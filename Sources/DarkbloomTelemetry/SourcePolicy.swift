@@ -16,6 +16,8 @@ public struct DarkbloomSourcePolicy: Equatable, Sendable {
     public static let lifecycleCommandTimeout: Duration = .seconds(660)
     /// Native restart adds its startup-confirmation deadline to the lifecycle bound.
     public static let restartCommandTimeout: Duration = .seconds(840)
+    /// Validation/hash work plus drain and same-session inventory replacement.
+    public static let liveSwitchCommandTimeout: Duration = .seconds(900)
     public static let catalogTimeout: Duration = .seconds(15)
     public static let downloadTimeout: Duration = .seconds(21_600)
     public static let mutationOutputByteLimit = 1_048_576
@@ -135,5 +137,12 @@ public enum DarkbloomCommand {
             "--timeout", String(DarkbloomSourcePolicy.lifecycleDrainTimeoutSeconds),
             "--startup-timeout", String(DarkbloomSourcePolicy.lifecycleStartupTimeoutSeconds),
         ])
+    }
+    public static func liveSwitch(executable: URL, models: [String]) -> ProcessCommand {
+        var arguments = [
+            "switch", "--timeout", String(DarkbloomSourcePolicy.lifecycleDrainTimeoutSeconds),
+        ]
+        for model in models { arguments += ["--model", model] }
+        return ProcessCommand(executable: executable, arguments: arguments)
     }
 }

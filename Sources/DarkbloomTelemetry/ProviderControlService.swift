@@ -88,6 +88,9 @@ public struct ProviderControlSnapshot: Equatable, Sendable {
     public let residentModelIDs: Set<String>
     public let capturedAt: Date
     public let sources: ProviderControlSourceStates
+    /// Read-only effective model cache reported by the same CLI inventory read.
+    public let effectiveCacheDirectory: String?
+    public let liveSwitchAvailability: ProviderLiveSwitchAvailability
 
     public init(
         inventory: ModelInventory,
@@ -95,7 +98,11 @@ public struct ProviderControlSnapshot: Equatable, Sendable {
         daemonState: DaemonState? = nil,
         residentModelIDs: Set<String>? = nil,
         capturedAt: Date,
-        sources: ProviderControlSourceStates = .unknown
+        sources: ProviderControlSourceStates = .unknown,
+        effectiveCacheDirectory: String? = nil,
+        liveSwitchAvailability: ProviderLiveSwitchAvailability = .unavailable(
+            "Refresh current provider state before applying live"
+        )
     ) {
         self.inventory = inventory
         self.draft = draft
@@ -107,6 +114,8 @@ public struct ProviderControlSnapshot: Equatable, Sendable {
         )
         self.capturedAt = capturedAt
         self.sources = sources
+        self.effectiveCacheDirectory = effectiveCacheDirectory
+        self.liveSwitchAvailability = liveSwitchAvailability
     }
 }
 
@@ -173,6 +182,10 @@ public protocol ProviderControlling: Sendable {
         enabledModels: [String],
         onPhase: ProviderMutationPhaseObserver?
     ) async throws -> ProviderMutationCompletion
+    func performLiveSwitch(
+        enabledModels: [String],
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderMutationCompletion
     /// Hosting-aware lifecycle dispatch. Implementations apply the official
     /// local-endpoint start flags through the same bounded, reconciled path as
     /// every other lifecycle action.
@@ -202,6 +215,15 @@ public extension ProviderControlling {
         try await download(modelID, onOutput: onOutput)
         await onPhase?(.reconciling)
         return .refreshUncertain
+    }
+
+    func performLiveSwitch(
+        enabledModels: [String],
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderMutationCompletion {
+        throw ProviderControlError.liveSwitchUnavailable(
+            "This controller does not support Apply Live"
+        )
     }
 
     func performDelete(
@@ -249,6 +271,7 @@ public enum ProviderControlError: Error, Equatable, Sendable {
     case hostingRequiresSupervision
     case hostingUnsupportedByController
     case invalidHostingOptions
+    case liveSwitchUnavailable(String)
 }
 
 public actor ProviderControlService: ProviderControlling {
@@ -261,6 +284,7 @@ public actor ProviderControlService: ProviderControlling {
         let local: [LocalModel]
         let catalogState: ProviderControlSourceState
         let localState: ProviderControlSourceState
+        let effectiveCacheDirectory: String?
     }
 
     private static let invalidSelectionMessage =
@@ -275,6 +299,7 @@ public actor ProviderControlService: ProviderControlling {
     private let now: @Sendable () -> Date
     private var lastCatalog: [CatalogModel]?
     private var lastLocalModels: [LocalModel]?
+    private var lastEffectiveCacheDirectory: String?
     private var nextRefreshGeneration: UInt64 = 0
     private var lastCatalogGeneration: UInt64 = 0
     private var lastLocalModelsGeneration: UInt64 = 0
@@ -490,6 +515,44 @@ public actor ProviderControlService: ProviderControlling {
         )
     }
 
+    public func performLiveSwitch(
+        enabledModels: [String],
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderMutationCompletion {
+        try beginCommand()
+        defer { endCommand() }
+        let executable = try resolveExecutable()
+        let snapshot = try await refresh(
+            using: executable,
+            allowStaleModelSources: false,
+            freshResidencyRequirement: nil
+        )
+        switch snapshot.liveSwitchAvailability {
+        case .available:
+            break
+        case .inProgress:
+            throw ProviderControlError.liveSwitchUnavailable(
+                "A live model switch is already in progress"
+            )
+        case .unavailable(let reason):
+            throw ProviderControlError.liveSwitchUnavailable(reason)
+        }
+        let savedSelectors = snapshot.draft.original.enabled
+        guard !savedSelectors.isEmpty else { throw ProviderControlError.noEnabledModels }
+        let modelIDs = try resolvedLocalModelIDs(
+            for: savedSelectors,
+            in: snapshot.inventory
+        )
+        return try await runDispatchedMutation(
+            DarkbloomCommand.liveSwitch(executable: executable, models: modelIDs),
+            timeout: DarkbloomSourcePolicy.liveSwitchCommandTimeout,
+            outputLimit: DarkbloomSourcePolicy.mutationOutputByteLimit,
+            onOutput: nil,
+            onPhase: onPhase,
+            executable: executable
+        )
+    }
+
     public func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult {
         try await performSave(draft, onPhase: nil).result
     }
@@ -685,6 +748,13 @@ public actor ProviderControlService: ProviderControlling {
                 localModels: modelSources.localState,
                 daemon: daemonState,
                 loadedModels: loadedModelsState
+            ),
+            effectiveCacheDirectory: modelSources.effectiveCacheDirectory,
+            liveSwitchAvailability: ProviderLiveSwitchAvailability.evaluate(
+                daemon: daemonRead,
+                daemonSource: daemonState,
+                providerConfig: policy.providerConfig,
+                at: capturedAt
             )
         )
     }
@@ -697,6 +767,7 @@ public actor ProviderControlService: ProviderControlling {
         let generation = nextRefreshGeneration
         var catalog: [CatalogModel]?
         var local: [LocalModel]?
+        var effectiveCacheDirectory: String?
         var catalogState: ProviderControlSourceState = .unavailable("Model catalog is unavailable")
         var localState: ProviderControlSourceState = .unavailable("Local model list is unavailable")
 
@@ -730,18 +801,21 @@ public actor ProviderControlService: ProviderControlling {
                 outputLimit: DarkbloomSourcePolicy.mutationOutputByteLimit,
                 onOutput: nil
             )
-            let decoded = try LocalModelListDecoder.decode(result.standardOutput).models
+            let decoded = try LocalModelListDecoder.decode(result.standardOutput)
             if generation > lastLocalModelsGeneration {
-                lastLocalModels = decoded
+                lastLocalModels = decoded.models
+                lastEffectiveCacheDirectory = decoded.cacheDirectory
                 lastLocalModelsGeneration = generation
             }
-            local = decoded
+            local = decoded.models
+            effectiveCacheDirectory = decoded.cacheDirectory
             localState = .fresh(evidenceAt: now())
         } catch let error as CancellationError {
             throw error
         } catch {
             if allowStaleSources, let lastLocalModels {
                 local = lastLocalModels
+                effectiveCacheDirectory = lastEffectiveCacheDirectory
                 localState = .stale("Local model list is stale; download state may be outdated")
             }
         }
@@ -756,7 +830,8 @@ public actor ProviderControlService: ProviderControlling {
             catalog: catalog,
             local: local,
             catalogState: catalogState,
-            localState: localState
+            localState: localState,
+            effectiveCacheDirectory: effectiveCacheDirectory
         )
     }
 
@@ -893,6 +968,29 @@ public actor ProviderControlService: ProviderControlling {
             }
             if !resolved.contains(matches[0].id) {
                 resolved.append(matches[0].id)
+            }
+        }
+        return resolved
+    }
+
+    /// Resolve from the inventory captured by the same feature-gating refresh.
+    /// This avoids a second catalog/local read opening a mixed-generation
+    /// window between the compatibility decision and command dispatch.
+    private func resolvedLocalModelIDs(
+        for selectors: [String],
+        in inventory: ModelInventory
+    ) throws -> [String] {
+        var resolved: [String] = []
+        for selector in selectors {
+            let exact = inventory.myCatalog.filter { $0.catalogID == selector }
+            let matches = exact.isEmpty
+                ? inventory.myCatalog.filter { $0.enabledSelector == selector }
+                : exact
+            guard matches.count == 1 else {
+                throw ProviderControlError.inventoryUnavailable(Self.invalidSelectionMessage)
+            }
+            if !resolved.contains(matches[0].catalogID) {
+                resolved.append(matches[0].catalogID)
             }
         }
         return resolved

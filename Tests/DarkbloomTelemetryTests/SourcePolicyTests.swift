@@ -79,6 +79,7 @@ struct SourcePolicyTests {
         #expect(DarkbloomSourcePolicy.lifecycleStartupTimeoutSeconds == 180)
         #expect(DarkbloomSourcePolicy.lifecycleCommandTimeout == .seconds(660))
         #expect(DarkbloomSourcePolicy.restartCommandTimeout == .seconds(840))
+        #expect(DarkbloomSourcePolicy.liveSwitchCommandTimeout == .seconds(900))
         #expect(DarkbloomSourcePolicy.catalogTimeout == .seconds(15))
         #expect(DarkbloomSourcePolicy.downloadTimeout == .seconds(21_600))
         #expect(DarkbloomSourcePolicy.mutationOutputByteLimit == 1_048_576)

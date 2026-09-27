@@ -2026,7 +2026,8 @@ private struct ModelManagerFooter: View {
                 }
                 .disabled(store.operation != .idle)
 
-                if store.operation == .refreshing || store.operation == .saving {
+                if store.operation == .refreshing || store.operation == .saving
+                    || store.operation == .liveSwitch {
                     ProgressView()
                         .controlSize(.small)
                 }
@@ -2047,6 +2048,14 @@ private struct ModelManagerFooter: View {
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(!store.canSave)
                 .accessibilityIdentifier("models.save")
+
+                Button("Apply Live") {
+                    Task { await store.applyLive() }
+                }
+                .disabled(!store.canApplyLive)
+                .help(store.applyLiveUnavailableReason
+                    ?? "Switches the running provider to the saved model selection.")
+                .accessibilityIdentifier("models.apply-live")
             }
 
             if let validation = store.draftValidationMessage, store.operation != .refreshing {
@@ -2060,7 +2069,22 @@ private struct ModelManagerFooter: View {
                     .foregroundStyle(.orange)
                     .font(.callout)
             }
-            Text("Save changes first, then restart the provider to apply them.")
+            if let cacheDirectory = store.snapshot?.effectiveCacheDirectory {
+                LabeledContent(
+                    store.snapshot?.sources.localModels.isMarkedFresh == true
+                        ? "Effective cache" : "Last known cache"
+                ) {
+                    Text(cacheDirectory)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("models.effective-cache")
+            }
+            Text(store.applyLiveUnavailableReason
+                ?? "Apply Live switches the running provider to the saved model selection without restarting it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if let error = store.errorMessage {

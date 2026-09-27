@@ -204,6 +204,31 @@ struct ProviderControlStoreTests {
         }
     }
 
+    @Test("Models renders the effective cache and enabled Apply Live control")
+    func dashboardModelsShowsApplyLive() async throws {
+        let store = ProviderControlStore(controller: FakeProviderController.fixture(
+            snapshot: try liveSwitchFixture()
+        ))
+        await store.refresh()
+        #expect(store.canApplyLive)
+        #expect(store.snapshot?.effectiveCacheDirectory == "/inert/cache")
+        let host = NSHostingController(rootView: ModelsView(controlStore: store))
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 620, height: 760))
+        window.orderBack(nil)
+        defer { window.close() }
+        try await Task.sleep(for: .milliseconds(250))
+        host.view.layoutSubtreeIfNeeded()
+        guard ProcessInfo.processInfo.environment["DARKBLOOM_RENDER_EVIDENCE"] == "1" else { return }
+        let capture = Process()
+        capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        capture.arguments = ["-x", "-l", String(window.windowNumber), "/tmp/darkbloom-apply-live.png"]
+        try capture.run()
+        capture.waitUntilExit()
+        #expect(capture.terminationStatus == 0)
+    }
+
     @Test("save promotes staged selectors")
     func savesDraft() async throws {
         let controller = FakeProviderController.fixture()
@@ -217,6 +242,63 @@ struct ProviderControlStoreTests {
         #expect(store.draft?.selection.enabled == ["saved-model", "second-model"])
         #expect(!store.canSave)
         #expect(await controller.saveCount == 1)
+    }
+
+    @Test("Apply Live is separate from saving and uses only the saved selection")
+    func appliesSavedSelectionLive() async throws {
+        let controller = FakeProviderController.fixture(snapshot: try liveSwitchFixture())
+        let store = ProviderControlStore(controller: controller)
+        await store.refresh()
+
+        #expect(store.canApplyLive)
+        store.setEnabled(true, modelID: "second-model")
+        #expect(!store.canApplyLive)
+        #expect(store.applyLiveUnavailableReason == "Save or discard pending changes before applying live")
+
+        await store.applyLive()
+        #expect(await controller.liveSwitchSelections.isEmpty)
+
+        await store.refresh()
+        #expect(store.canApplyLive)
+        await store.applyLive()
+
+        #expect(await controller.liveSwitchSelections == [["saved-model"]])
+        #expect(await controller.saveCount == 0)
+        #expect(store.operation == .idle)
+    }
+
+    @Test("Apply Live exposes provider compatibility and already-applied reasons")
+    func reportsApplyLiveAvailability() async throws {
+        let unavailable = ProviderControlStore(controller: FakeProviderController.fixture())
+        await unavailable.refresh()
+        #expect(!unavailable.canApplyLive)
+        #expect(unavailable.applyLiveUnavailableReason ==
+            "Refresh current provider state before applying live")
+
+        let current = ProviderControlStore(controller: FakeProviderController.fixture(
+            snapshot: try liveSwitchFixture(advertised: ["saved-model"])
+        ))
+        await current.refresh()
+        #expect(!current.canApplyLive)
+        #expect(current.applyLiveUnavailableReason == "The saved model selection is already active")
+
+        let live = try liveSwitchFixture()
+        let staleInventory = ProviderControlSnapshot(
+            inventory: live.inventory,
+            draft: live.draft,
+            daemonState: live.daemonState,
+            residentModelIDs: live.residentModelIDs,
+            capturedAt: live.capturedAt,
+            sources: .unknown,
+            effectiveCacheDirectory: live.effectiveCacheDirectory,
+            liveSwitchAvailability: .available
+        )
+        let stale = ProviderControlStore(controller: FakeProviderController.fixture(
+            snapshot: staleInventory
+        ))
+        await stale.refresh()
+        #expect(!stale.canApplyLive)
+        #expect(stale.applyLiveUnavailableReason == "Refresh model controls before applying live")
     }
 
     @Test("save invalidates old source freshness when its follow-up refresh fails")
@@ -1781,6 +1863,7 @@ private actor FakeProviderController: ProviderControlling {
     private(set) var downloadedModels: [String] = []
     private(set) var deletedModels: [String] = []
     private(set) var executedActions: [Execution] = []
+    private(set) var liveSwitchSelections: [[String]] = []
     private(set) var saveCount = 0
     private(set) var activityReadCount = 0
     private(set) var downloadCancellationCount = 0
@@ -1993,6 +2076,15 @@ private actor FakeProviderController: ProviderControlling {
         if executeCancellation { throw CancellationError() }
         if let executeControlFailure { throw executeControlFailure }
         if let executeFailure { throw executeFailure }
+    }
+
+    func performLiveSwitch(
+        enabledModels: [String],
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderMutationCompletion {
+        liveSwitchSelections.append(enabledModels)
+        await onPhase?(.reconciling)
+        return .refreshed(currentSnapshot)
     }
 }
 
@@ -2210,4 +2302,20 @@ private func selectionFixture(advertised: [String], now: Date) throws -> Provide
     let daemon = try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: raw))
     return ProviderControlSnapshot(inventory: base.inventory, draft: base.draft,
         daemonState: daemon, capturedAt: now, sources: base.sources)
+}
+
+private func liveSwitchFixture(
+    advertised: [String] = ["second-model"]
+) throws -> ProviderControlSnapshot {
+    let base = try selectionFixture(advertised: advertised, now: providerControlTestNow)
+    return ProviderControlSnapshot(
+        inventory: base.inventory,
+        draft: base.draft,
+        daemonState: base.daemonState,
+        residentModelIDs: base.residentModelIDs,
+        capturedAt: base.capturedAt,
+        sources: base.sources,
+        effectiveCacheDirectory: "/inert/cache",
+        liveSwitchAvailability: .available
+    )
 }

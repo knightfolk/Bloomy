@@ -28,6 +28,22 @@ struct ModelInventoryTests {
         #expect(decoded.models.map(\.id) == ["current-model"])
     }
 
+    @Test("rejects unsafe effective cache paths before UI rendering")
+    func rejectsUnsafeCachePaths() {
+        for cache in ["", "bad\u{001B}[31m", String(repeating: "a", count: 4_097)] {
+            let escaped = cache
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "\u{001B}", with: "\\u001b")
+            let data = Data(
+                "{\"cache_directory\":\"\(escaped)\",\"filtered_by_config\":false,\"models\":[]}".utf8
+            )
+            #expect(throws: (any Error).self) {
+                try LocalModelListDecoder.decode(data)
+            }
+        }
+    }
+
     @Test("decodes catalog and local model JSON")
     func decodesSources() throws {
         let catalog = try ModelCatalogDecoder.decode(fixture("model-catalog.json"))
