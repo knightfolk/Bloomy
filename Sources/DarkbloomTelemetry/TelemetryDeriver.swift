@@ -54,7 +54,10 @@ public enum TelemetryDeriver {
     }
 
     public static func trustAge(state: DaemonState, now: TimeInterval) -> DerivedDuration {
-        let value = now - state.trust.receivedAt
+        guard let trust = state.trust else {
+            return .unavailable(reason: "Trust is not reported in this provider phase")
+        }
+        let value = now - trust.receivedAt
         return value >= 0
             ? .available(seconds: value, label: "derived")
             : .unavailable(reason: "Trust receipt time is in the future")

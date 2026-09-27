@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "pid": 12005,
+  "process_identity": {"pid": 12005, "start_time_micros": 1800000400000000},
+  "version": "0.9.10",
+  "written_at": 1800000410,
+  "started_at": 1800000400,
+  "lifecycle": {"outcome": "forced", "remaining": 0, "coordinator_acknowledged": false},
+  "inference_active": false,
+  "stats": {"requests_served": 2, "tokens_generated": 20, "usage_gaps": 0}
+}

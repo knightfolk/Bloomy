@@ -14,12 +14,13 @@ public enum DaemonStateParser {
                 requestsServed: raw.stats.requestsServed,
                 usageGaps: raw.stats.usageGaps
             ),
-            trust: .init(
-                level: raw.trust.level,
-                status: raw.trust.status,
-                reason: raw.trust.reason,
-                receivedAt: raw.trust.receivedAt,
-                authorization: raw.trust.authorization.map {
+            trust: raw.trust.map { trust in
+                TrustState(
+                level: trust.level,
+                status: trust.status,
+                reason: trust.reason,
+                receivedAt: trust.receivedAt,
+                authorization: trust.authorization.map {
                     ProviderAuthorizationStatus(
                         protocolVersion: $0.protocolVersion,
                         appAttestAvailable: $0.appAttestAvailable,
@@ -31,12 +32,14 @@ public enum DaemonStateParser {
                         machineIDPresent: $0.machineID?.isEmpty == false
                     )
                 }
-            ),
-            capacity: .init(
-                totalMemoryGB: raw.capacity.totalMemoryGB,
-                gpuMemoryActiveGB: raw.capacity.gpuMemoryActiveGB,
-                gpuMemoryCacheGB: raw.capacity.gpuMemoryCacheGB
-            ),
+            )},
+            capacity: raw.capacity.map {
+                MemoryCapacity(
+                    totalMemoryGB: $0.totalMemoryGB,
+                    gpuMemoryActiveGB: $0.gpuMemoryActiveGB,
+                    gpuMemoryCacheGB: $0.gpuMemoryCacheGB
+                )
+            },
             slots: raw.slots.compactMap { slot in
                 guard slot.loadError == nil else { return nil }
                 return ModelSlot(
@@ -78,8 +81,40 @@ public enum DaemonStateParser {
                     remainingRequests: $0.remaining,
                     coordinatorAcknowledged: $0.coordinatorAcknowledged
                 )
+            },
+            startupPreloadPendingModels: raw.startupPreloadPendingModels.map {
+                Array($0.compactMap(SafeTelemetryReason.model).prefix(64))
+            },
+            modelSwitch: raw.modelSwitch.map {
+                ProviderModelSwitchState(
+                    outcome: ProviderModelSwitchOutcome(rawValue: $0.outcome ?? ""),
+                    models: Array($0.models.compactMap(SafeTelemetryReason.model).prefix(64)),
+                    remainingRequests: $0.remaining
+                )
+            },
+            availability: raw.availability.map {
+                ProviderAvailabilityState(
+                    phase: ProviderAvailabilityPhase(rawValue: $0.phase ?? ""),
+                    nextWindowAt: $0.nextWindowAt
+                )
+            },
+            configPath: boundedPath(raw.configPath),
+            runtimeCapabilities: raw.runtimeCapabilities.map {
+                Array($0.compactMap(safeCapability).prefix(64))
             }
         )
+    }
+
+    private static func boundedPath(_ value: String?) -> String? {
+        guard let value, !value.isEmpty, value.utf8.count <= 4_096 else { return nil }
+        return value
+    }
+
+    private static func safeCapability(_ value: String) -> String? {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty, normalized.count <= 100 else { return nil }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+        return normalized.unicodeScalars.allSatisfy(allowed.contains) ? normalized : nil
     }
 }
 
@@ -113,12 +148,12 @@ private struct RawDaemonState: Decodable {
     let stats: RawStats
     let version: String
     let currentModel: String?
-    let trust: RawTrust
+    let trust: RawTrust?
     let warmModels: [String]
     let advertisedModels: [String]?
     let coordinatorURL: String?
     let pid: Int32
-    let capacity: RawCapacity
+    let capacity: RawCapacity?
     let slots: [RawSlot]
     let inferenceActive: Bool
     let startedAt: TimeInterval
@@ -126,6 +161,11 @@ private struct RawDaemonState: Decodable {
     let processIdentity: RawProcessIdentity
     let lastModelLoadError: RawModelLoadError?
     let lifecycle: RawLifecycle?
+    let startupPreloadPendingModels: [String]?
+    let modelSwitch: RawModelSwitch?
+    let availability: RawAvailability?
+    let configPath: String?
+    let runtimeCapabilities: [String]?
 
     enum CodingKeys: String, CodingKey {
         case schema, stats, version, trust, pid, capacity, slots
@@ -135,6 +175,11 @@ private struct RawDaemonState: Decodable {
         case coordinatorURL = "coordinator_url"
         case lastModelLoadError = "last_model_load_error"
         case lifecycle
+        case startupPreloadPendingModels = "startup_preload_pending_models"
+        case modelSwitch = "model_switch"
+        case availability
+        case configPath = "config_path"
+        case runtimeCapabilities = "runtime_capabilities"
         case inferenceActive = "inference_active"
         case startedAt = "started_at"
         case writtenAt = "written_at"
@@ -147,12 +192,12 @@ private struct RawDaemonState: Decodable {
         stats = try values.decode(RawStats.self, forKey: .stats)
         version = try values.decode(String.self, forKey: .version)
         currentModel = try values.decodeIfPresent(String.self, forKey: .currentModel)
-        trust = try values.decode(RawTrust.self, forKey: .trust)
+        trust = try values.decodeIfPresent(RawTrust.self, forKey: .trust)
         warmModels = try values.decodeIfPresent([String].self, forKey: .warmModels) ?? []
         advertisedModels = try values.decodeIfPresent([String].self, forKey: .advertisedModels)
         coordinatorURL = try values.decodeIfPresent(String.self, forKey: .coordinatorURL)
         pid = try values.decode(Int32.self, forKey: .pid)
-        capacity = try values.decode(RawCapacity.self, forKey: .capacity)
+        capacity = try values.decodeIfPresent(RawCapacity.self, forKey: .capacity)
         slots = try values.decodeIfPresent([RawSlot].self, forKey: .slots) ?? []
         inferenceActive = try values.decode(Bool.self, forKey: .inferenceActive)
         startedAt = try values.decode(TimeInterval.self, forKey: .startedAt)
@@ -160,6 +205,36 @@ private struct RawDaemonState: Decodable {
         processIdentity = try values.decode(RawProcessIdentity.self, forKey: .processIdentity)
         lastModelLoadError = try values.decodeIfPresent(RawModelLoadError.self, forKey: .lastModelLoadError)
         lifecycle = try? values.decode(RawLifecycle.self, forKey: .lifecycle)
+        startupPreloadPendingModels = try values.decodeIfPresent([String].self, forKey: .startupPreloadPendingModels)
+        modelSwitch = try? values.decode(RawModelSwitch.self, forKey: .modelSwitch)
+        availability = try? values.decode(RawAvailability.self, forKey: .availability)
+        configPath = try values.decodeIfPresent(String.self, forKey: .configPath)
+        runtimeCapabilities = try values.decodeIfPresent([String].self, forKey: .runtimeCapabilities)
+    }
+}
+
+private struct RawModelSwitch: Decodable {
+    let outcome: String?
+    let models: [String]
+    let remaining: Int?
+
+    enum CodingKeys: String, CodingKey { case outcome, models, remaining }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        outcome = try? values.decode(String.self, forKey: .outcome)
+        models = (try? values.decode([String].self, forKey: .models)) ?? []
+        remaining = try? values.decode(Int.self, forKey: .remaining)
+    }
+}
+
+private struct RawAvailability: Decodable {
+    let phase: String?
+    let nextWindowAt: TimeInterval?
+
+    enum CodingKeys: String, CodingKey {
+        case phase
+        case nextWindowAt = "next_window_at"
     }
 }
 

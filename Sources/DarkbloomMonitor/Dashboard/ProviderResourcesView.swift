@@ -127,6 +127,11 @@ struct ProviderResourcesView: View {
 
     private var requestActivityMetric: some View {
         let presentation = ProviderRequestActivityPresentation.make(daemonState: daemonState)
+        let requestSubtitle: String = switch presentation.mode {
+        case .draining: "left · new work paused"
+        case .stopped: "provider not serving"
+        default: "running requests"
+        }
         return HStack(spacing: 10) {
             Image(systemName: requestActivitySymbol(for: presentation.mode))
                 .font(.system(size: 24, weight: .medium))
@@ -145,9 +150,7 @@ struct ProviderResourcesView: View {
                         .foregroundStyle(requestActivityColor(for: presentation.mode))
                         .lineLimit(1)
                 }
-                Text(presentation.mode == .draining
-                    ? "left · new work paused"
-                    : "running requests")
+                Text(requestSubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -173,15 +176,19 @@ struct ProviderResourcesView: View {
     private var gpuMemoryMetric: some View {
         switch store.snapshot.state {
         case .available(let state, _):
-            gpuMemoryCard(state, stale: daemonStateIsStale)
+            if let capacity = state.capacity {
+                gpuMemoryCard(capacity, stale: daemonStateIsStale)
+            }
         case .stale(let state, _, _):
-            gpuMemoryCard(state, stale: true)
+            if let capacity = state.capacity {
+                gpuMemoryCard(capacity, stale: true)
+            }
         case .unavailable:
             EmptyView()
         }
     }
 
-    private func gpuMemoryCard(_ state: DaemonState, stale: Bool) -> some View {
+    private func gpuMemoryCard(_ capacity: MemoryCapacity, stale: Bool) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Label("GPU memory", systemImage: "memorychip")
@@ -192,10 +199,10 @@ struct ProviderResourcesView: View {
                         .foregroundStyle(.orange)
                 }
             }
-            Text("\(state.capacity.gpuMemoryActiveGB.formatted(.number.precision(.fractionLength(1)))) GB active")
+            Text("\(capacity.gpuMemoryActiveGB.formatted(.number.precision(.fractionLength(1)))) GB active")
                 .font(.title3.weight(.semibold))
                 .monospacedDigit()
-            Text("\(state.capacity.gpuMemoryCacheGB.formatted(.number.precision(.fractionLength(1)))) GB cached")
+            Text("\(capacity.gpuMemoryCacheGB.formatted(.number.precision(.fractionLength(1)))) GB cached")
                 .font(.callout)
                 .monospacedDigit()
             Text("Provider-reported allocations")
@@ -206,7 +213,7 @@ struct ProviderResourcesView: View {
         .padding(11)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("GPU memory, \(state.capacity.gpuMemoryActiveGB.formatted(.number.precision(.fractionLength(1)))) gigabytes active, \(state.capacity.gpuMemoryCacheGB.formatted(.number.precision(.fractionLength(1)))) gigabytes cached\(stale ? ", last report" : "")")
+        .accessibilityLabel("GPU memory, \(capacity.gpuMemoryActiveGB.formatted(.number.precision(.fractionLength(1)))) gigabytes active, \(capacity.gpuMemoryCacheGB.formatted(.number.precision(.fractionLength(1)))) gigabytes cached\(stale ? ", last report" : "")")
         .accessibilityIdentifier("provider-resource.gpu-memory")
     }
 

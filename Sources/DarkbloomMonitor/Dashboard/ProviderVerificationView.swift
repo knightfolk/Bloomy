@@ -14,7 +14,7 @@ struct ProviderVerificationView: View {
                     .foregroundStyle(result.isVerified ? Color.primary : Color.secondary)
                 Text(result.detail).font(.callout).foregroundStyle(.secondary)
                 if result.state == .verified {
-                    Text(state.trust.authorization?.mdmRemovalReady == true
+                    Text(state.trust?.authorization?.mdmRemovalReady == true
                          ? "The coordinator reports MDM-removal readiness. Enrollment changes remain in the official CLI."
                          : "MDM-removal readiness has not been granted for this connection.")
                         .font(.caption).foregroundStyle(.secondary)

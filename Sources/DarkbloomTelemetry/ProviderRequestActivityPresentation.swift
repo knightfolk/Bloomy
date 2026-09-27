@@ -27,6 +27,62 @@ public struct ProviderRequestActivityPresentation: Equatable, Sendable {
             )
         }
 
+        if let lifecycle = daemonState.lifecycle {
+            switch lifecycle.outcome {
+            case .busy:
+                return Self(
+                    mode: .draining,
+                    value: lifecycle.remainingRequests.map(String.init) ?? "—",
+                    status: "Busy",
+                    detail: "Another lifecycle action is in progress; new work may remain paused."
+                )
+            case .forced:
+                return Self(
+                    mode: .stopped,
+                    value: "0",
+                    status: "Forced stop",
+                    detail: "The provider reported a forced stop; accepted work may have been interrupted."
+                )
+            case .timedOut:
+                return Self(
+                    mode: .draining,
+                    value: lifecycle.remainingRequests.map(String.init) ?? "—",
+                    status: "Timed out",
+                    detail: "The drain deadline expired; new work remains paused until lifecycle control is reconciled."
+                )
+            default:
+                break
+            }
+        }
+
+        if let modelSwitch = daemonState.modelSwitch,
+           [.validating, .draining, .switching].contains(modelSwitch.outcome) {
+            return Self(
+                mode: .draining,
+                value: modelSwitch.remainingRequests.map(String.init) ?? "—",
+                status: "Switching",
+                detail: "The provider is applying a live model selection; new work is paused during the switch."
+            )
+        }
+
+        if daemonState.startupPreloadPendingModels?.isEmpty == false {
+            return Self(
+                mode: .idle,
+                value: "0",
+                status: "Preloading",
+                detail: "Configured startup models are still loading before normal serving begins."
+            )
+        }
+
+        if daemonState.availability?.phase == .waitingForSchedule {
+            return Self(
+                mode: .stopped,
+                value: "0",
+                status: "Scheduled idle",
+                detail: "The provider is healthy and waiting for its next configured serving window."
+            )
+        }
+
         if let lifecycle = daemonState.lifecycle, lifecycle.outcome == .draining {
             guard let remaining = lifecycle.remainingRequests else {
                 return Self(
