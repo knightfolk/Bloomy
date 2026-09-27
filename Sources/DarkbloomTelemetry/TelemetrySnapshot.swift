@@ -81,12 +81,13 @@ extension MenuPresentationStatus {
         now: Date
     ) -> Self {
         guard let state = availability.value else { return .unavailable }
-        if state.trust.status == "offline" { return .offline }
+        if state.trust?.status == "offline" { return .offline }
 
         let age = now.timeIntervalSince1970 - state.writtenAt
         if age < 0 || age > 10 { return .stale }
         if case .stale = availability { return .stale }
-        return state.trust.status == "online" ? .online : .stale
+        if state.availability?.phase == .waitingForSchedule { return .online }
+        return state.trust?.status == "online" ? .online : .stale
     }
 }
 

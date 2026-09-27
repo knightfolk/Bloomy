@@ -19,7 +19,7 @@ struct ProviderSelectionComparisonTests {
     @Test @MainActor func confirmationNamesBothSelectionsAndWorkRisk() {
         let value = ProviderSelectionComparison(saved: ["qwen"], advertised: ["bonsai"])
         let dialog = LifecycleConfirmationPresentation.make(.restartSelection(.active, value))
-        #expect(dialog.body.contains("interrupt"))
+        #expect(dialog.body.contains("finish accepted requests"))
         #expect(dialog.body.contains("Saved selection: qwen"))
         #expect(dialog.body.contains("Advertised now: bonsai"))
         #expect(dialog.confirmLabel == "Restart with Saved Models")

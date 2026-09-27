@@ -225,6 +225,7 @@ struct LifecycleConfirmationPresentation: Equatable {
 
     static func make(_ confirmation: LifecycleConfirmation) -> Self {
         let isStop = confirmation.action == .stop
+        let isRestart = confirmation.action == .restart
         let body = switch (confirmation.action, confirmation.risk) {
         case (.stop, .active):
             "Darkbloom will pause new requests, finish accepted requests, and then stop. This may take several minutes."
@@ -232,19 +233,16 @@ struct LifecycleConfirmationPresentation: Equatable {
             "Activity is unavailable. Darkbloom's native Stop will pause new requests, finish accepted requests, and then stop. This may take several minutes."
         case (.stop, .idle):
             "Darkbloom reports no active customer job. Native Stop will still pause new work before shutting down."
-        case (_, .active):
-            "A customer job is currently running. Continuing will interrupt it."
-        case (_, .unknown):
-            "\(MonitorApplicationIdentity.displayName) cannot confirm whether a customer job is running. Continuing may interrupt customer work."
-        case (_, .idle):
-            "Darkbloom reports no active customer job."
+        case (.restart, .active):
+            "Darkbloom will pause new requests, finish accepted requests, and then restart with the saved configuration. This may take several minutes."
+        case (.restart, .unknown):
+            "Activity is unavailable. Darkbloom's native Restart will pause new requests and finish accepted requests when graceful control is available; otherwise it will fail safely without replacing the provider."
+        case (.restart, .idle):
+            "Darkbloom reports no active customer job. Native Restart still pauses new work before replacing the provider."
+        case (.start, _):
+            "Darkbloom will start with the saved configuration."
         }
-        let confirmLabel = switch confirmation.risk {
-        case .unknown:
-            isStop ? "Drain & Stop" : "Continue Anyway"
-        case .active, .idle:
-            isStop ? "Drain & Stop" : "Restart Anyway"
-        }
+        let confirmLabel = isStop ? "Drain & Stop" : (isRestart ? "Drain & Restart" : "Start")
         if case .restartSelection(_, let comparison) = confirmation {
             let advertised = comparison.advertised.map { $0.joined(separator: ", ") } ?? "not currently verified"
             return Self(title: "Restart applies the saved model selection",
@@ -254,7 +252,7 @@ struct LifecycleConfirmationPresentation: Equatable {
                         confirmLabel: "Restart with Saved Models")
         }
         return Self(
-            title: isStop ? "Drain and stop the provider?" : "Customer work may be interrupted",
+            title: isStop ? "Drain and stop the provider?" : (isRestart ? "Drain and restart the provider?" : "Start the provider?"),
             body: body,
             confirmLabel: confirmLabel
         )

@@ -15,20 +15,39 @@ struct ProviderSelectionView: View {
                     Text("Settings last read " + control.capturedAt.formatted(date: .omitted, time: .shortened))
                         .font(.caption).foregroundStyle(.secondary)
                     if case .available(let state, _) = store.snapshot.state,
-                       (0...10).contains(context.date.timeIntervalSince1970 - state.writtenAt),
-                       let advertised = state.advertisedModels {
-                        row("Advertised now", ids: advertised)
-                        row("Loaded now", ids: state.warmModels)
-                        if Set(saved) != Set(advertised) {
-                            Label("Restart applies a different saved selection", systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(.orange).font(.callout)
+                       (0...10).contains(context.date.timeIntervalSince1970 - state.writtenAt) {
+                        let runtime = ProviderRuntimePresentation.make(state)
+                        Label(runtime.title, systemImage: runtimeSymbol(for: state))
+                            .font(.callout.weight(.semibold))
+                        Text(runtime.detail)
+                            .font(.caption).foregroundStyle(.secondary)
+                        if let advertised = state.advertisedModels {
+                            row("Advertised now", ids: advertised)
+                            row("Loaded now", ids: state.warmModels)
+                        } else {
+                            Text("Running selection is not reported in this provider phase.")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
-                        let onDemand = Set(advertised).subtracting(state.warmModels).sorted()
-                        if !onDemand.isEmpty {
-                            Text("Advertised, not loaded: " + onDemand.joined(separator: ", "))
-                                .font(.caption).foregroundStyle(.secondary)
-                            Text("These models can be requested on demand. Absence alone does not establish why they are unloaded.")
-                                .font(.caption).foregroundStyle(.secondary)
+                        if let pending = state.startupPreloadPendingModels, !pending.isEmpty {
+                            row("Preloading", ids: pending)
+                        }
+                        if let switching = state.modelSwitch,
+                           [.validating, .draining, .switching].contains(switching.outcome),
+                           !switching.models.isEmpty {
+                            row("Switching", ids: switching.models)
+                        }
+                        if let advertised = state.advertisedModels {
+                            if Set(saved) != Set(advertised) {
+                                Label("Restart applies a different saved selection", systemImage: "exclamationmark.triangle")
+                                    .foregroundStyle(.orange).font(.callout)
+                            }
+                            let onDemand = Set(advertised).subtracting(state.warmModels).sorted()
+                            if !onDemand.isEmpty {
+                                Text("On demand: " + onDemand.joined(separator: ", "))
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Text("These advertised models will load when requested.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                     } else {
                         Text("Running selection is not currently verified").foregroundStyle(.secondary)
@@ -53,5 +72,15 @@ struct ProviderSelectionView: View {
                 .multilineTextAlignment(.trailing).textSelection(.enabled)
         }
         .font(.callout)
+    }
+
+    private func runtimeSymbol(for state: DaemonState) -> String {
+        if state.availability?.phase == .waitingForSchedule { return "calendar.badge.clock" }
+        if state.modelSwitch.map({ [.validating, .draining, .switching].contains($0.outcome) }) == true {
+            return "arrow.triangle.2.circlepath"
+        }
+        if state.startupPreloadPendingModels?.isEmpty == false { return "arrow.down.circle" }
+        if state.lifecycle?.outcome == .draining { return "hourglass" }
+        return "checkmark.circle"
     }
 }

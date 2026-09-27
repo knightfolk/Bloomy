@@ -19,16 +19,23 @@ enum HealthPresentation {
 
     static func daemonRows(_ state: DaemonState?) -> [DisplayRow] {
         guard let state else { return [] }
-        return [
+        var rows = [
             DisplayRow(label: "Process PID", value: String(state.processIdentity.pid)),
             DisplayRow(label: "Process start identity (µs)", value: String(state.processIdentity.startTimeMicros)),
             DisplayRow(label: "CLI version · daemon", value: state.version),
-            DisplayRow(label: "Trust", value: "\(state.trust.status) · \(state.trust.level)"),
             DisplayRow(label: "Inference", value: state.inferenceActive ? "Active" : "Idle"),
             DisplayRow(label: "Reported slots", value: String(state.slots.count)),
-            DisplayRow(label: "GPU active memory", value: "\(state.capacity.gpuMemoryActiveGB.formatted(.number.precision(.fractionLength(1)))) GB"),
-            DisplayRow(label: "GPU cache memory", value: "\(state.capacity.gpuMemoryCacheGB.formatted(.number.precision(.fractionLength(1)))) GB"),
         ]
+        if let trust = state.trust {
+            rows.append(DisplayRow(label: "Trust", value: "\(trust.status) · \(trust.level)"))
+        } else {
+            rows.append(DisplayRow(label: "Trust", value: TelemetryFormatting.unavailable("not reported in this provider phase")))
+        }
+        if let capacity = state.capacity {
+            rows.append(DisplayRow(label: "GPU active memory", value: "\(capacity.gpuMemoryActiveGB.formatted(.number.precision(.fractionLength(1)))) GB"))
+            rows.append(DisplayRow(label: "GPU cache memory", value: "\(capacity.gpuMemoryCacheGB.formatted(.number.precision(.fractionLength(1)))) GB"))
+        }
+        return rows
     }
 
     static func statusRows(_ status: SourceAvailability<StatusSnapshot>) -> [DisplayRow] {

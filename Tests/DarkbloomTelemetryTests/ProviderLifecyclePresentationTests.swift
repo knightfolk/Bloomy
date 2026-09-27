@@ -797,7 +797,7 @@ struct ProviderLifecyclePresentationTests {
         #expect(!ProviderLifecycleControl.restart.isActive(in: .downloading("gpt-oss")))
     }
 
-    @Test("confirmed stop uses native graceful drain while restart warns about interruption")
+    @Test("confirmed stop and restart use native graceful drain")
     func activeWarningCopy() {
         let stop = LifecycleConfirmationPresentation.make(.stop(.active))
         let restart = LifecycleConfirmationPresentation.make(.restart(.active))
@@ -806,9 +806,10 @@ struct ProviderLifecyclePresentationTests {
         #expect(stop.body.contains("pause new requests"))
         #expect(stop.body.contains("finish accepted requests"))
         #expect(stop.confirmLabel == "Drain & Stop")
-        #expect(restart.title == "Customer work may be interrupted")
-        #expect(restart.body == "A customer job is currently running. Continuing will interrupt it.")
-        #expect(restart.confirmLabel == "Restart Anyway")
+        #expect(restart.title == "Drain and restart the provider?")
+        #expect(restart.body.contains("pause new requests"))
+        #expect(restart.body.contains("finish accepted requests"))
+        #expect(restart.confirmLabel == "Drain & Restart")
     }
 
     @Test("unknown warning uses bounded generic copy")
@@ -817,9 +818,10 @@ struct ProviderLifecyclePresentationTests {
             .restart(.unknown("private provider detail"))
         )
 
-        #expect(value.title == "Customer work may be interrupted")
-        #expect(value.body == "Darkbloom Control cannot confirm whether a customer job is running. Continuing may interrupt customer work.")
-        #expect(value.confirmLabel == "Continue Anyway")
+        #expect(value.title == "Drain and restart the provider?")
+        #expect(value.body.contains("native Restart will pause new requests"))
+        #expect(value.body.contains("fail safely"))
+        #expect(value.confirmLabel == "Drain & Restart")
         #expect(!value.body.contains("private provider detail"))
 
         let stop = LifecycleConfirmationPresentation.make(.stop(.unknown("private provider detail")))

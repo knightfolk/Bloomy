@@ -63,10 +63,10 @@ struct Telemetry097CompatibilityTests {
         let state = try DaemonStateParser.parse(data)
         #expect(state.advertisedModels == ["Bonsai", "Qwen"])
         #expect(state.coordinatorURL == "wss://api.darkbloom.dev/ws/provider")
-        #expect(state.trust.authorization?.protocolVersion == 1)
-        #expect(state.trust.authorization?.sessionIDPresent == true)
-        #expect(state.trust.authorization?.machineIDPresent == true)
-        #expect(state.trust.authorization?.reason == "unknown")
+        #expect(state.trust?.authorization?.protocolVersion == 1)
+        #expect(state.trust?.authorization?.sessionIDPresent == true)
+        #expect(state.trust?.authorization?.machineIDPresent == true)
+        #expect(state.trust?.authorization?.reason == "unknown")
         #expect(state.slots == [ModelSlot(
             model: "Bonsai",
             mtpEnabled: true,
@@ -214,7 +214,16 @@ private extension DaemonState {
         if let authorization {
             newAuthorization = authorization
         } else {
-            newAuthorization = trust.authorization
+            newAuthorization = trust?.authorization
+        }
+        let newTrust = trust.map {
+            TrustState(
+                level: $0.level,
+                status: $0.status,
+                reason: $0.reason,
+                receivedAt: $0.receivedAt,
+                authorization: newAuthorization
+            )
         }
         return DaemonState(
             schema: schema,
@@ -222,13 +231,7 @@ private extension DaemonState {
             currentModel: currentModel,
             warmModels: warmModels,
             stats: stats,
-            trust: TrustState(
-                level: trust.level,
-                status: trust.status,
-                reason: trust.reason,
-                receivedAt: trust.receivedAt,
-                authorization: newAuthorization
-            ),
+            trust: newTrust,
             capacity: capacity,
             slots: slots,
             inferenceActive: inferenceActive,
@@ -238,7 +241,13 @@ private extension DaemonState {
             processIdentity: processIdentity,
             advertisedModels: advertisedModels,
             coordinatorURL: coordinatorURL ?? self.coordinatorURL,
-            modelLoadFailures: modelLoadFailures
+            modelLoadFailures: modelLoadFailures,
+            lifecycle: lifecycle,
+            startupPreloadPendingModels: startupPreloadPendingModels,
+            modelSwitch: modelSwitch,
+            availability: availability,
+            configPath: configPath,
+            runtimeCapabilities: runtimeCapabilities
         )
     }
 }

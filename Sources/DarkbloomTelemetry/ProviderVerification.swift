@@ -54,12 +54,13 @@ public struct ProviderVerification: Equatable, Sendable {
         liveProcessIdentity: ProcessIdentity? = nil
     ) -> Self {
         let nowSeconds = now.timeIntervalSince1970
+        let trust = state.trust
         let snapshotFresh = isFresh(state.writtenAt, now: nowSeconds)
-        let trustFresh = isFresh(state.trust.receivedAt, now: nowSeconds)
-        let receivedAfterStarted = state.trust.receivedAt.isFinite
+        let trustFresh = trust.map { isFresh($0.receivedAt, now: nowSeconds) } ?? false
+        let receivedAfterStarted = trust?.receivedAt.isFinite == true
             && state.startedAt.isFinite
-            && state.trust.receivedAt >= state.startedAt
-        let online = state.trust.status.lowercased() == "online"
+            && (trust?.receivedAt ?? -.infinity) >= state.startedAt
+        let online = trust?.status.lowercased() == "online"
 
         let liveIdentity = liveProcessIdentity ?? ProcessIdentity.read(pid: state.pid)
         let processMatches = liveIdentity == state.processIdentity
@@ -69,7 +70,7 @@ public struct ProviderVerification: Equatable, Sendable {
             expected: expectedCoordinator
         )
 
-        let authorization = state.trust.authorization
+        let authorization = trust?.authorization
         let protocolSupported = authorization?.protocolVersion == 1
         let appAttestPath = authorization?.path.lowercased() == "app_attest"
         let appAttestUnexpired: Bool
@@ -95,10 +96,18 @@ public struct ProviderVerification: Equatable, Sendable {
             resultState = .wrongCoordinator
             title = "Verification unavailable"
             detail = "The state snapshot belongs to a different or unconfirmed coordinator."
-        } else if !snapshotFresh || !trustFresh {
+        } else if !snapshotFresh {
             resultState = .stale
             title = "Verification needs refresh"
-            detail = "Daemon or coordinator trust telemetry is older than 10 seconds."
+            detail = "Daemon telemetry is older than 10 seconds."
+        } else if trust == nil {
+            resultState = .incomplete
+            title = "Verification unavailable"
+            detail = "Coordinator trust is not reported in this provider phase."
+        } else if !trustFresh {
+            resultState = .stale
+            title = "Verification needs refresh"
+            detail = "Coordinator trust telemetry is older than 10 seconds."
         } else if !receivedAfterStarted {
             resultState = .incomplete
             title = "Verification unavailable"
@@ -110,7 +119,7 @@ public struct ProviderVerification: Equatable, Sendable {
         } else if authorization == nil {
             // Pre-App-Attest snapshots can still carry the legacy hardware
             // trust path. Do not call an arbitrary online snapshot verified.
-            if ["hardware", "mda_verified"].contains(state.trust.level.lowercased()) {
+            if ["hardware", "mda_verified"].contains(trust?.level.lowercased() ?? "") {
                 resultState = .legacy
                 title = "Legacy verification"
                 detail = "Fresh legacy verification is present; keep the Darkbloom management profile installed."

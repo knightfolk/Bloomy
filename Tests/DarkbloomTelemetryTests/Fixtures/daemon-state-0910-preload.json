@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "pid": 12002,
+  "process_identity": {"pid": 12002, "start_time_micros": 1800000100000000},
+  "version": "0.9.10",
+  "written_at": 1800000110,
+  "started_at": 1800000100,
+  "coordinator_url": "https://api.darkbloom.dev",
+  "config_path": "/Users/example/.config/darkbloom/provider.toml",
+  "runtime_capabilities": ["apple_m5", "mlx_nax"],
+  "advertised_models": ["model-a", "model-b", "model-c"],
+  "warm_models": ["model-a"],
+  "startup_preload_pending_models": ["model-b"],
+  "lifecycle": {"outcome": "serving", "remaining": 0, "coordinator_acknowledged": false},
+  "inference_active": false,
+  "stats": {"requests_served": 0, "tokens_generated": 0, "usage_gaps": 0}
+}

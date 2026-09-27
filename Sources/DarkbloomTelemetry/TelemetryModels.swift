@@ -6,8 +6,12 @@ public struct DaemonState: Equatable, Sendable {
     public let currentModel: String
     public let warmModels: [String]
     public let stats: ProviderStats
-    public let trust: TrustState
-    public let capacity: MemoryCapacity
+    /// Coordinator trust can be absent while a scheduled provider process is
+    /// intentionally waiting outside its serving window.
+    public let trust: TrustState?
+    /// Capacity is emitted by the serving loop and can be absent during early
+    /// startup or scheduled idle.
+    public let capacity: MemoryCapacity?
     public let slots: [ModelSlot]
     public let inferenceActive: Bool
     public let startedAt: TimeInterval
@@ -26,6 +30,17 @@ public struct DaemonState: Equatable, Sendable {
     /// Bounded native CLI lifecycle status, when present in this daemon
     /// snapshot. Older schema-1 states omit it.
     public let lifecycle: ProviderLifecycleState?
+    /// Models still pending from the configured startup preload plan. `nil`
+    /// means the running provider predates this field; an empty array means
+    /// startup preload is complete.
+    public let startupPreloadPendingModels: [String]?
+    public let modelSwitch: ProviderModelSwitchState?
+    public let availability: ProviderAvailabilityState?
+    /// Exact provider configuration path used by the current process. Consumers
+    /// use it only for local capability matching and must redact it from DTOs.
+    public let configPath: String?
+    /// Open capability values reported by the current provider runtime.
+    public let runtimeCapabilities: [String]?
 
     public var loadFailures: [ModelLoadFailure] { modelLoadFailures }
 
@@ -35,8 +50,8 @@ public struct DaemonState: Equatable, Sendable {
         currentModel: String,
         warmModels: [String],
         stats: ProviderStats,
-        trust: TrustState,
-        capacity: MemoryCapacity,
+        trust: TrustState?,
+        capacity: MemoryCapacity?,
         slots: [ModelSlot],
         inferenceActive: Bool,
         startedAt: TimeInterval,
@@ -46,7 +61,12 @@ public struct DaemonState: Equatable, Sendable {
         advertisedModels: [String]? = nil,
         coordinatorURL: String? = nil,
         modelLoadFailures: [ModelLoadFailure] = [],
-        lifecycle: ProviderLifecycleState? = nil
+        lifecycle: ProviderLifecycleState? = nil,
+        startupPreloadPendingModels: [String]? = nil,
+        modelSwitch: ProviderModelSwitchState? = nil,
+        availability: ProviderAvailabilityState? = nil,
+        configPath: String? = nil,
+        runtimeCapabilities: [String]? = nil
     ) {
         self.schema = schema
         self.version = version
@@ -65,6 +85,11 @@ public struct DaemonState: Equatable, Sendable {
         self.coordinatorURL = coordinatorURL
         self.modelLoadFailures = modelLoadFailures
         self.lifecycle = lifecycle
+        self.startupPreloadPendingModels = startupPreloadPendingModels
+        self.modelSwitch = modelSwitch
+        self.availability = availability
+        self.configPath = configPath
+        self.runtimeCapabilities = runtimeCapabilities
     }
 }
 
@@ -73,6 +98,9 @@ public enum ProviderLifecycleOutcome: Equatable, Sendable {
     case draining
     case drained
     case stopped
+    case timedOut
+    case forced
+    case busy
     case unknown
 
     init(rawValue: String) {
@@ -81,8 +109,75 @@ public enum ProviderLifecycleOutcome: Equatable, Sendable {
         case "draining": self = .draining
         case "drained": self = .drained
         case "stopped": self = .stopped
+        case "timedout", "timed_out": self = .timedOut
+        case "forced": self = .forced
+        case "busy": self = .busy
         default: self = .unknown
         }
+    }
+}
+
+public enum ProviderModelSwitchOutcome: Equatable, Sendable {
+    case serving
+    case validating
+    case draining
+    case switching
+    case switched
+    case timedOut
+    case failed
+    case busy
+    case unknown
+
+    init(rawValue: String) {
+        switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "serving": self = .serving
+        case "validating": self = .validating
+        case "draining": self = .draining
+        case "switching": self = .switching
+        case "switched": self = .switched
+        case "timedout", "timed_out": self = .timedOut
+        case "failed": self = .failed
+        case "busy": self = .busy
+        default: self = .unknown
+        }
+    }
+}
+
+public struct ProviderModelSwitchState: Equatable, Sendable {
+    public let outcome: ProviderModelSwitchOutcome
+    public let models: [String]
+    public let remainingRequests: Int?
+
+    public init(
+        outcome: ProviderModelSwitchOutcome,
+        models: [String],
+        remainingRequests: Int? = nil
+    ) {
+        self.outcome = outcome
+        self.models = Array(models.prefix(64))
+        self.remainingRequests = remainingRequests.flatMap { (0...1_000_000).contains($0) ? $0 : nil }
+    }
+}
+
+public enum ProviderAvailabilityPhase: Equatable, Sendable {
+    case waitingForSchedule
+    case unknown
+
+    init(rawValue: String) {
+        switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "waiting_for_schedule": self = .waitingForSchedule
+        default: self = .unknown
+        }
+    }
+}
+
+public struct ProviderAvailabilityState: Equatable, Sendable {
+    public let phase: ProviderAvailabilityPhase
+    public let nextWindowAt: TimeInterval?
+
+    public init(phase: ProviderAvailabilityPhase, nextWindowAt: TimeInterval? = nil) {
+        self.phase = phase
+        self.nextWindowAt = nextWindowAt.flatMap { $0.isFinite ? $0 : nil }
     }
 }
 

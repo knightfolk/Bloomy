@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "pid": 12001,
+  "process_identity": {"pid": 12001, "start_time_micros": 1800000000000000},
+  "version": "0.9.10",
+  "written_at": 1800000010,
+  "started_at": 1800000000,
+  "coordinator_url": "https://api.darkbloom.dev",
+  "availability": {"phase": "waiting_for_schedule", "next_window_at": 1800003600},
+  "lifecycle": {"outcome": "drained", "remaining": 0, "coordinator_acknowledged": false},
+  "inference_active": false,
+  "stats": {"requests_served": 0, "tokens_generated": 0, "usage_gaps": 0}
+}
