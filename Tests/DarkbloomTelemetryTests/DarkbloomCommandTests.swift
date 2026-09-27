@@ -38,6 +38,17 @@ struct DarkbloomCommandTests {
         ])
     }
 
+    @Test("live switch repeats exact model IDs and carries the drain deadline")
+    func liveSwitchArguments() {
+        #expect(DarkbloomCommand.liveSwitch(
+            executable: executable,
+            models: ["model-a", "model-b"]
+        ).arguments == [
+            "switch", "--timeout", "600",
+            "--model", "model-a", "--model", "model-b",
+        ])
+    }
+
     @Test("model commands keep identifiers as single arguments")
     func modelArguments() {
         #expect(DarkbloomCommand.catalog(executable: executable, config: config).arguments == [

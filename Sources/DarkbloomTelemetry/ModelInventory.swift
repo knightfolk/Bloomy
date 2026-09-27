@@ -129,9 +129,18 @@ public struct LocalModelList: Decodable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let current = try decoder.container(keyedBy: CodingKeys.self)
         let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
-        cacheDirectory = current.contains(.cacheDirectory)
+        let decodedCacheDirectory = current.contains(.cacheDirectory)
             ? try current.decode(String.self, forKey: .cacheDirectory)
             : try legacy.decode(String.self, forKey: .cacheDirectory)
+        guard !decodedCacheDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              decodedCacheDirectory.utf8.count <= 4_096,
+              decodedCacheDirectory.rangeOfCharacter(from: .controlCharacters) == nil else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Effective cache path is invalid"
+            ))
+        }
+        cacheDirectory = decodedCacheDirectory
         filteredByConfig = current.contains(.filteredByConfig)
             ? try current.decode(Bool.self, forKey: .filteredByConfig)
             : try legacy.decode(Bool.self, forKey: .filteredByConfig)

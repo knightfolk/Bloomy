@@ -464,6 +464,64 @@ struct ProviderControlServiceTests {
         #expect(await harness.runner.lifecycleInvocations.isEmpty)
     }
 
+    @Test("live switch uses the fresh saved selection and reports the effective cache")
+    func liveSwitchUsesFreshSavedSelection() async throws {
+        let harness = try ServiceHarness.make(selection: ProviderModelSelection(
+            enabled: ["gemma-4-26b-qat-4bit", "gpt-oss"],
+            preloaded: []
+        ))
+        defer { harness.cleanup() }
+        await harness.telemetry.setDaemon(liveSwitchDaemon(configPath: harness.configURL.path))
+
+        let snapshot = try await harness.service.refresh()
+        #expect(snapshot.effectiveCacheDirectory == "/inert/cache")
+        #expect(snapshot.liveSwitchAvailability == .available)
+
+        _ = try await harness.service.performLiveSwitch(
+            enabledModels: ["stale-caller-model"],
+            onPhase: nil
+        )
+
+        let invocation = try #require(await harness.runner.switchInvocations.first)
+        #expect(invocation.command.arguments == [
+            "switch", "--timeout", "600",
+            "--model", "gemma-4-26b-qat-4bit",
+            "--model", "gpt-oss-20b",
+        ])
+        #expect(invocation.timeout == DarkbloomSourcePolicy.liveSwitchCommandTimeout)
+        #expect(invocation.outputLimit == DarkbloomSourcePolicy.mutationOutputByteLimit)
+        #expect(await harness.runner.sourceArguments.count == 6)
+    }
+
+    @Test("older provider and active switch dispatch nothing")
+    func liveSwitchFailsClosed() async throws {
+        let harness = try ServiceHarness.make()
+        defer { harness.cleanup() }
+
+        await #expect(throws: ProviderControlError.liveSwitchUnavailable(
+            "Upgrade the running provider to use Apply Live"
+        )) {
+            _ = try await harness.service.performLiveSwitch(
+                enabledModels: ["gemma-4-26b-qat-4bit"],
+                onPhase: nil
+            )
+        }
+
+        await harness.telemetry.setDaemon(liveSwitchDaemon(
+            configPath: harness.configURL.path,
+            modelSwitch: .init(outcome: .switching, models: ["gemma-4-26b-qat-4bit"])
+        ))
+        await #expect(throws: ProviderControlError.liveSwitchUnavailable(
+            "A live model switch is already in progress"
+        )) {
+            _ = try await harness.service.performLiveSwitch(
+                enabledModels: ["gemma-4-26b-qat-4bit"],
+                onPhase: nil
+            )
+        }
+        #expect(await harness.runner.switchInvocations.isEmpty)
+    }
+
     @Test("start rejects a saved selector that cannot resolve to one downloaded model")
     func startRequiresResolvableDownloadedModels() async throws {
         let missing = try ServiceHarness.make(selection: ProviderModelSelection(
@@ -1312,6 +1370,10 @@ private actor ServiceRunnerFake: LaunchReportingProcessExecuting {
         invocations.filter { ["start", "stop", "restart"].contains($0.command.arguments.first ?? "") }
     }
 
+    var switchInvocations: [Invocation] {
+        invocations.filter { $0.command.arguments.first == "switch" }
+    }
+
     var mutationInvocations: [Invocation] {
         invocations.filter {
             let arguments = $0.command.arguments
@@ -1393,7 +1455,7 @@ private actor ServiceRunnerFake: LaunchReportingProcessExecuting {
         let isModelMutation = command.arguments.count > 1
             && command.arguments[0] == "models"
             && (command.arguments[1] == "download" || command.arguments[1] == "remove")
-        let isLifecycleMutation = ["start", "stop", "restart"].contains(
+        let isLifecycleMutation = ["start", "stop", "restart", "switch"].contains(
             command.arguments.first ?? ""
         )
         if (isModelMutation || isLifecycleMutation), shouldBlockNextMutationBeforeLaunch {
@@ -1587,6 +1649,10 @@ private actor ServiceTelemetryFake: TelemetrySource {
         )
     }
 
+    func setDaemon(_ daemon: DaemonState) {
+        self.daemon = daemon
+    }
+
     func readDaemonState() async throws -> DaemonState {
         if daemonReadShouldCancel {
             daemonReadShouldCancel = false
@@ -1638,6 +1704,32 @@ private func daemon(
         writtenAt: writtenAt,
         pid: 1,
         processIdentity: ProcessIdentity(pid: 1, startTimeMicros: 1)
+    )
+}
+
+private func liveSwitchDaemon(
+    configPath: String,
+    modelSwitch: ProviderModelSwitchState = .init(outcome: .serving, models: [])
+) -> DaemonState {
+    DaemonState(
+        schema: 1,
+        version: "0.9.10",
+        currentModel: "gemma-4-26b-qat-4bit",
+        warmModels: ["gemma-4-26b-qat-4bit"],
+        stats: ProviderStats(tokensGenerated: 0, requestsServed: 0, usageGaps: 0),
+        trust: nil,
+        capacity: nil,
+        slots: [],
+        inferenceActive: false,
+        startedAt: serviceNow.timeIntervalSince1970 - 10,
+        writtenAt: serviceNow.timeIntervalSince1970,
+        pid: 1,
+        processIdentity: ProcessIdentity(pid: 1, startTimeMicros: 1),
+        advertisedModels: ["gemma-4-26b-qat-4bit"],
+        coordinatorURL: "https://api.darkbloom.dev",
+        modelSwitch: modelSwitch,
+        configPath: configPath,
+        runtimeCapabilities: []
     )
 }
 

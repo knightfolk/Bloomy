@@ -6,6 +6,7 @@ enum ProviderOperation: Equatable {
     case idle
     case refreshing
     case saving
+    case liveSwitch
     case downloading(String)
     case deleting(String)
     case lifecycle(ProviderLifecycleAction)
@@ -73,6 +74,42 @@ final class ProviderControlStore: ObservableObject {
     var canSave: Bool {
         guard operation == .idle, let draft, draft.hasChanges else { return false }
         return draftValidationMessage == nil
+    }
+
+    var canApplyLive: Bool { applyLiveUnavailableReason == nil }
+
+    var applyLiveUnavailableReason: String? {
+        guard operation == .idle else { return "Another provider action is in progress" }
+        guard let draft, let snapshot else { return "Provider configuration is unavailable" }
+        guard !draft.hasChanges else {
+            return "Save or discard pending changes before applying live"
+        }
+        guard !draft.original.enabled.isEmpty else {
+            return "Apply Live requires at least one saved enabled model"
+        }
+        guard snapshot.sources.catalog.isMarkedFresh,
+              snapshot.sources.localModels.isMarkedFresh else {
+            return "Refresh model controls before applying live"
+        }
+        switch snapshot.liveSwitchAvailability {
+        case .available:
+            break
+        case .inProgress:
+            return "A live model switch is already in progress"
+        case .unavailable(let reason):
+            return Self.safeLiveSwitchDiagnostics.contains(reason)
+                ? diagnosticSanitizer.sanitize(reason)
+                : "Apply Live is unavailable"
+        }
+        if let advertised = snapshot.daemonState?.advertisedModels {
+            let saved = Set(draft.original.enabled.compactMap {
+                Self.resolvedCatalogID(for: $0, in: snapshot.inventory)
+            })
+            if !saved.isEmpty, saved == Set(advertised) {
+                return "The saved model selection is already active"
+            }
+        }
+        return nil
     }
 
     func canDownload(_ modelID: String) -> Bool {
@@ -211,7 +248,9 @@ final class ProviderControlStore: ObservableObject {
                         daemonState: snapshot.daemonState,
                         residentModelIDs: snapshot.residentModelIDs,
                         capturedAt: snapshot.capturedAt,
-                        sources: snapshot.sources
+                        sources: snapshot.sources,
+                        effectiveCacheDirectory: snapshot.effectiveCacheDirectory,
+                        liveSwitchAvailability: snapshot.liveSwitchAvailability
                     )
                 }
                 await reconcileCompletedMutation(
@@ -228,6 +267,40 @@ final class ProviderControlStore: ObservableObject {
                 errorMessage = configErrorMessage(error)
             } catch {
                 errorMessage = "Could not save provider settings."
+            }
+            finish(generation)
+        }
+        currentTask = task
+        await awaitTask(task)
+    }
+
+    func applyLive() async {
+        guard canApplyLive, let savedEnabledModels = draft?.original.enabled,
+              let generation = begin(.liveSwitch)
+        else { return }
+        let controller = self.controller
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let completion = try await controller.performLiveSwitch(
+                    enabledModels: savedEnabledModels,
+                    onPhase: { [weak self] phase in
+                        await self?.advanceMutationPhase(phase, generation: generation)
+                    }
+                )
+                await reconcileCompletedMutation(
+                    completion,
+                    preserving: draft,
+                    failureMessage: "The live switch completed, but model controls could not refresh.",
+                    uncertainFailureMessage:
+                        "The live switch outcome could not be confirmed; model controls could not refresh."
+                )
+            } catch is CancellationError {
+                // Cancellation is authoritative until the service reports dispatch.
+            } catch let error as ProviderControlError {
+                errorMessage = controlErrorMessage(error, action: "apply models live")
+            } catch {
+                errorMessage = "Could not apply the saved model selection live."
             }
             finish(generation)
         }
@@ -569,7 +642,7 @@ final class ProviderControlStore: ObservableObject {
         operationGeneration &+= 1
         operation = newOperation
         switch newOperation {
-        case .saving, .downloading, .deleting, .lifecycle:
+        case .saving, .liveSwitch, .downloading, .deleting, .lifecycle:
             operationPhase = .mutating
         case .idle, .refreshing:
             operationPhase = nil
@@ -670,7 +743,8 @@ final class ProviderControlStore: ObservableObject {
             daemonState: snapshot.daemonState,
             residentModelIDs: snapshot.residentModelIDs,
             capturedAt: snapshot.capturedAt,
-            sources: .unknown
+            sources: .unknown,
+            effectiveCacheDirectory: snapshot.effectiveCacheDirectory
         )
     }
 
@@ -726,6 +800,10 @@ final class ProviderControlStore: ObservableObject {
             "This build cannot apply hosting settings."
         case .invalidHostingOptions:
             "Enter a valid port and bind address before applying hosting settings."
+        case .liveSwitchUnavailable(let reason):
+            Self.safeLiveSwitchDiagnostics.contains(reason)
+                ? diagnosticSanitizer.sanitize(reason)
+                : "Apply Live is unavailable."
         }
     }
 
@@ -772,6 +850,14 @@ final class ProviderControlStore: ObservableObject {
         "Saved model selection is not an unambiguous downloaded catalog model",
         "Model catalog is unavailable",
         "Local model list is unavailable",
+    ]
+
+    private static let safeLiveSwitchDiagnostics: Set<String> = [
+        "Refresh current provider state before applying live",
+        "Upgrade the running provider to use Apply Live",
+        "The running provider uses a different configuration",
+        "Finish the current provider lifecycle action before applying live",
+        "A live model switch is already in progress",
     ]
 
     private static let safeDeleteDiagnostics: Set<String> = {
