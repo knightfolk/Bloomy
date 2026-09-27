@@ -15,7 +15,7 @@ struct DarkbloomCommandTests {
             models: ["gemma-4-26b-qat-4bit", "gpt-oss"]
         )
         #expect(command.arguments == [
-            "start", "--config", config.path,
+            "start", "--config", config.path, "--timeout", "600",
             "--model", "gemma-4-26b-qat-4bit",
             "--model", "gpt-oss",
         ])
@@ -28,6 +28,14 @@ struct DarkbloomCommandTests {
         #expect(DarkbloomCommand.stop(executable: executable).arguments == ["stop", "--timeout", "600"])
         #expect(!DarkbloomCommand.stop(executable: executable).arguments.contains("--force"))
         #expect(!DarkbloomCommand.stop(executable: executable).arguments.contains("--uninstall"))
+    }
+
+    @Test("native restart carries drain and startup confirmation deadlines")
+    func restartArguments() {
+        #expect(DarkbloomCommand.restart(executable: executable, config: config).arguments == [
+            "restart", "--config", config.path,
+            "--timeout", "600", "--startup-timeout", "180",
+        ])
     }
 
     @Test("model commands keep identifiers as single arguments")

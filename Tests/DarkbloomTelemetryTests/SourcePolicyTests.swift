@@ -56,7 +56,12 @@ struct SourcePolicyTests {
         #expect(!DarkbloomCommand.stop(executable: executable).arguments.contains("--force"))
         #expect(!DarkbloomCommand.stop(executable: executable).arguments.contains("--uninstall"))
         #expect(DarkbloomCommand.start(executable: executable, config: config, models: ["first", "second"]).arguments == [
-            "start", "--config", config.path, "--model", "first", "--model", "second",
+            "start", "--config", config.path, "--timeout", "600",
+            "--model", "first", "--model", "second",
+        ])
+        #expect(DarkbloomCommand.restart(executable: executable, config: config).arguments == [
+            "restart", "--config", config.path,
+            "--timeout", "600", "--startup-timeout", "180",
         ])
         #expect(!commands.flatMap(\.arguments).contains("--no-auth"))
     }
@@ -70,8 +75,10 @@ struct SourcePolicyTests {
         #expect(DarkbloomSourcePolicy.processOutputByteLimit == 262_144)
         #expect(DarkbloomSourcePolicy.processTimeout == .seconds(3))
         #expect(DarkbloomSourcePolicy.lifecycleTimeout == .seconds(30))
-        #expect(DarkbloomSourcePolicy.stopDrainTimeoutSeconds == 600)
-        #expect(DarkbloomSourcePolicy.stopCommandTimeout == .seconds(630))
+        #expect(DarkbloomSourcePolicy.lifecycleDrainTimeoutSeconds == 600)
+        #expect(DarkbloomSourcePolicy.lifecycleStartupTimeoutSeconds == 180)
+        #expect(DarkbloomSourcePolicy.lifecycleCommandTimeout == .seconds(660))
+        #expect(DarkbloomSourcePolicy.restartCommandTimeout == .seconds(840))
         #expect(DarkbloomSourcePolicy.catalogTimeout == .seconds(15))
         #expect(DarkbloomSourcePolicy.downloadTimeout == .seconds(21_600))
         #expect(DarkbloomSourcePolicy.mutationOutputByteLimit == 1_048_576)

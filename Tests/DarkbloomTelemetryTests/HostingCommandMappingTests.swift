@@ -16,6 +16,7 @@ struct HostingCommandMappingTests {
         )
         #expect(command.arguments == [
             "start", "--config", config.path,
+            "--timeout", "600",
             "--model", "model-a", "--model", "model-b",
         ])
         #expect(command.executable == executable)
@@ -30,7 +31,8 @@ struct HostingCommandMappingTests {
             hosting: .default
         )
         #expect(command.arguments == [
-            "start", "--config", config.path, "--model", "model-a",
+            "start", "--config", config.path,
+            "--timeout", "600", "--model", "model-a",
         ])
     }
 
@@ -44,7 +46,8 @@ struct HostingCommandMappingTests {
             hosting: options
         )
         #expect(command.arguments == [
-            "start", "--config", config.path, "--model", "model-a",
+            "start", "--config", config.path,
+            "--timeout", "600", "--model", "model-a",
             "--local-endpoint", "--port", "8123", "--bind", "127.0.0.1",
         ])
         #expect(!command.arguments.contains("--local"))
