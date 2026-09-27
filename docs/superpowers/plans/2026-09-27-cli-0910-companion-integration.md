@@ -10,6 +10,12 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-27-cli-0910-companion-control-contract.md`
 
+**Candidate status (2026-09-27):** Tasks 1–8 are implemented in local commits.
+The synthetic Mac host and iPhone vertical slice are implemented and verified,
+including a post-review idle-session repair. The signed persistent helper, live
+Control adapters, physical-device/Tailscale proof, and release packaging remain
+Coming Soon gates and are intentionally not represented as shipped behavior.
+
 ## Global Constraints
 
 - Preserve unrelated and dirty worktrees; use `codex/0910-lifecycle-fixes` for the CLI and `codex/cli-0910-integration` for Control.
@@ -35,9 +41,9 @@
 
 **Interfaces:** Produces one explicit effective-cache selection context used by explicit, all, picker, and download paths.
 
-- [ ] Add a failing test with different default and configured caches.
-- [ ] Make every switch selection path consume the configured cache context.
-- [ ] Run focused CLI tests and commit.
+- [x] Add a failing test with different default and configured caches.
+- [x] Make every switch selection path consume the configured cache context.
+- [x] Run focused CLI tests and commit (`247b8682`).
 
 ### Task 2: Provider lifecycle completion and stale-owner recovery
 
@@ -45,10 +51,10 @@
 
 **Interfaces:** Produces restart completion states that distinguish serving from scheduled idle and exact-identity ownership from PID reuse.
 
-- [ ] Add failing scheduled-idle restart and stale-PID reuse tests.
-- [ ] Accept a fresh scheduled-idle identity without weakening serving authorization.
-- [ ] Defer ownership to exact process identity and the lifetime lock.
-- [ ] Run focused tests and commit.
+- [x] Add failing scheduled-idle restart and stale-PID reuse tests.
+- [x] Accept a fresh scheduled-idle identity without weakening serving authorization.
+- [x] Defer ownership to exact process identity and the lifetime lock.
+- [x] Run focused tests and commit (`b8e3624b`).
 
 ### Task 3: Stop standalone startup during preload
 
@@ -56,9 +62,9 @@
 
 **Interfaces:** Produces startup lifecycle control that exists before preload and prevents bind after stop.
 
-- [ ] Add a blocked-preload stop regression test.
-- [ ] Publish lifecycle identity/control before preload and cancel cleanly on stop.
-- [ ] Run focused tests and commit.
+- [x] Add a blocked-preload stop regression test that proves no listener bind.
+- [x] Publish lifecycle identity/control before preload and cancel cleanly on stop.
+- [x] Run focused tests and commit (`18b34d49`).
 
 ### Task 4: Provider cleanup and hardening
 
@@ -66,11 +72,11 @@
 
 **Interfaces:** Removes duplicate stop work and unreachable optional cache paths; preserves existing public CLI behavior.
 
-- [ ] Add/adjust tests for parsed TOML presence, FIFO rejection, and bounded diagnostic output.
-- [ ] Remove duplicate stop and optional cache branches.
-- [ ] Replace fragile section-text matching where selection authority depends on it.
-- [ ] Add nonblocking special-file rejection and bounded subprocess capture.
-- [ ] Run provider tests/build and commit.
+- [x] Add/adjust tests for parsed TOML presence, FIFO rejection, and bounded diagnostic output.
+- [x] Remove duplicate stop and optional cache branches.
+- [x] Replace fragile section-text matching where selection authority depends on it.
+- [x] Add nonblocking special-file rejection and bounded subprocess capture.
+- [x] Run focused provider tests/build and commit (`f3094cde`, `1b4e58a7`).
 
 ### Task 5: Control lifecycle deadline compatibility
 
@@ -78,9 +84,9 @@
 
 **Interfaces:** Produces explicit CLI drain arguments and a caller deadline covering drain, shutdown, and startup confirmation.
 
-- [ ] Add a failing test proving Start/Restart outlive the CLI drain deadline.
-- [ ] Pass explicit drain/startup timeouts and derive a bounded command deadline.
-- [ ] Verify timeout/cancellation reconciliation and commit.
+- [x] Add a failing test proving Start/Restart outlive the CLI drain deadline.
+- [x] Pass explicit drain/startup timeouts and derive a bounded command deadline.
+- [x] Verify timeout/cancellation reconciliation and commit (`7d72e04`, `63f3834`).
 
 ### Task 6: Control v0.9.10 sparse state and lifecycle presentation
 
@@ -88,10 +94,10 @@
 
 **Interfaces:** Produces optional trust/capacity state plus typed preload, switch, drain, and scheduled-idle presentation.
 
-- [ ] Add v0.9.10 fixtures for scheduled idle, preload, switch phases, busy, forced, and timeout.
-- [ ] Decode optional fields without dropping verified identity/lifecycle data.
-- [ ] Render truthful Preloading, On demand, Switching, Draining, and scheduled-idle states.
-- [ ] Replace stale interruption copy and commit.
+- [x] Add v0.9.10 fixtures for scheduled idle, preload, switch phases, busy, forced, and timeout.
+- [x] Decode optional fields without dropping verified identity/lifecycle data.
+- [x] Render truthful Preloading, On demand, Switching, Draining, and scheduled-idle states.
+- [x] Replace stale interruption copy and commit (`970b6ad`).
 
 ### Task 7: Feature-gated live model switch and cache diagnostics
 
@@ -99,10 +105,10 @@
 
 **Interfaces:** Produces separate Save and Apply Live actions; Apply Live is available only from fresh matching capability state.
 
-- [ ] Add failing command, capability, receipt, conflict, and older-provider fallback tests.
-- [ ] Implement bounded `darkbloom switch` dispatch and reconciliation.
-- [ ] Add read-only effective-cache location diagnostics.
-- [ ] Inspect rendered macOS UI, run the full suite/release build, and commit.
+- [x] Add failing command, capability, receipt, conflict, and older-provider fallback tests.
+- [x] Implement bounded `darkbloom switch` dispatch and reconciliation.
+- [x] Add read-only effective-cache location diagnostics.
+- [x] Inspect rendered macOS UI, run the full suite/release build, and commit (`3eb6f0f`).
 
 ### Task 8: Integrate the preserved companion foundation
 
@@ -110,9 +116,9 @@
 
 **Interfaces:** Produces versioned, size-bounded DTOs and framing shared by Mac and iOS targets.
 
-- [ ] Preserve and integrate the existing native TLS/Tailscale evidence and uncommitted protocol work.
-- [ ] Rebase DTOs on the corrected lifecycle/state model and add privacy/limit fixtures.
-- [ ] Run protocol tests and commit.
+- [x] Preserve and integrate the existing native TLS/Tailscale evidence and uncommitted protocol work.
+- [x] Rebase DTOs on the corrected lifecycle/state model and add privacy/limit fixtures.
+- [x] Run protocol tests and commit (`63f3834`).
 
 ### Task 9: Mac companion host and background lifecycle helper
 
@@ -120,9 +126,9 @@
 
 **Interfaces:** Produces QR bootstrap, mutually authenticated sessions, snapshot streaming, revision-checked settings, provider controls, and Control quit/reopen commands.
 
-- [ ] Add failing identity, pairing, replay, authorization, revision, size, redaction, and lifecycle recovery tests.
-- [ ] Implement one host coordinator over Network.framework with Keychain-backed identity and paired-device allowlist.
-- [ ] Route every provider action through the tested Control lifecycle service and app actions through the helper.
+- [x] Add identity, pairing, replay, authorization, revision, size, redaction, and lifecycle adapter tests.
+- [x] Implement one host coordinator over Network.framework with Keychain-backed identity and paired-device allowlist.
+- [ ] Package the signed persistent helper and connect the host adapters to live Control telemetry, provider control, and app lifecycle.
 - [ ] Run host integration tests and commit.
 
 ### Task 10: iOS companion application
@@ -132,10 +138,10 @@
 **Interfaces:** Consumes the shared protocol and Mac host; produces the user-facing companion.
 
 - [ ] Add failing view-model and transport tests for pairing, reconnect, stale data, command confirmation, revision conflict, and revocation.
-- [ ] Implement QR pairing and authenticated LAN/Tailscale connection.
-- [ ] Implement telemetry, safe settings, provider lifecycle/switch, and Mac app controls.
-- [ ] Build/test on iOS Simulator and inspect all primary rendered states.
-- [ ] Commit.
+- [x] Implement QR pairing and authenticated LAN/user-managed-Tailscale routes.
+- [x] Implement telemetry, safe settings, provider lifecycle/switch, and Mac app control surfaces against the authenticated host contract.
+- [x] Build/test on iOS Simulator and inspect Status, Models, Control, and Settings with the synthetic paired host.
+- [x] Commit the vertical slice (`63f3834`); keep production-only gates Coming Soon.
 
 ### Task 11: End-to-end verification and documentation
 
@@ -144,7 +150,7 @@
 **Interfaces:** Produces reproducible proof for CLI, Control, Mac helper, and iOS simulator.
 
 - [ ] Run focused and full provider tests/build without the prior Metal artifact failure.
-- [ ] Run the full Control suite and release build.
+- [x] Run the full Control suite and release build.
 - [ ] Pair a simulator with the local Mac host and verify monitor, settings conflict, start/stop/restart/switch, app quit/reopen, reconnect, and revocation.
-- [ ] Update compatibility documentation and keep unreleased companion UI marked Coming Soon until all gates pass.
+- [x] Update compatibility documentation and keep unreleased companion UI marked Coming Soon until all gates pass.
 - [ ] Run a final cross-repository review, fix important findings test-first, and commit.

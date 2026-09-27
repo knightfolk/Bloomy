@@ -1,0 +1,33 @@
+{
+  "date": "2026-09-27",
+  "status": "candidate_verified_with_release_gates",
+  "app_branch": "codex/cli-0910-integration",
+  "cli_branch": "codex/0910-lifecycle-fixes",
+  "verification": {
+    "control_tests": 765,
+    "protocol_tests": 18,
+    "host_transport_tests": 16,
+    "mac_total_tests": 799,
+    "mac_release_build": "passed",
+    "ios_simulator_tests": 4,
+    "ios_simulator_result": "passed",
+    "generic_ios_compile": "passed",
+    "paired_fixture_rendering": ["status", "models", "control", "settings"],
+    "cli_tests": 298,
+    "cli_test_result": "passed",
+    "provider_full_command": "failed_existing_gpu_parity",
+    "provider_gpu_parity_issues": 129
+  },
+  "network": {
+    "remote_v1": "user_managed_tailscale",
+    "embedded_tailscale": "excluded_unresolved_transport_regression"
+  },
+  "side_effects": {
+    "live_provider_started": false,
+    "live_provider_settings_changed": false,
+    "service_installed": false,
+    "pushed": false,
+    "released": false,
+    "deployed": false
+  }
+}

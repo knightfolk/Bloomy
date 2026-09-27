@@ -3,6 +3,7 @@ import Foundation
 import Network
 
 public final class AuthenticatedCompanionServer: @unchecked Sendable {
+    public static let defaultAuthenticatedIdleTimeout: TimeInterval = 300
     public typealias Authenticator = @Sendable (SessionAuthentication, SessionChallenge) async -> Bool
     public typealias Handler = @Sendable (UUID, Envelope) async throws -> Envelope
     public typealias BootstrapHandler = @Sendable (Envelope) async throws -> Envelope
@@ -24,6 +25,7 @@ public final class AuthenticatedCompanionServer: @unchecked Sendable {
     private let authenticate: Authenticator
     private let handler: Handler
     private let bootstrapHandler: BootstrapHandler?
+    private let authenticatedIdleTimeout: TimeInterval
     private let now: @Sendable () -> Date
     private let onError: @Sendable (String) -> Void
 
@@ -33,12 +35,17 @@ public final class AuthenticatedCompanionServer: @unchecked Sendable {
         bindHost: String = "127.0.0.1",
         authenticate: @escaping Authenticator,
         bootstrapHandler: BootstrapHandler? = nil,
+        authenticatedIdleTimeout: TimeInterval = AuthenticatedCompanionServer.defaultAuthenticatedIdleTimeout,
         now: @escaping @Sendable () -> Date = Date.init,
         onError: @escaping @Sendable (String) -> Void = { _ in },
         handler: @escaping Handler
     ) throws {
         self.authenticate = authenticate
         self.bootstrapHandler = bootstrapHandler
+        guard authenticatedIdleTimeout >= 1, authenticatedIdleTimeout <= 3_600 else {
+            throw CompanionTransportError.invalidEndpoint
+        }
+        self.authenticatedIdleTimeout = authenticatedIdleTimeout
         self.handler = handler
         self.now = now
         self.onError = onError
@@ -129,7 +136,9 @@ public final class AuthenticatedCompanionServer: @unchecked Sendable {
                         )
                     }
                     while !Task.isCancelled {
-                        let envelope = try await connection.receiveEnvelope(timeout: 10)
+                        let envelope = try await connection.receiveEnvelope(
+                            timeout: self.authenticatedIdleTimeout
+                        )
                         try envelope.validate(for: .authenticated)
                         let response = try await self.handler(authentication.deviceID, envelope)
                         try await connection.sendEnvelope(response)

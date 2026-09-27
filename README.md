@@ -13,13 +13,13 @@ Previously named Darkbloom Monitor.
 
 ## iOS companion — Coming soon
 
-An iPhone companion is in development for secure QR pairing, monitoring,
-supported settings, and provider/Mac app controls over LAN and remote access.
-It is not available in the current app release. The isolated
-[transport prototype](tools/companion-spike/README.md) is for development only
-and is not included in the macOS app. See the
-[implementation plan](docs/superpowers/plans/2026-09-25-ios-companion.md)
-for the remaining work.
+An iPhone companion candidate now exists in source for secure QR pairing,
+monitoring, supported settings, and provider/Mac app controls over LAN and
+user-managed Tailscale. It is not available in the current app release. The
+candidate uses a synthetic Mac fixture for end-to-end testing; it does not yet
+install the signed background helper needed for production controls. See the
+[companion operations runbook](docs/COMPANION_OPERATIONS.md) and
+[implementation plan](docs/superpowers/plans/2026-09-27-cli-0910-companion-integration.md).
 
 ## Download
 

@@ -6,6 +6,47 @@ import Testing
 
 @Suite(.serialized)
 struct AuthenticatedServerTests {
+    @Test func authenticatedSessionSupportsSequentialRequestsBeyondHandshakeDeadline() async throws {
+        #expect(AuthenticatedCompanionServer.defaultAuthenticatedIdleTimeout == 300)
+        let host = try CompanionIdentity.makeEphemeral(role: .host)
+        let phone = try CompanionIdentity.makeEphemeral(role: .phone)
+        let deviceID = UUID()
+        let calls = LockedCounter()
+        let server = try AuthenticatedCompanionServer(
+            identity: host,
+            authenticate: { authentication, challenge in
+                authentication.deviceID == deviceID && CompanionTrust.verify(
+                    authentication.signature,
+                    message: CompanionHostCoordinator.sessionTranscript(
+                        deviceID: deviceID, nonce: challenge.nonce
+                    ),
+                    certificateDER: phone.certificateDER
+                )
+            },
+            authenticatedIdleTimeout: 1,
+            handler: { _, request in
+                calls.increment()
+                return .init(
+                    requestID: request.requestID,
+                    payload: .safeError(.init(code: .unavailable))
+                )
+            }
+        )
+        let port = try await server.start()
+        let client = try await CompanionClientSession.connect(
+            route: .init(kind: .lan, host: "127.0.0.1", port: port),
+            identity: phone,
+            expectedHostSPKI: host.spkiSHA256,
+            deviceID: deviceID
+        )
+        _ = try await client.request(.monitorSubscribe(.init()))
+        try await Task.sleep(for: .milliseconds(200))
+        _ = try await client.request(.settingsDraft(.init()))
+        #expect(calls.value == 2)
+        await client.close()
+        await server.stop()
+    }
+
     @Test func sessionChallengeBindsTransportCertificateToDevice() async throws {
         let host = try CompanionIdentity.makeEphemeral(role: .host)
         let phone = try CompanionIdentity.makeEphemeral(role: .phone)
