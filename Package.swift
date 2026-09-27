@@ -3,8 +3,9 @@ import PackageDescription
 
 let package = Package(
     name: "DarkbloomMonitor",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
+        .library(name: "DarkbloomCompanionProtocol", targets: ["DarkbloomCompanionProtocol"]),
         .library(name: "DarkbloomTelemetry", targets: ["DarkbloomTelemetry"]),
         .executable(name: "DarkbloomMonitor", targets: ["DarkbloomMonitor"]),
     ],
@@ -12,6 +13,7 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6"),
     ],
     targets: [
+        .target(name: "DarkbloomCompanionProtocol"),
         .target(
             name: "DarkbloomTelemetry",
             linkerSettings: [.linkedLibrary("sqlite3")]
@@ -36,6 +38,11 @@ let package = Package(
         .testTarget(
             name: "DarkbloomTelemetryTests",
             dependencies: ["DarkbloomTelemetry", "DarkbloomMonitor"],
+            resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "DarkbloomCompanionProtocolTests",
+            dependencies: ["DarkbloomCompanionProtocol"],
             resources: [.copy("Fixtures")]
         ),
     ]
