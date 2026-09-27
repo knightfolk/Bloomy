@@ -72,5 +72,9 @@ and proving listener non-publication were fixed. It made no repository edits.
 - Physical-iPhone camera, Keychain/Secure Enclave, LAN, and external Tailscale proof.
 - Accessibility, signing, notarization, update, and release review.
 
-No push, release, deployment, service installation, provider start, provider
-setting mutation, real account access, or embedded-Tailscale promotion occurred.
+No push, release, deployment, service installation, provider start by this
+verification, provider setting mutation, real account access, or
+embedded-Tailscale promotion occurred. The final process audit found that
+launch recovery had brought the provider back after the prior pause. The native
+graceful stop drained zero requests, received coordinator acknowledgement,
+disabled auto-start, and a final provider/watchdog process check was clear.

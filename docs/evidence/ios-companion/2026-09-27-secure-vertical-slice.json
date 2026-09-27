@@ -23,7 +23,8 @@
     "embedded_tailscale": "excluded_unresolved_transport_regression"
   },
   "side_effects": {
-    "live_provider_started": false,
+    "live_provider_started_by_verification": false,
+    "final_process_audit": "provider_found_relaunched_then_gracefully_paused",
     "live_provider_settings_changed": false,
     "service_installed": false,
     "pushed": false,
