@@ -105,6 +105,10 @@ private enum JSONWireSchema {
         case .enrollmentResult:
             try closed(value, ["device", "policyEpoch"], type.rawValue)
             try pairedDevice(value["device"], path: "enrollmentResult.device")
+        case .sessionChallenge:
+            try closed(value, ["nonce", "expiresAt"], type.rawValue)
+        case .sessionAuthenticate:
+            try closed(value, ["deviceID", "nonce", "signature"], type.rawValue)
         case .monitorSubscribe:
             try closed(value, ["minimumIntervalSeconds"], type.rawValue)
         case .companionSnapshot:

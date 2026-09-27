@@ -6,14 +6,35 @@ let package = Package(
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(name: "DarkbloomCompanionProtocol", targets: ["DarkbloomCompanionProtocol"]),
+        .library(name: "DarkbloomCompanionTransport", targets: ["DarkbloomCompanionTransport"]),
+        .library(name: "DarkbloomCompanionHost", targets: ["DarkbloomCompanionHost"]),
         .library(name: "DarkbloomTelemetry", targets: ["DarkbloomTelemetry"]),
         .executable(name: "DarkbloomMonitor", targets: ["DarkbloomMonitor"]),
+        .executable(name: "DarkbloomCompanionFixtureHost", targets: ["DarkbloomCompanionFixtureHost"]),
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6"),
+        .package(url: "https://github.com/apple/swift-certificates.git", exact: "1.21.0"),
+        .package(url: "https://github.com/apple/swift-asn1.git", from: "1.1.0"),
     ],
     targets: [
         .target(name: "DarkbloomCompanionProtocol"),
+        .target(
+            name: "DarkbloomCompanionTransport",
+            dependencies: [
+                "DarkbloomCompanionProtocol",
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
+            ]
+        ),
+        .target(
+            name: "DarkbloomCompanionHost",
+            dependencies: [
+                "DarkbloomCompanionProtocol",
+                "DarkbloomCompanionTransport",
+                "DarkbloomTelemetry",
+            ]
+        ),
         .target(
             name: "DarkbloomTelemetry",
             linkerSettings: [.linkedLibrary("sqlite3")]
@@ -35,6 +56,13 @@ let package = Package(
             ],
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
+        .executableTarget(
+            name: "DarkbloomCompanionFixtureHost",
+            dependencies: [
+                "DarkbloomCompanionHost", "DarkbloomCompanionProtocol",
+                "DarkbloomCompanionTransport", "DarkbloomTelemetry",
+            ]
+        ),
         .testTarget(
             name: "DarkbloomTelemetryTests",
             dependencies: ["DarkbloomTelemetry", "DarkbloomMonitor"],
@@ -44,6 +72,13 @@ let package = Package(
             name: "DarkbloomCompanionProtocolTests",
             dependencies: ["DarkbloomCompanionProtocol"],
             resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "DarkbloomCompanionHostTests",
+            dependencies: [
+                "DarkbloomCompanionHost", "DarkbloomCompanionProtocol",
+                "DarkbloomCompanionTransport",
+            ]
         ),
     ]
 )

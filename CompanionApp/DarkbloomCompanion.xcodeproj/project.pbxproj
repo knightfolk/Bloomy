@@ -1,0 +1,369 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		2244A12E92F338B70D30B1F3 /* CompanionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C3E78F929FA34F5C9A93FC7 /* CompanionSettingsView.swift */; };
+		33329D6E166741577517A8F3 /* CompanionClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73A5C520D30F917348736928 /* CompanionClientTests.swift */; };
+		35DDF691D4DD2D4B5D439859 /* DarkbloomCompanionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B242A1C657300E4BF86BCD49 /* DarkbloomCompanionApp.swift */; };
+		41C7A304526B4A7D3027A277 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1F93E7417E6F7A74F4DE65C /* PairingView.swift */; };
+		82FDE65F361577DD7F056D06 /* CompanionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A804FD0872E50B21BDCC556 /* CompanionStore.swift */; };
+		AD40D4B695F33965AF69A4D9 /* ModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42F533F0EB5D57E58D2541BB /* ModelsView.swift */; };
+		B15908348E9D01CA009E9A79 /* DarkbloomCompanionProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = CDBFB1B00CB4637D2B4C8F92 /* DarkbloomCompanionProtocol */; };
+		C7BBF049776B067CC26D068E /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97B1A8668BCC5ABA7C802382 /* DashboardView.swift */; };
+		D91D80502FE3ECEE37F2F0B4 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 911E29DE5943A70261CDC97B /* RootView.swift */; };
+		DF5B557869605B2DA3F15D4F /* DarkbloomCompanionTransport in Frameworks */ = {isa = PBXBuildFile; productRef = F460F28423BCE28EAC6C0088 /* DarkbloomCompanionTransport */; };
+		EC458BC5729A7422225BD298 /* ControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 987CFDEE996D5CA98BA40365 /* ControlsView.swift */; };
+		F30F4C4690107AB6DAFB5B2D /* ApprovalKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67031D69E8EF3946365F6EBA /* ApprovalKeyStore.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		BE70D9D81AA01606936C55CE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6CB1AFB66B00479D2FF4FA74 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 12DB3C20FA6FFC400D22DD47;
+			remoteInfo = DarkbloomCompanion;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		1E20DF9EAA7C10566D1530C0 /* DarkbloomCompanionTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = DarkbloomCompanionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		25EA3323AE33281468A7E811 /* DarkbloomCompanion.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = DarkbloomCompanion.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		42F533F0EB5D57E58D2541BB /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
+		4C3E78F929FA34F5C9A93FC7 /* CompanionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSettingsView.swift; sourceTree = "<group>"; };
+		4D9EA5B2DB8FFB3CEE149D94 /* DarkbloomCLIMenuBarMonitor */ = {isa = PBXFileReference; lastKnownFileType = folder; name = DarkbloomCLIMenuBarMonitor; path = ..; sourceTree = SOURCE_ROOT; };
+		67031D69E8EF3946365F6EBA /* ApprovalKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalKeyStore.swift; sourceTree = "<group>"; };
+		73A5C520D30F917348736928 /* CompanionClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionClientTests.swift; sourceTree = "<group>"; };
+		7A804FD0872E50B21BDCC556 /* CompanionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionStore.swift; sourceTree = "<group>"; };
+		911E29DE5943A70261CDC97B /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		97B1A8668BCC5ABA7C802382 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		987CFDEE996D5CA98BA40365 /* ControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlsView.swift; sourceTree = "<group>"; };
+		B242A1C657300E4BF86BCD49 /* DarkbloomCompanionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DarkbloomCompanionApp.swift; sourceTree = "<group>"; };
+		D1F93E7417E6F7A74F4DE65C /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		CBBD278621B822A96D3F3577 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B15908348E9D01CA009E9A79 /* DarkbloomCompanionProtocol in Frameworks */,
+				DF5B557869605B2DA3F15D4F /* DarkbloomCompanionTransport in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2CD26B8D3054BA6F3F1D4EE5 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				4D9EA5B2DB8FFB3CEE149D94 /* DarkbloomCLIMenuBarMonitor */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		498C662B1E07B6BE4F031A0F /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				25EA3323AE33281468A7E811 /* DarkbloomCompanion.app */,
+				1E20DF9EAA7C10566D1530C0 /* DarkbloomCompanionTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		4F1A9FAC365580EB0B670A4E = {
+			isa = PBXGroup;
+			children = (
+				2CD26B8D3054BA6F3F1D4EE5 /* Packages */,
+				CA2945EC55BA3273726790B7 /* Sources */,
+				FCCDDBC8064BC62305A208CE /* Tests */,
+				498C662B1E07B6BE4F031A0F /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		CA2945EC55BA3273726790B7 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				67031D69E8EF3946365F6EBA /* ApprovalKeyStore.swift */,
+				4C3E78F929FA34F5C9A93FC7 /* CompanionSettingsView.swift */,
+				7A804FD0872E50B21BDCC556 /* CompanionStore.swift */,
+				987CFDEE996D5CA98BA40365 /* ControlsView.swift */,
+				B242A1C657300E4BF86BCD49 /* DarkbloomCompanionApp.swift */,
+				97B1A8668BCC5ABA7C802382 /* DashboardView.swift */,
+				42F533F0EB5D57E58D2541BB /* ModelsView.swift */,
+				D1F93E7417E6F7A74F4DE65C /* PairingView.swift */,
+				911E29DE5943A70261CDC97B /* RootView.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		FCCDDBC8064BC62305A208CE /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				73A5C520D30F917348736928 /* CompanionClientTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		12DB3C20FA6FFC400D22DD47 /* DarkbloomCompanion */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 90CDE981AD474808AEE8F156 /* Build configuration list for PBXNativeTarget "DarkbloomCompanion" */;
+			buildPhases = (
+				AF336B8C34A6828C83BB8767 /* Sources */,
+				CBBD278621B822A96D3F3577 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DarkbloomCompanion;
+			packageProductDependencies = (
+				CDBFB1B00CB4637D2B4C8F92 /* DarkbloomCompanionProtocol */,
+				F460F28423BCE28EAC6C0088 /* DarkbloomCompanionTransport */,
+			);
+			productName = DarkbloomCompanion;
+			productReference = 25EA3323AE33281468A7E811 /* DarkbloomCompanion.app */;
+			productType = "com.apple.product-type.application";
+		};
+		5E109465BFC7919A634309EA /* DarkbloomCompanionTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 355C6F336FD3982552E410AC /* Build configuration list for PBXNativeTarget "DarkbloomCompanionTests" */;
+			buildPhases = (
+				7E68780876F0C5872D3F852B /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				963C3D4157D6B5E23A279D82 /* PBXTargetDependency */,
+			);
+			name = DarkbloomCompanionTests;
+			packageProductDependencies = (
+			);
+			productName = DarkbloomCompanionTests;
+			productReference = 1E20DF9EAA7C10566D1530C0 /* DarkbloomCompanionTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		6CB1AFB66B00479D2FF4FA74 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					12DB3C20FA6FFC400D22DD47 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 5695838649D1BDF0A434C294 /* Build configuration list for PBXProject "DarkbloomCompanion" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 4F1A9FAC365580EB0B670A4E;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				98014C1633453B01BFB3D07D /* XCLocalSwiftPackageReference ".." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 498C662B1E07B6BE4F031A0F /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				12DB3C20FA6FFC400D22DD47 /* DarkbloomCompanion */,
+				5E109465BFC7919A634309EA /* DarkbloomCompanionTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		7E68780876F0C5872D3F852B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				33329D6E166741577517A8F3 /* CompanionClientTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AF336B8C34A6828C83BB8767 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F30F4C4690107AB6DAFB5B2D /* ApprovalKeyStore.swift in Sources */,
+				2244A12E92F338B70D30B1F3 /* CompanionSettingsView.swift in Sources */,
+				82FDE65F361577DD7F056D06 /* CompanionStore.swift in Sources */,
+				EC458BC5729A7422225BD298 /* ControlsView.swift in Sources */,
+				35DDF691D4DD2D4B5D439859 /* DarkbloomCompanionApp.swift in Sources */,
+				C7BBF049776B067CC26D068E /* DashboardView.swift in Sources */,
+				AD40D4B695F33965AF69A4D9 /* ModelsView.swift in Sources */,
+				41C7A304526B4A7D3027A277 /* PairingView.swift in Sources */,
+				D91D80502FE3ECEE37F2F0B4 /* RootView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		963C3D4157D6B5E23A279D82 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 12DB3C20FA6FFC400D22DD47 /* DarkbloomCompanion */;
+			targetProxy = BE70D9D81AA01606936C55CE /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0BAB452DF15B8CAC06ADAB49 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.darkbloom.companion.tests;
+				PRODUCT_NAME = DarkbloomCompanionTests;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DarkbloomCompanion.app/DarkbloomCompanion";
+			};
+			name = Debug;
+		};
+		3A3AC9CC2DC24AE8D8EF149D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+			};
+			name = Debug;
+		};
+		3B96BDFD4F32EB7468824B64 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Darkbloom;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan the one-time pairing code shown by Darkbloom Control on your Mac.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect securely to your paired Darkbloom host on your local network.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.darkbloom.companion;
+				PRODUCT_NAME = DarkbloomCompanion;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		43D9A37D15F51CC4C1CB3131 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+			};
+			name = Release;
+		};
+		AD56B6785F04C1D7779FE3B9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.darkbloom.companion.tests;
+				PRODUCT_NAME = DarkbloomCompanionTests;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DarkbloomCompanion.app/DarkbloomCompanion";
+			};
+			name = Release;
+		};
+		DB4C9220944654DE13801D0D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Darkbloom;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan the one-time pairing code shown by Darkbloom Control on your Mac.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect securely to your paired Darkbloom host on your local network.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.darkbloom.companion;
+				PRODUCT_NAME = DarkbloomCompanion;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		355C6F336FD3982552E410AC /* Build configuration list for PBXNativeTarget "DarkbloomCompanionTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0BAB452DF15B8CAC06ADAB49 /* Debug */,
+				AD56B6785F04C1D7779FE3B9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5695838649D1BDF0A434C294 /* Build configuration list for PBXProject "DarkbloomCompanion" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3A3AC9CC2DC24AE8D8EF149D /* Debug */,
+				43D9A37D15F51CC4C1CB3131 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		90CDE981AD474808AEE8F156 /* Build configuration list for PBXNativeTarget "DarkbloomCompanion" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3B96BDFD4F32EB7468824B64 /* Debug */,
+				DB4C9220944654DE13801D0D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		98014C1633453B01BFB3D07D /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		CDBFB1B00CB4637D2B4C8F92 /* DarkbloomCompanionProtocol */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DarkbloomCompanionProtocol;
+		};
+		F460F28423BCE28EAC6C0088 /* DarkbloomCompanionTransport */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DarkbloomCompanionTransport;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 6CB1AFB66B00479D2FF4FA74 /* Project object */;
+}

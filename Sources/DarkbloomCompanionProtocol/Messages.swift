@@ -7,6 +7,8 @@ public enum MessageType: String, Codable, CaseIterable, Equatable, Sendable {
     case enrollmentProof
     case pendingEnrollment
     case enrollmentResult
+    case sessionChallenge
+    case sessionAuthenticate
     case monitorSubscribe
     case companionSnapshot
     case historyQuery
@@ -198,6 +200,39 @@ public struct EnrollmentResult: Codable, Equatable, Sendable {
     public init(device: PairedDevice, policyEpoch: UInt64) { self.device = device; self.policyEpoch = policyEpoch }
 }
 
+public struct SessionChallenge: Codable, Equatable, Sendable {
+    public let nonce: Data
+    public let expiresAt: Date
+    public init(nonce: Data, expiresAt: Date) { self.nonce = nonce; self.expiresAt = expiresAt }
+    func validate() throws {
+        guard (16...128).contains(nonce.count) else { throw ProtocolError.invalidField("session.nonce") }
+    }
+}
+
+public struct SessionAuthentication: Codable, Equatable, Sendable {
+    public let deviceID: UUID
+    public let nonce: Data
+    public let signature: Data
+    public init(deviceID: UUID, nonce: Data, signature: Data) {
+        self.deviceID = deviceID; self.nonce = nonce; self.signature = signature
+    }
+    func validate() throws {
+        guard (16...128).contains(nonce.count),
+              !signature.isEmpty,
+              signature.count <= ProtocolLimits.maximumBinaryFieldBytes else {
+            throw ProtocolError.invalidField("session.authentication")
+        }
+    }
+
+    public static func transcript(deviceID: UUID, nonce: Data) -> Data {
+        var data = Data("darkbloom-companion-session-v1\0".utf8)
+        data.append(Data(deviceID.uuidString.lowercased().utf8))
+        data.append(0)
+        data.append(nonce)
+        return data
+    }
+}
+
 public enum DeviceListMode: String, Codable, Equatable, Sendable { case request, response }
 public struct DeviceListMessage: Codable, Equatable, Sendable {
     public let mode: DeviceListMode
@@ -243,6 +278,8 @@ public enum EnvelopePayload: Equatable, Sendable {
     case enrollmentProof(EnrollmentProof)
     case pendingEnrollment(PendingEnrollment)
     case enrollmentResult(EnrollmentResult)
+    case sessionChallenge(SessionChallenge)
+    case sessionAuthenticate(SessionAuthentication)
     case monitorSubscribe(MonitorSubscription)
     case companionSnapshot(CompanionSnapshot)
     case historyQuery(HistoryQuery)
@@ -266,6 +303,8 @@ public enum EnvelopePayload: Equatable, Sendable {
         case .enrollmentProof: .enrollmentProof
         case .pendingEnrollment: .pendingEnrollment
         case .enrollmentResult: .enrollmentResult
+        case .sessionChallenge: .sessionChallenge
+        case .sessionAuthenticate: .sessionAuthenticate
         case .monitorSubscribe: .monitorSubscribe
         case .companionSnapshot: .companionSnapshot
         case .historyQuery: .historyQuery
@@ -291,6 +330,8 @@ public enum EnvelopePayload: Equatable, Sendable {
         case let .enrollmentProof(value): try value.validate()
         case let .pendingEnrollment(value): try value.validate()
         case let .enrollmentResult(value): try value.device.validate()
+        case let .sessionChallenge(value): try value.validate()
+        case let .sessionAuthenticate(value): try value.validate()
         case let .monitorSubscribe(value):
             guard (1...300).contains(value.minimumIntervalSeconds) else { throw ProtocolError.invalidField("subscription.interval") }
         case let .companionSnapshot(value): try value.validate()
@@ -365,6 +406,8 @@ public struct Envelope: Codable, Equatable, Sendable {
         case .enrollmentProof: payload = .enrollmentProof(try container.decode(EnrollmentProof.self, forKey: .payload))
         case .pendingEnrollment: payload = .pendingEnrollment(try container.decode(PendingEnrollment.self, forKey: .payload))
         case .enrollmentResult: payload = .enrollmentResult(try container.decode(EnrollmentResult.self, forKey: .payload))
+        case .sessionChallenge: payload = .sessionChallenge(try container.decode(SessionChallenge.self, forKey: .payload))
+        case .sessionAuthenticate: payload = .sessionAuthenticate(try container.decode(SessionAuthentication.self, forKey: .payload))
         case .monitorSubscribe: payload = .monitorSubscribe(try container.decode(MonitorSubscription.self, forKey: .payload))
         case .companionSnapshot: payload = .companionSnapshot(try container.decode(CompanionSnapshot.self, forKey: .payload))
         case .historyQuery: payload = .historyQuery(try container.decode(HistoryQuery.self, forKey: .payload))
@@ -396,6 +439,8 @@ public struct Envelope: Codable, Equatable, Sendable {
         case let .enrollmentProof(value): try container.encode(value, forKey: .payload)
         case let .pendingEnrollment(value): try container.encode(value, forKey: .payload)
         case let .enrollmentResult(value): try container.encode(value, forKey: .payload)
+        case let .sessionChallenge(value): try container.encode(value, forKey: .payload)
+        case let .sessionAuthenticate(value): try container.encode(value, forKey: .payload)
         case let .monitorSubscribe(value): try container.encode(value, forKey: .payload)
         case let .companionSnapshot(value): try container.encode(value, forKey: .payload)
         case let .historyQuery(value): try container.encode(value, forKey: .payload)

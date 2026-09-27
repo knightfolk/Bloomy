@@ -30,14 +30,6 @@ struct DarkbloomCommandTests {
         #expect(!DarkbloomCommand.stop(executable: executable).arguments.contains("--uninstall"))
     }
 
-    @Test("native restart carries drain and startup confirmation deadlines")
-    func restartArguments() {
-        #expect(DarkbloomCommand.restart(executable: executable, config: config).arguments == [
-            "restart", "--config", config.path,
-            "--timeout", "600", "--startup-timeout", "180",
-        ])
-    }
-
     @Test("live switch repeats exact model IDs and carries the drain deadline")
     func liveSwitchArguments() {
         #expect(DarkbloomCommand.liveSwitch(

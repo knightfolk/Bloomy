@@ -131,13 +131,6 @@ public enum DarkbloomCommand {
             arguments: ["stop", "--timeout", String(DarkbloomSourcePolicy.lifecycleDrainTimeoutSeconds)]
         )
     }
-    public static func restart(executable: URL, config: URL) -> ProcessCommand {
-        ProcessCommand(executable: executable, arguments: [
-            "restart", "--config", config.path,
-            "--timeout", String(DarkbloomSourcePolicy.lifecycleDrainTimeoutSeconds),
-            "--startup-timeout", String(DarkbloomSourcePolicy.lifecycleStartupTimeoutSeconds),
-        ])
-    }
     public static func liveSwitch(executable: URL, models: [String]) -> ProcessCommand {
         var arguments = [
             "switch", "--timeout", String(DarkbloomSourcePolicy.lifecycleDrainTimeoutSeconds),

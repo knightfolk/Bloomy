@@ -86,6 +86,7 @@ struct ContractTests {
     func exactMessageCasesRoundTrip() throws {
         #expect(Set(MessageType.allCases) == Set([
             .pairingInvitation, .enrollmentProof, .pendingEnrollment, .enrollmentResult,
+            .sessionChallenge, .sessionAuthenticate,
             .monitorSubscribe, .companionSnapshot, .historyQuery, .historyPage,
             .settingsDraft, .settingsSnapshot, .settingsPatch, .settingsSave,
             .controlProposal, .preparedCommand, .signedApproval, .operationQuery,
@@ -237,6 +238,15 @@ extension Envelope {
             payload = .enrollmentResult(EnrollmentResult(
                 device: PairedDevice(deviceID: deviceID, displayName: "Test Phone", capabilities: [.monitor], enrolledAt: now),
                 policyEpoch: 1
+            ))
+        case .sessionChallenge:
+            payload = .sessionChallenge(SessionChallenge(
+                nonce: Data(repeating: 9, count: 32), expiresAt: now.addingTimeInterval(10)
+            ))
+        case .sessionAuthenticate:
+            payload = .sessionAuthenticate(SessionAuthentication(
+                deviceID: deviceID, nonce: Data(repeating: 9, count: 32),
+                signature: Data(repeating: 10, count: 64)
             ))
         case .monitorSubscribe:
             payload = .monitorSubscribe(MonitorSubscription())

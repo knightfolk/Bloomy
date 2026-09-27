@@ -47,7 +47,6 @@ struct SourcePolicyTests {
             DarkbloomCommand.remove(executable: executable, modelID: "safe-id"),
             DarkbloomCommand.start(executable: executable, config: config, models: ["first", "second"]),
             DarkbloomCommand.stop(executable: executable),
-            DarkbloomCommand.restart(executable: executable, config: config),
         ]
 
         #expect(commands.allSatisfy { $0.executable == executable })
@@ -58,10 +57,6 @@ struct SourcePolicyTests {
         #expect(DarkbloomCommand.start(executable: executable, config: config, models: ["first", "second"]).arguments == [
             "start", "--config", config.path, "--timeout", "600",
             "--model", "first", "--model", "second",
-        ])
-        #expect(DarkbloomCommand.restart(executable: executable, config: config).arguments == [
-            "restart", "--config", config.path,
-            "--timeout", "600", "--startup-timeout", "180",
         ])
         #expect(!commands.flatMap(\.arguments).contains("--no-auth"))
     }
