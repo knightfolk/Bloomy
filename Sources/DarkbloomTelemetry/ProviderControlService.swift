@@ -480,12 +480,9 @@ public actor ProviderControlService: ProviderControlling {
                 hosting: hosting
             )
         }
-        let timeout = action == .stop
-            ? DarkbloomSourcePolicy.stopCommandTimeout
-            : DarkbloomSourcePolicy.lifecycleTimeout
         return try await runDispatchedMutation(
             command,
-            timeout: timeout,
+            timeout: DarkbloomSourcePolicy.lifecycleCommandTimeout,
             outputLimit: DarkbloomSourcePolicy.mutationOutputByteLimit,
             onOutput: nil,
             onPhase: onPhase,

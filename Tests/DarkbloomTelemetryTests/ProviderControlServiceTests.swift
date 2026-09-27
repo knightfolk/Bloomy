@@ -378,14 +378,14 @@ struct ProviderControlServiceTests {
 
         let invocations = await harness.runner.lifecycleInvocations
         #expect(invocations.map(\.command.arguments) == [
-            ["start", "--config", harness.configURL.path, "--model", "gemma-4-26b-qat-4bit", "--model", "gpt-oss-20b"],
+            ["start", "--config", harness.configURL.path, "--timeout", "600", "--model", "gemma-4-26b-qat-4bit", "--model", "gpt-oss-20b"],
             ["stop", "--timeout", "600"],
-            ["start", "--config", harness.configURL.path, "--model", "gemma-4-26b-qat-4bit", "--model", "gpt-oss-20b"],
+            ["start", "--config", harness.configURL.path, "--timeout", "600", "--model", "gemma-4-26b-qat-4bit", "--model", "gpt-oss-20b"],
         ])
         #expect(invocations.map(\.timeout) == [
-            DarkbloomSourcePolicy.lifecycleTimeout,
-            DarkbloomSourcePolicy.stopCommandTimeout,
-            DarkbloomSourcePolicy.lifecycleTimeout,
+            DarkbloomSourcePolicy.lifecycleCommandTimeout,
+            DarkbloomSourcePolicy.lifecycleCommandTimeout,
+            DarkbloomSourcePolicy.lifecycleCommandTimeout,
         ])
         #expect(invocations.allSatisfy { $0.outputLimit == DarkbloomSourcePolicy.mutationOutputByteLimit })
         #expect(invocations.allSatisfy { !$0.command.arguments.contains("--uninstall") })
@@ -422,6 +422,7 @@ struct ProviderControlServiceTests {
         let invocation = try #require(await harness.runner.lifecycleInvocations.first)
         #expect(invocation.command.arguments == [
             "start", "--config", harness.configURL.path,
+            "--timeout", "600",
             "--model", "gemma-4-26b-qat-4bit",
         ])
     }
@@ -442,6 +443,7 @@ struct ProviderControlServiceTests {
         let invocation = try #require(await harness.runner.lifecycleInvocations.first)
         #expect(invocation.command.arguments == [
             "start", "--config", harness.configURL.path,
+            "--timeout", "600",
             "--model", "gemma-4-26b-qat-4bit",
             "--model", "gpt-oss-20b",
         ])
@@ -1730,10 +1732,11 @@ struct HostingLifecycleServiceTests {
         #expect(invocations.count == 1)
         #expect(invocations.first?.command.arguments == [
             "start", "--config", harness.configURL.path,
+            "--timeout", "600",
             "--model", "gemma-4-26b-qat-4bit",
             "--local-endpoint", "--port", "8123", "--bind", "127.0.0.1",
         ])
-        #expect(invocations.first?.timeout == DarkbloomSourcePolicy.lifecycleTimeout)
+        #expect(invocations.first?.timeout == DarkbloomSourcePolicy.lifecycleCommandTimeout)
         #expect(invocations.first?.outputLimit == DarkbloomSourcePolicy.mutationOutputByteLimit)
         #expect(invocations.allSatisfy { !$0.command.arguments.contains("--no-auth") })
     }
@@ -1755,6 +1758,7 @@ struct HostingLifecycleServiceTests {
         #expect(invocations.map(\.command.arguments) == [
             [
                 "start", "--config", harness.configURL.path,
+                "--timeout", "600",
                 "--model", "gemma-4-26b-qat-4bit",
                 "--local-endpoint", "--port", "8000", "--bind", "127.0.0.1",
             ],

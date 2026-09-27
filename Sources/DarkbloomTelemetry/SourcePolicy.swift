@@ -8,10 +8,14 @@ public struct DarkbloomSourcePolicy: Equatable, Sendable {
     public static let processOutputByteLimit = 256 * 1_024
     public static let processTimeout: Duration = .seconds(3)
     public static let lifecycleTimeout: Duration = .seconds(30)
-    /// Darkbloom's native stop may wait ten minutes for accepted work and usage acknowledgement.
-    public static let stopDrainTimeoutSeconds = 600
-    /// Give the stop command additional time to finish after its own drain deadline.
-    public static let stopCommandTimeout: Duration = .seconds(630)
+    /// Native lifecycle commands may spend this long draining accepted work.
+    public static let lifecycleDrainTimeoutSeconds = 600
+    /// Native restart may spend this long confirming the replacement process.
+    public static let lifecycleStartupTimeoutSeconds = 180
+    /// Drain plus the CLI's 30-second shutdown bound and 30 seconds of process overhead.
+    public static let lifecycleCommandTimeout: Duration = .seconds(660)
+    /// Native restart adds its startup-confirmation deadline to the lifecycle bound.
+    public static let restartCommandTimeout: Duration = .seconds(840)
     public static let catalogTimeout: Duration = .seconds(15)
     public static let downloadTimeout: Duration = .seconds(21_600)
     public static let mutationOutputByteLimit = 1_048_576
@@ -105,7 +109,10 @@ public enum DarkbloomCommand {
         hosting: HostingOptions = .default
     ) -> ProcessCommand {
         precondition(hosting.isValid, "Hosting options must be validated before dispatch")
-        var args = ["start", "--config", config.path]
+        var args = [
+            "start", "--config", config.path,
+            "--timeout", String(DarkbloomSourcePolicy.lifecycleDrainTimeoutSeconds),
+        ]
         for model in models { args += ["--model", model] }
         args += hosting.startArguments
         return ProcessCommand(executable: executable, arguments: args)
@@ -119,8 +126,14 @@ public enum DarkbloomCommand {
     public static func stop(executable: URL) -> ProcessCommand {
         ProcessCommand(
             executable: executable,
-            arguments: ["stop", "--timeout", String(DarkbloomSourcePolicy.stopDrainTimeoutSeconds)]
+            arguments: ["stop", "--timeout", String(DarkbloomSourcePolicy.lifecycleDrainTimeoutSeconds)]
         )
     }
-    public static func restart(executable: URL, config: URL) -> ProcessCommand { ProcessCommand(executable: executable, arguments: ["restart", "--config", config.path]) }
+    public static func restart(executable: URL, config: URL) -> ProcessCommand {
+        ProcessCommand(executable: executable, arguments: [
+            "restart", "--config", config.path,
+            "--timeout", String(DarkbloomSourcePolicy.lifecycleDrainTimeoutSeconds),
+            "--startup-timeout", String(DarkbloomSourcePolicy.lifecycleStartupTimeoutSeconds),
+        ])
+    }
 }
