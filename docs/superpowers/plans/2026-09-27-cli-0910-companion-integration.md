@@ -153,4 +153,4 @@ Coming Soon gates and are intentionally not represented as shipped behavior.
 - [x] Run the full Control suite and release build.
 - [ ] Pair a simulator with the local Mac host and verify monitor, settings conflict, start/stop/restart/switch, app quit/reopen, reconnect, and revocation.
 - [x] Update compatibility documentation and keep unreleased companion UI marked Coming Soon until all gates pass.
-- [ ] Run a final cross-repository review, fix important findings test-first, and commit.
+- [x] Run a final cross-repository review with GLM-5.3 Max plus local verification, fix important findings, and commit (`2add75e`, CLI `9d47cc40`).
