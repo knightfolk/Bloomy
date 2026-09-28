@@ -139,6 +139,134 @@ public enum ModelOpportunityRanker {
     }
 }
 
+/// Joins only dated, authoritative local observations to fresh network demand.
+/// A model already resident in the same verified process has demonstrated
+/// compatibility and memory admission; installed RAM or catalog minimums do
+/// not establish either fact for an unloaded model.
+public enum RecommendationEvidenceAssembler {
+    public static func make(
+        at now: Date,
+        network: SourceAvailability<NetworkCapacitySnapshot>,
+        telemetry: TelemetrySnapshot,
+        control: ProviderControlSnapshot?,
+        observedWork: [ModelWorkEarnings]
+    ) -> RecommendationInput {
+        let capacity: NetworkCapacitySnapshot?
+        if case let .available(value, _) = network, value.isFresh(at: now) {
+            capacity = value
+        } else {
+            capacity = nil
+        }
+
+        let daemon: DaemonState?
+        if case let .available(value, capturedAt) = telemetry.state,
+           isRecent(capturedAt, at: now, maximumAge: 10),
+           isRecent(Date(timeIntervalSince1970: value.writtenAt), at: now, maximumAge: 10) {
+            daemon = value
+        } else {
+            daemon = nil
+        }
+        let currentModelID = daemon?.currentModel
+        let inventoryFresh = control.map {
+            isRecent($0.capturedAt, at: now, maximumAge: 10)
+                && sourceFresh($0.sources.catalog, at: now)
+                && sourceFresh($0.sources.localModels, at: now)
+        } ?? false
+        let residentProof: Bool
+        if inventoryFresh, let control, let daemon, let controlDaemon = control.daemonState {
+            residentProof = sourceFresh(control.sources.daemon, at: now)
+                && sourceFresh(control.sources.loadedModels, at: now)
+                && controlDaemon.processIdentity == daemon.processIdentity
+                && controlDaemon.currentModel == daemon.currentModel
+        } else {
+            residentProof = false
+        }
+
+        let items = (control?.inventory.myCatalog ?? []) + (control?.inventory.available ?? [])
+        let networkModels = capacity?.models ?? []
+        let relevant: [(ModelInventoryItem, NetworkModelCapacity?)]
+        if capacity != nil {
+            relevant = networkModels.flatMap { model in
+                items.filter { $0.catalogID == model.id }.map { ($0, model) }
+            }
+        } else {
+            relevant = items.filter { $0.catalogID == currentModelID }.map { ($0, nil) }
+        }
+        let candidates = relevant.map { item, model in
+            let resident = residentProof
+                && control?.residentModelIDs.contains(item.catalogID) == true
+                && item.liveState != .unloaded
+            let readiness = resident ? control.map {
+                RecommendationReadinessEvidence(
+                    capturedAt: $0.capturedAt,
+                    compatible: true, locallyReady: true, memoryFits: true
+                )
+            } : nil
+            let rate: [RecommendationTokenRateEvidence]
+            if item.catalogID == currentModelID,
+               daemon != nil,
+               isRecent(telemetry.capturedAt, at: now, maximumAge: 10),
+               case let .available(tokensPerSecond, _) = telemetry.tokenRate,
+               tokensPerSecond.isFinite, tokensPerSecond > 0 {
+                rate = [.init(capturedAt: telemetry.capturedAt, tokensPerSecond: tokensPerSecond, sampleCount: 1)]
+            } else {
+                rate = []
+            }
+            let work: [RecommendationWorkEvidence] = observedWork.filter { $0.model == item.catalogID }.prefix(2).compactMap { value -> RecommendationWorkEvidence? in
+                guard let capturedAt = value.sourceCapturedAt,
+                      let microUSD = value.workMicroUSD,
+                      let jobs = value.jobs else { return nil }
+                return RecommendationWorkEvidence(
+                    capturedAt: capturedAt, period: value.queryPeriod,
+                    microUSD: microUSD, jobs: jobs,
+                    recordedHours: value.recordedHours,
+                    unknownHours: value.unknownHours,
+                    uncertainBoundaryHours: value.uncertainBoundaryHours,
+                    scope: .sameAccount
+                )
+            }
+            return RecommendationCandidateInput(
+                modelID: item.catalogID,
+                enabled: inventoryFresh && item.isEnabled && item.issue == nil,
+                downloaded: inventoryFresh && item.isDownloaded,
+                capacity: model.flatMap { model in
+                    capacity.map {
+                        RecommendationCapacityEvidence(
+                            capturedAt: $0.capturedAt,
+                            ready: model.ready && model.canAccept,
+                            activeRequests: model.activeRequests,
+                            queuedRequests: model.queuedRequests,
+                            warmProviders: model.warmProviders
+                        )
+                    }
+                },
+                readiness: readiness,
+                tokenRates: rate,
+                observedWork: work
+            )
+        }
+        return RecommendationInput(
+            evaluatedAt: now,
+            currentModelID: currentModelID,
+            inventoryCapturedAt: inventoryFresh ? control?.capturedAt : nil,
+            capacityIsDraining: capacity?.isDraining ?? false,
+            candidates: candidates
+        )
+    }
+
+    private static func isRecent(_ source: Date, at now: Date, maximumAge: TimeInterval) -> Bool {
+        let age = now.timeIntervalSince(source)
+        return age.isFinite && (0...maximumAge).contains(age)
+    }
+
+    private static func sourceFresh(_ source: ProviderControlSourceState, at now: Date) -> Bool {
+        if case .fresh = source.evaluated(
+            at: now, invalidReason: "", staleReason: "", futureReason: ""
+        ) { return true }
+        return false
+    }
+}
+
 public enum ModelTokenRatePresentation {
     public static func breakdown(
         _ averages: [ModelTokenRateAverage]

@@ -53,6 +53,9 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var modelWorkEarnings: [ModelWorkEarnings] = []
     @Published private(set) var modelServingProfitAverages: [ModelServingProfitAverage] = []
     @Published private(set) var networkCapacity: SourceAvailability<NetworkCapacitySnapshot>
+    @Published private(set) var recommendationDecision: RecommendationDecision?
+    @Published private(set) var recommendationHistory: [RecommendationDecision] = []
+    @Published private(set) var recommendationHistoryAvailable = false
     @Published private(set) var publicCatalog: SourceAvailability<PublicCatalogSnapshot> = .unavailable(reason: "Waiting for public catalog")
     @Published private(set) var publicPricing: SourceAvailability<PublicPricingSnapshot> = .unavailable(reason: "Waiting for customer pricing")
     @Published private(set) var networkSeries: SourceAvailability<NetworkSeriesSnapshot> = .unavailable(reason: "Open the dashboard to load network history")
@@ -70,6 +73,8 @@ final class MonitorStore: ObservableObject {
     private var alertPersistenceInFlight = false
     private let tokenRateRecorder: (any ModelTokenRateRecording)?
     private let networkCapacityClient: (any NetworkCapacityFetching)?
+    private let recommendationJournal: RecommendationJournal?
+    private var recommendationControlSnapshot: (@MainActor () -> ProviderControlSnapshot?)?
     private let publicCatalogClient: (any PublicCatalogFetching)?
     private var publicCatalogPollingTask: Task<Void, Never>?
     private var publicCatalogRefreshing = false
@@ -112,6 +117,7 @@ final class MonitorStore: ObservableObject {
         alertPolicy: OperationalAlertPolicy = .init(),
         tokenRateRecorder: (any ModelTokenRateRecording)? = nil,
         networkCapacityClient: (any NetworkCapacityFetching)? = nil,
+        recommendationJournal: RecommendationJournal? = nil,
         publicCatalogClient: (any PublicCatalogFetching)? = nil,
         publicPricingClient: (any PublicPricingFetching)? = nil,
         networkSeriesClient: (any NetworkSeriesFetching)? = nil,
@@ -141,6 +147,7 @@ final class MonitorStore: ObservableObject {
         alertEngine = OperationalAlertEngine(policy: alertPolicy)
         self.tokenRateRecorder = tokenRateRecorder
         self.networkCapacityClient = networkCapacityClient
+        self.recommendationJournal = recommendationJournal
         self.publicCatalogClient = publicCatalogClient
         self.publicPricingClient = publicPricingClient
         self.networkSeriesClient = networkSeriesClient
@@ -161,6 +168,34 @@ final class MonitorStore: ObservableObject {
         modelTokenRateAverages = []
         modelEarnings = []
         networkCapacity = .unavailable(reason: "Waiting for network model demand")
+    }
+
+    func attachRecommendationInventory(_ snapshot: @escaping @MainActor () -> ProviderControlSnapshot?) {
+        recommendationControlSnapshot = snapshot
+    }
+
+    func refreshRecommendation() async {
+        let input = RecommendationEvidenceAssembler.make(
+            at: now(), network: networkCapacity, telemetry: snapshot,
+            control: recommendationControlSnapshot?(), observedWork: modelWorkEarnings
+        )
+        guard let recommendationJournal else {
+            recommendationDecision = RecommendationEvaluator.evaluate(input)
+            recommendationHistory = []
+            recommendationHistoryAvailable = false
+            return
+        }
+        do {
+            let decision = try await recommendationJournal.record(input)
+            let history = try await recommendationJournal.recent(limit: 12).map(\.storedDecision)
+            recommendationDecision = decision
+            recommendationHistory = history
+            recommendationHistoryAvailable = true
+        } catch {
+            recommendationDecision = RecommendationEvaluator.evaluate(input)
+            recommendationHistory = []
+            recommendationHistoryAvailable = false
+        }
     }
 
     func start() {
@@ -300,6 +335,8 @@ final class MonitorStore: ObservableObject {
             snapshot: snapshot,
             alerts: recentAlerts,
             allowlistedModelIDs: modelAllowlist,
+            recommendation: recommendationDecision,
+            recommendationHistory: recommendationHistory,
             createdAt: now()
         )
     }
@@ -574,6 +611,7 @@ final class MonitorStore: ObservableObject {
             else { return }
             guard value.isFresh(at: now()) else {
                 markNetworkCapacityRefreshFailed()
+                await refreshRecommendation()
                 return
             }
             guard latestNetworkCapacityCapturedAt.map({ value.capturedAt >= $0 }) ?? true else {
@@ -582,12 +620,14 @@ final class MonitorStore: ObservableObject {
             networkCapacity = .available(value: value, capturedAt: value.capturedAt)
             latestNetworkCapacityCapturedAt = value.capturedAt
             networkPollingPolicy.succeeded()
+            await refreshRecommendation()
         } catch is CancellationError {
             return
         } catch {
             guard !Task.isCancelled, shutdownTask == nil else { return }
             guard refreshGeneration == networkCapacityRefreshGeneration else { return }
             markNetworkCapacityRefreshFailed()
+            await refreshRecommendation()
         }
     }
 
@@ -822,8 +862,12 @@ final class MonitorStore: ObservableObject {
                 }
             }
         }
+        let previousCurrentModel = self.snapshot.state.value?.currentModel
         self.snapshot = snapshot
         await recordOperationalAlertTransitions(from: snapshot)
+        if previousCurrentModel != snapshot.state.value?.currentModel {
+            await refreshRecommendation()
+        }
     }
 
     private func recordOperationalAlertTransitions(from snapshot: TelemetrySnapshot) async {

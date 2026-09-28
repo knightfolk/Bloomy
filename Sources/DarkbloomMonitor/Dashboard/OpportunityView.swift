@@ -3,6 +3,43 @@ import SwiftUI
 
 /// Presentation order is a demand comparison, never an earnings recommendation.
 enum OpportunityPresentation {
+    static func recommendationTitle(_ outcome: RecommendationOutcome) -> String {
+        switch outcome {
+        case .insufficientEvidence: "Evidence is incomplete"
+        case .stay: "Stay with the current model"
+        case .consider(let modelID): "Consider \(modelID)"
+        }
+    }
+
+    static func factorTitle(_ kind: RecommendationFactorKind) -> String {
+        switch kind {
+        case .networkDemand: "Network requests"
+        case .networkReadiness: "Network accepting"
+        case .networkPressure: "Requests per loaded provider"
+        case .inventory: "Local inventory"
+        case .compatibility: "Runtime compatibility"
+        case .readiness: "Locally ready"
+        case .memory: "Memory admission"
+        case .measuredThroughput: "Measured token rate"
+        case .observedWork: "Observed account work"
+        }
+    }
+
+    static func factorValue(_ factor: RecommendationFactor) -> String? {
+        guard factor.freshness == .fresh, let value = factor.numericValue,
+              value.isFinite else { return nil }
+        switch factor.kind {
+        case .networkDemand: return value.formatted(.number.precision(.fractionLength(0)))
+        case .networkPressure: return value.formatted(.number.precision(.fractionLength(2)))
+        case .networkReadiness, .inventory, .compatibility, .readiness, .memory:
+            return value >= 0.5 ? "yes" : "no"
+        case .measuredThroughput:
+            return value.formatted(.number.precision(.fractionLength(1))) + " tok/s"
+        case .observedWork:
+            return "$" + (value / 1_000_000).formatted(.number.precision(.fractionLength(2))) + "/job observed"
+        }
+    }
+
     static func ordered(_ models: [NetworkModelCapacity]) -> [NetworkModelCapacity] {
         models.sorted {
             let left = $0.ready && $0.canAccept, right = $1.ready && $1.canAccept
@@ -75,6 +112,11 @@ private struct OpportunityModelListView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 10)) { context in
             VStack(alignment: .leading, spacing: 14) {
+                RecommendationEvidenceCard(
+                    decision: store.recommendationDecision,
+                    history: store.recommendationHistory,
+                    historyAvailable: store.recommendationHistoryAvailable
+                )
                 HStack {
                     TextField("Find a model", text: $search)
                         .textFieldStyle(.roundedBorder)
@@ -132,7 +174,7 @@ private struct OpportunityModelListView: View {
                                     VStack(alignment: .leading, spacing: 10) {
                                         Text("Work waiting comes first, then requests per loaded provider. These are network-wide signals, not a prediction of your earnings.")
                                         Text("RAM compares installed memory with the catalog minimum. It does not confirm free memory or runtime compatibility.")
-                                        if let controlStore { OpportunityCatalogControls(controlStore: controlStore) }
+                                        if let controlStore { OpportunityCatalogControls(store: store, controlStore: controlStore) }
                                         if let catalog = store.publicCatalog.value {
                                             Text("Model details last read \(catalog.capturedAt.formatted(date: .omitted, time: .shortened))\(catalogCurrent(context.date) ? "" : " · stale")")
                                         }
@@ -147,6 +189,7 @@ private struct OpportunityModelListView: View {
                 }
             }
         }
+        .task { await store.refreshRecommendation() }
     }
 
     private func metadata(_ id: String) -> CatalogModel? { store.publicCatalog.value?.models.first { $0.id == id } }
@@ -161,7 +204,12 @@ private struct OpportunityModelListView: View {
 }
 
 struct OpportunityCatalogControls: View {
+    let store: MonitorStore?
     @ObservedObject var controlStore: ProviderControlStore
+    init(store: MonitorStore? = nil, controlStore: ProviderControlStore) {
+        self.store = store
+        self.controlStore = controlStore
+    }
     var body: some View {
         HStack {
             Text(controlStore.errorMessage == nil ? "Local model details" : "Local details need a refresh")
@@ -170,7 +218,98 @@ struct OpportunityCatalogControls: View {
                 .disabled(controlStore.operation != .idle || controlStore.pendingConfirmation != nil)
         }
     }
-    func refreshCatalog() async { await controlStore.refreshPreservingDraft() }
+    func refreshCatalog() async {
+        await controlStore.refreshPreservingDraft()
+        await store?.refreshRecommendation()
+    }
+}
+
+private struct RecommendationEvidenceCard: View {
+    let decision: RecommendationDecision?
+    let history: [RecommendationDecision]
+    let historyAvailable: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Model evidence", systemImage: "checklist")
+                    .font(.headline)
+                Spacer()
+                Text("Observe only").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            if let decision {
+                Text(OpportunityPresentation.recommendationTitle(decision.outcome))
+                    .font(.title3.weight(.semibold))
+                Text("Confidence: \(decision.confidence.rawValue). No model change is made from this decision.")
+                    .font(.callout).foregroundStyle(.secondary)
+                if !decision.blockers.isEmpty {
+                    Text("Needs: " + decision.blockers.prefix(6).map(\.rawValue).joined(separator: ", "))
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                let selectedID: String? = {
+                    if case .consider(let id) = decision.outcome { return id }
+                    return nil
+                }()
+                let assessments = decision.assessments.sorted { left, right in
+                    if left.modelID == selectedID { return true }
+                    if right.modelID == selectedID { return false }
+                    return left.modelID < right.modelID
+                }
+                DisclosureGroup("Factors and source times") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(assessments.prefix(4).enumerated()), id: \.offset) { _, assessment in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(assessment.modelID)
+                                    .font(.callout.weight(.semibold)).textSelection(.enabled)
+                                if !assessment.blockers.isEmpty {
+                                    Text("Blocked: " + assessment.blockers.prefix(5).map(\.rawValue).joined(separator: ", "))
+                                        .foregroundStyle(.secondary)
+                                }
+                                ForEach(Array(assessment.factors.prefix(10).enumerated()), id: \.offset) { _, factor in
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text(OpportunityPresentation.factorTitle(factor.kind))
+                                        Spacer(minLength: 8)
+                                        Text(factor.freshness.rawValue)
+                                            .foregroundStyle(factor.freshness == .fresh ? .primary : .secondary)
+                                        if let value = OpportunityPresentation.factorValue(factor) {
+                                            Text(value)
+                                        }
+                                        if let capturedAt = factor.sourceCapturedAt {
+                                            Text(capturedAt, style: .relative).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Text("Source: \(factor.provenance.rawValue)")
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                    }.font(.caption).padding(.top, 8)
+                }.font(.callout)
+            } else {
+                Text("Waiting for a network and local inventory check.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            DisclosureGroup("Recent decisions") {
+                if historyAvailable {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(history.suffix(10).reversed()), id: \.id) { entry in
+                            HStack {
+                                Text(OpportunityPresentation.recommendationTitle(entry.outcome))
+                                Spacer()
+                                Text(entry.evaluatedAt, style: .relative)
+                            }
+                        }
+                    }.font(.caption).padding(.top, 8)
+                } else {
+                    Text("Recommendation history is unavailable.")
+                        .font(.caption).foregroundStyle(.secondary).padding(.top, 8)
+                }
+            }.font(.callout)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
+    }
 }
 
 private struct OpportunityLocalModelCard: View {

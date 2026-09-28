@@ -72,6 +72,51 @@ struct SupportPacketSnapshotTests {
         #expect(records.allSatisfy { $0["code"] as? String == "model_unknown" })
     }
 
+    @Test("recommendation summary exports only bounded states and allowlisted model IDs")
+    func recommendationPrivacy() throws {
+        let date = Date(timeIntervalSince1970: 100)
+        let current = RecommendationCandidateInput(
+            modelID: "allowed/model", enabled: true, downloaded: true,
+            capacity: .init(capturedAt: date, ready: true, activeRequests: 0, queuedRequests: 0, warmProviders: 1),
+            readiness: .init(capturedAt: date, compatible: true, locallyReady: true, memoryFits: true)
+        )
+        let privateModel = RecommendationCandidateInput(
+            modelID: "private-recommendation-canary", enabled: true, downloaded: true,
+            capacity: .init(capturedAt: date, ready: true, activeRequests: 1, queuedRequests: 2, warmProviders: 1),
+            readiness: .init(capturedAt: date, compatible: true, locallyReady: true, memoryFits: true),
+            tokenRates: [.init(capturedAt: date, tokensPerSecond: 123_456_789, sampleCount: 1)],
+            observedWork: [.init(
+                capturedAt: date, period: DateInterval(start: date.addingTimeInterval(-3_600), end: date),
+                microUSD: 987_654_321, jobs: 1, recordedHours: 1, unknownHours: 0,
+                uncertainBoundaryHours: 0, scope: .sameAccount
+            )]
+        )
+        let decision = RecommendationEvaluator.evaluate(.init(
+            evaluatedAt: date, currentModelID: "allowed/model", inventoryCapturedAt: date,
+            capacityIsDraining: false, candidates: [current, privateModel]
+        ))
+        #expect(decision.outcome == .consider(modelID: "private-recommendation-canary"))
+        let packet = try SupportPacketSnapshot.make(
+            snapshot: snapshot(at: 100, model: "allowed/model"), alerts: [],
+            allowlistedModelIDs: ["allowed/model"], recommendation: decision,
+            recommendationHistory: Array(repeating: decision, count: 40), createdAt: date
+        )
+        let text = packet.previewText
+        #expect(!text.contains("private-recommendation-canary"))
+        #expect(!text.contains("123456789"))
+        #expect(!text.contains("987654321"))
+        let document = try #require(JSONSerialization.jsonObject(with: packet.data) as? [String: Any])
+        let summary = try #require(document["recommendation"] as? [String: Any])
+        #expect(summary["outcome"] as? String == "consider")
+        #expect(summary["selected_model_id"] == nil)
+        let factors = try #require(summary["factor_states"] as? [[String: Any]])
+        #expect(factors.count <= 12)
+        #expect(factors.allSatisfy { $0["numeric_value"] == nil })
+        let history = try #require(document["recommendation_history"] as? [[String: Any]])
+        #expect(history.count == 12)
+        #expect(history.allSatisfy { $0["selected_model_id"] == nil })
+    }
+
     private func snapshot(at seconds: Int, model: String) -> TelemetrySnapshot {
         let date = Date(timeIntervalSince1970: TimeInterval(seconds))
         var status = StatusSnapshot()

@@ -24,6 +24,8 @@ public struct SupportPacketSnapshot: Sendable {
         snapshot: TelemetrySnapshot,
         alerts: [AlertRecord],
         allowlistedModelIDs: Set<String>,
+        recommendation: RecommendationDecision? = nil,
+        recommendationHistory: [RecommendationDecision] = [],
         createdAt: Date
     ) throws -> Self {
         guard Self.isExportableDate(snapshot.capturedAt),
@@ -93,6 +95,12 @@ public struct SupportPacketSnapshot: Sendable {
             lifecycleOutcome: source.daemon?.lifecycle.map { lifecycleCode($0.outcome) },
             requestsServed: source.daemon?.stats.requestsServed.boundedNonnegativeCounter,
             tokensGenerated: source.daemon?.stats.tokensGenerated.boundedNonnegativeCounter,
+            recommendation: recommendation.flatMap {
+                PacketRecommendation($0, allowedModels: allowedModels)
+            },
+            recommendationHistory: Array(recommendationHistory.suffix(12)).compactMap {
+                PacketRecommendationHistory($0, allowedModels: allowedModels)
+            },
             alerts: [],
             omittedAlertCount: 0
         )
@@ -231,6 +239,8 @@ public struct SupportPacketSnapshot: Sendable {
         let lifecycleOutcome: String?
         let requestsServed: Int64?
         let tokensGenerated: Int64?
+        let recommendation: PacketRecommendation?
+        let recommendationHistory: [PacketRecommendationHistory]
         let alerts: [PacketAlert]
         let omittedAlertCount: Int
 
@@ -249,6 +259,8 @@ public struct SupportPacketSnapshot: Sendable {
             case lifecycleOutcome = "lifecycle_outcome"
             case requestsServed = "requests_served"
             case tokensGenerated = "tokens_generated"
+            case recommendation
+            case recommendationHistory = "recommendation_history"
             case alerts
             case omittedAlertCount = "omitted_alert_count"
         }
@@ -269,9 +281,91 @@ public struct SupportPacketSnapshot: Sendable {
                 lifecycleOutcome: lifecycleOutcome,
                 requestsServed: requestsServed,
                 tokensGenerated: tokensGenerated,
+                recommendation: recommendation,
+                recommendationHistory: recommendationHistory,
                 alerts: alerts,
                 omittedAlertCount: omittedAlertCount
             )
+        }
+    }
+
+    private struct PacketRecommendation: Encodable {
+        let version: Int
+        let evaluatedAt: Date
+        let outcome: String
+        let confidence: RecommendationConfidence
+        let selectedModelID: String?
+        let blockers: [RecommendationBlocker]
+        let factorStates: [PacketRecommendationFactor]
+
+        enum CodingKeys: String, CodingKey {
+            case version
+            case evaluatedAt = "evaluated_at"
+            case outcome, confidence
+            case selectedModelID = "selected_model_id"
+            case blockers
+            case factorStates = "factor_states"
+        }
+
+        init?(_ value: RecommendationDecision, allowedModels: Set<String>) {
+            guard isExportableDate(value.evaluatedAt) else { return nil }
+            version = value.version
+            evaluatedAt = value.evaluatedAt
+            confidence = value.confidence
+            blockers = Array(value.blockers.prefix(16))
+            let selectedID: String?
+            switch value.outcome {
+            case .insufficientEvidence: outcome = "insufficient_evidence"; selectedID = nil
+            case .stay: outcome = "stay"; selectedID = nil
+            case .consider(let id): outcome = "consider"; selectedID = id
+            }
+            selectedModelID = selectedID.flatMap { allowlistedModel($0, in: allowedModels) }
+            let selected = selectedID.flatMap { id in value.assessments.first { $0.modelID == id } }
+                ?? value.assessments.first
+            factorStates = Array((selected?.factors ?? []).prefix(12)).map(PacketRecommendationFactor.init)
+        }
+    }
+
+    private struct PacketRecommendationFactor: Encodable {
+        let kind: RecommendationFactorKind
+        let provenance: RecommendationProvenance
+        let freshness: RecommendationFreshness
+        let sourceCapturedAt: Date?
+
+        enum CodingKeys: String, CodingKey {
+            case kind, provenance, freshness
+            case sourceCapturedAt = "source_captured_at"
+        }
+
+        init(_ value: RecommendationFactor) {
+            kind = value.kind
+            provenance = value.provenance
+            freshness = value.freshness
+            sourceCapturedAt = value.sourceCapturedAt.flatMap { isExportableDate($0) ? $0 : nil }
+        }
+    }
+
+    private struct PacketRecommendationHistory: Encodable {
+        let evaluatedAt: Date
+        let outcome: String
+        let selectedModelID: String?
+
+        enum CodingKeys: String, CodingKey {
+            case evaluatedAt = "evaluated_at"
+            case outcome
+            case selectedModelID = "selected_model_id"
+        }
+
+        init?(_ value: RecommendationDecision, allowedModels: Set<String>) {
+            guard isExportableDate(value.evaluatedAt) else { return nil }
+            evaluatedAt = value.evaluatedAt
+            switch value.outcome {
+            case .insufficientEvidence: outcome = "insufficient_evidence"; selectedModelID = nil
+            case .stay: outcome = "stay"; selectedModelID = nil
+            case .consider(let id):
+                outcome = "consider"
+                selectedModelID = allowlistedModel(id, in: allowedModels)
+            }
         }
     }
 
