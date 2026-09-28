@@ -3,6 +3,39 @@
     <channel>
         <title>Darkbloom Control</title>
         <item>
+            <title>1.8.0</title>
+            <pubDate>Mon, 28 Sep 2026 15:41:57 -0700</pubDate>
+            <sparkle:version>122</sparkle:version>
+            <sparkle:shortVersionString>1.8.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Darkbloom Control v1.8.0
+
+- Apply a saved model selection through Darkbloom 0.9.11's graceful live
+  switch when fresh provider state confirms that the operation is safe. The
+  popup also explains the CLI coordinator's automatic model loading without
+  implying that Control changes models on its own.
+- Add official Darkbloom fan-helper controls with bounded settings, exact
+  executable identity checks, and the normal macOS administrator prompt.
+- Add System, Light, and Dark appearance modes. System remains the default and
+  follows macOS appearance changes.
+- Record operational alerts locally, surface native notifications, and preview
+  a bounded support packet that excludes credentials, prompts, responses,
+  account identifiers, and filesystem paths.
+- Add an observe-only recommendation evidence journal with explainable factors,
+  deterministic replay, and clear insufficient-evidence states. Recommendations
+  never issue provider commands.
+- Improve Darkbloom 0.9.11 lifecycle presentation, including scheduled idle,
+  startup preload, model-switch progress, retained slots, and safe timeout or
+  forced-stop outcomes.
+
+Coming soon: the iOS companion, remote QR pairing/control, and its persistent
+Mac helper. The current download does not install or enable a remote-control
+service.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/DarkbloomControl/releases/download/v1.8.0/Darkbloom-Control-1.8.0-mac-arm64.zip" length="6714919" type="application/octet-stream" sparkle:edSignature="u89hsm/9RxAErnBPGMJwTFoTSCZNKu15W0pdX7soBxefPyzSjgrBjDjghMMcI7ySlOggHFa9uMNLcnTE/YO9BQ=="/>
+        </item>
+        <item>
             <title>1.7.0</title>
             <pubDate>Sat, 26 Sep 2026 00:11:30 -0700</pubDate>
             <sparkle:version>121</sparkle:version>
