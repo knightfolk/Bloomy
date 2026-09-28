@@ -38,6 +38,8 @@ final class MonitorStore: ObservableObject {
     private var networkPollingPolicy = NetworkPollingPolicy()
 
     @Published private(set) var snapshot: TelemetrySnapshot
+    @Published private(set) var alertHistory: [AlertRecord] = []
+    @Published private(set) var alertHistoryAvailable = false
     @Published private(set) var thermalState: SystemThermalState
     @Published private(set) var earnings: EarningsPresentationValue
     @Published private(set) var todayEarnings: ObservedEarningsWindow?
@@ -59,6 +61,13 @@ final class MonitorStore: ObservableObject {
     private let service: TelemetryService
     private let earningsClient: any AccountEarningsFetching
     private let uptimeRecorder: (any ObservedUptimeRecording)?
+    private let alertHistoryRecorder: (any AlertHistoryRecording)?
+    private let alertNotifier: (any OperationalAlertNotifying)?
+    private var alertEngine: OperationalAlertEngine
+    private var alertStateRestored = false
+    private var alertStateRestorationTask: Task<(Set<OperationalAlertCode>, [AlertRecord])?, Never>?
+    private var pendingAlertTransitions: [AlertTransition] = []
+    private var alertPersistenceInFlight = false
     private let tokenRateRecorder: (any ModelTokenRateRecording)?
     private let networkCapacityClient: (any NetworkCapacityFetching)?
     private let publicCatalogClient: (any PublicCatalogFetching)?
@@ -98,6 +107,9 @@ final class MonitorStore: ObservableObject {
             homeDirectory: FileManager.default.homeDirectoryForCurrentUser
         ),
         uptimeRecorder: (any ObservedUptimeRecording)? = nil,
+        alertHistory: (any AlertHistoryRecording)? = nil,
+        alertNotifier: (any OperationalAlertNotifying)? = nil,
+        alertPolicy: OperationalAlertPolicy = .init(),
         tokenRateRecorder: (any ModelTokenRateRecording)? = nil,
         networkCapacityClient: (any NetworkCapacityFetching)? = nil,
         publicCatalogClient: (any PublicCatalogFetching)? = nil,
@@ -124,6 +136,9 @@ final class MonitorStore: ObservableObject {
         energy = initialEnergy
         self.earningsClient = earningsClient
         self.uptimeRecorder = uptimeRecorder
+        alertHistoryRecorder = alertHistory
+        self.alertNotifier = alertNotifier
+        alertEngine = OperationalAlertEngine(policy: alertPolicy)
         self.tokenRateRecorder = tokenRateRecorder
         self.networkCapacityClient = networkCapacityClient
         self.publicCatalogClient = publicCatalogClient
@@ -263,6 +278,30 @@ final class MonitorStore: ObservableObject {
             guard !Task.isCancelled, shutdownTask == nil else { return }
             await self.accept(snapshot)
         }
+    }
+
+    func makeSupportPacketPreview() async throws -> SupportPacketSnapshot {
+        var recentAlerts: [AlertRecord] = []
+        if let alertHistoryRecorder, await restoreAlertStateIfNeeded() {
+            recentAlerts = try await alertHistoryRecorder.recentHistory(limit: 500)
+            alertHistory = recentAlerts
+            alertHistoryAvailable = true
+        } else {
+            alertHistoryAvailable = false
+        }
+
+        let modelAllowlist: Set<String>
+        if case .available(let catalog, _) = publicCatalog {
+            modelAllowlist = Set(catalog.models.prefix(512).map(\.id))
+        } else {
+            modelAllowlist = []
+        }
+        return try SupportPacketSnapshot.make(
+            snapshot: snapshot,
+            alerts: recentAlerts,
+            allowlistedModelIDs: modelAllowlist,
+            createdAt: now()
+        )
     }
 
     func activity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar, model: String? = nil) async throws -> [ActivityBucket]? {
@@ -742,7 +781,7 @@ final class MonitorStore: ObservableObject {
         )
     }
 
-    private func accept(_ snapshot: TelemetrySnapshot) async {
+    func accept(_ snapshot: TelemetrySnapshot) async {
         if let state = snapshot.state.value {
             tokenRateAccumulator.record(
                 snapshot.tokenRate,
@@ -784,6 +823,68 @@ final class MonitorStore: ObservableObject {
             }
         }
         self.snapshot = snapshot
+        await recordOperationalAlertTransitions(from: snapshot)
+    }
+
+    private func recordOperationalAlertTransitions(from snapshot: TelemetrySnapshot) async {
+        guard alertHistoryRecorder != nil,
+              await restoreAlertStateIfNeeded() else { return }
+        pendingAlertTransitions.append(contentsOf: alertEngine.transitions(for: snapshot))
+        await flushOperationalAlertTransitions()
+    }
+
+    private func restoreAlertStateIfNeeded() async -> Bool {
+        guard let alertHistoryRecorder else { return false }
+        if alertStateRestored { return true }
+        if alertStateRestorationTask == nil {
+            alertStateRestorationTask = Task {
+                do {
+                    async let active = alertHistoryRecorder.activeAlertCodes()
+                    async let recent = alertHistoryRecorder.recentHistory(limit: 100)
+                    return try await (active, recent)
+                } catch {
+                    return nil
+                }
+            }
+        }
+        let restorationTask = alertStateRestorationTask
+        guard let restored = await restorationTask?.value else {
+            alertStateRestorationTask = nil
+            alertHistoryAvailable = false
+            return false
+        }
+        alertEngine.restoreActiveAlerts(restored.0)
+        alertHistory = restored.1
+        alertHistoryAvailable = true
+        alertStateRestored = true
+        alertStateRestorationTask = nil
+        return true
+    }
+
+    private func flushOperationalAlertTransitions() async {
+        guard !alertPersistenceInFlight,
+              let alertHistoryRecorder,
+              !pendingAlertTransitions.isEmpty else { return }
+        alertPersistenceInFlight = true
+        defer { alertPersistenceInFlight = false }
+
+        while !pendingAlertTransitions.isEmpty {
+            let batch = pendingAlertTransitions
+            do {
+                try await alertHistoryRecorder.record(batch)
+                pendingAlertTransitions.removeFirst(batch.count)
+                if let history = try? await alertHistoryRecorder.recentHistory(limit: 100) {
+                    alertHistory = history
+                    alertHistoryAvailable = true
+                } else {
+                    alertHistoryAvailable = false
+                }
+                await alertNotifier?.deliver(batch)
+            } catch {
+                alertHistoryAvailable = false
+                return
+            }
+        }
     }
 
     private func recordObservedUptime(from snapshot: TelemetrySnapshot) async {

@@ -4,8 +4,13 @@ import SwiftUI
 struct MonitorSettingsView: View {
     var extrasStore: ProviderExtrasStore? = nil
     var controlStore: ProviderControlStore? = nil
+    var monitorStore: MonitorStore? = nil
     @AppStorage("menuBarDisplayMode") private var displayModeRaw =
         MenuBarDisplayMode.automatic.rawValue
+    @State private var supportPacketPreview: SupportPacketPreviewPresentation?
+    @State private var isPreparingSupportPacket = false
+    @State private var supportPacketPrepareFailed = false
+    @State private var supportPacketPrepared = false
 
     var body: some View {
         Form {
@@ -20,11 +25,57 @@ struct MonitorSettingsView: View {
             ControlAppUpdateSettings()
             CLIUpdateNoticeView(store: CLIUpdateStatusStore.shared)
             GeneralSettingsView(displayModeRaw: $displayModeRaw)
+            supportSection
             if let extrasStore, let controlStore {
                 ProviderAdvancedSettingsHost(extras: extrasStore, control: controlStore)
             }
         }
         .formStyle(.grouped)
+        .sheet(item: $supportPacketPreview) { presentation in
+            SupportPacketPreviewView(snapshot: presentation.snapshot)
+        }
+    }
+
+    private var supportSection: some View {
+        Section("Support") {
+            Text("Prepare a frozen packet with fixed provider status, allowlisted model identifiers, and sanitized alert history. Review it before saving or sharing.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button(isPreparingSupportPacket ? "Preparing…" : "Review support packet…") {
+                prepareSupportPacket()
+            }
+            .accessibilityIdentifier("settings.supportPacket.preview")
+            .disabled(monitorStore == nil || isPreparingSupportPacket)
+
+            if supportPacketPrepareFailed {
+                Text("The support packet could not be prepared. Try again after telemetry refreshes.")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            } else if supportPacketPrepared, monitorStore?.alertHistoryAvailable == false {
+                Text("Local alert history is unavailable. The packet contains the current sanitized snapshot only.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func prepareSupportPacket() {
+        guard let monitorStore else { return }
+        supportPacketPrepareFailed = false
+        supportPacketPrepared = false
+        isPreparingSupportPacket = true
+        Task { @MainActor in
+            defer { isPreparingSupportPacket = false }
+            do {
+                let snapshot = try await monitorStore.makeSupportPacketPreview()
+                supportPacketPreview = SupportPacketPreviewPresentation(snapshot: snapshot)
+                supportPacketPrepared = true
+            } catch {
+                supportPacketPrepareFailed = true
+            }
+        }
     }
 }
 

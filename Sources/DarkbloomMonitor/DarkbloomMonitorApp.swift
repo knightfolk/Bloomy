@@ -80,6 +80,9 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             unifiedEvents: UnifiedLogStreamer().events()
         )
         let applicationSupport = MonitorApplicationIdentity.applicationSupportDirectory()
+        let alertHistoryDatabase = try? AlertHistoryDatabase(
+            url: applicationSupport.appendingPathComponent("alerts.sqlite3")
+        )
         let earningsDatabase = try? EarningsDatabase(
             url: applicationSupport.appendingPathComponent("earnings.sqlite3")
         )
@@ -99,6 +102,8 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             providerExtras: ProviderExtrasStore(),
             earningsClient: earningsClient,
             uptimeRecorder: observedUptimeDatabase,
+            alertHistory: alertHistoryDatabase,
+            alertNotifier: OperationalNotificationCenter(),
             tokenRateRecorder: tokenRateDatabase,
             networkCapacityClient: PublicNetworkCapacityClient(),
             publicCatalogClient: PublicCatalogClient(),

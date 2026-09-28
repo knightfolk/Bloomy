@@ -88,7 +88,8 @@ struct DashboardRootView: View {
             } else if navigation.selected == .settings {
                 MonitorSettingsView(
                     extrasStore: store.providerExtras,
-                    controlStore: controlStore
+                    controlStore: controlStore,
+                    monitorStore: store
                 )
             } else {
                 HealthView(store: store)
