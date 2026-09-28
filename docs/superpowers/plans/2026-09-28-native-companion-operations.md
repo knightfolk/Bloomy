@@ -138,7 +138,7 @@
 
 **Files:**
 - Modify: product README, architecture, companion operations runbook, implementation plan checkboxes
-- Delete: `docs/research/2026-09-28-bloomkeeper-comparison.md`
+- Remove temporary competitive-review artifacts after their useful requirements have been restated as native Darkbloom design decisions
 
 **Interfaces:**
 - Produces: reproducible build/test/render evidence and a project tree containing the implemented product design without the external comparison review.

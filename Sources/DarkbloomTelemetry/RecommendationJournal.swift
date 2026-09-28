@@ -88,10 +88,10 @@ public actor RecommendationJournal {
             defer { sqlite3_finalize(statement) }
             sqlite3_bind_text(statement, 1, decision.id, -1, recommendationSQLiteTransient)
             sqlite3_bind_double(statement, 2, decision.evaluatedAt.timeIntervalSince1970)
-            inputData.withUnsafeBytes { bytes in
+            _ = inputData.withUnsafeBytes { bytes in
                 sqlite3_bind_blob(statement, 3, bytes.baseAddress, Int32(bytes.count), recommendationSQLiteTransient)
             }
-            decisionData.withUnsafeBytes { bytes in
+            _ = decisionData.withUnsafeBytes { bytes in
                 sqlite3_bind_blob(statement, 4, bytes.baseAddress, Int32(bytes.count), recommendationSQLiteTransient)
             }
             guard sqlite3_step(statement) == SQLITE_DONE else { throw RecommendationJournalError.sqlite }
