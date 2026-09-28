@@ -13,58 +13,47 @@ struct DashboardOverviewView: View {
 
     private var overviewContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Overview").font(.largeTitle.bold())
-                        Text("Your provider, at a glance").foregroundStyle(.secondary)
+                        Text(Host.current().localizedName ?? "This Mac").foregroundStyle(.secondary)
                     }
                     Spacer()
                     Label(store.snapshot.menuStatus.accessibilityLabel, systemImage: "circle.fill")
                         .font(.callout)
                         .foregroundStyle(store.snapshot.menuStatus == .online ? Color.green : Color.secondary)
                 }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 16)], spacing: 16) {
-                    if let value = store.currentDayAverageTokenRate {
-                        DashboardMetric(title: "Today's observed average", value: number(value), unit: "tok/sec")
-                    }
-                    if let earnings = PopupEarningsMetrics.make(from: store.currentTodayEarnings) {
-                        DashboardMetric(title: "Observed today", value: money(earnings.totalUSD), unit: "USD")
-                        DashboardMetric(title: "Per observed hour", value: money(earnings.perHourUSD), unit: "USD/hour")
-                    }
-                    if let week = PopupWeekEarningsMetric.make(from: store.currentWeekEarnings) {
-                        DashboardMetric(title: week.title, value: money(week.totalUSD), unit: "USD")
-                    }
-                    if let jobs = store.currentJobSummary {
-                        DashboardMetric(title: "Completed today", value: jobs.completedToday.formatted(), unit: "jobs")
-                        if let average = jobs.averagePerDay {
-                            DashboardMetric(title: "7-day average", value: number(average), unit: "jobs/day")
-                        }
-                    }
-                }
-                if !store.currentModelTokenRateAverages.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Throughput by model").font(.title3.bold())
-                        ForEach(store.currentModelTokenRateAverages, id: \.model) { model in
-                            HStack {
-                                Text(model.model).textSelection(.enabled)
-                                Spacer()
-                                Text("\(number(model.tokensPerSecond)) tok/sec").monospacedDigit()
-                            }
-                        }
-                        Text("Calendar-day averages from observed, attributable samples.")
-                            .font(.caption).foregroundStyle(.secondary)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { summaryMetrics }.frame(minWidth: 700)
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                        summaryMetrics
                     }
                 }
                 ProviderResourcesView(store: store)
                 DashboardModelSummary(store: store, controlStore: controlStore)
-                if let controlStore { ProviderSelectionView(store: store, controlStore: controlStore) }
+                if let controlStore {
+                    DisclosureGroup("Running and saved selection") {
+                        ProviderSelectionView(store: store, controlStore: controlStore)
+                    }.font(.callout)
+                }
                 Text("Earnings reflect observed calendar coverage. Missing measurements are omitted; they are not zero.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            .padding(28)
+            .padding(20)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .task { await store.refreshModelServingProfitability() }
+    }
+
+    private var summaryMetrics: some View {
+        Group {
+                    let earnings = PopupEarningsMetrics.make(from: store.currentTodayEarnings)
+                    DashboardMetric(title: "Observed today", value: earnings.map { money($0.totalUSD) } ?? "—", unit: earnings == nil ? "Awaiting earnings" : "USD", symbol: "dollarsign.circle")
+                    DashboardMetric(title: "Per observed hour", value: earnings.map { money($0.perHourUSD) } ?? "—", unit: earnings == nil ? "Awaiting coverage" : "USD / hour", symbol: "clock")
+                    DashboardMetric(title: "Average speed today", value: store.currentDayAverageTokenRate.map(number) ?? "—", unit: store.currentDayAverageTokenRate == nil ? "Awaiting samples" : "tok/s", symbol: "speedometer")
+                    DashboardMetric(title: "Completed today", value: store.currentJobSummary.map { $0.completedToday.formatted() } ?? "—", unit: store.currentJobSummary == nil ? "Awaiting job history" : "jobs", symbol: "checkmark.circle")
+        }
     }
 
     private func number(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(1))) }
@@ -75,14 +64,15 @@ private struct DashboardMetric: View {
     let title: String
     let value: String
     let unit: String
+    var symbol: String = "chart.bar"
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.callout).foregroundStyle(.secondary)
-            Text(value).font(.system(size: 32, weight: .semibold, design: .rounded)).monospacedDigit()
+        VStack(alignment: .leading, spacing: 5) {
+            Label(title, systemImage: symbol).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 25, weight: .semibold, design: .rounded)).monospacedDigit()
             Text(unit).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
+        .padding(12)
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 16))
         .accessibilityElement(children: .combine)
     }
@@ -101,22 +91,36 @@ private struct DashboardModelSummary: View {
                     currentTime: context.date
                 )
                 if case .models(let models) = presentation {
-                    ForEach(models) { model in
-                        HStack {
-                            Circle().fill(color(model.state)).frame(width: 8, height: 8)
-                            Text(model.name).lineLimit(2)
-                            Spacer()
-                            Text(label(model.state)).font(.caption.weight(.semibold))
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], spacing: 10) {
+                        ForEach(models) { model in
+                            CompactModelCard(modelID: model.name, status: label(model.state),
+                                             tint: color(model.state), metrics: metrics(for: model.name),
+                                             selected: model.state == .active)
                         }
-                        .padding(.horizontal, 14).padding(.vertical, 10)
-                        .background(color(model.state).opacity(0.12), in: Capsule())
-                        .accessibilityElement(children: .combine)
                     }
                 } else {
                     Text("Model state is unavailable. Check Health & Logs for source details.").foregroundStyle(.secondary)
                 }
             }
         }
+    }
+
+    private func metrics(for id: String) -> [ModelCardMetric] {
+        var result: [ModelCardMetric] = []
+        if let rate = store.currentModelTokenRateAverages.first(where: { $0.model == id }) {
+            result.append(ModelCardMetric(id: "speed", symbol: "speedometer",
+                value: String(format: "%.1f", rate.tokensPerSecond), caption: "avg tok/s today"))
+        }
+        if let serving = store.modelServingProfitAverages.first(where: { $0.model == id }) {
+            let value = serving.profitUSDPerActiveHour ?? serving.grossUSDPerActiveHour
+            result.append(ModelCardMetric(id: "earnings", symbol: "dollarsign.circle",
+                value: value.formatted(.currency(code: "USD").precision(.fractionLength(2...4))),
+                caption: serving.profitUSDPerActiveHour == nil ? "derived gross / active h" : "est. net / active h"))
+        }
+        if result.isEmpty {
+            result.append(ModelCardMetric(id: "learning", symbol: "clock", value: "Learning", caption: "No measured averages"))
+        }
+        return result
     }
 
     private func color(_ state: DashboardModelState) -> Color {

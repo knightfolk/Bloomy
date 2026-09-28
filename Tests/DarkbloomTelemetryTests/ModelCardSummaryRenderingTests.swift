@@ -8,25 +8,30 @@ import Testing
 @Suite("Model card rendering", .serialized)
 @MainActor
 struct ModelCardSummaryRenderingTests {
-    @Test("grid stays two bounded columns and never stretches cards")
+    @Test("grid uses one two or three readable bounded columns")
     func columnCounts() {
-        // Two columns begin exactly when two 300pt cards plus one gap fit.
+        // Each breakpoint includes the gaps between cards and lands exactly
+        // on the 300pt readability floor.
         #expect(ModelCardLayout.columnCount(for: 613) == 1)
         #expect(ModelCardLayout.columnCount(for: 614) == 2)
-        // Narrow popover through the 1280pt native window and wide windows
-        // all stay two-column.
-        #expect(ModelCardLayout.columnCount(for: 600) == 1)
+        #expect(ModelCardLayout.columnCount(for: 927) == 2)
+        #expect(ModelCardLayout.columnCount(for: 928) == 3)
+        #expect(ModelCardLayout.cardWidth(for: 614) == 300)
+        #expect(ModelCardLayout.cardWidth(for: 928) == 300)
+        // A typical wide native window fills three columns while very wide
+        // windows keep a sensible per-card width ceiling.
         #expect(ModelCardLayout.columnCount(for: 680) == 2)
-        #expect(ModelCardLayout.columnCount(for: 1060) == 2)
-        #expect(ModelCardLayout.columnCount(for: 1240) == 2)
-        #expect(ModelCardLayout.columnCount(for: 1440) == 2)
-        #expect(ModelCardLayout.maximumColumns == 2)
-        // Cards never exceed the 400pt ceiling and only shrink below the
-        // 300pt floor when the container itself is narrower.
+        #expect(ModelCardLayout.columnCount(for: 1060) == 3)
+        #expect(ModelCardLayout.columnCount(for: 1240) == 3)
+        #expect(ModelCardLayout.columnCount(for: 1440) == 3)
+        #expect(ModelCardLayout.maximumColumns == 3)
+        #expect(ModelCardLayout.cardWidth(for: 1060) == 344)
+        #expect(ModelCardLayout.cardWidth(for: 1240) == 404)
+        #expect(ModelCardLayout.cardWidth(for: 1500) == 460)
+        // A single card only drops below the 300pt floor when the whole
+        // container is narrower than the card itself.
         #expect(ModelCardLayout.cardWidth(for: 680) == 333)
-        #expect(ModelCardLayout.cardWidth(for: 1060) == 400)
-        #expect(ModelCardLayout.cardWidth(for: 1240) == 400)
-        #expect(ModelCardLayout.cardWidth(for: 600) == 400)
+        #expect(ModelCardLayout.cardWidth(for: 600) == 460)
         #expect(ModelCardLayout.cardWidth(for: 260) == 260)
         // The compact card must stay far below its ~530pt predecessor while
         // still fitting the identity row, three stats, what-if slider, and

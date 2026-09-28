@@ -7,41 +7,35 @@ struct EventRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
             VStack(spacing: 3) {
-                Image(systemName: severitySymbol)
-                    .foregroundStyle(severityColor)
+                Image(systemName: Self.severitySymbol(for: event.severity))
+                    .foregroundStyle(Self.severityColor(for: event.severity))
                 Text(event.severity.rawValue.capitalized)
-                    .font(.caption2)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            .frame(width: 46)
+            .frame(width: 65)
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(event.category)
-                        .font(.caption.weight(.semibold))
-                        .monospaced()
-                        .lineLimit(1)
-                        .textSelection(.enabled)
-                        .help(event.category)
-                    Spacer(minLength: 8)
-                    Text(TelemetryFormatting.timestamp(event.timestamp))
-                        .font(.caption2)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
+                Text(event.category)
+                    .font(.callout.weight(.semibold))
+                    .monospaced()
+                    .textSelection(.enabled)
+                    .help(event.category)
+                Text(TelemetryFormatting.timestamp(event.timestamp))
+                    .font(.callout)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
 
                 Text(event.message)
-                    .font(.caption)
-                    .lineLimit(3)
+                    .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .help(event.message)
 
                 Text(metadata)
-                    .font(.caption2)
+                    .font(.callout)
                     .monospaced()
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
                     .textSelection(.enabled)
                     .help(metadata)
             }
@@ -68,8 +62,8 @@ struct EventRow: View {
         return value
     }
 
-    private var severitySymbol: String {
-        switch event.severity {
+    static func severitySymbol(for severity: LogSeverity) -> String {
+        switch severity {
         case .info: "info.circle.fill"
         case .notice: "bell.fill"
         case .warning: "exclamationmark.triangle.fill"
@@ -77,8 +71,8 @@ struct EventRow: View {
         }
     }
 
-    private var severityColor: Color {
-        switch event.severity {
+    static func severityColor(for severity: LogSeverity) -> Color {
+        switch severity {
         case .info: .blue
         case .notice: .secondary
         case .warning: .orange

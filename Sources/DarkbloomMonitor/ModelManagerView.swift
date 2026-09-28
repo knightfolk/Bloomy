@@ -979,22 +979,28 @@ struct ModelManagerView: View {
 }
 
 enum ModelCardLayout {
-    static let maximumColumns = 2
-    /// Bounded card width keeps text readable and controls intact: cards sit
-    /// between a ~300pt floor and a 400pt ceiling so wide windows show a
-    /// left-aligned 2×2-style grid instead of stretched cards.
+    static let maximumColumns = 3
+    /// Keep cards readable at the narrow end and use up to three columns in
+    /// the model manager's wide window. A modest width ceiling keeps card
+    /// controls and stats from stretching across large displays.
     static let minimumCardWidth: CGFloat = 300
-    static let maximumCardWidth: CGFloat = 400
+    static let maximumCardWidth: CGFloat = 460
     static let rowSpacing: CGFloat = 14
     /// Expected compact-card height; the previous card measured ~530pt.
     static let estimatedCardHeight: CGFloat = 268
 
     static func columnCount(for width: CGFloat) -> Int {
-        width >= CGFloat(maximumColumns) * minimumCardWidth + rowSpacing ? maximumColumns : 1
+        let threeColumnWidth = CGFloat(maximumColumns) * minimumCardWidth
+            + CGFloat(maximumColumns - 1) * rowSpacing
+        let twoColumnWidth = 2 * minimumCardWidth + rowSpacing
+        if width >= threeColumnWidth { return 3 }
+        if width >= twoColumnWidth { return 2 }
+        return 1
     }
 
-    /// Card width for the given container width: two even bounded columns,
-    /// or one bounded column on genuinely narrow containers.
+    /// Even bounded columns when the available width can support them. A
+    /// single card may shrink below the readability floor only when its whole
+    /// container is narrower than that floor.
     static func cardWidth(for width: CGFloat) -> CGFloat {
         let columns = CGFloat(columnCount(for: width))
         let available = max(0, width - (columns - 1) * rowSpacing)
@@ -1026,6 +1032,10 @@ struct ModelCardSummary: View {
     private var company: ModelCompany { ModelManagerPresentation.vendor(for: item.catalogID) }
     private var accent: Color { Self.companyColor(for: item.catalogID) }
     private var ramFit: String { ModelManagerPresentation.hardwareFit(item, installedMemoryGB: installedMemoryGB) }
+    private var shortTitle: String {
+        let formatted = ModelDisplayName.short(item.catalogID)
+        return formatted == item.catalogID ? item.displayName : formatted
+    }
 
     var body: some View {
         if showsDetails { detailedBody } else { cardFace }
@@ -1052,11 +1062,11 @@ struct ModelCardSummary: View {
         HStack(alignment: .top, spacing: 10) {
             familyMark
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.displayName)
+                Text(shortTitle)
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                    .help(item.displayName)
+                    .help(item.catalogID)
                 Text("\(companyName) · \(item.modelType.uppercased()) · \(ModelFormatting.size(item.sizeGB))")
                     .font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.tail)

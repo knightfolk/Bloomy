@@ -75,11 +75,7 @@ struct OpportunityView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Opportunity").font(.largeTitle.bold())
-                Text("See where the work is. Compare models for your Mac.")
-                    .font(.body).foregroundStyle(.secondary)
-            }
+            Text("Opportunity").font(.largeTitle.bold())
             Picker("View", selection: $showsHistory) {
                 Text("Models").tag(false)
                 Text("Network activity").tag(true)
@@ -112,11 +108,22 @@ private struct OpportunityModelListView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 10)) { context in
             VStack(alignment: .leading, spacing: 14) {
-                RecommendationEvidenceCard(
-                    decision: store.recommendationDecision,
-                    history: store.recommendationHistory,
-                    historyAvailable: store.recommendationHistoryAvailable
-                )
+                DisclosureGroup {
+                    RecommendationEvidenceCard(
+                        decision: store.recommendationDecision,
+                        history: store.recommendationHistory,
+                        historyAvailable: store.recommendationHistoryAvailable
+                    )
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Model guidance", systemImage: "checklist").font(.subheadline.weight(.semibold))
+                        Text(store.recommendationDecision.map { OpportunityPresentation.recommendationTitle($0.outcome) }
+                             ?? "Waiting for evidence")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(12)
+                .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
                 HStack {
                     TextField("Find a model", text: $search)
                         .textFieldStyle(.roundedBorder)
@@ -149,37 +156,47 @@ private struct OpportunityModelListView: View {
                         ContentUnavailableView(current ? "Network maintenance" : "Last reported: maintenance",
                             systemImage: "wrench.and.screwdriver", description: Text("Model capacity is temporarily withdrawn."))
                     } else {
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 12) {
-                                let models = OpportunityPresentation.ordered(capacity.models).filter { model in
-                                    search.isEmpty || model.id.localizedCaseInsensitiveContains(search)
-                                        || OpportunityPresentation.name(model, metadata: metadata(model.id)).localizedCaseInsensitiveContains(search)
-                                }
-                                if models.isEmpty {
-                                    ContentUnavailableView(search.isEmpty ? "No models reported" : "No matching models",
-                                        systemImage: "magnifyingglass", description: Text("Try a different search or refresh the network."))
-                                }
-                                ForEach(models) { model in
-                                    if let controlStore {
-                                        OpportunityLocalModelCard(model: model, controlStore: controlStore,
-                                            metadata: metadata(model.id), price: store.publicPricing.value?.price(for: model.id),
-                                            metadataIsCurrent: catalogCurrent(context.date), priceIsCurrent: pricingCurrent(context.date), networkIsCurrent: current)
+                        let models = OpportunityPresentation.ordered(capacity.models).filter { model in
+                            search.isEmpty || model.id.localizedCaseInsensitiveContains(search)
+                                || OpportunityPresentation.name(model, metadata: metadata(model.id)).localizedCaseInsensitiveContains(search)
+                        }
+                        GeometryReader { geometry in
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    if models.isEmpty {
+                                        ContentUnavailableView(search.isEmpty ? "No models reported" : "No matching models",
+                                            systemImage: "magnifyingglass", description: Text("Try a different search or refresh the network."))
                                     } else {
-                                        OpportunityModelCard(model: model, local: nil, metadata: metadata(model.id),
-                                            price: store.publicPricing.value?.price(for: model.id), metadataIsCurrent: catalogCurrent(context.date),
-                                            priceIsCurrent: pricingCurrent(context.date), networkIsCurrent: current)
-                                    }
-                                }
-                                DisclosureGroup("How to read this") {
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        Text("Work waiting comes first, then requests per loaded provider. These are network-wide signals, not a prediction of your earnings.")
-                                        Text("RAM compares installed memory with the catalog minimum. It does not confirm free memory or runtime compatibility.")
-                                        if let controlStore { OpportunityCatalogControls(store: store, controlStore: controlStore) }
-                                        if let catalog = store.publicCatalog.value {
-                                            Text("Model details last read \(catalog.capturedAt.formatted(date: .omitted, time: .shortened))\(catalogCurrent(context.date) ? "" : " · stale")")
+                                        LazyVGrid(
+                                            columns: Array(repeating: GridItem(.flexible(), spacing: 12),
+                                                           count: geometry.size.width >= 500 ? 2 : 1),
+                                            alignment: .leading,
+                                            spacing: 12
+                                        ) {
+                                            ForEach(models) { model in
+                                                if let controlStore {
+                                                    OpportunityLocalModelCard(model: model, controlStore: controlStore,
+                                                        metadata: metadata(model.id), price: store.publicPricing.value?.price(for: model.id),
+                                                        metadataIsCurrent: catalogCurrent(context.date), priceIsCurrent: pricingCurrent(context.date), networkIsCurrent: current)
+                                                } else {
+                                                    OpportunityModelCard(model: model, local: nil, metadata: metadata(model.id),
+                                                        price: store.publicPricing.value?.price(for: model.id), metadataIsCurrent: catalogCurrent(context.date),
+                                                        priceIsCurrent: pricingCurrent(context.date), networkIsCurrent: current)
+                                                }
+                                            }
                                         }
-                                    }.font(.callout).foregroundStyle(.secondary).padding(.top, 8)
-                                }.padding(.top, 6)
+                                    }
+                                    DisclosureGroup("How to read this") {
+                                        VStack(alignment: .leading, spacing: 10) {
+                                            Text("Work waiting comes first, then requests per loaded provider. These are network-wide signals, not a prediction of your earnings.")
+                                            Text("RAM compares installed memory with the catalog minimum. It does not confirm free memory or runtime compatibility.")
+                                            if let controlStore { OpportunityCatalogControls(store: store, controlStore: controlStore) }
+                                            if let catalog = store.publicCatalog.value {
+                                                Text("Model details last read \(catalog.capturedAt.formatted(date: .omitted, time: .shortened))\(catalogCurrent(context.date) ? "" : " · stale")")
+                                            }
+                                        }.font(.callout).foregroundStyle(.secondary).padding(.top, 8)
+                                    }.padding(.top, 6)
+                                }
                             }
                         }
                     }
@@ -348,22 +365,35 @@ struct OpportunityModelCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(OpportunityPresentation.name(model, metadata: metadata)).font(.headline).textSelection(.enabled)
-                    fitLabel.font(.callout)
-                }
-                Spacer(minLength: 4)
-                Text(OpportunityPresentation.demand(model))
-                    .font(.callout.weight(.semibold)).foregroundStyle(tint)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(tint.opacity(0.10), in: Capsule())
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "cpu")
+                    .font(.headline)
+                    .foregroundStyle(tint)
+                    .frame(width: 22)
+                Text(ModelDisplayName.short(OpportunityPresentation.name(model, metadata: metadata)))
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(model.id)
+                Spacer(minLength: 0)
             }
-            HStack(spacing: 16) {
+            HStack(spacing: 6) {
+                Text(OpportunityPresentation.demand(model))
+                    .font(.caption.weight(.semibold)).foregroundStyle(tint)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(tint.opacity(0.10), in: Capsule())
+                if !networkIsCurrent {
+                    Text("Last known").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            fitLabel.font(.caption)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 8) {
                 metric("In progress", model.activeRequests)
                 metric("Waiting", model.queuedRequests)
-                metric("Providers loaded", model.warmProviders)
+                metric("Loaded", model.warmProviders)
+                metric("Network tok/s", model.aggregateTokensPerSecond)
             }
             DisclosureGroup("Details") {
                 VStack(alignment: .leading, spacing: 10) {
@@ -393,9 +423,10 @@ struct OpportunityModelCard: View {
                 }.font(.callout).foregroundStyle(.secondary).padding(.top, 8)
             }.font(.callout).foregroundStyle(.secondary)
         }
-        .padding(16)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.07)))
     }
 
     @ViewBuilder private var fitLabel: some View {
@@ -415,10 +446,21 @@ struct OpportunityModelCard: View {
 
     private func metric(_ title: String, _ value: Int) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(value, format: .number).font(.title2.weight(.semibold)).monospacedDigit()
-            Text(title).font(.callout).foregroundStyle(.secondary)
+            Text(value, format: .number).font(.headline).monospacedDigit()
+            Text(title).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func metric(_ title: String, _ value: Double) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value, format: .number.precision(.fractionLength(0...1)))
+                .font(.headline).monospacedDigit()
+            Text(title).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .help("Aggregate network throughput across providers, not the speed of this Mac")
         .accessibilityElement(children: .combine)
     }
 }

@@ -20,61 +20,177 @@ struct LogsQuery {
 struct LogsView: View {
     let feed: SourceAvailability<EventFeed>
     @State private var query = LogsQuery()
+    @State private var selectedID: Int?
     @State private var exportPreview: LogExportSnapshot?
     @State private var exportFailed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Recent logs").font(.title2.bold())
-                Spacer()
-                Button("Preview export…") { prepareExport() }
-                    .disabled(query.apply(feed.value?.events ?? []).isEmpty)
-            }
-            Text("Up to 100 events and 128 KiB of text. Known sensitive fields are withheld; review before sharing. Oversized events are omitted. No commands or links are executed.")
-                .font(.callout).foregroundStyle(.secondary)
-            TextField("Search message or category", text: $query.text)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Search logs")
-            HStack {
-                Picker("Severity", selection: $query.severity) {
-                    Text("All").tag(nil as LogSeverity?)
-                    ForEach([LogSeverity.info, .notice, .warning, .error], id: \.rawValue) {
-                        Text($0.rawValue.capitalized).tag(Optional($0))
-                    }
-                }
-                Picker("Source", selection: $query.source) {
-                    Text("All").tag(nil as LogSource?)
-                    Text("Legacy").tag(Optional(LogSource.legacy))
-                    Text("Unified").tag(Optional(LogSource.unified))
-                }
-            }
-            if case .stale(_, _, let reason) = feed {
-                Text("Stale events — \(reason)").font(.callout).foregroundStyle(.orange)
-            }
+            Text("Recent logs").font(.title2.bold())
+            toolbar
+            sourceStatus
             if exportFailed {
-                Text("Could not prepare an export from this snapshot.")
+                Label("Could not prepare an export from this snapshot.", systemImage: "exclamationmark.triangle")
                     .font(.callout).foregroundStyle(.orange)
             }
             if let message = feed.eventEmptyMessage {
                 Text(message).foregroundStyle(.secondary)
             } else {
-                let events = query.apply(feed.value?.events ?? [])
-                if events.isEmpty {
+                if rows.isEmpty {
                     Text("No events match these filters.").foregroundStyle(.secondary)
-                }
-                List {
-                    ForEach(Array(events.enumerated()), id: \.offset) { _, event in
-                        EventRow(event: event).padding(.vertical, 6)
+                } else {
+                    Table(rows, selection: $selectedID) {
+                        TableColumn("Local time") { row in
+                            Text(Self.compactTimestamp(row.event.timestamp))
+                                .monospacedDigit()
+                                .lineLimit(1)
+                                .help(TelemetryFormatting.timestamp(row.event.timestamp))
+                        }
+                        .width(100)
+                        TableColumn("Severity") { row in
+                            Label(row.event.severity.rawValue.capitalized,
+                                  systemImage: EventRow.severitySymbol(for: row.event.severity))
+                                .foregroundStyle(EventRow.severityColor(for: row.event.severity))
+                                .lineLimit(1)
+                        }
+                        .width(85)
+                        TableColumn("Source") { row in
+                            Text(row.event.source.rawValue.capitalized).lineLimit(1)
+                        }
+                        .width(65)
+                        TableColumn("Message") { row in
+                            Text(row.event.message)
+                                .lineLimit(1)
+                                .help(row.event.message)
+                        }
+                    }
+                    .frame(minHeight: 180)
+                    .accessibilityLabel("Recent log events")
+                    if let event = selectedEvent {
+                        eventDetails(event)
+                    } else {
+                        Text("Select an event to see its full details.")
+                            .font(.callout).foregroundStyle(.secondary)
                     }
                 }
-                .listStyle(.plain)
             }
+            Text("Export preview withholds known sensitive fields and omits oversized events. Review it before sharing.")
+                .font(.callout).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(item: $exportPreview) { snapshot in
             LogExportPreviewView(snapshot: snapshot)
         }
+        .onChange(of: feed.value?.events) { _, _ in selectedID = nil }
+        .onChange(of: query.text) { _, _ in selectedID = nil }
+        .onChange(of: query.severity) { _, _ in selectedID = nil }
+        .onChange(of: query.source) { _, _ in selectedID = nil }
+    }
+
+    private static func compactTimestamp(_ date: Date?) -> String {
+        guard let date else { return "Unknown" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM/dd HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private var rows: [LogTableRow] {
+        (feed.value?.events ?? []).enumerated().compactMap { index, event in
+            query.apply([event]).isEmpty ? nil : LogTableRow(id: index, event: event)
+        }
+    }
+
+    private var toolbar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                searchField.frame(minWidth: 180)
+                severityPicker
+                sourcePicker
+                exportButton
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                searchField
+                HStack(spacing: 8) {
+                    severityPicker
+                    sourcePicker
+                    Spacer(minLength: 0)
+                    exportButton
+                }
+            }
+        }
+    }
+
+    private var searchField: some View {
+        TextField("Search logs", text: $query.text)
+            .textFieldStyle(.roundedBorder)
+            .accessibilityLabel("Search message or category")
+    }
+
+    private var severityPicker: some View {
+        Picker("Severity", selection: $query.severity) {
+            Text("All severities").tag(nil as LogSeverity?)
+            ForEach([LogSeverity.info, .notice, .warning, .error], id: \.rawValue) {
+                Text($0.rawValue.capitalized).tag(Optional($0))
+            }
+        }
+        .labelsHidden()
+        .accessibilityLabel("Severity")
+        .frame(width: 125)
+    }
+
+    private var sourcePicker: some View {
+        Picker("Source", selection: $query.source) {
+            Text("All sources").tag(nil as LogSource?)
+            Text("Legacy").tag(Optional(LogSource.legacy))
+            Text("Unified").tag(Optional(LogSource.unified))
+        }
+        .labelsHidden()
+        .accessibilityLabel("Source")
+        .frame(width: 110)
+    }
+
+    private var exportButton: some View {
+        Button {
+            prepareExport()
+        } label: {
+            Label("Preview export", systemImage: "square.and.arrow.up")
+        }
+        .disabled(rows.isEmpty)
+    }
+
+    private var selectedEvent: LogEvent? {
+        guard let selectedID else { return nil }
+        return rows.first(where: { $0.id == selectedID })?.event
+    }
+
+    @ViewBuilder
+    private var sourceStatus: some View {
+        switch feed {
+        case .available(_, let capturedAt):
+            Label("Events captured \(TelemetryFormatting.timestamp(capturedAt))", systemImage: "checkmark.circle")
+                .foregroundStyle(.secondary)
+        case .stale(_, let capturedAt, let reason):
+            Label("Stale events from \(TelemetryFormatting.timestamp(capturedAt)) · \(reason)",
+                  systemImage: "clock.fill")
+                .foregroundStyle(.orange)
+        case .unavailable(let reason):
+            Label("Logs unavailable · \(reason)", systemImage: "xmark.circle.fill")
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func eventDetails(_ event: LogEvent) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Event details").font(.headline)
+            ScrollView {
+                EventRow(event: event)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 170)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func prepareExport() {
@@ -93,4 +209,9 @@ struct LogsView: View {
             exportFailed = true
         }
     }
+}
+
+private struct LogTableRow: Identifiable {
+    let id: Int
+    let event: LogEvent
 }

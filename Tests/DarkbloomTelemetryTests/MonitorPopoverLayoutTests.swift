@@ -420,7 +420,7 @@ struct MonitorPopoverLayoutTests {
         }
     }
 
-    @Test("two-row lifecycle popover has a compact stable viewport")
+    @Test("machine and model popover has a bounded scrollable viewport")
     func hasCompactViewport() async throws {
         let service = TelemetryService(source: UnusedTelemetrySource())
         let store = MonitorStore(
@@ -438,7 +438,7 @@ struct MonitorPopoverLayoutTests {
         )
 
         #expect(proposedSize.width == 420)
-        #expect(proposedSize.height < 200)
+        #expect(proposedSize.height < 650)
         if ProcessInfo.processInfo.environment["DARKBLOOM_RENDER_EVIDENCE"] == "1" {
             let window = NSWindow(contentViewController: hostingController)
             window.isReleasedWhenClosed = false
@@ -462,7 +462,7 @@ struct MonitorPopoverLayoutTests {
             "gemma-4-26b-qat-4bit",
             "qwen3.6-35b-a3b-vl-mtp-mxfp8",
         ]
-        let now = layoutNow
+        let now = Date()
         let service = TelemetryService(
             source: AutoModeTelemetrySource(now: now, modelIDs: modelIDs),
             now: { now }
@@ -484,7 +484,7 @@ struct MonitorPopoverLayoutTests {
         let fitted = hostingController.sizeThatFits(in: NSSize(width: 420, height: 0))
 
         #expect(fitted.width == 420)
-        #expect(fitted.height < 500)
+        #expect(fitted.height <= 700)
         guard ProcessInfo.processInfo.environment["DARKBLOOM_RENDER_EVIDENCE"] == "1" else { return }
         let window = NSWindow(contentViewController: hostingController)
         window.isReleasedWhenClosed = false
@@ -612,7 +612,8 @@ private actor AutoModeTelemetrySource: TelemetrySource {
             startedAt: timestamp - 3_600,
             writtenAt: timestamp,
             pid: 42,
-            processIdentity: ProcessIdentity(pid: 42, startTimeMicros: 42_000_000)
+            processIdentity: ProcessIdentity(pid: 42, startTimeMicros: 42_000_000),
+            advertisedModels: modelIDs
         )
     }
 

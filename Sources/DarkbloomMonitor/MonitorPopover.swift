@@ -364,6 +364,8 @@ struct MonitorPopover: View {
     @EnvironmentObject private var controlStore: ProviderControlStore
     let openSettings: () -> Void
     let openDashboard: () -> Void
+    @State private var showsFans = false
+    private static let machineName = Host.current().localizedName ?? "This Mac"
 
     init(
         store: MonitorStore,
@@ -382,99 +384,180 @@ struct MonitorPopover: View {
     }
 
     private func content(currentTime: Date) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             header
+            providerHeader(currentTime: currentTime)
+            HStack(spacing: 12) {
+                CompactGPUGauge(usage: store.gpuUsage, now: currentTime)
+                Spacer(minLength: 0)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Button { showsFans = true } label: {
+                        Label("Fans", systemImage: "fan")
+                    }
+                    if let fanSummary = fanSummary(at: currentTime) {
+                        Text(fanSummary).font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+                .disabled(store.providerExtras == nil)
+                .help("Fan readings and controls")
+                .accessibilityIdentifier("popup.fans")
+                Button(action: openDashboard) { Image(systemName: "rectangle.grid.2x2") }
+                    .help("Open dashboard").accessibilityLabel("Open dashboard")
+            }
             if case .available(.updateAvailable(_, let latest), let checkedAt) = cliUpdates.status,
                currentTime.timeIntervalSince(checkedAt) < 6 * 60 * 60 {
-                Button(action: openSettings) {
-                    Label("CLI \(latest) available · Details", systemImage: "arrow.down.circle")
-                        .font(.callout)
-                }.buttonStyle(.plain).foregroundStyle(.orange)
+                Button("CLI \(latest) available", action: openSettings).font(.caption)
             }
             Divider()
-            providerHeader(currentTime: currentTime)
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Divider()
-                    HStack {
-                        Text("Models").font(.subheadline.weight(.semibold))
-                        if modelModePresentation(at: currentTime) == .automatic {
-                            AutoModelModeBadge()
-                        }
-                        Spacer()
-                        Text("Today’s average speed").font(.caption).foregroundStyle(.secondary)
-                    }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
                     compactModels(currentTime: currentTime)
-                    if earningsMetrics != nil || weekEarningsMetric != nil {
-                        Divider()
-                        compactEarnings
-                    }
+                    financePanel(currentTime: currentTime)
                     compactJobs
-                    if case .available(let capacity, _) = store.networkCapacity, capacity.isDraining, capacity.isFresh(at: currentTime) {
+                    if case .available(let capacity, _) = store.networkCapacity,
+                       capacity.isDraining, capacity.isFresh(at: currentTime) {
                         Label("Network maintenance", systemImage: "wrench.and.screwdriver")
                             .font(.caption).foregroundStyle(.orange)
                     }
-                    if UserDefaults.standard.bool(forKey: "electricity.enabled") {
-                        EnergySummaryView(reading: store.currentEnergyReading,
-                                          earnings: store.currentEnergyEarnings, now: currentTime,
-                                          waitingMessage: store.energy?.issue ?? "Collecting matched earnings data")
-                    }
-
-                }
-                .padding(.trailing, 4)
+                }.padding(.trailing, 2)
             }
+            .frame(height: popupBodyHeight(currentTime: currentTime))
         }
         .padding(16)
         .frame(width: 420, alignment: .topLeading)
-        .fixedSize(horizontal: false, vertical: true)
         .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-
-    private func compactModels(currentTime: Date) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            switch modelPresentation(at: currentTime) {
-            case .models(let models):
-                ForEach(models) { model in
-                    HStack(spacing: 8) {
-                        ModelStatusPill(model: model)
-                        if let demand = inlineNetworkDemand(for: model.name) {
-                            InlineNetworkDemandBadge(
-                                row: demand,
-                                isStale: PopupNetworkDemandPresentation.freshness(
-                                    of: store.networkCapacity,
-                                    at: currentTime
-                                ) == .stale
-                            )
-                        }
-                        Spacer(minLength: 4)
-                        if let average = store.currentModelTokenRateAverages.first(where: { $0.model == model.name }) {
-                            VStack(alignment: .trailing, spacing: 1) {
-                            if model.state == .active {
-                                Text("Working").font(.caption).foregroundStyle(.primary)
-                            }
-                            Text("\(average.tokensPerSecond, specifier: "%.1f") tok/s")
-                                .help("Today's average tokens per second")
-                            }
-                        } else if model.state == .active {
-                            Text("Working")
-                                .help("The official CLI does not expose streaming token throughput")
-                        }
-                    }
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                }
-            case .unavailable:
-                Text("Model state unavailable").foregroundStyle(.secondary)
+        .sheet(isPresented: $showsFans) {
+            if let extras = store.providerExtras {
+                PopupFanPanel(extras: extras, control: controlStore)
             }
         }
+        .task { await store.refreshModelServingProfitability() }
+    }
+
+    private func fanSummary(at now: Date) -> String? {
+        guard case .available(let raw, let capturedAt) = store.providerExtras?.snapshot?.fanStatus,
+              (0...ProviderExtrasSnapshot.maximumSourceAge).contains(now.timeIntervalSince(capturedAt)) else { return nil }
+        let status = raw.helperIsFresh(at: now) ? raw : raw.withoutHelper()
+        let temperature = status.displayedTemperatureCelsius.map { String(format: "%.0f°C", $0) }
+        let rpm = status.displayedFans.compactMap(\.actualRPM).max().map { String(format: "%.0f RPM", $0) }
+        let values = [temperature, rpm].compactMap { $0 }
+        return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+
+    private func popupBodyHeight(currentTime: Date) -> CGFloat {
+        let advertised = advertisedIDs(at: currentTime) ?? []
+        let available = availableIDs(excluding: advertised)
+        let rows = (advertised.count + 1) / 2 + (available.count + 1) / 2
+        return min(470, CGFloat(rows) * 112 + 190)
+    }
+
+    private func advertisedIDs(at now: Date) -> [String]? {
+        PopupModelGroups.advertised(snapshot: store.snapshot, control: controlStore.snapshot, now: now)
+    }
+
+    private func availableIDs(excluding advertised: [String]) -> [String] {
+        let local = controlStore.snapshot?.inventory.myCatalog.map(\.catalogID) ?? models.map(\.name)
+        return Array(Set(local).subtracting(advertised)).sorted()
+    }
+
+    private func compactModels(currentTime: Date) -> some View {
+        let advertised = advertisedIDs(at: currentTime)
+        let available = availableIDs(excluding: advertised ?? [])
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Advertised", systemImage: "antenna.radiowaves.left.and.right")
+                    .font(.subheadline.weight(.semibold))
+                if modelModePresentation(at: currentTime) == .automatic { AutoModelModeBadge() }
+                Spacer()
+                if let advertised { Text(advertised.count.formatted()).foregroundStyle(.secondary) }
+            }
+            if let advertised {
+                if advertised.isEmpty {
+                    Text("No models advertised").font(.caption).foregroundStyle(.secondary)
+                } else { modelGrid(advertised) }
+            } else {
+                Label("Advertising state unavailable", systemImage: "clock")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            HStack {
+                Label("Available on this Mac", systemImage: "internaldrive")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(available.count.formatted()).foregroundStyle(.secondary)
+            }
+            if available.isEmpty {
+                Text("No other downloaded models").font(.caption).foregroundStyle(.secondary)
+            } else { modelGrid(available) }
+        }
+    }
+
+    private func modelGrid(_ ids: [String]) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {
+            ForEach(ids, id: \.self) { id in
+                let state = models.first(where: { $0.name == id })?.state
+                CompactModelCard(modelID: id, status: modelStateLabel(state),
+                                 tint: state == .active ? .green : state == .loadedIdle ? .orange : .secondary,
+                                 metrics: modelMetrics(id), selected: state == .active)
+            }
+        }
+    }
+
+    private func modelStateLabel(_ state: DashboardModelState?) -> String {
+        switch state {
+        case .active: "Active"
+        case .loadedIdle: "Loaded · idle"
+        case .availableUnloaded: "On demand"
+        case nil: "State unavailable"
+        }
+    }
+
+    private func modelMetrics(_ id: String) -> [ModelCardMetric] {
+        var metrics: [ModelCardMetric] = []
+        if let rate = store.currentModelTokenRateAverages.first(where: { $0.model == id }) {
+            metrics.append(ModelCardMetric(id: "speed", symbol: "speedometer",
+                value: String(format: "%.1f", rate.tokensPerSecond), caption: "avg tok/s today"))
+        }
+        if let average = store.modelServingProfitAverages.first(where: { $0.model == id }) {
+            let value = average.profitUSDPerActiveHour ?? average.grossUSDPerActiveHour
+            metrics.append(ModelCardMetric(id: "earnings", symbol: "dollarsign.circle",
+                value: value.formatted(.currency(code: "USD").precision(.fractionLength(2...4))),
+                caption: average.profitUSDPerActiveHour == nil ? "derived gross / active h" : "est. net / active h"))
+        }
+        if metrics.isEmpty {
+            metrics.append(ModelCardMetric(id: "unknown", symbol: "clock", value: "Learning", caption: "No measured averages"))
+        }
+        return metrics
+    }
+
+    private func financePanel(currentTime: Date) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Earnings", systemImage: "chart.line.uptrend.xyaxis")
+                .font(.subheadline.weight(.semibold))
+            if earningsMetrics != nil || weekEarningsMetric != nil {
+                compactEarnings
+            } else {
+                Text("Waiting for earnings history").font(.caption).foregroundStyle(.secondary)
+            }
+            if UserDefaults.standard.bool(forKey: "electricity.enabled") {
+                Divider()
+                EnergySummaryView(reading: store.currentEnergyReading,
+                                  earnings: store.currentEnergyEarnings, now: currentTime,
+                                  waitingMessage: store.energy?.issue ?? "Collecting matched earnings data")
+            } else {
+                Button(action: openSettings) {
+                    Label("Set up electricity estimate", systemImage: "bolt")
+                }.font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var compactEarnings: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             if let metrics = earningsMetrics {
-                compactAmount("Today", value: metrics.totalUSD)
-                compactAmount("Avg / hour", value: metrics.perHourUSD)
+                compactAmount("Observed today", value: metrics.totalUSD)
+                compactAmount("Per observed h", value: metrics.perHourUSD)
             }
             if let week = weekEarningsMetric {
                 compactAmount(week.title, value: week.totalUSD)
@@ -495,7 +578,7 @@ struct MonitorPopover: View {
     private func compactAmount(_ label: String, value: Double) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.caption).foregroundStyle(.secondary)
-            Text(value, format: .currency(code: "USD").precision(.fractionLength(2)))
+            Text(value, format: .currency(code: "USD").precision(.fractionLength(2...4)))
                 .font(.system(size: 20, weight: .semibold, design: .rounded))
                 .monospacedDigit()
         }
@@ -555,9 +638,12 @@ struct MonitorPopover: View {
 
     private func providerHeader(currentTime: Date) -> some View {
         HStack(alignment: .top) {
-            Label("Provider", systemImage: "server.rack")
-                .font(.headline)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Label(Self.machineName, systemImage: "desktopcomputer")
+                    .font(.headline).lineLimit(1).help(Self.machineName)
+                Text(store.snapshot.menuStatus.accessibilityLabel)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
                 ProviderLifecycleControls(
@@ -1086,15 +1172,27 @@ private struct AutoModelModeBadge: View {
 }
 
 enum PopupModelName {
-    static func short(_ id: String) -> String {
-        switch id {
-        case "EigenLabs/Qwen3.8-27B-4bit-mtp": return "Qwen 3.8 · 27B"
-        case "gemma-4-26b-qat-4bit": return "Gemma 4 · 26B"
-        case "qwen3-vl-30b-a3b-instruct": return "Qwen VL · 30B"
-        case "qwen3.5-35b-a3b": return "Qwen 3.5 · 35B"
-        case "qwen3.6-35b-a3b-vl-mtp-mxfp8": return "Qwen 3.6 · 35B"
-        case "gpt-oss-20b": return "OSS · 20B"
-        default: return id
+    static func short(_ id: String) -> String { ModelDisplayName.short(id) }
+}
+
+private struct PopupFanPanel: View {
+    @ObservedObject var extras: ProviderExtrasStore
+    @ObservedObject var control: ProviderControlStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Label("Fan controls", systemImage: "fan").font(.title2.bold())
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            }.padding()
+            Form {
+                ProviderFanControlSettingsView(store: extras) { label, mutation in
+                    await control.performSettingsMutation(label, mutation: mutation)
+                }
+            }.formStyle(.grouped)
         }
+        .frame(width: 560, height: 520)
     }
 }

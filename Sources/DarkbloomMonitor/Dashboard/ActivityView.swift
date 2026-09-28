@@ -54,17 +54,18 @@ struct ActivityView: View {
             VStack(alignment: .leading, spacing: 12) {
                 activityHeader
                 if period == .date || period == .dateRange { dateControls }
-                Text("Recorded ledger events · \(Calendar.current.timeZone.identifier)")
-                    .foregroundStyle(.secondary)
                 modelFilters
                 chartControls
-                Text(chartMetric == .estimatedProfit
-                     ? "Estimated per earning model-hour. Whole-Mac electricity is shared evenly among models with recorded work; other Mac use is included. Incomplete power hours are omitted."
-                     : model == nil
-                        ? "Company shades stay related; base rewards are separate. Gaps are unknown, not zero. Recorded totals may be incomplete."
-                        : "Showing recorded work for this model only. Base rewards are excluded; gaps are unknown, not zero.")
-                    .font(.callout).foregroundStyle(.secondary)
-                    .frame(maxWidth: 900, alignment: .leading)
+                DisclosureGroup("About this activity") {
+                    Text("Recorded ledger events · \(Calendar.current.timeZone.identifier)")
+                    Text(chartMetric == .estimatedProfit
+                         ? "Estimated per earning model-hour. Whole-Mac electricity is shared evenly among models with recorded work; other Mac use is included. Incomplete power hours are omitted."
+                         : model == nil
+                            ? "Company shades stay related; base rewards are separate. Gaps are unknown, not zero. Recorded totals may be incomplete."
+                            : "Showing recorded work for this model only. Base rewards are excluded; gaps are unknown, not zero.")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 if loading {
                     ProgressView("Reading local history…")
                 } else if let message {
@@ -149,7 +150,7 @@ struct ActivityView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text("Filter by model").font(.headline)
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 155, maximum: 255), alignment: .leading)],
+                    columns: [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 8)],
                     alignment: .leading,
                     spacing: 8
                 ) {
@@ -163,10 +164,11 @@ struct ActivityView: View {
                     ) { model = nil }
                     ForEach(models, id: \.self) { name in
                         modelFilterChip(
-                            title: name,
+                            title: ModelDisplayName.short(name),
                             color: modelColor(name),
                             isSelected: model == name,
-                            accessibilityLabel: model == name ? "Selected model \(name)" : "Filter to model \(name)"
+                            accessibilityLabel: model == name ? "Selected model \(name)" : "Filter to model \(name)",
+                            help: name
                         ) {
                             model = model == name ? nil : name
                         }
@@ -200,16 +202,15 @@ struct ActivityView: View {
                 }
                 .labelsHidden().pickerStyle(.segmented)
             }
-            if chartStyle == .bars {
-                chartControlRow("Layout") {
-                    Picker("Bar layout", selection: $barArrangement) {
-                        ForEach(ActivityBarArrangement.allCases) { arrangement in Text(arrangement.rawValue).tag(arrangement) }
-                    }
-                    .labelsHidden().pickerStyle(.segmented)
+            chartControlRow("Layout") {
+                Picker("Bar layout", selection: $barArrangement) {
+                    ForEach(ActivityBarArrangement.allCases) { arrangement in Text(arrangement.rawValue).tag(arrangement) }
                 }
+                .labelsHidden().pickerStyle(.segmented)
+                .disabled(chartStyle != .bars)
             }
         }
-        .frame(maxWidth: 560, alignment: .leading)
+        .frame(maxWidth: 520, alignment: .leading)
         .padding(12)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
     }
@@ -221,84 +222,73 @@ struct ActivityView: View {
         HStack(spacing: 12) {
             Text(title)
                 .font(.subheadline.weight(.medium))
-                .frame(width: 82, alignment: .leading)
+                .frame(width: 64, alignment: .leading)
             control()
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var profitAveragesDisclosure: some View {
         DisclosureGroup(isExpanded: $showsModelHourlyAverages) {
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 8) {
-                    ForEach(visibleModelHourlyProfitAverages) { average in
-                        VStack(alignment: .leading, spacing: 5) {
-                            averageModelLabel(average.model)
-                            Text(average.profitUSDPerHour
-                                .formatted(.currency(code: "USD").precision(.fractionLength(4))) + " profit / hour")
-                                .monospacedDigit()
-                            Text("\(average.coveredHours.formatted()) covered earning \(average.coveredHours == 1 ? "hour" : "hours")")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        .frame(width: 230, alignment: .leading)
-                        .padding(.horizontal, 10).padding(.vertical, 7)
-                        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
-                        .help("Estimated recorded model work minus an equal share of measured whole-Mac electricity in complete earning hours. Includes other Mac use, so it is not provider-only power cost.")
-                        .accessibilityElement(children: .combine)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 175), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(visibleModelHourlyProfitAverages) { average in
+                    VStack(alignment: .leading, spacing: 4) {
+                        averageModelLabel(average.model)
+                        Text(average.profitUSDPerHour
+                            .formatted(.currency(code: "USD").precision(.fractionLength(4))))
+                            .font(.headline)
+                            .monospacedDigit()
+                        Text("Profit / hour · \(average.coveredHours.formatted()) covered h")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: .infinity, minHeight: 70, alignment: .topLeading)
+                    .padding(10)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
+                    .help("Estimated recorded model work minus an equal share of measured whole-Mac electricity in complete earning hours. Includes other Mac use, so it is not provider-only power cost.")
+                    .accessibilityElement(children: .combine)
                 }
-                .padding(.top, 8)
             }
-            .scrollIndicators(.automatic)
+            .padding(.top, 8)
         } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Average estimated profit per model-hour").font(.headline)
-                Text("Whole-Mac electricity is divided evenly across active earning models; hours with power gaps are left out.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            Text("Estimated profit per model-hour").font(.headline)
         }
     }
 
     private var earningsAveragesDisclosure: some View {
         DisclosureGroup(isExpanded: $showsModelHourlyAverages) {
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 8) {
-                    ForEach(visibleModelHourlyAverages) { average in
-                        VStack(alignment: .leading, spacing: 5) {
-                            averageModelLabel(average.model)
-                            Text(average.averageWorkUSDPerEarningHour
-                                .formatted(.currency(code: "USD").precision(.fractionLength(4))) + " per hour")
-                                .monospacedDigit()
-                            Text("\(average.earningHours.formatted()) recorded earning \(average.earningHours == 1 ? "hour" : "hours")")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        .frame(width: 230, alignment: .leading)
-                        .padding(.horizontal, 10).padding(.vertical, 7)
-                        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
-                        .help("Gross recorded model work divided by hours with earnings ledger entries. Electricity and idle hours are not included.")
-                        .accessibilityElement(children: .combine)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 175), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(visibleModelHourlyAverages) { average in
+                    VStack(alignment: .leading, spacing: 4) {
+                        averageModelLabel(average.model)
+                        Text(average.averageWorkUSDPerEarningHour
+                            .formatted(.currency(code: "USD").precision(.fractionLength(4))))
+                            .font(.headline)
+                            .monospacedDigit()
+                        Text("Work / hour · \(average.earningHours.formatted()) earning h")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: .infinity, minHeight: 70, alignment: .topLeading)
+                    .padding(10)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
+                    .help("Gross recorded model work divided by hours with earnings ledger entries. Electricity and idle hours are not included.")
+                    .accessibilityElement(children: .combine)
                 }
-                .padding(.top, 8)
             }
-            .scrollIndicators(.automatic)
+            .padding(.top, 8)
         } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Average work earnings per model-hour").font(.headline)
-                Text("Gross recorded work; excludes electricity and hours without earnings.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            Text("Work earnings per model-hour").font(.headline)
         }
     }
 
     private func averageModelLabel(_ name: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Circle().fill(modelColor(name)).frame(width: 8, height: 8).padding(.top, 4)
-            Text(name)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(ModelDisplayName.short(name))
+                .lineLimit(1)
+                .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .help(name)
         }
     }
 
@@ -386,6 +376,7 @@ struct ActivityView: View {
         color: Color,
         isSelected: Bool,
         accessibilityLabel: String,
+        help: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -393,12 +384,12 @@ struct ActivityView: View {
                 Circle().fill(color).frame(width: 9, height: 9)
                 Text(title)
                     .font(.callout.weight(isSelected ? .semibold : .regular))
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .frame(height: 52)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 isSelected ? color.opacity(0.22) : Color(nsColor: .controlBackgroundColor),
@@ -411,7 +402,7 @@ struct ActivityView: View {
             }
         }
         .buttonStyle(.plain)
-        .help(title)
+        .help(help ?? title)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }

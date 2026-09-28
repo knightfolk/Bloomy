@@ -43,12 +43,20 @@ private actor OpportunityFixture: NetworkCapacityFetching {
     func fetch(at capturedAt: Date) async throws -> NetworkCapacitySnapshot {
         guard !fetched else { throw NetworkCapacityError.httpStatus(429) }
         fetched = true
-        return NetworkCapacitySnapshot(models: [NetworkModelCapacity(
-            id: "Example/Attributed-Model", ready: true, canAccept: true, routableProviders: 12,
-            warmProviders: 4, runningProviders: 2, coldProviders: 8, activeRequests: 3,
-            queuedRequests: 1, queueLimit: 16, aggregateTokensPerSecond: 120,
-            estimatedTimeToFirstTokenMS: 100, tokenBudgetRemaining: 500, tokenBudgetTotal: 1000
-        )], capturedAt: capturedAt)
+        return NetworkCapacitySnapshot(models: [
+            NetworkModelCapacity(
+                id: "Example/Attributed-Model", ready: true, canAccept: true, routableProviders: 12,
+                warmProviders: 4, runningProviders: 2, coldProviders: 8, activeRequests: 3,
+                queuedRequests: 1, queueLimit: 16, aggregateTokensPerSecond: 120,
+                estimatedTimeToFirstTokenMS: 100, tokenBudgetRemaining: 500, tokenBudgetTotal: 1000
+            ),
+            NetworkModelCapacity(
+                id: "Example/Second-Model", ready: true, canAccept: true, routableProviders: 8,
+                warmProviders: 3, runningProviders: 1, coldProviders: 5, activeRequests: 2,
+                queuedRequests: 0, queueLimit: 16, aggregateTokensPerSecond: 80,
+                estimatedTimeToFirstTokenMS: 150, tokenBudgetRemaining: 600, tokenBudgetTotal: 1000
+            ),
+        ], capturedAt: capturedAt)
     }
 }
 
@@ -57,7 +65,7 @@ private actor OpportunityMetadataFixture: PublicCatalogFetching {
     func fetch(at capturedAt: Date) async throws -> PublicCatalogSnapshot {
         guard !fetched else { throw PublicCatalogError.httpStatus(429) }
         fetched = true
-        return try PublicCatalogSnapshot.parse(Data(#"{"models":[{"id":"Example/Attributed-Model","display_name":"Example","family":"example","model_type":"llm","capabilities":["text"],"size_gb":20,"min_ram_gb":32,"active":true}]}"#.utf8), capturedAt: capturedAt)
+        return try PublicCatalogSnapshot.parse(Data(#"{"models":[{"id":"Example/Attributed-Model","display_name":"Example","family":"example","model_type":"llm","capabilities":["text"],"size_gb":20,"min_ram_gb":32,"active":true},{"id":"Example/Second-Model","display_name":"Second model","family":"example","model_type":"llm","capabilities":["text"],"size_gb":16,"min_ram_gb":24,"active":true}]}"#.utf8), capturedAt: capturedAt)
     }
 }
 
