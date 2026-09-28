@@ -1,0 +1,64 @@
+name: DarkbloomCompanion
+options:
+  bundleIdPrefix: dev.darkbloom
+  deploymentTarget:
+    iOS: '17.0'
+packages:
+  DarkbloomCore:
+    path: ..
+targets:
+  DarkbloomCompanion:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    dependencies:
+      - package: DarkbloomCore
+        product: DarkbloomCompanionProtocol
+      - package: DarkbloomCore
+        product: DarkbloomCompanionTransport
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.darkbloom.companion
+        PRODUCT_NAME: DarkbloomCompanion
+        SWIFT_VERSION: 6.0
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: YES
+        ENABLE_TESTABILITY: YES
+        ALWAYS_SEARCH_USER_PATHS: "NO"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Darkbloom
+        INFOPLIST_KEY_NSCameraUsageDescription: Scan the one-time pairing code shown by Darkbloom Control on your Mac.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Connect securely to your paired Darkbloom host on your local network.
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        TARGETED_DEVICE_FAMILY: 1
+        CODE_SIGN_STYLE: Automatic
+  DarkbloomCompanionTests:
+    type: bundle.unit-test
+    platform: iOS
+    hostApplication: DarkbloomCompanion
+    sources:
+      - Tests
+    dependencies:
+      - target: DarkbloomCompanion
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.darkbloom.companion.tests
+        PRODUCT_NAME: DarkbloomCompanionTests
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        SWIFT_VERSION: 6.0
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: YES
+        GENERATE_INFOPLIST_FILE: YES
+        ALWAYS_SEARCH_USER_PATHS: "NO"
+schemes:
+  DarkbloomCompanion:
+    build:
+      targets:
+        DarkbloomCompanion: all
+        DarkbloomCompanionTests: [test]
+    test:
+      targets:
+        - DarkbloomCompanionTests

@@ -297,6 +297,8 @@ public actor ProviderControlService: ProviderControlling {
     private let configStore: any ProviderConfigManaging
     private let runner: any ProcessExecuting
     private let now: @Sendable () -> Date
+    private let lifecycleConfirmationTimeout: Duration
+    private let lifecycleConfirmationSleep: @Sendable (Duration) async throws -> Void
     private var lastCatalog: [CatalogModel]?
     private var lastLocalModels: [LocalModel]?
     private var lastEffectiveCacheDirectory: String?
@@ -310,13 +312,21 @@ public actor ProviderControlService: ProviderControlling {
         telemetrySource: any TelemetrySource,
         configStore: any ProviderConfigManaging,
         runner: any ProcessExecuting,
-        now: @escaping @Sendable () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = Date.init,
+        lifecycleConfirmationTimeout: Duration = .seconds(
+            DarkbloomSourcePolicy.lifecycleStartupTimeoutSeconds
+        ),
+        lifecycleConfirmationSleep: @escaping @Sendable (Duration) async throws -> Void = {
+            try await Task.sleep(for: $0)
+        }
     ) {
         self.policy = policy
         self.telemetrySource = telemetrySource
         self.configStore = configStore
         self.runner = runner
         self.now = now
+        self.lifecycleConfirmationTimeout = lifecycleConfirmationTimeout
+        self.lifecycleConfirmationSleep = lifecycleConfirmationSleep
     }
 
     public func refresh() async throws -> ProviderControlSnapshot {
@@ -482,6 +492,8 @@ public actor ProviderControlService: ProviderControlling {
         } else {
             savedEnabledModels = []
         }
+        let priorIdentity = try? await telemetrySource.readDaemonState().processIdentity
+        let dispatchedAt = now()
         let command: ProcessCommand
         switch action {
         case .start:
@@ -505,14 +517,45 @@ public actor ProviderControlService: ProviderControlling {
                 hosting: hosting
             )
         }
-        return try await runDispatchedMutation(
+        let completion = try await runDispatchedMutation(
             command,
-            timeout: DarkbloomSourcePolicy.lifecycleCommandTimeout,
+            timeout: action == .restart
+                ? DarkbloomSourcePolicy.restartCommandTimeout
+                : DarkbloomSourcePolicy.lifecycleCommandTimeout,
             outputLimit: DarkbloomSourcePolicy.mutationOutputByteLimit,
             onOutput: nil,
             onPhase: onPhase,
             executable: executable
         )
+        guard action == .start || action == .restart else { return completion }
+        guard completion != .outcomeUncertain else { return completion }
+        return await confirmStartedProvider(
+            after: action == .restart ? priorIdentity : nil,
+            dispatchedAt: dispatchedAt,
+            using: executable
+        ) ?? .outcomeUncertain
+    }
+
+    private func confirmStartedProvider(
+        after priorIdentity: ProcessIdentity?,
+        dispatchedAt: Date,
+        using executable: URL
+    ) async -> ProviderMutationCompletion? {
+        let deadline = ContinuousClock.now.advanced(by: lifecycleConfirmationTimeout)
+        repeat {
+            if let snapshot = try? await refresh(
+                using: executable,
+                allowStaleModelSources: true,
+                freshResidencyRequirement: nil
+            ), let state = snapshot.daemonState,
+               state.writtenAt >= dispatchedAt.timeIntervalSince1970 - 1,
+               priorIdentity == nil || state.processIdentity != priorIdentity {
+                return .refreshed(snapshot)
+            }
+            guard ContinuousClock.now < deadline else { return nil }
+            try? await lifecycleConfirmationSleep(.seconds(2))
+        } while !Task.isCancelled
+        return nil
     }
 
     public func performLiveSwitch(
@@ -646,6 +689,13 @@ public actor ProviderControlService: ProviderControlling {
             await onPhase?(.reconciling)
             let completion = await refreshAfterCompletedMutation(using: executable)
             return completion == .refreshUncertain ? .outcomeUncertain : completion
+        } catch ProcessRunnerError.timedOut {
+            guard dispatchEvidence.indicatesPossibleLaunch else {
+                throw ProcessRunnerError.timedOut
+            }
+            await onPhase?(.reconciling)
+            _ = await refreshAfterCompletedMutation(using: executable)
+            return .outcomeUncertain
         }
         await onPhase?(.reconciling)
         return await refreshAfterCompletedMutation(using: executable)

@@ -385,7 +385,7 @@ struct ProviderControlServiceTests {
         #expect(invocations.map(\.timeout) == [
             DarkbloomSourcePolicy.lifecycleCommandTimeout,
             DarkbloomSourcePolicy.lifecycleCommandTimeout,
-            DarkbloomSourcePolicy.lifecycleCommandTimeout,
+            DarkbloomSourcePolicy.restartCommandTimeout,
         ])
         #expect(invocations.allSatisfy { $0.outputLimit == DarkbloomSourcePolicy.mutationOutputByteLimit })
         #expect(invocations.allSatisfy { !$0.command.arguments.contains("--uninstall") })
@@ -1227,7 +1227,8 @@ private final class ServiceHarness: @unchecked Sendable {
         loadedModels: [String] = ["gemma-4-26b-qat-4bit"],
         loadedModelsUpdatedAt: TimeInterval = serviceNow.timeIntervalSince1970,
         useLegacyExecutor: Bool = false,
-        maxModelSlots: Int = 1
+        maxModelSlots: Int = 1,
+        lifecycleConfirmationTimeout: Duration = .zero
     ) throws -> ServiceHarness {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("darkbloom-provider-service-\(UUID().uuidString)", isDirectory: true)
@@ -1259,7 +1260,8 @@ private final class ServiceHarness: @unchecked Sendable {
             telemetry: telemetry,
             configStore: configStore,
             policy: policy,
-            useLegacyExecutor: useLegacyExecutor
+            useLegacyExecutor: useLegacyExecutor,
+            lifecycleConfirmationTimeout: lifecycleConfirmationTimeout
         )
     }
 
@@ -1271,7 +1273,8 @@ private final class ServiceHarness: @unchecked Sendable {
         telemetry: ServiceTelemetryFake,
         configStore: ServiceConfigStoreFake,
         policy: DarkbloomSourcePolicy,
-        useLegacyExecutor: Bool
+        useLegacyExecutor: Bool,
+        lifecycleConfirmationTimeout: Duration
     ) {
         self.directory = directory
         self.configURL = configURL
@@ -1287,7 +1290,9 @@ private final class ServiceHarness: @unchecked Sendable {
             telemetrySource: telemetry,
             configStore: configStore,
             runner: executor,
-            now: { serviceNow }
+            now: { serviceNow },
+            lifecycleConfirmationTimeout: lifecycleConfirmationTimeout,
+            lifecycleConfirmationSleep: { _ in }
         )
     }
 
@@ -1342,6 +1347,8 @@ private actor ServiceRunnerFake: LaunchReportingProcessExecuting {
     private var blockedLocalData: Data?
     private var shouldBlockNextLocal = false
     private var successfulLocalReadsBeforeBlock = 0
+    private var nextMutationError: ProcessRunnerError?
+    private var nextLifecycleCallback: (@Sendable () async -> Void)?
 
     init(catalog: Data, local: Data) {
         self.catalog = catalog
@@ -1428,6 +1435,10 @@ private actor ServiceRunnerFake: LaunchReportingProcessExecuting {
     func cancelNextCatalog() { nextCatalog = .cancellation }
     func useNextCatalog(_ data: Data) { nextCatalog = .data(data) }
     func useNextLocal(_ data: Data) { nextLocal = .data(data) }
+    func timeOutNextMutation() { nextMutationError = .timedOut }
+    func onNextLifecycle(_ callback: @escaping @Sendable () async -> Void) {
+        nextLifecycleCallback = callback
+    }
 
     func run(
         _ command: ProcessCommand,
@@ -1470,11 +1481,20 @@ private actor ServiceRunnerFake: LaunchReportingProcessExecuting {
                 Invocation(command: command, timeout: timeout, outputLimit: outputLimit)
             )
         }
+        if ["start", "stop", "restart"].contains(command.arguments.first ?? ""),
+           let callback = nextLifecycleCallback {
+            nextLifecycleCallback = nil
+            await callback()
+        }
         if (isModelMutation || isLifecycleMutation), shouldBlockNextMutation {
             shouldBlockNextMutation = false
             if let blockedGate {
                 try await blockedGate.wait()
             }
+        }
+        if (isModelMutation || isLifecycleMutation), let error = nextMutationError {
+            nextMutationError = nil
+            throw error
         }
         if Array(command.arguments.prefix(2)) == ["models", "download"] {
             onOutput?(ProcessOutputChunk(
@@ -1684,6 +1704,7 @@ private func daemon(
     inferenceActive: Bool,
     startedAt: TimeInterval = 0,
     writtenAt: TimeInterval = serviceNow.timeIntervalSince1970,
+    processIdentity: ProcessIdentity = ProcessIdentity(pid: 1, startTimeMicros: 1),
     capacity: MemoryCapacity = MemoryCapacity(
         totalMemoryGB: 32,
         gpuMemoryActiveGB: 0,
@@ -1702,8 +1723,8 @@ private func daemon(
         inferenceActive: inferenceActive,
         startedAt: startedAt,
         writtenAt: writtenAt,
-        pid: 1,
-        processIdentity: ProcessIdentity(pid: 1, startTimeMicros: 1)
+        pid: processIdentity.pid,
+        processIdentity: processIdentity
     )
 }
 
@@ -1856,6 +1877,44 @@ struct HostingLifecycleServiceTests {
             ],
             ["stop", "--timeout", "600"],
         ])
+        #expect(invocations.first?.timeout == DarkbloomSourcePolicy.restartCommandTimeout)
+    }
+
+    @Test("a launched lifecycle timeout preserves an uncertain outcome")
+    func launchedLifecycleTimeoutIsUncertain() async throws {
+        let harness = try ServiceHarness.make()
+        defer { harness.cleanup() }
+        let phases = ServicePhaseRecorder()
+        await harness.runner.timeOutNextMutation()
+
+        let completion = try await harness.service.performLifecycle(
+            .stop, enabledModels: [], onPhase: { phase in await phases.record(phase) }
+        )
+
+        #expect(completion == .outcomeUncertain)
+        #expect(await phases.values == [.reconciling])
+        #expect(await harness.runner.lifecycleInvocations.map(\.command.arguments) == [["stop", "--timeout", "600"]])
+    }
+
+    @Test("restart confirms a fresh replacement identity")
+    func restartConfirmsReplacement() async throws {
+        let harness = try ServiceHarness.make(lifecycleConfirmationTimeout: .seconds(1))
+        defer { harness.cleanup() }
+        let replacement = daemon(
+            currentModel: "gemma-4-26b-qat-4bit",
+            inferenceActive: false,
+            processIdentity: .init(pid: 2, startTimeMicros: 2)
+        )
+        await harness.runner.onNextLifecycle {
+            await harness.telemetry.setDaemon(replacement)
+        }
+
+        let completion = try await harness.service.performLifecycle(
+            .restart, enabledModels: [], onPhase: nil
+        )
+
+        #expect(completion.snapshot?.daemonState?.processIdentity == replacement.processIdentity)
+        #expect(await harness.runner.lifecycleInvocations.first?.timeout == DarkbloomSourcePolicy.restartCommandTimeout)
     }
 
     @Test("standalone mode is refused by construction and dispatches nothing")
