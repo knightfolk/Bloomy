@@ -12,7 +12,7 @@ struct CompanionHostAlertHistoryTests {
         let hostID = UUID()
         let deviceID = UUID()
         let registry = InMemoryPairedDeviceRegistry()
-        try await registry.enroll(pairedRecord(deviceID: deviceID, capabilities: [.history]))
+        _ = try await registry.enroll(pairedRecord(deviceID: deviceID, capabilities: [.history]))
         let database = try AlertHistoryDatabase(url: temporaryURL(), historyLimit: 20)
         try await database.record([
             transition(.providerOffline, .raised, at: 1),
@@ -53,7 +53,7 @@ struct CompanionHostAlertHistoryTests {
         let hostID = UUID()
         let deviceID = UUID()
         let registry = InMemoryPairedDeviceRegistry()
-        try await registry.enroll(pairedRecord(deviceID: deviceID, capabilities: [.monitor]))
+        _ = try await registry.enroll(pairedRecord(deviceID: deviceID, capabilities: [.monitor]))
         let coordinator = makeCoordinator(hostID: hostID, registry: registry, history: nil)
         let response = await coordinator.handle(deviceID: deviceID, envelope: .init(
             requestID: UUID(),
@@ -69,8 +69,8 @@ struct CompanionHostAlertHistoryTests {
         let firstPhoneID = UUID()
         let secondPhoneID = UUID()
         let registry = InMemoryPairedDeviceRegistry()
-        try await registry.enroll(pairedRecord(deviceID: firstPhoneID, capabilities: []))
-        try await registry.enroll(pairedRecord(deviceID: secondPhoneID, capabilities: []))
+        _ = try await registry.enroll(pairedRecord(deviceID: firstPhoneID, capabilities: []))
+        _ = try await registry.enroll(pairedRecord(deviceID: secondPhoneID, capabilities: []))
         let coordinator = makeCoordinator(hostID: hostID, registry: registry, history: nil)
 
         let response = await coordinator.handle(deviceID: firstPhoneID, envelope: .init(
@@ -87,8 +87,8 @@ struct CompanionHostAlertHistoryTests {
         let firstPhoneID = UUID()
         let secondPhoneID = UUID()
         let registry = InMemoryPairedDeviceRegistry()
-        try await registry.enroll(pairedRecord(deviceID: firstPhoneID, capabilities: []))
-        try await registry.enroll(pairedRecord(deviceID: secondPhoneID, capabilities: []))
+        _ = try await registry.enroll(pairedRecord(deviceID: firstPhoneID, capabilities: []))
+        _ = try await registry.enroll(pairedRecord(deviceID: secondPhoneID, capabilities: []))
         let coordinator = makeCoordinator(hostID: hostID, registry: registry, history: nil)
 
         let response = await coordinator.handle(deviceID: firstPhoneID, envelope: .init(
