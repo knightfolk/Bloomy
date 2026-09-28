@@ -6,10 +6,10 @@ Darkbloom Control is a native macOS menu-bar companion for a local Darkbloom
 provider. It turns provider telemetry into a compact infographic popup and
 keeps model and lifecycle controls behind explicit safety checks.
 
-**v1.2** adds per-model chart colors, clearer chart scales, per-model average
-gross recorded earnings per earning-hour, and per-model network demand. It
-builds on v1.1's clearer settings, provider startup progress, and signed Control
-updates. Previously named Darkbloom Monitor.
+**v1.7** adds compact model cards in two columns, collapsible Enabled and
+Available groups, independent daily-runtime forecasts, and a menu-bar GPU ring.
+It builds on v1.6's built-in Chat and explicit local or paid-network routing.
+Previously named Darkbloom Monitor.
 
 ## Download
 
@@ -20,6 +20,13 @@ for first-launch confirmation or permission to read your external model drive.
 The release Apple Silicon app is Developer ID–signed, notarized by Apple, and
 includes a stapled notarization ticket. Gatekeeper verification passed on the
 release bundle; no Gatekeeper-disable or quarantine-removal workaround is needed.
+
+## Coming soon
+
+The iOS companion, QR pairing and remote controls are experimental and are not
+included in this release. Fan controls, richer provider statistics, and automatic
+model warming remain planned. No background remote-control service is installed
+or enabled by this app.
 
 ## Highlights
 
@@ -43,7 +50,12 @@ release bundle; no Gatekeeper-disable or quarantine-removal workaround is needed
   is active or activity cannot be verified
 - Model catalog management with separate Download, Delete, Enable, and Preload
   actions
-- Models organized into On this Mac, Available, and Capacity, with search and expandable details
+- Models organized into collapsible Enabled and Available groups, with search,
+  expandable details, and a separate Provider capacity section
+- Independent daily-runtime what-if sliders with estimates from observed data;
+  they do not schedule or change provider runtime. Earnings inputs are account-level
+  and assume this Mac produced the recorded work for that model
+- A whole-Mac GPU utilization ring in the menu bar, with fresh temperature coloring
 - Concurrency selections from 1–24 and resident-model limits staged together with model selections
 - Clear saved-state labels for idle-memory, beta, and electricity settings
 - Starting/Restarting progress that blocks repeated clicks until fresh telemetry arrives
@@ -61,6 +73,12 @@ release bundle; no Gatekeeper-disable or quarantine-removal workaround is needed
 - Fresh verification diagnostics for legacy and App Attest authorization
 - Network maintenance and aggregate cache-health reporting
 - One resizable dashboard and Settings window
+- Built-in Chat with an explicit per-conversation destination — the local
+  endpoint on this Mac (default) or the paid Darkbloom network — a separate
+  resizable chat window sharing the same conversation, verified-model
+  pickers, per-response route provenance, and a fail-closed paid gate
+  (consumer API key, fresh balance above zero, verified pricing, 402
+  honored as the network's final decision with no retry)
 - Qwen, OpenAI/GPT-OSS and Google/Gemma menu-bar icons during observed activity
 - Opt-in estimated adapter power, a saved USD/kWh electricity rate, and earnings
   after electricity for matching measurement periods
@@ -139,6 +157,12 @@ It stores compact, user-only SQLite histories under:
 Those databases contain hourly earnings aggregates, changed balance samples,
 observed uptime, and measured model token rates. They do not store the auth
 token, account ID, provider key, prompts, responses, or per-job content.
+Chat conversations are equally off-disk: the built-in Chat destination and
+its pop-out window keep the transcript in memory only, discard it on quit,
+and never write prompts or replies to any store. The Darkbloom consumer API
+key used by the paid chat route lives only in the macOS Keychain — never in
+preferences, files, or logs — and is separate from both the provider device
+token and the local endpoint token.
 
 Historical throughput is derived from positive token/time deltas belonging to
 the same provider process and model. These completion counters are not a live
@@ -155,7 +179,7 @@ applies the saved selection; it can differ from the models the daemon currently
 advertises. The comparison is shown separately from loaded models and unsaved edits. Saving
 configuration does not silently restart the provider.
 
-**Models → Capacity** lets you save a concurrency limit from 1–24
+**Models → Provider capacity** lets you save a concurrency limit from 1–24
 and choose how many models the provider may keep in memory. Darkbloom CLI 0.9.7
 currently caps effective concurrency at 8 per model engine, even when a higher
 value is saved. The CLI 0.9.7 defaults are
@@ -199,6 +223,10 @@ does not claim to verify the applied runtime configuration through private APIs.
 - A per-model throughput breakdown appears only after at least two models have
   valid measured samples for the current local calendar day.
 - CLI output and APIs may evolve after the validated 0.9.7 contract. Older CLI versions omit unsupported diagnostics.
+- Chat is a first non-streaming version with cancellation; responses arrive
+  as a single completion. The paid network route's balance display is
+  advisory only — the network decides reservation sufficiency per request,
+  and HTTP 402 is final.
 - Only the official CLI is supported; do not install a custom provider branch
   to enable monitor features. Live streaming throughput and protected model
   switching are not available.
