@@ -3,6 +3,8 @@ import SwiftUI
 
 struct CompanionSettingsView: View {
     @Environment(CompanionStore.self) private var store
+    @AppStorage(CompanionAppearanceMode.defaultsKey) private var appearanceModeRaw =
+        CompanionAppearanceMode.system.rawValue
     @State private var concurrency = 1
     @State private var slots = 1
     @State private var startupPreload = false
@@ -14,6 +16,17 @@ struct CompanionSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Appearance") {
+                    Picker("Color scheme", selection: appearanceModeBinding) {
+                        ForEach(CompanionAppearanceMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text("System follows the iPhone appearance automatically.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+
                 Section("Provider") {
                     if let settings = store.settings {
                         Stepper("Concurrent requests: \(concurrency)", value: $concurrency, in: settings.concurrentRequestRange.minimum...settings.concurrentRequestRange.maximum)
@@ -143,5 +156,12 @@ struct CompanionSettingsView: View {
         case .connected: store.snapshotIsStale ? "Connected · stale data" : "Connected"
         case .disconnected: "Disconnected"
         }
+    }
+
+    private var appearanceModeBinding: Binding<CompanionAppearanceMode> {
+        Binding(
+            get: { CompanionAppearanceMode(storedValue: appearanceModeRaw) },
+            set: { appearanceModeRaw = $0.rawValue }
+        )
     }
 }

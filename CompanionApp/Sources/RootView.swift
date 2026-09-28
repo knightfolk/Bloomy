@@ -3,6 +3,8 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(CompanionStore.self) private var store
+    @AppStorage(CompanionAppearanceMode.defaultsKey) private var appearanceModeRaw =
+        CompanionAppearanceMode.system.rawValue
 
     var body: some View {
         @Bindable var store = store
@@ -29,6 +31,7 @@ struct RootView: View {
             }
         }
         .tint(.mint)
+        .preferredColorScheme(CompanionAppearanceMode(storedValue: appearanceModeRaw).colorScheme)
         .alert("Darkbloom", isPresented: Binding(
             get: { store.errorMessage != nil },
             set: { if !$0 { store.errorMessage = nil } }

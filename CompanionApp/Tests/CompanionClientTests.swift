@@ -4,6 +4,14 @@ import XCTest
 @testable import DarkbloomCompanion
 
 final class CompanionClientTests: XCTestCase {
+    func testAppearanceDefaultsToSystemAndMapsExplicitOverrides() {
+        XCTAssertEqual(CompanionAppearanceMode(storedValue: nil), .system)
+        XCTAssertEqual(CompanionAppearanceMode(storedValue: "future-mode"), .system)
+        XCTAssertNil(CompanionAppearanceMode.system.colorScheme)
+        XCTAssertEqual(CompanionAppearanceMode.light.colorScheme, .light)
+        XCTAssertEqual(CompanionAppearanceMode.dark.colorScheme, .dark)
+    }
+
     func testApprovalKeyIsStableAndProducesVerifiableSignatures() throws {
         let service = "dev.darkbloom.companion.tests.\(UUID().uuidString)"
         let store = ApprovalKeyStore(service: service)
