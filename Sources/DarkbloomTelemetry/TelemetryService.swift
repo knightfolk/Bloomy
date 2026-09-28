@@ -753,7 +753,7 @@ public actor TelemetryService {
                 reason: "Status acquisition time is in the future"
             )
         }
-        if age > 60 {
+        if age > StatusSnapshot.maximumAge {
             return .stale(
                 value: lastStatus.value,
                 capturedAt: lastStatus.capturedAt,

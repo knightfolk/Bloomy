@@ -164,6 +164,54 @@ struct MonitorPopoverLayoutTests {
         #expect(models.filter { $0.state == .availableUnloaded }.count == 3)
     }
 
+    @Test("popup labels fresh auto-select status as automatic")
+    func popupAutomaticModelMode() {
+        var automatic = StatusSnapshot()
+        automatic.configuredModel = "auto-select"
+        var pinned = StatusSnapshot()
+        pinned.configuredModel = "gemma-4-26b-qat-4bit"
+
+        #expect(PopupModelModePresentation.make(
+            status: .available(value: automatic, capturedAt: layoutNow),
+            currentTime: layoutNow
+        ) == .automatic)
+        #expect(PopupModelModePresentation.make(
+            status: .available(value: automatic, capturedAt: layoutNow),
+            currentTime: layoutNow.addingTimeInterval(60)
+        ) == .automatic)
+        #expect(PopupModelModePresentation.make(
+            status: .available(value: automatic, capturedAt: layoutNow),
+            currentTime: layoutNow.addingTimeInterval(60.001)
+        ) == .unavailable)
+        #expect(PopupModelModePresentation.make(
+            status: .available(value: pinned, capturedAt: layoutNow),
+            currentTime: layoutNow
+        ) == .unavailable)
+        #expect(PopupModelModePresentation.make(
+            status: .stale(value: automatic, capturedAt: layoutNow, reason: "Status refresh required"),
+            currentTime: layoutNow
+        ) == .unavailable)
+    }
+
+    @Test("unloaded enabled models explain that they load on demand")
+    func popupOnDemandModelStatus() {
+        #expect(PopupModelStatusPresentation.make(for: .availableUnloaded) == .init(
+            statusName: "on demand",
+            supplementaryLabel: "On demand",
+            systemImage: "arrow.triangle.2.circlepath"
+        ))
+        #expect(PopupModelStatusPresentation.make(for: .loadedIdle) == .init(
+            statusName: "loaded but idle",
+            supplementaryLabel: nil,
+            systemImage: nil
+        ))
+        #expect(PopupModelStatusPresentation.make(for: .active) == .init(
+            statusName: "active",
+            supplementaryLabel: nil,
+            systemImage: nil
+        ))
+    }
+
     @Test("DC monogram loads as a tintable vector asset")
     func officialLogoAsset() throws {
         let sourceImage = try #require(DarkbloomLogoAsset.sourceImage)
@@ -407,6 +455,51 @@ struct MonitorPopoverLayoutTests {
         }
     }
 
+    @Test("automatic mode and on-demand models fit the production popup width")
+    func automaticModePopupLayout() async throws {
+        let modelIDs = [
+            "EigenLabs/Qwen3.8-27B-4bit-mtp",
+            "gemma-4-26b-qat-4bit",
+            "qwen3.6-35b-a3b-vl-mtp-mxfp8",
+        ]
+        let now = layoutNow
+        let service = TelemetryService(
+            source: AutoModeTelemetrySource(now: now, modelIDs: modelIDs),
+            now: { now }
+        )
+        let store = MonitorStore(
+            service: service,
+            initial: .unavailable(now: now),
+            now: { now }
+        )
+        await store.refreshTelemetryImmediately()
+        let controlStore = ProviderControlStore(
+            controller: InertSettingsController(sources: .unknown)
+        )
+        await controlStore.refresh()
+        let hostingController = NSHostingController(
+            rootView: MonitorPopover(store: store)
+                .environmentObject(controlStore)
+        )
+        let fitted = hostingController.sizeThatFits(in: NSSize(width: 420, height: 0))
+
+        #expect(fitted.width == 420)
+        #expect(fitted.height < 500)
+        guard ProcessInfo.processInfo.environment["DARKBLOOM_RENDER_EVIDENCE"] == "1" else { return }
+        let window = NSWindow(contentViewController: hostingController)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(fitted)
+        window.orderBack(nil)
+        defer { window.close() }
+        try await Task.sleep(for: .milliseconds(200))
+        let view = hostingController.view
+        view.layoutSubtreeIfNeeded()
+        let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        try #require(bitmap.representation(using: .png, properties: [:]))
+            .write(to: URL(fileURLWithPath: "/tmp/darkbloom-auto-model-popup.png"))
+    }
+
     @Test("lifecycle controls bind to an inert shared store and remain compact")
     func lifecycleControlsFit() async {
         let controlStore = ProviderControlStore(controller: InertSettingsController())
@@ -488,6 +581,57 @@ private struct UnusedTelemetrySource: TelemetrySource {
     func readLoadedModels() async throws -> LoadedModelsState { throw UnusedError() }
     func readStatus() async throws -> StatusSnapshot { throw UnusedError() }
     func readLegacyEvents(limit: Int) async throws -> [LogEvent] { throw UnusedError() }
+}
+
+private actor AutoModeTelemetrySource: TelemetrySource {
+    let now: Date
+    let modelIDs: [String]
+
+    init(now: Date, modelIDs: [String]) {
+        self.now = now
+        self.modelIDs = modelIDs
+    }
+
+    func readDaemonState() async throws -> DaemonState {
+        let timestamp = now.timeIntervalSince1970
+        return DaemonState(
+            schema: 1,
+            version: "0.9.11",
+            currentModel: modelIDs[0],
+            warmModels: Array(modelIDs.prefix(2)),
+            stats: ProviderStats(tokensGenerated: 11_092, requestsServed: 124, usageGaps: 0),
+            trust: TrustState(
+                level: "hardware",
+                status: "online",
+                reason: "same_binary",
+                receivedAt: timestamp
+            ),
+            capacity: MemoryCapacity(totalMemoryGB: 192, gpuMemoryActiveGB: 54, gpuMemoryCacheGB: 8),
+            slots: [],
+            inferenceActive: false,
+            startedAt: timestamp - 3_600,
+            writtenAt: timestamp,
+            pid: 42,
+            processIdentity: ProcessIdentity(pid: 42, startTimeMicros: 42_000_000)
+        )
+    }
+
+    func readLoadedModels() async throws -> LoadedModelsState {
+        LoadedModelsState(
+            schema: 1,
+            models: Array(modelIDs.prefix(2)),
+            updatedAt: now.timeIntervalSince1970
+        )
+    }
+
+    func readStatus() async throws -> StatusSnapshot {
+        var status = StatusSnapshot()
+        status.configuredModel = "auto-select"
+        status.enabledModelFilter = modelIDs.joined(separator: ",")
+        return status
+    }
+
+    func readLegacyEvents(limit: Int) async throws -> [LogEvent] { [] }
 }
 
 private struct UnusedError: Error {}

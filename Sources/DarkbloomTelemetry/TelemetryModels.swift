@@ -398,6 +398,8 @@ public enum TokenRate: Equatable, Sendable {
 }
 
 public struct StatusSnapshot: Equatable, Sendable {
+    public static let maximumAge: TimeInterval = 60
+
     public var version: String?
     public var providerName: String?
     public var configPath: String?

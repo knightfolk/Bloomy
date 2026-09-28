@@ -1,6 +1,50 @@
 import DarkbloomTelemetry
 import SwiftUI
 
+enum PopupModelModePresentation: Equatable {
+    case automatic
+    case unavailable
+
+    static func make(
+        status: SourceAvailability<StatusSnapshot>,
+        currentTime: Date = Date()
+    ) -> Self {
+        guard case .available(let status, let capturedAt) = status else {
+            return .unavailable
+        }
+        let age = currentTime.timeIntervalSince(capturedAt)
+        guard age.isFinite,
+              age >= 0,
+              age <= StatusSnapshot.maximumAge,
+              status.configuredModel?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == "auto-select"
+        else { return .unavailable }
+        return .automatic
+    }
+}
+
+struct PopupModelStatusPresentation: Equatable {
+    let statusName: String
+    let supplementaryLabel: String?
+    let systemImage: String?
+
+    static func make(for state: DashboardModelState) -> Self {
+        switch state {
+        case .active:
+            Self(statusName: "active", supplementaryLabel: nil, systemImage: nil)
+        case .loadedIdle:
+            Self(statusName: "loaded but idle", supplementaryLabel: nil, systemImage: nil)
+        case .availableUnloaded:
+            Self(
+                statusName: "on demand",
+                supplementaryLabel: "On demand",
+                systemImage: "arrow.triangle.2.circlepath"
+            )
+        }
+    }
+}
+
 enum PopupModelPresentation: Equatable {
     case models([DashboardModel])
     case unavailable
@@ -354,6 +398,9 @@ struct MonitorPopover: View {
                     Divider()
                     HStack {
                         Text("Models").font(.subheadline.weight(.semibold))
+                        if modelModePresentation(at: currentTime) == .automatic {
+                            AutoModelModeBadge()
+                        }
                         Spacer()
                         Text("Today’s average speed").font(.caption).foregroundStyle(.secondary)
                     }
@@ -772,6 +819,10 @@ struct MonitorPopover: View {
         )
     }
 
+    private func modelModePresentation(at currentTime: Date) -> PopupModelModePresentation {
+        .make(status: store.snapshot.status, currentTime: currentTime)
+    }
+
     private var models: [DashboardModel] {
         guard case .models(let models) = modelPresentation() else { return [] }
         return models
@@ -980,13 +1031,24 @@ private struct ModelStatusPill: View {
             Text(PopupModelName.short(model.name))
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .lineLimit(1)
+
+            if let label = status.supplementaryLabel,
+               let systemImage = status.systemImage {
+                Label(label, systemImage: systemImage)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .background(color.opacity(backgroundOpacity), in: Capsule())
-        .help("\(model.name) — \(statusName)")
+        .help(helpText)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(model.name), \(statusName)")
+        .accessibilityLabel("\(model.name), \(status.statusName)")
+    }
+
+    private var status: PopupModelStatusPresentation {
+        .make(for: model.state)
     }
 
     private var color: Color {
@@ -1001,12 +1063,25 @@ private struct ModelStatusPill: View {
         model.state == .availableUnloaded ? 0.12 : 0.18
     }
 
-    private var statusName: String {
-        switch model.state {
-        case .active: "active"
-        case .loadedIdle: "loaded but idle"
-        case .availableUnloaded: "available but not loaded"
+    private var helpText: String {
+        if model.state == .availableUnloaded {
+            return "\(model.name) — on demand. Loads automatically when requested."
         }
+        return "\(model.name) — \(status.statusName)"
+    }
+}
+
+private struct AutoModelModeBadge: View {
+    var body: some View {
+        Label("Auto", systemImage: "arrow.triangle.2.circlepath")
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .foregroundStyle(.blue)
+            .background(Color.blue.opacity(0.12), in: Capsule())
+            .help("Darkbloom selects and loads enabled models automatically for incoming work")
+            .accessibilityLabel("Automatic model selection")
+            .accessibilityHint("Enabled models load automatically when requested")
     }
 }
 
