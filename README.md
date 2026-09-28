@@ -24,8 +24,8 @@ release bundle; no Gatekeeper-disable or quarantine-removal workaround is needed
 ## Coming soon
 
 The iOS companion, QR pairing and remote controls are experimental and are not
-included in this release. Fan controls, richer provider statistics, and automatic
-model warming remain planned. No background remote-control service is installed
+included in this release. Richer provider statistics and automatic model warming
+remain planned. No background remote-control service is installed
 or enabled by this app.
 
 ## Highlights
@@ -245,8 +245,8 @@ does not claim to verify the applied runtime configuration through private APIs.
   advisory only — the network decides reservation sufficiency per request,
   and HTTP 402 is final.
 - Only the official CLI is supported; do not install a custom provider branch
-  to enable monitor features. Live streaming throughput and protected model
-  switching are not available.
+  to enable monitor features. Live streaming throughput is not available, and
+  automatic demand-based model switching is not implemented.
 - Provider actions affect the local provider and may affect customer jobs; read
   confirmation dialogs before proceeding.
 

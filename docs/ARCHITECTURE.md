@@ -61,11 +61,11 @@ read a file or launch a process directly.
    top-level `enabled_models`, `preload_models`, and `max_model_slots`,
    validates a UUID-named sibling candidate, and retains one fixed backup after
    publication. `ProviderControlService` owns only the official CLI's
-   catalog/list/download/remove and start/stop/restart operations;
-   `ProviderControlStore` serializes their UI state. A config save reports
-   restart-required rather than restarting the provider itself. The official
-   CLI does not provide a supported monitor-side warm, retire, or live-switch
-   operation.
+   catalog/list/download/remove, start/stop/restart, and supported same-session
+   switch operations; `ProviderControlStore` serializes their UI state. A config
+   save reports restart-required unless fresh daemon evidence permits an explicit
+   Apply Live action. The official CLI does not provide a separate monitor-side
+   warm or retire operation.
 
    Its revision checks, bounded advisory locks, and atomic replacement
    coordinate cooperating writers only. A noncooperating writer that keeps an
@@ -352,10 +352,11 @@ settings. Capacity exposes concurrent-request and resident-model limits; all
 changes share the staged draft and the validated configuration save path.
 Refresh preserves edits; Discard edits explicitly reloads the saved settings.
 Model presentation is derived from the enabled-model filter plus loaded, warm,
-slot, and current-model state. Green
-means active, yellow means loaded but idle, and gray means available but
-unloaded. No Warm or live-switch action is presented because the official CLI
-does not expose the required operator API. `StatusItemController` owns an
+slot, and current-model state. Green means active, yellow means loaded but idle,
+and gray means available on demand. There is no separate Warm row action because
+the official CLI does not expose one. Saved selections can use Apply Live when
+fresh daemon state confirms the supported same-session switch capability.
+`StatusItemController` owns an
 in-process Settings window whose SwiftUI view owns the persisted menu-bar
 metric picker, avoiding delegation to another registered app bundle.
 Diagnostic telemetry remains in the library and tests rather than being
