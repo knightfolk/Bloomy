@@ -50,6 +50,8 @@ or enabled by this app.
   is active or activity cannot be verified
 - Model catalog management with separate Download, Delete, Enable, and Preload
   actions
+- Live application of a saved model selection through the CLI's graceful
+  same-session `switch` command when fresh runtime evidence says it is safe
 - Models organized into collapsible Enabled and Available groups, with search,
   expandable details, and a separate Provider capacity section
 - Independent daily-runtime what-if sliders with estimates from observed data;
@@ -59,14 +61,16 @@ or enabled by this app.
 - Concurrency selections from 1–24 and resident-model limits staged together with model selections
 - Clear saved-state labels for idle-memory, beta, and electricity settings
 - Starting/Restarting progress that blocks repeated clicks until fresh telemetry arrives
-- Signed automatic and manual Control updates, plus a separate read-only CLI update notice
+- Signed automatic and manual Control updates, a separate CLI update notice,
+  and an explicit automatic CLI-update setting
 - Native graceful Stop pauses new work, drains accepted requests, and reports exact requests remaining
 - Provider resources include a system-wide GPU-use gauge and an honest running/draining request count
 - Opportunity cards with readable names, RAM checks, demand badges, and workload counts
 - Separate network-history charts with technical details available on demand
 - Saved versus advertised model selection, with an explicit restart warning when they differ
 - Model hardware/runtime requirements, quantization, and context/output limits
-- GPU temperature and fan readings from the official read-only CLI diagnostics
+- GPU temperature and fan readings plus opt-in control through the official
+  Darkbloom fan helper, with bounded policy values and macOS administrator approval
 - Provider resources with measured Mac-wide CPU utilization and reported GPU
   active/cache memory; GPU engine utilization is not exposed by the provider
 - Idle-memory policy and advanced beta settings, with explicit restart-required feedback
@@ -102,7 +106,7 @@ Settings from an earlier local review build. Values vary by provider.
 - The official, unmodified Darkbloom CLI for provider data and controls
 - `darkbloom login` for authenticated earnings
 
-The telemetry and command contracts cover Darkbloom 0.8.15 through 0.9.7,
+The telemetry and command contracts cover Darkbloom 0.8.15 through 0.9.11,
 with optional fields and source failures handled independently. The monitor remains usable when Darkbloom is missing or stopped, but
 affected live values and actions will be unavailable.
 
@@ -177,7 +181,10 @@ Download, Delete, Enable and Preload are separate operations. Saved model
 selection is passed explicitly at startup to bypass the CLI picker. App Restart also
 applies the saved selection; it can differ from the models the daemon currently
 advertises. The comparison is shown separately from loaded models and unsaved edits. Saving
-configuration does not silently restart the provider.
+configuration does not silently restart the provider. With Darkbloom 0.9.10 or
+newer, **Apply Live** can gracefully drain accepted requests and replace the
+advertised model selection on the existing coordinator session. Timeouts leave
+the provider draining and do not force-cancel work.
 
 **Models → Provider capacity** lets you save a concurrency limit from 1–24
 and choose how many models the provider may keep in memory. Darkbloom CLI 0.9.7
@@ -186,8 +193,9 @@ value is saved. The CLI 0.9.7 defaults are
 4 requests and 3 resident models. Existing per-model concurrency overrides are
 preserved and may differ from the global setting. Actual capacity depends on memory.
 Changes remain staged until **Save Changes**; **Refresh** preserves edits and
-**Discard edits** reloads saved values. These settings use the official provider configuration. Manual live warming, staged replacement and
-automatic demand-based switching are not supported by this app.
+**Discard edits** reloads saved values. These settings use the official provider
+configuration. Manual live warming, load-first replacement, and automatic
+demand-based switching are not supported by this app.
 
 Stop and Restart require a customer-impact confirmation when work is active or
 activity is unknown. Stop uses the CLI's native graceful drain: it pauses new
@@ -206,8 +214,17 @@ drain, it shows the exact accepted requests remaining.
 
 Idle-memory and beta controls use official CLI commands and require a restart to
 apply. They share the model/lifecycle action gate and cannot overwrite a staged
-model draft. Fan monitoring is read-only; this app does not install or configure
-the privileged fan helper. Verification guidance never removes enrollment.
+model draft. Automatic CLI updates use `darkbloom autoupdate` and apply when the
+provider next starts.
+
+Fan controls use only the official experimental CLI helper. Enable/configure are
+limited to the CLI's 60–90% target and a validated temperature threshold; every
+mutation displays a macOS administrator prompt. Disable and Uninstall restore
+macOS automatic control. No custom fan curve, setuid executable, stored password,
+or wildcard privileged helper is added. The authorization bridge refuses
+`PATH`-discovered binaries and verifies the canonical provider executable's
+Darkbloom Developer ID before running it. Verification guidance never removes
+enrollment.
 
 After saving model configuration, restart the provider to apply it. The monitor
 does not claim to verify the applied runtime configuration through private APIs.

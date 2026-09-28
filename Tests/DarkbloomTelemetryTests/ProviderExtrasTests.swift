@@ -152,6 +152,15 @@ struct ProviderExtrasTests {
         try await client.saveIdle(minutes: 0)
         try await client.saveIdle(minutes: 60)
         try await client.setBeta(id: "mtp", enabled: true)
+        try await client.setAutoUpdate(enabled: true)
+        let fanPolicy = try #require(ProviderFanPolicy(
+            speedPercent: 82,
+            triggerTemperatureCelsius: 47
+        ))
+        try await client.enableFan(policy: fanPolicy)
+        try await client.configureFan(policy: fanPolicy)
+        try await client.disableFan()
+        try await client.uninstallFan()
         await #expect(throws: ProviderExtrasMutationError.invalidIdleMinutes) {
             try await client.saveIdle(minutes: 10_081)
         }
@@ -169,6 +178,107 @@ struct ProviderExtrasTests {
         #expect(commands.contains {
             $0.arguments == ["beta", "enable", "mtp", "--config", testPolicy().providerConfig.path]
         })
+        #expect(commands.contains {
+            $0.arguments == ["autoupdate", "enable", "--config", testPolicy().providerConfig.path]
+        })
+        #expect(commands.contains {
+            $0.executable.path == "/usr/bin/osascript"
+                && $0.arguments.suffix(6) == [
+                    "/usr/bin/true", "enable", "--speed", "82.0", "--temperature", "47.0",
+                ]
+        })
+        #expect(commands.contains {
+            $0.executable.path == "/usr/bin/osascript"
+                && $0.arguments.suffix(6) == [
+                    "/usr/bin/true", "configure", "--speed", "82.0", "--temperature", "47.0",
+                ]
+        })
+        #expect(commands.contains {
+            $0.arguments.suffix(2) == ["/usr/bin/true", "disable"]
+        })
+        #expect(commands.contains {
+            $0.arguments.suffix(2) == ["/usr/bin/true", "uninstall"]
+        })
+    }
+
+    @Test("fan policies and privileged command construction stay bounded")
+    func validatesFanPolicyAndPrivilegeBoundary() throws {
+        #expect(ProviderFanPolicy(speedPercent: 60, triggerTemperatureCelsius: 15) != nil)
+        #expect(ProviderFanPolicy(speedPercent: 90, triggerTemperatureCelsius: 125) != nil)
+        #expect(ProviderFanPolicy(speedPercent: 59.9, triggerTemperatureCelsius: 45) == nil)
+        #expect(ProviderFanPolicy(speedPercent: 90.1, triggerTemperatureCelsius: 45) == nil)
+        #expect(ProviderFanPolicy(speedPercent: 80, triggerTemperatureCelsius: 14.9) == nil)
+        #expect(ProviderFanPolicy(speedPercent: .infinity, triggerTemperatureCelsius: 45) == nil)
+
+        let policy = try #require(ProviderFanPolicy(
+            speedPercent: 80,
+            triggerTemperatureCelsius: 45
+        ))
+        let command = ProviderExtrasCommand.privilegedFanMutation(
+            executable: URL(fileURLWithPath: "/Applications/Test CLI/darkbloom"),
+            action: .enable,
+            policy: policy
+        )
+        #expect(command.executable.path == "/usr/bin/osascript")
+        #expect(command.arguments.first == "-e")
+        #expect(command.arguments[1].contains("with administrator privileges"))
+        #expect(command.arguments[1].contains("/usr/bin/codesign --verify --deep --strict"))
+        #expect(command.arguments[1].contains("io.darkbloom.provider"))
+        #expect(command.arguments[1].contains("SLDQ2GJ6TL"))
+        #expect(!command.arguments[1].contains("/Applications/Test CLI"))
+        #expect(command.arguments.suffix(6) == [
+            "/Applications/Test CLI/darkbloom", "enable",
+            "--speed", "80.0", "--temperature", "45.0",
+        ])
+
+        let unsupportedInstalled = ProviderFanStatus(
+            capability: ProviderFanStatus.controlCapability,
+            installed: true,
+            loaded: true,
+            helper: nil,
+            diagnostic: ProviderFanDiagnostic(
+                chip: "Apple",
+                supported: false,
+                gpuTemperatures: [],
+                fans: []
+            ),
+            helperErrorPresent: true,
+            diagnosticErrorPresent: true
+        )
+        #expect(unsupportedInstalled.advertisesOfficialControl)
+        #expect(!unsupportedInstalled.supportsOfficialControl)
+    }
+
+    @Test("fan mutations never elevate a PATH-discovered executable")
+    func rejectsPathExecutableForFanMutation() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dc-fan-path-\(UUID().uuidString)", isDirectory: true)
+        let pathDirectory = directory.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: pathDirectory,
+            withIntermediateDirectories: true
+        )
+        let pathExecutable = pathDirectory.appendingPathComponent("darkbloom")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: pathExecutable)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: pathExecutable.path
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let runner = ExtrasRunner(results: [:])
+        let client = ProviderExtrasClient(
+            policy: DarkbloomSourcePolicy(
+                homeDirectory: directory,
+                environmentPath: pathDirectory.path
+            ),
+            runner: runner
+        )
+
+        await #expect(throws: ProviderExtrasMutationError.executableUnavailable) {
+            try await client.disableFan()
+        }
+        #expect(await runner.commands.isEmpty)
     }
 
     @Test("failed refresh retains the original source timestamp as stale")

@@ -92,7 +92,7 @@ struct ProviderThermalView: View {
     }
 }
 
-/// Settings sections for the new CLI idle-memory and beta-feature controls.
+/// Settings sections for CLI idle-memory, beta, update, and fan controls.
 /// Writes are always routed through the parent-provided serial mutation gate.
 struct ProviderAdvancedSettingsView: View {
     @ObservedObject var store: ProviderExtrasStore
@@ -120,6 +120,8 @@ struct ProviderAdvancedSettingsView: View {
             Section("Provider · Experimental features") {
                 betaSection
             }
+            ProviderAutoUpdateSettingsView(store: store, performMutation: performMutation)
+            ProviderFanControlSettingsView(store: store, performMutation: performMutation)
             if let feedback {
                 Text(feedback)
                     .font(.caption)

@@ -7,6 +7,9 @@ public struct DarkbloomSourcePolicy: Equatable, Sendable {
     public static let legacyLogByteLimit = 128 * 1_024
     public static let processOutputByteLimit = 256 * 1_024
     public static let processTimeout: Duration = .seconds(3)
+    /// Fan helper mutations display a macOS administrator authorization prompt.
+    /// Keep this bounded while allowing enough time for the user to respond.
+    public static let fanMutationTimeout: Duration = .seconds(120)
     public static let lifecycleTimeout: Duration = .seconds(30)
     /// Native lifecycle commands may spend this long draining accepted work.
     public static let lifecycleDrainTimeoutSeconds = 600
@@ -38,6 +41,10 @@ public struct DarkbloomSourcePolicy: Equatable, Sendable {
     /// explicit user action. This is intentionally excluded from `allowedFiles`.
     public let localEndpointToken: URL
     public let providerConfig: URL
+    /// The canonical Developer ID-signed provider executable. Privileged fan
+    /// mutations are intentionally restricted to this path instead of the
+    /// broader read-only CLI discovery list.
+    public let providerAppExecutable: URL
     public let cliCandidates: [URL]
 
     public var allowedFiles: [URL] { [daemonState, loadedModels, legacyLog] }
@@ -49,7 +56,10 @@ public struct DarkbloomSourcePolicy: Equatable, Sendable {
         legacyLog = root.appendingPathComponent("provider.log")
         localEndpointToken = root.appendingPathComponent("local_token")
         providerConfig = homeDirectory.appendingPathComponent(".config/darkbloom/provider.toml")
-        cliCandidates = [root.appendingPathComponent("bin/darkbloom"), root.appendingPathComponent("Darkbloom.app/Contents/MacOS/darkbloom")] + environmentPath.split(separator: ":").map {
+        providerAppExecutable = root.appendingPathComponent(
+            "Darkbloom.app/Contents/MacOS/darkbloom"
+        )
+        cliCandidates = [root.appendingPathComponent("bin/darkbloom"), providerAppExecutable] + environmentPath.split(separator: ":").map {
             URL(fileURLWithPath: String($0), isDirectory: true).appendingPathComponent("darkbloom")
         }
     }

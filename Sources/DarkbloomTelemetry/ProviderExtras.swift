@@ -170,6 +170,7 @@ public struct ProviderFanDiagnostic: Equatable, Sendable {
 /// intentionally represented only by the source availability around this value;
 /// they can contain paths or other local diagnostic material.
 public struct ProviderFanStatus: Equatable, Sendable {
+    public static let controlCapability = "darkbloom-fan-helper-v1"
     public static let maximumHelperAge: TimeInterval = 15
 
     public let capability: String
@@ -227,6 +228,33 @@ public struct ProviderFanStatus: Equatable, Sendable {
         guard let helper, !helper.fans.isEmpty else { return diagnostic.fans }
         return helper.fans
     }
+
+    public var advertisesOfficialControl: Bool {
+        capability == Self.controlCapability
+    }
+
+    public var supportsOfficialControl: Bool {
+        advertisesOfficialControl && diagnostic.supported
+    }
+}
+
+public struct ProviderFanPolicy: Equatable, Sendable {
+    public static let speedRange = 60.0...90.0
+    public static let triggerTemperatureRange = 15.0...125.0
+    public static let `default` = ProviderFanPolicy(speedPercent: 80, triggerTemperatureCelsius: 45)!
+
+    public let speedPercent: Double
+    public let triggerTemperatureCelsius: Double
+
+    public init?(speedPercent: Double, triggerTemperatureCelsius: Double) {
+        guard speedPercent.isFinite,
+              triggerTemperatureCelsius.isFinite,
+              Self.speedRange.contains(speedPercent),
+              Self.triggerTemperatureRange.contains(triggerTemperatureCelsius)
+        else { return nil }
+        self.speedPercent = speedPercent
+        self.triggerTemperatureCelsius = triggerTemperatureCelsius
+    }
 }
 
 public struct ProviderAutoUpdateStatus: Equatable, Sendable {
@@ -274,7 +302,9 @@ public enum ProviderExtrasParseError: Error, Equatable, Sendable {
 
 public enum ProviderExtrasMutationError: Error, Equatable, Sendable {
     case invalidIdleMinutes
+    case invalidFanPolicy
     case unsupportedBetaFeature
+    case unsupportedFanControl
     case executableUnavailable
     case commandFailed
     case mutationInProgress
@@ -285,8 +315,12 @@ public extension ProviderExtrasMutationError {
         switch self {
         case .invalidIdleMinutes:
             "Choose an idle window from 0 to 10,080 minutes."
+        case .invalidFanPolicy:
+            "Choose a fan speed from 60% to 90% and a trigger from 15 °C to 125 °C."
         case .unsupportedBetaFeature:
             "That beta feature is not available for changes in this app."
+        case .unsupportedFanControl:
+            "This Darkbloom installation does not expose the official fan-control helper."
         case .executableUnavailable:
             "The Darkbloom command is unavailable."
         case .commandFailed:

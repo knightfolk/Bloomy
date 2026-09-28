@@ -125,6 +125,44 @@ final class ProviderExtrasStore: ObservableObject {
     }
 
     func setBeta(id: String, enabled: Bool) async throws {
+        try await performMutation {
+            try await self.client.setBeta(id: id, enabled: enabled)
+        }
+    }
+
+    func setAutoUpdate(enabled: Bool) async throws {
+        try await performMutation {
+            try await self.client.setAutoUpdate(enabled: enabled)
+        }
+    }
+
+    func enableFan(policy: ProviderFanPolicy) async throws {
+        try await performMutation {
+            try await self.client.enableFan(policy: policy)
+        }
+    }
+
+    func configureFan(policy: ProviderFanPolicy) async throws {
+        try await performMutation {
+            try await self.client.configureFan(policy: policy)
+        }
+    }
+
+    func disableFan() async throws {
+        try await performMutation {
+            try await self.client.disableFan()
+        }
+    }
+
+    func uninstallFan() async throws {
+        try await performMutation {
+            try await self.client.uninstallFan()
+        }
+    }
+
+    private func performMutation(
+        _ mutation: @escaping @Sendable () async throws -> Void
+    ) async throws {
         guard !mutationInFlight else {
             throw ProviderExtrasMutationError.mutationInProgress
         }
@@ -132,7 +170,7 @@ final class ProviderExtrasStore: ObservableObject {
         errorMessage = nil
         defer { mutationInFlight = false }
         do {
-            try await client.setBeta(id: id, enabled: enabled)
+            try await mutation()
             await refresh(force: true)
         } catch let error as ProviderExtrasMutationError {
             errorMessage = error.userMessage

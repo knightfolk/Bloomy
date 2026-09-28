@@ -4,6 +4,36 @@ public protocol ProviderExtrasProviding: Sendable {
     func refresh() async -> ProviderExtrasSnapshot
     func saveIdle(minutes: Int) async throws
     func setBeta(id: String, enabled: Bool) async throws
+    func setAutoUpdate(enabled: Bool) async throws
+    func enableFan(policy: ProviderFanPolicy) async throws
+    func configureFan(policy: ProviderFanPolicy) async throws
+    func disableFan() async throws
+    func uninstallFan() async throws
+}
+
+public extension ProviderExtrasProviding {
+    func setAutoUpdate(enabled: Bool) async throws {
+        throw ProviderExtrasMutationError.commandFailed
+    }
+    func enableFan(policy: ProviderFanPolicy) async throws {
+        throw ProviderExtrasMutationError.unsupportedFanControl
+    }
+    func configureFan(policy: ProviderFanPolicy) async throws {
+        throw ProviderExtrasMutationError.unsupportedFanControl
+    }
+    func disableFan() async throws {
+        throw ProviderExtrasMutationError.unsupportedFanControl
+    }
+    func uninstallFan() async throws {
+        throw ProviderExtrasMutationError.unsupportedFanControl
+    }
+}
+
+public enum ProviderFanMutationAction: String, Equatable, Sendable {
+    case enable
+    case configure
+    case disable
+    case uninstall
 }
 
 public enum ProviderExtrasCommand {
@@ -63,6 +93,57 @@ public enum ProviderExtrasCommand {
                 "beta", enabled ? "enable" : "disable", id, "--config", config.path,
             ]
         )
+    }
+
+    public static func setAutoUpdate(
+        executable: URL,
+        config: URL,
+        enabled: Bool
+    ) -> ProcessCommand {
+        ProcessCommand(
+            executable: executable,
+            arguments: [
+                "autoupdate", enabled ? "enable" : "disable", "--config", config.path,
+            ]
+        )
+    }
+
+    public static func privilegedFanMutation(
+        executable: URL,
+        action: ProviderFanMutationAction,
+        policy: ProviderFanPolicy? = nil
+    ) -> ProcessCommand {
+        var commandArguments = [executable.path, action.rawValue]
+        if let policy {
+            commandArguments += [
+                "--speed", canonicalNumber(policy.speedPercent),
+                "--temperature", canonicalNumber(policy.triggerTemperatureCelsius),
+            ]
+        }
+        return ProcessCommand(
+            executable: URL(fileURLWithPath: "/usr/bin/osascript"),
+            arguments: ["-e", privilegedFanScript] + commandArguments
+        )
+    }
+
+    private static let privilegedFanScript = #"""
+        on run argv
+            if (count of argv) < 2 then error "missing fan command"
+            set cliPath to item 1 of argv
+            set fanAction to item 2 of argv
+            if fanAction is not in {"enable", "configure", "disable", "uninstall"} then error "unsupported fan command"
+            set requirementText to "anchor apple generic and identifier \"io.darkbloom.provider\" and certificate leaf[subject.OU] = \"SLDQ2GJ6TL\""
+            set verifyCommand to "/usr/bin/codesign --verify --deep --strict -R " & quoted form of requirementText & " " & quoted form of cliPath
+            set commandText to quoted form of cliPath & " fan " & quoted form of fanAction
+            repeat with argumentIndex from 3 to count of argv
+                set commandText to commandText & " " & quoted form of item argumentIndex of argv
+            end repeat
+            do shell script verifyCommand & " && " & commandText with administrator privileges
+        end run
+        """#
+
+    private static func canonicalNumber(_ value: Double) -> String {
+        String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 }
 
@@ -189,11 +270,47 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
         try await runMutation(command)
     }
 
+    public func setAutoUpdate(enabled: Bool) async throws {
+        guard let executable = resolveExecutable() else {
+            throw ProviderExtrasMutationError.executableUnavailable
+        }
+        try await runMutation(ProviderExtrasCommand.setAutoUpdate(
+            executable: executable,
+            config: policy.providerConfig,
+            enabled: enabled
+        ))
+    }
+
+    public func enableFan(policy: ProviderFanPolicy) async throws {
+        try await runFanMutation(action: .enable, policy: policy)
+    }
+
+    public func configureFan(policy: ProviderFanPolicy) async throws {
+        try await runFanMutation(action: .configure, policy: policy)
+    }
+
+    public func disableFan() async throws {
+        try await runFanMutation(action: .disable)
+    }
+
+    public func uninstallFan() async throws {
+        try await runFanMutation(action: .uninstall)
+    }
+
     private func resolveExecutable() -> URL? {
         if let testOnlyExecutable { return testOnlyExecutable }
         return policy.cliCandidates.first {
             FileManager.default.isExecutableFile(atPath: $0.path)
         }
+    }
+
+    private func resolvePrivilegedFanExecutable() -> URL? {
+        if let testOnlyExecutable { return testOnlyExecutable }
+        let executable = policy.providerAppExecutable.resolvingSymlinksInPath()
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
+            return nil
+        }
+        return executable
     }
 
     private func readIdle(
@@ -309,6 +426,35 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
         } catch {
             // ProcessRunnerError can retain stderr; deliberately map it to a
             // fixed message before anything reaches UI or logs.
+            throw ProviderExtrasMutationError.commandFailed
+        }
+    }
+
+    private func runFanMutation(
+        action: ProviderFanMutationAction,
+        policy: ProviderFanPolicy? = nil
+    ) async throws {
+        guard let executable = resolvePrivilegedFanExecutable() else {
+            throw ProviderExtrasMutationError.executableUnavailable
+        }
+        let command = ProviderExtrasCommand.privilegedFanMutation(
+            executable: executable,
+            action: action,
+            policy: policy
+        )
+        do {
+            let result = try await runner.run(
+                command,
+                timeout: DarkbloomSourcePolicy.fanMutationTimeout,
+                outputLimit: DarkbloomSourcePolicy.mutationOutputByteLimit,
+                onOutput: nil
+            )
+            guard result.exitCode == 0 else {
+                throw ProviderExtrasMutationError.commandFailed
+            }
+        } catch let error as ProviderExtrasMutationError {
+            throw error
+        } catch {
             throw ProviderExtrasMutationError.commandFailed
         }
     }
