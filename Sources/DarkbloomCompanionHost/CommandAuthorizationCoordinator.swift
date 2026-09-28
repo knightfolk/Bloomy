@@ -20,6 +20,12 @@ public struct AuthorizedCommand: Equatable, Sendable {
     public let commandID: UUID
     public let proposal: ControlProposal
     public let deviceID: UUID
+
+    public init(commandID: UUID, proposal: ControlProposal, deviceID: UUID) {
+        self.commandID = commandID
+        self.proposal = proposal
+        self.deviceID = deviceID
+    }
 }
 
 public actor CommandAuthorizationCoordinator {

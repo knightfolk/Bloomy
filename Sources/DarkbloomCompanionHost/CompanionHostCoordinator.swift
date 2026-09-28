@@ -19,10 +19,10 @@ public actor CompanionHostCoordinator {
     private let registry: any PairedDeviceRegistry
     private let pairing: PairingCoordinator
     private let authorization: CommandAuthorizationCoordinator
-    private let dispatcher: HostCommandDispatcher
+    private let dispatcher: any HostOperationDispatching
     private let settings: CompanionSettingsCoordinator
     private let snapshots: any CompanionSnapshotProviding
-    private let audit: CompanionAuditLog
+    private let audit: any CompanionAuditRecording
 
     public init(
         hostID: UUID,
@@ -30,10 +30,10 @@ public actor CompanionHostCoordinator {
         pairing: PairingCoordinator,
         registry: any PairedDeviceRegistry,
         authorization: CommandAuthorizationCoordinator,
-        dispatcher: HostCommandDispatcher,
+        dispatcher: any HostOperationDispatching,
         settings: CompanionSettingsCoordinator,
         snapshots: any CompanionSnapshotProviding,
-        audit: CompanionAuditLog = .init()
+        audit: any CompanionAuditRecording = CompanionAuditLog()
     ) {
         self.hostID = hostID
         self.runtimeEpoch = runtimeEpoch
@@ -82,7 +82,7 @@ public actor CompanionHostCoordinator {
                     return failure(requestID: envelope.requestID, code: .malformedRequest, reason: nil)
                 }
                 let prepared = try await authorization.prepare(proposal, deviceID: deviceID)
-                await audit.append(.init(
+                try await audit.append(.init(
                     at: .now, event: .prepared, deviceID: deviceID,
                     requestID: proposal.requestID, commandID: prepared.commandID,
                     actionType: Self.actionType(proposal.action)
@@ -90,13 +90,13 @@ public actor CompanionHostCoordinator {
                 return Envelope(requestID: envelope.requestID, payload: .preparedCommand(prepared))
             case let .signedApproval(approval):
                 let command = try await authorization.authorize(approval, deviceID: deviceID)
-                await audit.append(.init(
+                try await audit.append(.init(
                     at: .now, event: .authorized, deviceID: deviceID,
                     requestID: command.proposal.requestID, commandID: command.commandID,
                     actionType: Self.actionType(command.proposal.action)
                 ))
                 let status = try await dispatcher.dispatch(command)
-                await audit.append(.init(
+                try await audit.append(.init(
                     at: .now, event: status.state == .succeeded ? .succeeded : .failed,
                     deviceID: deviceID, requestID: command.proposal.requestID,
                     commandID: command.commandID, actionType: Self.actionType(command.proposal.action)

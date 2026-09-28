@@ -13,7 +13,11 @@ public struct CompanionAuditEntry: Codable, Equatable, Sendable {
     public let actionType: String?
 }
 
-public actor CompanionAuditLog {
+public protocol CompanionAuditRecording: Sendable {
+    func append(_ entry: CompanionAuditEntry) async throws
+}
+
+public actor CompanionAuditLog: CompanionAuditRecording {
     private let maximumEntries: Int
     private var values: [CompanionAuditEntry] = []
     public init(maximumEntries: Int = 1_000) { self.maximumEntries = max(1, maximumEntries) }

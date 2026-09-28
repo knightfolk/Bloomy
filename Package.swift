@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "DarkbloomTelemetry", targets: ["DarkbloomTelemetry"]),
         .executable(name: "DarkbloomMonitor", targets: ["DarkbloomMonitor"]),
         .executable(name: "DarkbloomCompanionFixtureHost", targets: ["DarkbloomCompanionFixtureHost"]),
+        .executable(name: "DarkbloomCompanionHelper", targets: ["DarkbloomCompanionHelper"]),
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6"),
@@ -63,6 +64,11 @@ let package = Package(
                 "DarkbloomCompanionTransport", "DarkbloomTelemetry",
             ]
         ),
+        .executableTarget(
+            name: "DarkbloomCompanionHelper",
+            dependencies: ["DarkbloomCompanionHost", "DarkbloomCompanionProtocol", "DarkbloomTelemetry"],
+            linkerSettings: [.linkedLibrary("sqlite3")]
+        ),
         .testTarget(
             name: "DarkbloomTelemetryTests",
             dependencies: ["DarkbloomTelemetry", "DarkbloomMonitor"],
@@ -77,7 +83,7 @@ let package = Package(
             name: "DarkbloomCompanionHostTests",
             dependencies: [
                 "DarkbloomCompanionHost", "DarkbloomCompanionProtocol",
-                "DarkbloomCompanionTransport",
+                "DarkbloomCompanionTransport", "DarkbloomCompanionHelper", "DarkbloomTelemetry",
             ]
         ),
     ]

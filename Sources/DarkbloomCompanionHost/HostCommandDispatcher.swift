@@ -77,7 +77,12 @@ public actor WorkspaceMacAppLifecycleController: MacAppLifecycleControlling {
 
 public enum HostDispatchError: Error, Equatable, Sendable { case busy }
 
-public actor HostCommandDispatcher {
+public protocol HostOperationDispatching: Sendable {
+    func dispatch(_ command: AuthorizedCommand) async throws -> OperationStatus
+    func operation(_ operationID: UUID, deviceID: UUID) async -> OperationStatus?
+}
+
+public actor HostCommandDispatcher: HostOperationDispatching {
     private let provider: any ProviderControlling
     private let settings: CompanionSettingsCoordinator
     private let app: any MacAppLifecycleControlling
