@@ -36,11 +36,17 @@ final class CompanionClientTests: XCTestCase {
         )
         let encoded = try PairingQRCode.encode(invitation)
         XCTAssertLessThanOrEqual(encoded.utf8.count, PairingQRCode.maximumBytes)
-        XCTAssertEqual(try PairingQRCode.decode(encoded), invitation)
+        let decoded = try PairingQRCode.decode(encoded)
+        XCTAssertEqual(decoded.hostID, invitation.hostID)
+        XCTAssertEqual(decoded.invitationID, invitation.invitationID)
+        XCTAssertEqual(decoded.invitationSecret, invitation.invitationSecret)
+        XCTAssertEqual(decoded.hostSPKIPin, invitation.hostSPKIPin)
+        XCTAssertEqual(decoded.routes, invitation.routes)
+        XCTAssertEqual(decoded.expiresAt.timeIntervalSince1970, invitation.expiresAt.timeIntervalSince1970, accuracy: 0.001)
     }
 
     @MainActor
-    func testStoreRestoresOnlyExplicitlyPersistedHost() throws {
+    func testLegacySingleHostMigratesToIdentityKeyedRegistry() throws {
         let suite = "CompanionClientTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -51,6 +57,46 @@ final class CompanionClientTests: XCTestCase {
             spkiPin: Data(repeating: 3, count: 32)
         )
         defaults.set(try JSONEncoder().encode(host), forKey: "companion.host")
-        XCTAssertEqual(CompanionStore(defaults: defaults).host, host)
+        let store = CompanionStore(defaults: defaults)
+        XCTAssertEqual(store.host, host)
+        XCTAssertEqual(store.hosts.map(\.hostID), [host.hostID])
+        XCTAssertNil(defaults.data(forKey: "companion.host"))
+        XCTAssertNotNil(defaults.data(forKey: HostRegistry.storageKey))
+    }
+
+    func testRegistryAllowsDuplicateNamesAndRemovesOnlyMatchingIdentity() throws {
+        let name = "Darkbloom Mac"
+        let first = makeHost(name: name)
+        let second = makeHost(name: name)
+        var registry = HostRegistry(hosts: [first, second], selectedHostID: second.hostID)
+
+        XCTAssertEqual(registry.hosts.map(\.name), [name, name])
+        XCTAssertEqual(registry.selectedHostID, second.hostID)
+        XCTAssertEqual(registry.remove(first.hostID), first)
+        XCTAssertEqual(registry.hosts, [second])
+        XCTAssertEqual(registry.selectedHostID, second.hostID)
+    }
+
+    func testRegistryPersistsSelectedIdentity() throws {
+        let suite = "CompanionClientTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = makeHost(name: "Mac")
+        let second = makeHost(name: "Mac")
+        var registry = HostRegistry(hosts: [first, second], selectedHostID: first.hostID)
+        registry.select(second.hostID)
+        registry.save(to: defaults)
+
+        let restored = HostRegistry.load(from: defaults)
+        XCTAssertEqual(restored, registry)
+        XCTAssertEqual(restored.selectedHost?.hostID, second.hostID)
+    }
+
+    private func makeHost(name: String) -> StoredHost {
+        StoredHost(
+            hostID: UUID(), name: name,
+            routes: .init(candidates: [.init(kind: .tailnet, host: "100.64.0.1", port: 49_444)]),
+            spkiPin: Data(repeating: 3, count: 32)
+        )
     }
 }

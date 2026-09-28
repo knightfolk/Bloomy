@@ -121,6 +121,13 @@ private enum JSONWireSchema {
                 try closed(bucket, ["start", "end", "observations"], "historyPage.buckets[\(index)]")
                 try observations(bucket["observations"], path: "historyPage.buckets[\(index)].observations")
             }
+        case .alertHistoryQuery:
+            try closed(value, ["cursor", "maximumRecords"], type.rawValue)
+        case .alertHistoryPage:
+            try closed(value, ["hostID", "records", "nextCursor"], type.rawValue)
+            for (index, record) in dictionaries(value["records"]).enumerated() {
+                try closed(record, ["id", "code", "transition", "occurredAt", "observedDurationSeconds", "observationCount"], "alertHistoryPage.records[\(index)]")
+            }
         case .settingsDraft:
             try closed(value, [], type.rawValue)
         case .settingsSnapshot:
@@ -155,6 +162,8 @@ private enum JSONWireSchema {
                 try pairedDevice(device, path: "deviceList.devices[\(index)]")
             }
         case .deviceRevoke:
+            try closed(value, ["deviceID"], type.rawValue)
+        case .deviceRevokeResponse:
             try closed(value, ["deviceID"], type.rawValue)
         case .safeError:
             try closed(value, ["code", "reason", "retryAfterSeconds"], type.rawValue)

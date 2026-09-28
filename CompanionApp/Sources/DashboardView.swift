@@ -22,14 +22,14 @@ struct DashboardView: View {
                 }
                 .padding()
             }
-            .navigationTitle(store.host?.name ?? "Darkbloom")
+            .navigationTitle(store.host.map(store.displayName(for:)) ?? "Darkbloom")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { Task { await store.refresh() } } label: { Image(systemName: "arrow.clockwise") }
                         .accessibilityLabel("Refresh host status")
                 }
             }
-            .task {
+            .task(id: store.selectedHostID) {
                 if store.connection != .connected { await store.connectAfterApproval() }
                 else { await store.refresh() }
             }

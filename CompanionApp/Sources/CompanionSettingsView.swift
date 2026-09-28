@@ -8,6 +8,8 @@ struct CompanionSettingsView: View {
     @State private var startupPreload = false
     @State private var enabledModels: Set<String> = []
     @State private var preloadModels: Set<String> = []
+    @State private var confirmForget = false
+    @State private var confirmRevoke = false
 
     var body: some View {
         NavigationStack {
@@ -67,11 +69,32 @@ struct CompanionSettingsView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
 
-                Section("Connection") {
-                    LabeledContent("Host", value: store.host?.name ?? "None")
-                    LabeledContent("Status", value: String(describing: store.connection))
-                    Button("Reconnect") { Task { await store.connectAfterApproval() } }
-                    Button("Forget this Mac", role: .destructive) { Task { await store.forgetHost() } }
+                Section("Hosts") {
+                    if !store.hosts.isEmpty {
+                        Picker("Active Mac", selection: Binding(
+                            get: { store.selectedHostID },
+                            set: { if let hostID = $0 { store.selectHost(hostID) } }
+                        )) {
+                            ForEach(store.hosts) { host in
+                                Text(store.displayName(for: host)).tag(Optional(host.hostID))
+                            }
+                        }
+                        LabeledContent("Status", value: statusLabel)
+                        Button("Reconnect") { Task { await store.connectAfterApproval() } }
+                        Button("Forget this Mac locally", role: .destructive) { confirmForget = true }
+                        Button("Revoke this iPhone on Mac", role: .destructive) { confirmRevoke = true }
+                            .disabled(store.host == nil)
+                        Text("Forgetting removes this Mac’s saved route and pin from this iPhone. Revoking also removes this iPhone’s pairing from the selected Mac.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else {
+                        Text("No paired Macs")
+                    }
+                }
+
+                Section("Selected host access") {
+                    if let host = store.host {
+                        LabeledContent("Host ID", value: host.hostID.uuidString.lowercased())
+                    }
                 }
 
                 Section("Remote access") {
@@ -82,6 +105,21 @@ struct CompanionSettingsView: View {
             }
             .navigationTitle("Settings")
             .task { if store.settings == nil { await load() } }
+            .onChange(of: store.selectedHostID) { _, _ in
+                Task { if store.settings == nil { await load() } }
+            }
+            .confirmationDialog("Forget this Mac from this iPhone?", isPresented: $confirmForget, titleVisibility: .visible) {
+                Button("Forget locally", role: .destructive) { Task { await store.forgetHost() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The Mac will still remember this iPhone until you revoke it there.")
+            }
+            .confirmationDialog("Revoke this iPhone on the selected Mac?", isPresented: $confirmRevoke, titleVisibility: .visible) {
+                Button("Revoke pairing", role: .destructive) { Task { await store.revokeSelectedPhone() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The selected Mac will remove this iPhone’s pairing. Only that Mac is affected.")
+            }
         }
     }
 
@@ -93,6 +131,17 @@ struct CompanionSettingsView: View {
             startupPreload = saved.startupPreload
             enabledModels = Set(saved.enabledModels)
             preloadModels = Set(saved.preloadModels)
+        }
+    }
+
+    private var statusLabel: String {
+        switch store.connection {
+        case .unpaired: "Not paired"
+        case .pairing: "Pairing"
+        case .awaitingApproval: "Awaiting Mac approval"
+        case .connecting: "Connecting"
+        case .connected: store.snapshotIsStale ? "Connected · stale data" : "Connected"
+        case .disconnected: "Disconnected"
         }
     }
 }

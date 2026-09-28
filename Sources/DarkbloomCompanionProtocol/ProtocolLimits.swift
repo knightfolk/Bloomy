@@ -8,6 +8,7 @@ public enum ProtocolLimits {
     public static let maximumModels = 256
     public static let maximumObservations = 64
     public static let maximumHistoryBuckets = 168
+    public static let maximumAlertHistoryRecordsPerPage = 100
     public static let maximumRouteHints = 8
     public static let maximumDevices = 8
     public static let maximumIdentifierBytes = 128

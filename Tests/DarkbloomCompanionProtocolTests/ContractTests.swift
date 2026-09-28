@@ -88,9 +88,10 @@ struct ContractTests {
             .pairingInvitation, .enrollmentProof, .pendingEnrollment, .enrollmentResult,
             .sessionChallenge, .sessionAuthenticate,
             .monitorSubscribe, .companionSnapshot, .historyQuery, .historyPage,
+            .alertHistoryQuery, .alertHistoryPage,
             .settingsDraft, .settingsSnapshot, .settingsPatch, .settingsSave,
             .controlProposal, .preparedCommand, .signedApproval, .operationQuery,
-            .operationStatus, .deviceList, .deviceRevoke, .safeError,
+            .operationStatus, .deviceList, .deviceRevoke, .deviceRevokeResponse, .safeError,
         ]))
 
         for type in MessageType.allCases {
@@ -259,6 +260,17 @@ extension Envelope {
                 buckets: [HistoryBucket(start: now.addingTimeInterval(-3_600), end: now, observations: [])],
                 hostTimeZoneID: "America/Phoenix", coverage: 1, nextCursor: nil
             ))
+        case .alertHistoryQuery:
+            payload = .alertHistoryQuery(AlertHistoryQuery(cursor: nil, maximumRecords: 20))
+        case .alertHistoryPage:
+            payload = .alertHistoryPage(try AlertHistoryPage.validated(
+                hostID: hostID,
+                records: [CompanionAlertRecord(
+                    id: 1, code: .providerOffline, transition: .raised,
+                    occurredAt: now, observedDurationSeconds: 60, observationCount: 4
+                )],
+                nextCursor: nil
+            ))
         case .settingsDraft:
             payload = .settingsDraft(SettingsDraftRequest())
         case .settingsSnapshot:
@@ -293,6 +305,8 @@ extension Envelope {
             ]))
         case .deviceRevoke:
             payload = .deviceRevoke(DeviceRevokeRequest(deviceID: deviceID))
+        case .deviceRevokeResponse:
+            payload = .deviceRevokeResponse(DeviceRevokeResponse(deviceID: deviceID))
         case .safeError:
             payload = .safeError(SafeErrorResponse(code: .unavailable, reason: .sourceRefreshFailed, retryAfterSeconds: 5))
         }

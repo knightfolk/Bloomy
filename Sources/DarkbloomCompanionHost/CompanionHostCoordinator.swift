@@ -1,5 +1,6 @@
 import DarkbloomCompanionProtocol
 import DarkbloomCompanionTransport
+import DarkbloomTelemetry
 import Foundation
 
 public protocol CompanionSnapshotProviding: Sendable {
@@ -23,6 +24,7 @@ public actor CompanionHostCoordinator {
     private let settings: CompanionSettingsCoordinator
     private let snapshots: any CompanionSnapshotProviding
     private let audit: any CompanionAuditRecording
+    private let alertHistory: (any AlertHistoryRecording)?
 
     public init(
         hostID: UUID,
@@ -33,7 +35,8 @@ public actor CompanionHostCoordinator {
         dispatcher: any HostOperationDispatching,
         settings: CompanionSettingsCoordinator,
         snapshots: any CompanionSnapshotProviding,
-        audit: any CompanionAuditRecording = CompanionAuditLog()
+        audit: any CompanionAuditRecording = CompanionAuditLog(),
+        alertHistory: (any AlertHistoryRecording)? = nil
     ) {
         self.hostID = hostID
         self.runtimeEpoch = runtimeEpoch
@@ -44,6 +47,7 @@ public actor CompanionHostCoordinator {
         self.settings = settings
         self.snapshots = snapshots
         self.audit = audit
+        self.alertHistory = alertHistory
     }
 
     public func authenticate(_ value: SessionAuthentication, challenge: SessionChallenge) async -> Bool {
@@ -71,6 +75,31 @@ public actor CompanionHostCoordinator {
                         for: deviceID, capabilities: record.device.capabilities
                     ))
                 )
+            case let .alertHistoryQuery(query):
+                try require(.history, in: record)
+                guard let alertHistory else {
+                    return failure(requestID: envelope.requestID, code: .unavailable, reason: .sourceMissing)
+                }
+                let retained = try await alertHistory.recentHistory(limit: 2_000)
+                let matching = retained
+                    .filter { value in query.cursor.map { value.id < $0 } ?? true }
+                    .sorted { $0.id > $1.id }
+                let candidates = Array(matching.prefix(query.maximumRecords + 1))
+                let hasOlder = candidates.count > query.maximumRecords
+                let selected = Array(candidates.prefix(query.maximumRecords))
+                let rows = selected.compactMap { value -> CompanionAlertRecord? in
+                    guard let code = CompanionAlertCode(rawValue: value.code.rawValue),
+                          let transition = CompanionAlertTransition(rawValue: value.kind.rawValue) else { return nil }
+                    return CompanionAlertRecord(
+                        id: value.id, code: code, transition: transition,
+                        occurredAt: value.occurredAt,
+                        observedDurationSeconds: value.observedDurationSeconds,
+                        observationCount: value.observationCount
+                    )
+                }
+                let cursor = hasOlder ? rows.last?.id : nil
+                let page = try AlertHistoryPage.validated(hostID: hostID, records: rows, nextCursor: cursor)
+                return Envelope(requestID: envelope.requestID, payload: .alertHistoryPage(page))
             case .settingsDraft:
                 try require(.settingsRead, in: record)
                 return Envelope(
@@ -114,7 +143,16 @@ public actor CompanionHostCoordinator {
                     requestID: envelope.requestID,
                     payload: .deviceList(.init(mode: .response, devices: devices))
                 )
-            case .settingsPatch, .settingsSave, .deviceRevoke:
+            case let .deviceRevoke(request):
+                guard request.deviceID == deviceID else {
+                    return failure(requestID: envelope.requestID, code: .forbidden, reason: nil)
+                }
+                try await registry.revoke(deviceID)
+                return Envelope(
+                    requestID: envelope.requestID,
+                    payload: .deviceRevokeResponse(.init(deviceID: deviceID))
+                )
+            case .settingsPatch, .settingsSave:
                 return failure(requestID: envelope.requestID, code: .forbidden, reason: nil)
             default:
                 return failure(requestID: envelope.requestID, code: .malformedRequest, reason: nil)

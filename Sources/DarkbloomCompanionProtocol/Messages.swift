@@ -13,6 +13,8 @@ public enum MessageType: String, Codable, CaseIterable, Equatable, Sendable {
     case companionSnapshot
     case historyQuery
     case historyPage
+    case alertHistoryQuery
+    case alertHistoryPage
     case settingsDraft
     case settingsSnapshot
     case settingsPatch
@@ -24,6 +26,7 @@ public enum MessageType: String, Codable, CaseIterable, Equatable, Sendable {
     case operationStatus
     case deviceList
     case deviceRevoke
+    case deviceRevokeResponse
     case safeError
 
     public var isBootstrapMessage: Bool {
@@ -250,6 +253,11 @@ public struct DeviceRevokeRequest: Codable, Equatable, Sendable {
     public init(deviceID: UUID) { self.deviceID = deviceID }
 }
 
+public struct DeviceRevokeResponse: Codable, Equatable, Sendable {
+    public let deviceID: UUID
+    public init(deviceID: UUID) { self.deviceID = deviceID }
+}
+
 public enum SafeErrorCode: String, Codable, Equatable, Sendable {
     case malformedRequest
     case unsupportedVersion
@@ -284,6 +292,8 @@ public enum EnvelopePayload: Equatable, Sendable {
     case companionSnapshot(CompanionSnapshot)
     case historyQuery(HistoryQuery)
     case historyPage(HistoryPage)
+    case alertHistoryQuery(AlertHistoryQuery)
+    case alertHistoryPage(AlertHistoryPage)
     case settingsDraft(SettingsDraftRequest)
     case settingsSnapshot(SettingsSnapshot)
     case settingsPatch(SettingsPatchRequest)
@@ -295,6 +305,7 @@ public enum EnvelopePayload: Equatable, Sendable {
     case operationStatus(OperationStatus)
     case deviceList(DeviceListMessage)
     case deviceRevoke(DeviceRevokeRequest)
+    case deviceRevokeResponse(DeviceRevokeResponse)
     case safeError(SafeErrorResponse)
 
     public var messageType: MessageType {
@@ -309,6 +320,8 @@ public enum EnvelopePayload: Equatable, Sendable {
         case .companionSnapshot: .companionSnapshot
         case .historyQuery: .historyQuery
         case .historyPage: .historyPage
+        case .alertHistoryQuery: .alertHistoryQuery
+        case .alertHistoryPage: .alertHistoryPage
         case .settingsDraft: .settingsDraft
         case .settingsSnapshot: .settingsSnapshot
         case .settingsPatch: .settingsPatch
@@ -320,6 +333,7 @@ public enum EnvelopePayload: Equatable, Sendable {
         case .operationStatus: .operationStatus
         case .deviceList: .deviceList
         case .deviceRevoke: .deviceRevoke
+        case .deviceRevokeResponse: .deviceRevokeResponse
         case .safeError: .safeError
         }
     }
@@ -337,6 +351,8 @@ public enum EnvelopePayload: Equatable, Sendable {
         case let .companionSnapshot(value): try value.validate()
         case let .historyQuery(value): try value.validate()
         case let .historyPage(value): try value.validate()
+        case let .alertHistoryQuery(value): try value.validate()
+        case let .alertHistoryPage(value): try value.validate()
         case .settingsDraft: break
         case let .settingsSnapshot(value): try value.validate()
         case let .settingsPatch(value):
@@ -350,7 +366,7 @@ public enum EnvelopePayload: Equatable, Sendable {
         case .operationQuery: break
         case let .operationStatus(value): try value.validate()
         case let .deviceList(value): try value.validate()
-        case .deviceRevoke, .safeError: break
+        case .deviceRevoke, .deviceRevokeResponse, .safeError: break
         }
     }
 }
@@ -412,6 +428,8 @@ public struct Envelope: Codable, Equatable, Sendable {
         case .companionSnapshot: payload = .companionSnapshot(try container.decode(CompanionSnapshot.self, forKey: .payload))
         case .historyQuery: payload = .historyQuery(try container.decode(HistoryQuery.self, forKey: .payload))
         case .historyPage: payload = .historyPage(try container.decode(HistoryPage.self, forKey: .payload))
+        case .alertHistoryQuery: payload = .alertHistoryQuery(try container.decode(AlertHistoryQuery.self, forKey: .payload))
+        case .alertHistoryPage: payload = .alertHistoryPage(try container.decode(AlertHistoryPage.self, forKey: .payload))
         case .settingsDraft: payload = .settingsDraft(try container.decode(SettingsDraftRequest.self, forKey: .payload))
         case .settingsSnapshot: payload = .settingsSnapshot(try container.decode(SettingsSnapshot.self, forKey: .payload))
         case .settingsPatch: payload = .settingsPatch(try container.decode(SettingsPatchRequest.self, forKey: .payload))
@@ -423,6 +441,7 @@ public struct Envelope: Codable, Equatable, Sendable {
         case .operationStatus: payload = .operationStatus(try container.decode(OperationStatus.self, forKey: .payload))
         case .deviceList: payload = .deviceList(try container.decode(DeviceListMessage.self, forKey: .payload))
         case .deviceRevoke: payload = .deviceRevoke(try container.decode(DeviceRevokeRequest.self, forKey: .payload))
+        case .deviceRevokeResponse: payload = .deviceRevokeResponse(try container.decode(DeviceRevokeResponse.self, forKey: .payload))
         case .safeError: payload = .safeError(try container.decode(SafeErrorResponse.self, forKey: .payload))
         }
         try validate()
@@ -445,6 +464,8 @@ public struct Envelope: Codable, Equatable, Sendable {
         case let .companionSnapshot(value): try container.encode(value, forKey: .payload)
         case let .historyQuery(value): try container.encode(value, forKey: .payload)
         case let .historyPage(value): try container.encode(value, forKey: .payload)
+        case let .alertHistoryQuery(value): try container.encode(value, forKey: .payload)
+        case let .alertHistoryPage(value): try container.encode(value, forKey: .payload)
         case let .settingsDraft(value): try container.encode(value, forKey: .payload)
         case let .settingsSnapshot(value): try container.encode(value, forKey: .payload)
         case let .settingsPatch(value): try container.encode(value, forKey: .payload)
@@ -456,6 +477,7 @@ public struct Envelope: Codable, Equatable, Sendable {
         case let .operationStatus(value): try container.encode(value, forKey: .payload)
         case let .deviceList(value): try container.encode(value, forKey: .payload)
         case let .deviceRevoke(value): try container.encode(value, forKey: .payload)
+        case let .deviceRevokeResponse(value): try container.encode(value, forKey: .payload)
         case let .safeError(value): try container.encode(value, forKey: .payload)
         }
     }

@@ -7,7 +7,7 @@ struct RootView: View {
     var body: some View {
         @Bindable var store = store
         Group {
-            if store.host == nil {
+            if store.hosts.isEmpty {
                 PairingView()
             } else {
                 TabView {
@@ -17,8 +17,14 @@ struct RootView: View {
                         .tabItem { Label("Models", systemImage: "shippingbox") }
                     ControlsView()
                         .tabItem { Label("Control", systemImage: "switch.2") }
+                    FleetOverview()
+                        .tabItem { Label("Fleet", systemImage: "server.rack") }
+                    AlertHistoryView()
+                        .tabItem { Label("Alerts", systemImage: "bell.badge") }
                     CompanionSettingsView()
                         .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }
+                    PairingView()
+                        .tabItem { Label("Add Mac", systemImage: "plus.circle") }
                 }
             }
         }
@@ -67,14 +73,14 @@ private struct CommandApprovalView: View {
                 LabeledContent("Expires", value: command.expiresAt.formatted(date: .omitted, time: .standard))
                 Spacer()
                 Button {
-                    Task { await store.approvePendingCommand() }
+                    Task { await store.approvePendingCommand(for: command) }
                 } label: {
                     Label("Approve with Face ID or Passcode", systemImage: "faceid")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                Button("Cancel", role: .cancel) { store.cancelPendingCommand() }
+                Button("Cancel", role: .cancel) { store.cancelPendingCommand(command) }
                     .frame(maxWidth: .infinity)
             }
             .padding(24)
