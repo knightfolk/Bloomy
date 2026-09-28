@@ -6,9 +6,10 @@ Darkbloom Control is a native macOS menu-bar companion for a local Darkbloom
 provider. It turns provider telemetry into a compact infographic popup and
 keeps model and lifecycle controls behind explicit safety checks.
 
-**v1.7** adds compact model cards in two columns, collapsible Enabled and
-Available groups, independent daily-runtime forecasts, and a menu-bar GPU ring.
-It builds on v1.6's built-in Chat and explicit local or paid-network routing.
+**v1.8** adds safe live model selection, official fan-helper controls, native
+System/Light/Dark appearance, operational alerts and sanitized support packets,
+plus an explainable observe-only recommendation journal. It builds on v1.7's
+compact model cards, daily-runtime forecasts, and menu-bar GPU ring.
 Previously named Darkbloom Monitor.
 
 ## Download
@@ -236,8 +237,10 @@ or wildcard privileged helper is added. The authorization bridge refuses
 Darkbloom Developer ID before running it. Verification guidance never removes
 enrollment.
 
-After saving model configuration, restart the provider to apply it. The monitor
-does not claim to verify the applied runtime configuration through private APIs.
+After saving model configuration, use **Apply Live** when fresh Darkbloom 0.9.11
+state confirms that the graceful switch is safe. Restart remains available for
+other saved provider changes. Control verifies outcomes through the CLI's public
+status and state files rather than private APIs.
 
 ## Limitations
 
@@ -249,7 +252,7 @@ does not claim to verify the applied runtime configuration through private APIs.
   weekly coverage is labeled explicitly.
 - A per-model throughput breakdown appears only after at least two models have
   valid measured samples for the current local calendar day.
-- CLI output and APIs may evolve after the validated 0.9.7 contract. Older CLI versions omit unsupported diagnostics.
+- CLI output and APIs may evolve after the validated 0.9.11 contract. Older CLI versions omit unsupported diagnostics.
 - Chat is a first non-streaming version with cancellation; responses arrive
   as a single completion. The paid network route's balance display is
   advisory only — the network decides reservation sufficiency per request,
