@@ -2,7 +2,8 @@
 
 ## Target structure
 
-The Swift 6 package has two targets:
+The Swift 6 package separates the shipping Mac app from portable companion
+contracts and the still-unshipped helper:
 
 - `DarkbloomTelemetry` is UI-independent. It owns fixed source policy,
   acquisition, parsing, normalization, freshness, derivation, authenticated
@@ -12,6 +13,22 @@ The Swift 6 package has two targets:
   an accessory application built around an `NSStatusItem` and `NSPopover`, with
   SwiftUI content hosted inside the popover and a retained, resizable Settings
   `NSWindow`. It has no Dock icon or main/document window.
+- `DarkbloomCompanionProtocol` owns the bounded, versioned wire DTOs, QR
+  invitations, snapshot fields, alert pages, capabilities, and signed command
+  bytes shared by the Mac and iPhone.
+- `DarkbloomCompanionTransport` owns pinned TLS 1.3 framing and device
+  authentication. It does not choose public routes or weaken the enrolled host
+  pin when a route changes.
+- `DarkbloomCompanionHost` owns pairing, device capabilities, revocation,
+  prepared-command authorization, alert paging, and typed host dispatch.
+- `DarkbloomCompanionHelper` contains the process lock, durable operation intent,
+  capped audit, allowlisted snapshot adapter, exact application identity checks,
+  and explicit `SMAppService` registration API. Its executable is intentionally
+  inert until signed helper packaging and local approval are completed.
+- `CompanionApp` is the native SwiftUI iPhone client. It persists independently
+  paired host identities, selects one host for commands, and shows host-attributed
+  fleet and alert state. User-installed Tailscale supplies private remote routes
+  for the first release.
 
 The telemetry library does not import SwiftUI or AppKit, and the views never
 read a file or launch a process directly.
@@ -92,6 +109,18 @@ read a file or launch a process directly.
    responses. Network demand is context for model selection, never a local
    job-progress or earnings measurement. It is informational only: it does not
    authorize or trigger local model loading, unloading, or switching.
+13. `OperationalAlertEngine` derives fixed-code transitions from bounded
+    telemetry, suppresses expected scheduled idle/cold-start states, and stores
+    deduplicated history in a capped private SQLite database. Native notification
+    permission and local history are independent.
+14. `RecommendationEvaluator` consumes a versioned immutable evidence snapshot.
+    Only fresh network demand joined to authoritative local inventory, current
+    process identity, and demonstrated resident readiness can produce a
+    `consider(model)` result. The capped SQLite journal records both stay and
+    consider decisions for deterministic replay; it has no mutation dependency.
+15. App appearance is a persisted three-state preference. System applies no
+    AppKit or SwiftUI override, so macOS and iOS appearance changes propagate
+    live; Light and Dark apply native platform overrides.
 
 ```text
 approved files -----> LocalTelemetrySource --\

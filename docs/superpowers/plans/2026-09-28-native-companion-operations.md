@@ -43,10 +43,10 @@
 **Interfaces:**
 - Produces: bounded `Envelope`, `CompanionSnapshot`, pairing, pinned TLS, paired-device registry, signed command preparation, host coordinator, and iOS client/store types.
 
-- [ ] Integrate the repository's own protocol, transport, host, and iOS candidate commits without importing the experimental embedded transport or dated review documents.
-- [ ] Reconcile `ProviderControlService` and `SourcePolicy` against the newer live-switch, fan-control, and freshness work on this branch.
-- [ ] Add regression tests for authenticated idle sessions and current CLI command deadlines.
-- [ ] Run protocol, host, telemetry, and iOS client tests; commit.
+- [x] Integrate the repository's own protocol, transport, host, and iOS candidate commits without importing the experimental embedded transport or dated review documents.
+- [x] Reconcile `ProviderControlService` and `SourcePolicy` against the newer live-switch, fan-control, and freshness work on this branch.
+- [x] Add regression tests for authenticated idle sessions and current CLI command deadlines.
+- [x] Run protocol, host, telemetry, and iOS client tests; commit.
 
 ### Task 2: Add evidence-backed alerts and a bounded support packet
 
@@ -63,10 +63,10 @@
 - Consumes: `TelemetrySnapshot`, fixed lifecycle/model failure enums, existing app support directory and export-preview patterns.
 - Produces: `AlertRecord`, `AlertTransition`, `AlertHistoryRecording`, `SupportPacketSnapshot`, and a notification adapter that accepts only sanitized records.
 
-- [ ] Add failing tests for sustained outage, deduplication, recovery, scheduled-idle suppression, restart persistence, retention, byte caps, and secret-canary exclusion.
-- [ ] Implement a pure alert transition engine and capped SQLite history using fixed templates and bounded numeric facts.
-- [ ] Add macOS notification delivery that preserves history when permission is denied and never requests permission merely to start monitoring.
-- [ ] Add immutable preview/export for a deterministic allowlist-only support packet; commit.
+- [x] Add failing tests for sustained outage, deduplication, recovery, scheduled-idle suppression, restart persistence, retention, byte caps, and secret-canary exclusion.
+- [x] Implement a pure alert transition engine and capped SQLite history using fixed templates and bounded numeric facts.
+- [x] Add macOS notification delivery that preserves history when permission is denied and never requests permission merely to start monitoring.
+- [x] Add immutable preview/export for a deterministic allowlist-only support packet; commit.
 
 ### Task 3: Wire the signed persistent helper and live host adapters
 
@@ -98,9 +98,9 @@
 - Consumes: fresh network capacity, enabled/downloaded inventory, measured token rates, bounded earnings observations, current model, and readiness/memory evidence.
 - Produces: `RecommendationDecision` with every factor, source timestamp, confidence class, blockers, selected action (`stay` or `consider(model)`), and a capped persistent journal.
 
-- [ ] Add failing tests proving stale, duplicate, partial, cross-account, or incompatible evidence cannot create a stronger recommendation.
-- [ ] Extend the existing ranker into an explainable decision without manufacturing an earnings forecast.
-- [ ] Persist both `stay` and `consider` decisions idempotently and expose recent evidence in the Opportunity UI.
+- [x] Add failing tests proving stale, duplicate, partial, cross-account, or incompatible evidence cannot create a stronger recommendation.
+- [x] Extend the existing ranker into an explainable decision without manufacturing an earnings forecast.
+- [x] Persist both `stay` and `consider` decisions idempotently and expose recent evidence in the Opportunity UI.
 - [ ] Add journal summaries to the sanitized host snapshot and support packet; commit.
 
 ### Task 5: Add multi-host iPhone aggregation and alert history
@@ -115,12 +115,26 @@
 - Consumes: independently paired host records and sanitized host alert/recommendation pages.
 - Produces: persistent `[StoredHost]`, per-host sessions, combined read-only overview, host-specific commands, and bounded alert history.
 
-- [ ] Add failing client tests for two hosts, duplicate display names, independent failures, clock skew, host removal, and command isolation.
-- [ ] Replace the single-host store with an identity-keyed registry and one bounded session state per selected host.
-- [ ] Add combined online/provider/model/jobs/earnings/temperature/alert presentation while preserving attribution and freshness.
+- [x] Add failing client tests for two hosts, duplicate display names, independent failures, clock skew, host removal, and command isolation.
+- [x] Replace the single-host store with an identity-keyed registry and one bounded session state per selected host.
+- [x] Add combined online/provider/model/jobs/earnings/temperature/alert presentation while preserving attribution and freshness.
 - [ ] Add host-specific alert history and recommendation evidence views; commit.
 
-### Task 6: Verify the complete native product and remove research references
+### Task 6: Add System, Light, and Dark appearance modes
+
+**Files:**
+- Create: shared appearance preference types for the macOS and iOS app targets
+- Modify: macOS settings and app/window composition, companion settings and root composition
+- Test: preference migration/default, mode mapping, and rendered light/dark/system states
+
+**Interfaces:**
+- Produces: a persisted `system`, `light`, or `dark` user preference, defaulting to `system`, with no effect on helper or protocol behavior.
+
+- [x] Add failing tests proving missing/unknown preferences select System and explicit Light/Dark map to the correct native color scheme.
+- [x] Add an Appearance picker to Mac and iPhone settings and apply it to every app-owned surface.
+- [x] Verify System responds to a live OS appearance change and inspect representative light and dark renders; commit.
+
+### Task 7: Verify the complete native product and remove research references
 
 **Files:**
 - Modify: product README, architecture, companion operations runbook, implementation plan checkboxes
@@ -129,8 +143,8 @@
 **Interfaces:**
 - Produces: reproducible build/test/render evidence and a project tree containing the implemented product design without the external comparison review.
 
-- [ ] Run focused suites after each task, then the complete Swift test suite and macOS release build.
+- [x] Run focused suites after each task, then the complete Swift test suite and macOS release build.
 - [ ] Build and test the iOS app on Simulator; inspect Pairing, Hosts, Overview, Models, Operations, Alerts, and Settings at phone size.
 - [ ] Run a local paired fixture smoke test for pairing, reconnect, read-only telemetry, stale state, command rejection/approval, revocation, and two-host aggregation.
-- [ ] Search the project for the reviewed project's name and links, delete the comparison artifact, and rewrite any remaining implementation-facing text as standalone Darkbloom requirements.
-- [ ] Run final privacy canaries, `git diff --check`, and a whole-branch review; commit.
+- [x] Search the project for the reviewed project's name and links, delete the comparison artifact, and rewrite any remaining implementation-facing text as standalone Darkbloom requirements.
+- [x] Run final privacy canaries, `git diff --check`, and a whole-branch review; commit.

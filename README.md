@@ -23,10 +23,16 @@ release bundle; no Gatekeeper-disable or quarantine-removal workaround is needed
 
 ## Coming soon
 
-The iOS companion, QR pairing and remote controls are experimental and are not
-included in this release. Richer provider statistics and automatic model warming
-remain planned. No background remote-control service is installed
-or enabled by this app.
+The source tree now includes a native iOS companion, cryptographic QR pairing,
+pinned TLS transport, multi-Mac status, alert history, and signed command
+contracts. They remain development features and are not included in the current
+download. The signed persistent Mac helper, physical-iPhone validation, and
+release packaging are still required before remote controls ship. No background
+remote-control service is installed or enabled by the current release.
+
+Automatic model changes also remain disabled. The app records an observe-only,
+replayable recommendation journal from fresh network and verified local evidence;
+it never turns a recommendation into a provider command.
 
 ## Highlights
 
@@ -77,6 +83,10 @@ or enabled by this app.
 - Fresh verification diagnostics for legacy and App Attest authorization
 - Network maintenance and aggregate cache-health reporting
 - One resizable dashboard and Settings window
+- System, Light, and Dark appearance choices; System follows macOS changes
+- Evidence-backed local alerts, capped alert history, and a preview-first
+  allowlist-only support packet
+- Explainable observe-only model recommendations with local replay history
 - Built-in Chat with an explicit per-conversation destination — the local
   endpoint on this Mac (default) or the paid Darkbloom network — a separate
   resizable chat window sharing the same conversation, verified-model
