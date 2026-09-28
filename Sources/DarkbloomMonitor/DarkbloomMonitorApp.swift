@@ -67,6 +67,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             return
         }
 
+        ApplicationAppearance.applyStored()
         NSApplication.shared.setActivationPolicy(.accessory)
         let home = FileManager.default.homeDirectoryForCurrentUser
         let policy = DarkbloomSourcePolicy(
@@ -92,6 +93,9 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         let tokenRateDatabase = try? ModelTokenRateDatabase(
             url: applicationSupport.appendingPathComponent("model-token-rates.sqlite3")
         )
+        let recommendationJournal = try? RecommendationJournal(
+            url: applicationSupport.appendingPathComponent("recommendations.sqlite3")
+        )
         let earningsClient = AuthenticatedEarningsClient(
             homeDirectory: home,
             database: earningsDatabase
@@ -106,6 +110,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             alertNotifier: OperationalNotificationCenter(),
             tokenRateRecorder: tokenRateDatabase,
             networkCapacityClient: PublicNetworkCapacityClient(),
+            recommendationJournal: recommendationJournal,
             publicCatalogClient: PublicCatalogClient(),
             publicPricingClient: PublicPricingClient(),
             networkSeriesClient: NetworkSeriesClient()
@@ -176,6 +181,9 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
                 hostingSettingsStore?.options ?? HostingSettingsStore.loadOptions(from: .standard)
             }
         )
+        monitorStore.attachRecommendationInventory { [weak providerControlStore] in
+            providerControlStore?.snapshot
+        }
         hostingSettingsStore.attachControlStore(providerControlStore)
         store = monitorStore
         controlStore = providerControlStore
@@ -193,8 +201,9 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         ControlAppUpdater.shared.start()
         CLIUpdateStatusStore.shared.start()
         monitorStore.start()
-        Task { @MainActor [weak providerControlStore] in
+        Task { @MainActor [weak providerControlStore, weak monitorStore] in
             await providerControlStore?.refresh()
+            await monitorStore?.refreshRecommendation()
         }
     }
 

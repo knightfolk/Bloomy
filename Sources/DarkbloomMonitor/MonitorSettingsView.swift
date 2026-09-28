@@ -7,6 +7,8 @@ struct MonitorSettingsView: View {
     var monitorStore: MonitorStore? = nil
     @AppStorage("menuBarDisplayMode") private var displayModeRaw =
         MenuBarDisplayMode.automatic.rawValue
+    @AppStorage(ApplicationAppearance.defaultsKey) private var appearanceModeRaw =
+        AppAppearanceMode.system.rawValue
     @State private var supportPacketPreview: SupportPacketPreviewPresentation?
     @State private var isPreparingSupportPacket = false
     @State private var supportPacketPrepareFailed = false
@@ -24,7 +26,17 @@ struct MonitorSettingsView: View {
             }
             ControlAppUpdateSettings()
             CLIUpdateNoticeView(store: CLIUpdateStatusStore.shared)
-            GeneralSettingsView(displayModeRaw: $displayModeRaw)
+            GeneralSettingsView(
+                displayModeRaw: $displayModeRaw,
+                appearanceModeRaw: $appearanceModeRaw
+            )
+            Section("iPhone companion") {
+                LabeledContent("Signed background helper", value: "Coming soon")
+                Text("Secure QR pairing and remote controls will appear here after the helper is packaged, signed, and verified on a physical iPhone. The current app does not enable it automatically.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             supportSection
             if let extrasStore, let controlStore {
                 ProviderAdvancedSettingsHost(extras: extrasStore, control: controlStore)
@@ -81,11 +93,25 @@ struct MonitorSettingsView: View {
 
 private struct GeneralSettingsView: View {
     @Binding var displayModeRaw: String
+    @Binding var appearanceModeRaw: String
     @AppStorage("electricity.usdPerKWh") private var electricityRate = ""
     @AppStorage("electricity.enabled") private var electricityEnabled = false
 
     var body: some View {
         Group {
+            Section("Appearance · Applies immediately") {
+                Picker("Color scheme", selection: appearanceModeBinding) {
+                    ForEach(AppAppearanceMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("System follows the Mac appearance automatically. Light and Dark keep the selected look until you change it.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Section("Electricity") {
                 Toggle(isOn: $electricityEnabled) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -130,6 +156,16 @@ private struct GeneralSettingsView: View {
         Binding(
             get: { MenuBarDisplayMode(rawValue: displayModeRaw) ?? .automatic },
             set: { displayModeRaw = $0.rawValue }
+        )
+    }
+
+    private var appearanceModeBinding: Binding<AppAppearanceMode> {
+        Binding(
+            get: { AppAppearanceMode(storedValue: appearanceModeRaw) },
+            set: { mode in
+                appearanceModeRaw = mode.rawValue
+                ApplicationAppearance.apply(mode)
+            }
         )
     }
 }
