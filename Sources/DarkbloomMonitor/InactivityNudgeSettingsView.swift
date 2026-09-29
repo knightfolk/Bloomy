@@ -46,6 +46,9 @@ struct InactivityNudgeSettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
 
+        if !store.keyPresent {
+            Section { NudgeSetupGuide(store: store) }
+        } else {
         Section("Nudge setup") {
             Text("Use a Darkbloom consumer key restricted to “my machine only.” Bloomy stores one dedicated nudge key in the macOS Keychain for both manual and automatic requests, separate from provider and local API tokens.")
                 .font(.callout)
@@ -103,6 +106,7 @@ struct InactivityNudgeSettingsView: View {
         .onDisappear {
             keyDraft = ""
             keyError = nil
+        }
         }
     }
 }

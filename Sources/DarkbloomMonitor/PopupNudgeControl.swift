@@ -26,6 +26,9 @@ struct PopupNudgeControl: View {
                     .accessibilityIdentifier("popup.nudge.close")
             }
 
+            if !store.keyPresent {
+                ScrollView { NudgeSetupGuide(store: store).padding(.vertical, 4) }
+            } else {
             Text("Send one free, exclusive self-route request capped at 8 output tokens. It may reach another owned machine serving the same model. A response does not guarantee public work.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -61,6 +64,7 @@ struct PopupNudgeControl: View {
                 InactivityNudgeSettingsView(store: store)
             }
             .formStyle(.grouped)
+            }
         }
         .padding(20)
         .frame(width: 520, height: 600)

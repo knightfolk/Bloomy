@@ -8,6 +8,27 @@ import Testing
 struct ManualNudgeStoreTests {
     private let instant = 2_000_000.0
 
+    @Test("setup saves a key without sending or enabling automation, and removal restores setup")
+    func setupIsExplicit() async {
+        let clock = ManualNudgeClock(instant)
+        let key = FakeConsumerKeyStore()
+        let spy = ManualNudgeSpy()
+        let store = makeStore(clock: clock, key: key) { _, _ in
+            spy.sends += 1
+            return .sent
+        }
+        #expect(!store.keyPresent)
+        #expect(store.saveKey("nudge-setup-test-key") == nil)
+        #expect(store.keyPresent)
+        #expect(!store.enabled)
+        #expect(spy.sends == 0)
+        #expect(store.lastAttempt == nil)
+        store.removeKey()
+        #expect(!store.keyPresent)
+        #expect(spy.sends == 0)
+        await store.stop()
+    }
+
     @Test("multiple advertised models require an exact self-route model ID")
     func exactRouteForMultipleAdvertised() {
         #expect(NudgeSelfRouteModel.familyFallback(
