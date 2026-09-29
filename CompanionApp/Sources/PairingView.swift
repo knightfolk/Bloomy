@@ -16,7 +16,7 @@ struct PairingView: View {
                             .foregroundStyle(.mint)
                         Text("Pair with your Mac")
                             .font(.largeTitle.bold())
-                        Text("Scan the one-time code in Darkbloom Control. Your phone and Mac create device identities; there is no shared password.")
+                        Text("Scan the one-time code in Bloomy. Your phone and Mac create device identities; there is no shared password.")
                             .foregroundStyle(.secondary)
                     }
                     .accessibilityElement(children: .combine)
@@ -33,7 +33,7 @@ struct PairingView: View {
                                 .font(.system(.largeTitle, design: .monospaced, weight: .bold))
                                 .tracking(6)
                                 .accessibilityLabel("Comparison code \(code.map(String.init).joined(separator: " "))")
-                            Text("Confirm that this six-digit code matches Darkbloom Control, then approve this iPhone on the Mac.")
+                            Text("Confirm that this six-digit code matches Bloomy, then approve this iPhone on the Mac.")
                                 .foregroundStyle(.secondary)
                             Button("I approved it — connect") {
                                 Task { await store.connectAfterApproval() }
@@ -77,7 +77,7 @@ struct PairingView: View {
                 }
                 .padding(24)
             }
-            .navigationTitle("Darkbloom")
+            .navigationTitle("Bloomy")
             .sheet(isPresented: $scannerPresented) {
                 QRScannerView { value in
                     scannerPresented = false

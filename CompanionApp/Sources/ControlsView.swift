@@ -21,7 +21,7 @@ struct ControlsView: View {
                         await store.prepare(.applySavedModelsLive)
                     }
                 }
-                Section("Darkbloom Control on Mac") {
+                Section("Bloomy on Mac") {
                     ControlButton("Open app", icon: "macwindow", enabled: has(.appLifecycle)) {
                         await store.prepare(.appLifecycle(.open))
                     }

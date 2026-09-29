@@ -111,7 +111,7 @@ def _make_framework_lookup_portable(executable, rpaths):
 
 def assemble(executable, resources, output, version, build_number,
              sparkle_framework=None, update_public_key=None, update_feed_url=None,
-             app_name='Darkbloom Control', bundle_identifier='dev.darkbloom.monitor'):
+             app_name='Bloomy', bundle_identifier='dev.darkbloom.monitor'):
     if not re.fullmatch(r'\d+\.\d+\.\d+', version):
         raise ValueError('version must be three numeric components')
     if not re.fullmatch(r'[1-9]\d*', build_number):
@@ -146,7 +146,7 @@ def assemble(executable, resources, output, version, build_number,
         if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
             raise ValueError('resources cannot contain symlinks or special files')
     if not (resource_files / 'AppIcon.icns').is_file():
-        raise ValueError('resources must contain the Darkbloom Control app icon')
+        raise ValueError('resources must contain AppIcon.icns')
     if output.is_relative_to(resources) or resources.is_relative_to(output):
         raise ValueError('output and resource paths must not overlap')
     if sparkle_framework is not None:
@@ -200,8 +200,8 @@ def main():
         parser.add_argument('--' + name, required=True, type=Path)
     parser.add_argument('--version', required=True)
     parser.add_argument('--build-number', required=True)
-    parser.add_argument('--app-name', default='Darkbloom Control',
-                        help='bundle name (defaults to the production identity)')
+    parser.add_argument('--app-name', default='Bloomy',
+                        help='bundle and display name (defaults to Bloomy)')
     parser.add_argument('--bundle-identifier', default='dev.darkbloom.monitor',
                         help='reverse-DNS bundle id (defaults to the production identity)')
     parser.add_argument('--sparkle-framework', type=Path,

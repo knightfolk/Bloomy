@@ -114,7 +114,7 @@ struct MonitorSettingsView: View {
 
     private func pageDescription(_ page: SettingsPage) -> String {
         switch page {
-        case .appearance: "Choose how Darkbloom Control looks. Changes apply immediately."
+        case .appearance: "Choose how Bloomy looks. Changes apply immediately."
         case .menuBar: "Choose the metric shown in the menu bar. Changes apply immediately."
         case .electricity: "Track electricity estimates and set your local price."
         case .updates: "App, CLI, and provider update preferences."

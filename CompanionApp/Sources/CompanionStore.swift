@@ -593,7 +593,7 @@ private extension CommandRisk {
         case .restartsProvider: "a provider restart"
         case .interruptsActiveWork: "a live model change"
         case .stopsProvider: "stopping the provider"
-        case .quitsMacApp: "quitting Darkbloom Control"
+        case .quitsMacApp: "quitting Bloomy"
         }
     }
 }

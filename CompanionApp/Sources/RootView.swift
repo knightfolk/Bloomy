@@ -32,7 +32,7 @@ struct RootView: View {
         }
         .tint(.mint)
         .preferredColorScheme(CompanionAppearanceMode(storedValue: appearanceModeRaw).colorScheme)
-        .alert("Darkbloom", isPresented: Binding(
+        .alert("Bloomy", isPresented: Binding(
             get: { store.errorMessage != nil },
             set: { if !$0 { store.errorMessage = nil } }
         )) {
@@ -122,7 +122,7 @@ private extension ControlAction {
         case .applySavedModelsLive: "Apply the saved model selection to the running provider. Active work may drain first."
         case .applySettings: "Update the staged provider settings on the paired Mac."
         case .saveSettings: "Save the staged provider settings. This does not restart the provider."
-        case let .appLifecycle(action): "\(action.rawValue.capitalized) Darkbloom Control on the paired Mac. The helper stays online."
+        case let .appLifecycle(action): "\(action.rawValue.capitalized) Bloomy on the paired Mac. The helper stays online."
         }
     }
 }

@@ -4,6 +4,14 @@ import Testing
 
 @Suite("Monitor app identity")
 struct MonitorApplicationIdentityTests {
+    @Test("the new app name does not depend on a bundle display-name key")
+    func displayNameFallbackAndBundleOverride() {
+        #expect(MonitorApplicationIdentity.displayName(bundleDisplayName: nil) == "Bloomy")
+        #expect(MonitorApplicationIdentity.displayName(
+            bundleDisplayName: "Bloomy Beta"
+        ) == "Bloomy Beta")
+    }
+
     @Test("the production app keeps its existing support and lock paths")
     func productionPathsStayStable() {
         let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)

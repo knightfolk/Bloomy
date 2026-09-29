@@ -16,7 +16,7 @@ struct ProviderAutoUpdateSettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Install signed provider updates automatically")
                             .font(.body.weight(.medium))
-                        Text("The provider checks for signed CLI releases after it starts. This does not update Darkbloom Control.")
+                        Text("The provider checks for signed CLI releases after it starts. This does not update Bloomy.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

@@ -67,15 +67,16 @@ class PackagingTests(unittest.TestCase):
     def test_bundle_and_manifest(self):
         result = self.run_packager()
         self.assertEqual(result.returncode, 0, result.stderr)
-        app = self.output / 'Darkbloom Control.app'
+        app = self.output / 'Bloomy.app'
+        self.assertFalse((self.output / 'Darkbloom Control.app').exists())
         binary = app / 'Contents/MacOS/DarkbloomMonitor'
         self.assertEqual(binary.read_bytes(), self.exe.read_bytes())
         self.assertTrue(binary.stat().st_mode & 0o111)
         self.assertFalse(binary.is_symlink())
         info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
         self.assertEqual(info['CFBundleIdentifier'], 'dev.darkbloom.monitor')
-        self.assertEqual(info['CFBundleName'], 'Darkbloom Control')
-        self.assertEqual(info['CFBundleDisplayName'], 'Darkbloom Control')
+        self.assertEqual(info['CFBundleName'], 'Bloomy')
+        self.assertEqual(info['CFBundleDisplayName'], 'Bloomy')
         self.assertEqual(info['CFBundleIconFile'], 'AppIcon')
         self.assertEqual((app / 'Contents/Resources/AppIcon.icns').read_bytes(), b'fixture-icon')
         self.assertEqual(info['CFBundleExecutable'], 'DarkbloomMonitor')
@@ -113,6 +114,30 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(info['CFBundleName'], 'DC Beta')
         self.assertEqual(info['CFBundleDisplayName'], 'DC Beta')
 
+    def test_legacy_display_name_override_keeps_upgrade_and_update_identity(self):
+        framework = self.make_sparkle_framework()
+        public_key = base64.b64encode(bytes(range(32))).decode('ascii')
+        feed_url = 'https://updates.example.com/darkbloom/appcast.xml'
+
+        result = self.run_packager(
+            '--app-name', 'Darkbloom Control',
+            '--sparkle-framework', str(framework),
+            '--update-public-key', public_key,
+            '--update-feed-url', feed_url,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        app = self.output / 'Darkbloom Control.app'
+        info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+        self.assertEqual(info['CFBundleName'], 'Darkbloom Control')
+        self.assertEqual(info['CFBundleDisplayName'], 'Darkbloom Control')
+        self.assertEqual(info['CFBundleIdentifier'], 'dev.darkbloom.monitor')
+        self.assertEqual(info['CFBundleExecutable'], 'DarkbloomMonitor')
+        self.assertEqual(info['SUFeedURL'], feed_url)
+        self.assertEqual(info['SUPublicEDKey'], public_key)
+        self.assertEqual((app / 'Contents/MacOS/DarkbloomMonitor').read_bytes(), self.exe.read_bytes())
+        self.assertTrue((app / 'Contents/Resources/DarkbloomMonitor_DarkbloomMonitor.bundle').is_dir())
+
     def test_beta_bundle_identity_rejects_path_components_and_invalid_ids(self):
         cases = [
             ('../DC Beta', 'dev.darkbloom.monitor.beta'),
@@ -141,7 +166,7 @@ class PackagingTests(unittest.TestCase):
         result = self.run_packager()
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        app = self.output / 'Darkbloom Control.app'
+        app = self.output / 'Bloomy.app'
         nested_bundle = app / 'Contents/Resources/DarkbloomMonitor_DarkbloomMonitor.bundle'
         self.assertEqual(
             (nested_bundle / 'Contents/Info.plist').read_bytes(),
@@ -192,7 +217,7 @@ class PackagingTests(unittest.TestCase):
             '--update-public-key', public_key, '--update-feed-url', feed_url)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        app = self.output / 'Darkbloom Control.app'
+        app = self.output / 'Bloomy.app'
         embedded = app / 'Contents/Frameworks/Sparkle.framework'
         self.assertEqual((embedded / 'Versions/A/Sparkle').read_bytes(), b'fixture-framework-binary')
         self.assertTrue((embedded / 'Versions/Current').is_symlink())
@@ -230,7 +255,7 @@ class PackagingTests(unittest.TestCase):
         result = self.run_packager('--sparkle-framework', str(framework))
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        info = plistlib.loads((self.output / 'Darkbloom Control.app/Contents/Info.plist').read_bytes())
+        info = plistlib.loads((self.output / 'Bloomy.app/Contents/Info.plist').read_bytes())
         self.assertNotIn('SUFeedURL', info)
         self.assertNotIn('SUPublicEDKey', info)
         self.assertFalse(info['SUEnableAutomaticChecks'])

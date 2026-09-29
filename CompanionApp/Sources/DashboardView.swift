@@ -22,7 +22,7 @@ struct DashboardView: View {
                 }
                 .padding()
             }
-            .navigationTitle(store.host.map(store.displayName(for:)) ?? "Darkbloom")
+            .navigationTitle(store.host.map(store.displayName(for:)) ?? "Bloomy")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { Task { await store.refresh() } } label: { Image(systemName: "arrow.clockwise") }

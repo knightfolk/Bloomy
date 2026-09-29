@@ -1,14 +1,17 @@
 import Foundation
 
 /// Per-bundle display and local-storage identity. The production bundle keeps
-/// its historical name and paths; review variants get isolated preferences,
+/// its historical storage paths; review variants get isolated preferences,
 /// history files, and single-instance locks while observing the same provider.
 enum MonitorApplicationIdentity {
     static let productionBundleIdentifier = "dev.darkbloom.monitor"
 
     static var displayName: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
-            ?? "Darkbloom Control"
+        displayName(bundleDisplayName: Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+    }
+
+    static func displayName(bundleDisplayName: String?) -> String {
+        bundleDisplayName ?? "Bloomy"
     }
 
     static func applicationSupportDirectory(

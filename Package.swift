@@ -43,10 +43,10 @@ let package = Package(
         .executableTarget(
             name: "DarkbloomMonitor",
             dependencies: ["DarkbloomTelemetry", .product(name: "Sparkle", package: "Sparkle")],
-            exclude: ["Resources/DarkbloomLogo.svg", "Resources/darkbloom-mark.svg", "Resources/darkbloom-menubar.svg"],
+            exclude: ["Resources/DarkbloomLogo.svg", "Resources/darkbloom-mark.svg", "Resources/darkbloom-menubar.svg", "Resources/dc-mark.svg", "Resources/dc-menubar.svg"],
             resources: [
-                .copy("Resources/dc-mark.svg"),
-                .copy("Resources/dc-menubar.svg"),
+                .copy("Resources/bloomy-mark.svg"),
+                .copy("Resources/bloomy-menubar.svg"),
                 .copy("Resources/AppIcon.icns"),
                 .copy("Resources/model-qwen.svg"),
                 .copy("Resources/model-openai.svg"),

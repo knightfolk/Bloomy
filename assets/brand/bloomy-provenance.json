@@ -1,0 +1,28 @@
+{
+  "brand": "Bloomy",
+  "approved_direction": "Compute gremlin: personal local AI companion",
+  "date": "2026-09-29",
+  "provenance": "Concept approved in this chat; app icon derived with built-in image generation. SVG masks are hand-authored simplifications for small native rendering. Legacy DC vectors retained.",
+  "files": [
+    {
+      "path": "assets/brand/bloomy-concept.png",
+      "sha256": "780c590048a1555c2a7c78e28699b81b070446a13b3a020dd2a11ed8c17c0207"
+    },
+    {
+      "path": "assets/brand/bloomy-app-icon.png",
+      "sha256": "b58fc962ee7bf77e9e36b4160d24a7cf496c6e96a31d304e95bd4b2510cd9127"
+    },
+    {
+      "path": "Sources/DarkbloomMonitor/Resources/bloomy-mark.svg",
+      "sha256": "e9fa6c021ce4582078c4d21ad734fa19457ccb45cec3762f0af7e9d522a635fd"
+    },
+    {
+      "path": "Sources/DarkbloomMonitor/Resources/bloomy-menubar.svg",
+      "sha256": "e9fa6c021ce4582078c4d21ad734fa19457ccb45cec3762f0af7e9d522a635fd"
+    },
+    {
+      "path": "Sources/DarkbloomMonitor/Resources/AppIcon.icns",
+      "sha256": "c896cbc796051f784dbb1a97aa7fdbef241b0b76c10172c6c46a6da8af85b019"
+    }
+  ]
+}

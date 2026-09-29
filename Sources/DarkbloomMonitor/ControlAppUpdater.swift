@@ -85,7 +85,7 @@ final class ControlAppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
                  untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
         guard !canRelaunch() else { return false }
-        message = "Update ready. Finish or discard edits and pending provider actions to restart Control."
+        message = "Update ready. Finish or discard edits and pending provider actions to restart Bloomy."
         resumeTask?.cancel()
         resumeTask = Task { @MainActor [weak self] in
             while let self, !self.canRelaunch() {
@@ -109,7 +109,7 @@ struct ControlAppUpdateSettings: View {
             Toggle("Automatically download and install", isOn: Binding(
                 get: { updater.automaticInstall }, set: updater.setAutomaticInstall))
                 .disabled(!updater.isConfigured || !updater.automaticChecks)
-            Text("Automatic installation completes when Control quits. The provider keeps running.")
+            Text("Automatic installation completes when Bloomy quits. The provider keeps running.")
                 .font(.callout).foregroundStyle(.secondary)
             HStack {
                 VStack(alignment: .leading, spacing: 4) {

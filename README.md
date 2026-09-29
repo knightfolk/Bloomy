@@ -1,26 +1,33 @@
-# Darkbloom Control
+# Bloomy
 
-<img src="assets/brand/dc-app-icon.svg" width="96" alt="Darkbloom Control DC icon">
+<img src="assets/brand/bloomy-concept.png" width="96" alt="Bloomy app icon concept">
 
-Darkbloom Control is a native macOS menu-bar companion for a local Darkbloom
+Bloomy is a native macOS menu-bar companion for a local Darkbloom
 provider. It turns provider telemetry into a compact infographic popup and
 keeps model and lifecycle controls behind explicit safety checks.
 
-**v1.8** adds safe live model selection, official fan-helper controls, native
-System/Light/Dark appearance, operational alerts and sanitized support packets,
-plus an explainable observe-only recommendation journal. It builds on v1.7's
-compact model cards, daily-runtime forecasts, and menu-bar GPU ring.
-Previously named Darkbloom Monitor.
+Bloomy was previously named **Darkbloom Control**, and before that **Darkbloom
+Monitor**. The provider's official product and CLI are still named
+**Darkbloom**; commands such as `darkbloom login` have not changed.
+
+The **Darkbloom Control v1.8** release added safe live model selection,
+official fan-helper controls, native System/Light/Dark appearance, operational
+alerts and sanitized support packets, plus an explainable observe-only
+recommendation journal. It built on v1.7's compact model cards, daily-runtime
+forecasts, and menu-bar GPU ring.
 
 ## Download
 
-Download the Apple Silicon build from [Releases](https://github.com/knightfolk/DarkbloomControl/releases/latest),
-unzip it, move **Darkbloom Control.app** to Applications, then open it.
+Download the Apple Silicon build from [Releases](https://github.com/knightfolk/Bloomy/releases/latest),
+unzip it, move the downloaded app to Applications, then open it. Published
+releases through **Darkbloom Control v1.9.3** use `Darkbloom Control.app`;
+the renamed bundle is `Bloomy.app`.
 Quit an older monitor copy before launching the new one. macOS may still ask
 for first-launch confirmation or permission to read your external model drive.
-The release Apple Silicon app is Developer ID–signed, notarized by Apple, and
-includes a stapled notarization ticket. Gatekeeper verification passed on the
-release bundle; no Gatekeeper-disable or quarantine-removal workaround is needed.
+The Darkbloom Control v1.9.3 Apple Silicon release was Developer ID–signed and
+notarized by Apple, with a stapled notarization ticket. Gatekeeper verification
+passed on that bundle. Check the release notes for the signing status of future
+Bloomy downloads.
 
 ## Coming soon
 
@@ -35,7 +42,7 @@ Automatic model changes also remain disabled. The app records an observe-only,
 replayable recommendation journal from fresh network and verified local evidence;
 it never turns a recommendation into a provider command.
 
-## Highlights
+## Source highlights
 
 - Menu-bar activity status with clearly labeled model-average throughput
 - A compact, content-sized popup with short model pills and inline statistics
@@ -124,8 +131,8 @@ affected live values and actions will be unavailable.
 ## Build and run
 
 ```bash
-git clone https://github.com/knightfolk/DarkbloomControl.git
-cd DarkbloomControl
+git clone https://github.com/knightfolk/Bloomy.git
+cd Bloomy
 swift test
 swift run DarkbloomMonitor
 ```
@@ -140,6 +147,10 @@ swift build -c release
 You can also open `Package.swift` in Xcode and run the `DarkbloomMonitor`
 scheme. The app appears only in the menu bar and intentionally has no Dock icon
 by default. Use the gear in its popup to access the resizable Settings window.
+The Swift package target, executable and resource bundle are still named
+`DarkbloomMonitor`. The old local checkout folder
+`DarkbloomCLIMenuBarMonitor` may also stay as it is; neither name determines
+the user-facing app name or the GitHub repository URL.
 
 Each launch claims one user-scoped kernel lock before creating a status item.
 A duplicate build using this same lock exits only the new process and does not
@@ -305,7 +316,7 @@ python3 tools/package_app.py \
   --version 1.1.0 --build-number 110
 ```
 
-The new directory contains `Darkbloom Control.app` and a SHA-256 file manifest.
+The new directory contains `Bloomy.app` and a SHA-256 file manifest.
 Version/build values are labels, not release provenance. This tool does not
 launch, register, install, distribution-sign, notarize, or publish the app.
 The manifest is not an SBOM or reproducible-build proof. Keep live relaunch,
@@ -313,18 +324,21 @@ unsaved-settings safety, upgrade testing and distribution approval separate.
 
 See [release signing and notarization](docs/RELEASING.md) for distribution packaging.
 
-## Upgrade from Darkbloom Monitor
+## Upgrade from Darkbloom Control or Darkbloom Monitor
 
-Quit the old monitor before opening Darkbloom Control. Quitting the monitor
+Quit the old app before opening Bloomy. Quitting the app
 does not stop the official provider CLI. Keep only one installed app copy in
-your chosen Applications folder; do not leave the old app as a second login item.
+your chosen Applications folder; remove an old login item if you had configured
+one, then use only the Bloomy app for future launches.
 
 The bundle identifier, internal executable/resource names, settings keys,
 history folder (`Library/Application Support/Darkbloom Monitor`), and
 single-instance lock are intentionally unchanged. Existing settings and
 history carry over without a migration. Swift package commands still use the
-internal `DarkbloomMonitor` target name. The Git history and old release notes
-retain the original project name for traceability.
+internal `DarkbloomMonitor` target name. The update feed and Sparkle public-key
+identity remain the same so compatible signed updates can continue across the
+display-name change. The Git history and old release notes retain their
+original names for traceability.
 
 See [Branding](docs/BRANDING.md) for editable icon sources and packaging details.
 
@@ -332,14 +346,14 @@ See [Branding](docs/BRANDING.md) for editable icon sources and packaging details
 
 v1.0 users need to download v1.1 manually once to gain the built-in updater.
 
-Settings includes separate controls for automatically checking for **Darkbloom
-Control** updates and automatically downloading/installing them on quit. Use
+Settings includes separate controls for automatically checking for **Bloomy**
+updates and automatically downloading/installing them on quit. Use
 **Check for Updates…** for a manual check; Sparkle’s update window offers the
-signed download and installation when a newer Control release is available.
-Updating Control does not restart the provider. Unfinished model edits or pending
+signed download and installation when a newer app release is available.
+Updating Bloomy does not restart the provider. Unfinished model edits or pending
 provider actions postpone an updater-requested relaunch.
 
-The CLI update notice is separate and read-only. Control can announce a newer
+The CLI update notice is separate and read-only. Bloomy can announce a newer
 CLI release, but does not install it or change the CLI’s automatic-update policy.
 Local review bundles without an update feed/key show updating as unavailable.
 See [release preparation](docs/RELEASING.md) for the signed feed and packaging

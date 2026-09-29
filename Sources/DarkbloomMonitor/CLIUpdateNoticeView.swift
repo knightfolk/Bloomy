@@ -132,7 +132,7 @@ struct CLIUpdateNoticeView: View {
     var body: some View {
         Section("Darkbloom CLI · Update notices only") {
             statusContent
-            Text("Control checks for newer CLI releases but never installs them.")
+            Text("Bloomy checks for newer CLI releases but never installs them.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Spacer()

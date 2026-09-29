@@ -3,8 +3,8 @@ import DarkbloomTelemetry
 import SwiftUI
 
 enum DarkbloomLogoAsset {
-    static let sourceImage = load(named: "dc-mark")
-    private static let menuBarMask = load(named: "dc-menubar")
+    static let sourceImage = load(named: "bloomy-mark")
+    private static let menuBarMask = load(named: "bloomy-menubar")
     private static let modelMasks: [ModelFamilyIcon: NSImage] = {
         var masks: [ModelFamilyIcon: NSImage] = [:]
         for family in ModelFamilyIcon.allCases where family != .darkbloom {
