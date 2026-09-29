@@ -48,6 +48,43 @@ struct InactivityNudgeStoreTests {
         await store.stop()
     }
 
+    @Test("completed CLI switch remains eligible for automatic reward-only nudge")
+    func completedSwitchDispatch() async {
+        let clock = NudgeTestClock(epoch)
+        let key = FakeConsumerKeyStore()
+        key.inject("watcher-test-key")
+        let spy = NudgeTestSpy()
+        let store = makeStore(defaults: makeDefaults(), clock: clock, key: key, spy: spy)
+        store.setEnabled(true)
+        driveIdle(store, clock: clock, minutes: 15,
+                  modelSwitch: .init(outcome: .switched, models: ["model-a"], remainingRequests: 0))
+        #expect(await eventually { spy.preflightAllowed })
+        #expect(spy.sends == 1)
+        #expect(store.lastAttempt == Date(timeIntervalSince1970: epoch + 900))
+        await store.stop()
+    }
+
+    @Test("invalid switch evidence reports paused instead of watching")
+    func invalidSwitchReportsPaused() async {
+        let clock = NudgeTestClock(epoch)
+        let key = FakeConsumerKeyStore()
+        key.inject("watcher-test-key")
+        let spy = NudgeTestSpy()
+        let store = makeStore(defaults: makeDefaults(), clock: clock, key: key, spy: spy)
+        store.setEnabled(true)
+        for outcome in [ProviderModelSwitchOutcome.switching, .failed, .timedOut] {
+            store.observe(state(at: epoch,
+                modelSwitch: .init(outcome: outcome, models: ["model-a"], remainingRequests: 0)))
+            #expect(store.status.hasPrefix("Paused:"))
+        }
+        store.observe(state(at: epoch,
+            modelSwitch: .init(outcome: .switched, models: ["model-a"], remainingRequests: 1)))
+        #expect(store.status.hasPrefix("Paused:"))
+        #expect(spy.earningsChecks == 0)
+        #expect(spy.sends == 0)
+        await store.stop()
+    }
+
     @Test("unavailable, incomplete, or recorded work evidence does not send")
     func incompleteEarningsCannotDispatch() async {
         for evidence in [NudgeEarningsEvidence.unavailable, .insufficientHistory, .workRecorded] {
@@ -183,17 +220,22 @@ struct InactivityNudgeStoreTests {
     }
 
     private func driveIdle(_ store: InactivityNudgeStore, clock: NudgeTestClock,
-                           from start: TimeInterval? = nil, minutes: Int = 30) {
+                           from start: TimeInterval? = nil, minutes: Int = 30,
+                           modelSwitch: ProviderModelSwitchState? = nil) {
         store.setInactivityMinutes(minutes)
         let start = start ?? epoch
         for offset in stride(from: 0, through: minutes * 60, by: 10) {
             let tick = start + Double(offset)
             clock.set(tick)
-            store.observe(state(at: tick))
+            store.observe(state(at: tick, modelSwitch: modelSwitch))
         }
     }
 
-    private func state(at writtenAt: TimeInterval, requests: Int64 = 0) -> DaemonState {
+    private func state(
+        at writtenAt: TimeInterval,
+        requests: Int64 = 0,
+        modelSwitch: ProviderModelSwitchState? = nil
+    ) -> DaemonState {
         DaemonState(
             schema: 1, version: "test", currentModel: "model-a", warmModels: ["model-a"],
             stats: .init(tokensGenerated: requests, requestsServed: requests, usageGaps: 0),
@@ -202,7 +244,7 @@ struct InactivityNudgeStoreTests {
             startedAt: epoch - 1_000, writtenAt: writtenAt, pid: 1,
             processIdentity: .init(pid: 1, startTimeMicros: 1), advertisedModels: ["model-a"],
             modelLoadFailures: [], lifecycle: .init(outcome: .serving, remainingRequests: 0),
-            startupPreloadPendingModels: []
+            startupPreloadPendingModels: [], modelSwitch: modelSwitch
         )
     }
 

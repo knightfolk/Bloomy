@@ -1,5 +1,37 @@
 import Foundation
 
+/// One fresh, idle local provider state that can safely support a nudge.
+/// The CLI retains `switched` after a completed model switch; zero remaining
+/// requests and the other serving checks remain required in that state.
+public enum NudgeIdleStateEligibility {
+    public static func eligibleState(_ state: DaemonState?, at now: Date) -> DaemonState? {
+        let nowSeconds = now.timeIntervalSince1970
+        guard nowSeconds.isFinite,
+              let state,
+              state.writtenAt.isFinite,
+              (0...10).contains(nowSeconds - state.writtenAt),
+              !state.inferenceActive,
+              state.trust?.status == "online",
+              state.lifecycle?.outcome == .serving,
+              state.lifecycle?.remainingRequests == 0,
+              state.startupPreloadPendingModels?.isEmpty == true,
+              state.availability == nil,
+              state.modelLoadFailures.isEmpty,
+              state.stats.requestsServed >= 0,
+              state.stats.tokensGenerated >= 0,
+              state.stats.usageGaps >= 0,
+              !state.currentModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              state.advertisedModels?.contains(state.currentModel) == true,
+              state.warmModels == [state.currentModel] else { return nil }
+
+        if let modelSwitch = state.modelSwitch {
+            guard [.serving, .switched].contains(modelSwitch.outcome),
+                  modelSwitch.remainingRequests == 0 else { return nil }
+        }
+        return state
+    }
+}
+
 /// Observes continuous, explicitly idle provider state. The caller owns any
 /// notification cooldown; returning a start date does not consume an attempt.
 public struct InactivityNudgePolicy: Sendable {
@@ -23,33 +55,10 @@ public struct InactivityNudgePolicy: Sendable {
         at now: Date,
         threshold: TimeInterval = 900
     ) -> Date? {
-        let nowSeconds = now.timeIntervalSince1970
-        guard nowSeconds.isFinite,
-              threshold.isFinite,
+        guard threshold.isFinite,
               threshold >= 0,
-              let state,
-              state.writtenAt.isFinite,
-              (0...10).contains(nowSeconds - state.writtenAt),
-              !state.inferenceActive,
-              state.trust?.status == "online",
-              state.lifecycle?.outcome == .serving,
-              state.lifecycle?.remainingRequests == 0,
-              state.startupPreloadPendingModels?.isEmpty == true,
-              state.availability == nil,
-              state.modelLoadFailures.isEmpty,
-              state.stats.requestsServed >= 0,
-              state.stats.tokensGenerated >= 0,
-              state.stats.usageGaps >= 0,
-              !state.currentModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              state.advertisedModels?.contains(state.currentModel) == true,
-              state.warmModels == [state.currentModel]
+              let state = NudgeIdleStateEligibility.eligibleState(state, at: now)
         else {
-            reset()
-            return nil
-        }
-
-        if let modelSwitch = state.modelSwitch,
-           modelSwitch.outcome != .serving || modelSwitch.remainingRequests != 0 {
             reset()
             return nil
         }

@@ -157,7 +157,9 @@ final class InactivityNudgeStore: ObservableObject {
         eligibleSince = policy.observe(state, at: instant, threshold: Double(inactivityMinutes) * 60)
         guard task == nil else { return }
         guard let since = eligibleSince, let state else {
-            status = "Watching for \(inactivityMinutes) minutes of continuous idle time."
+            status = NudgeIdleStateEligibility.eligibleState(state, at: instant) == nil
+                ? "Paused: waiting for fresh, idle provider state."
+                : "Watching for \(inactivityMinutes) minutes of continuous idle time."
             return
         }
         guard budgetAvailable(at: instant) else { return }
@@ -280,30 +282,7 @@ final class InactivityNudgeStore: ObservableObject {
     }
 
     private static func manualEligibleState(_ state: DaemonState?, at now: Date) -> DaemonState? {
-        let seconds = now.timeIntervalSince1970
-        guard seconds.isFinite,
-              let state,
-              state.writtenAt.isFinite,
-              (0...10).contains(seconds - state.writtenAt),
-              !state.inferenceActive,
-              state.trust?.status == "online",
-              state.lifecycle?.outcome == .serving,
-              state.lifecycle?.remainingRequests == 0,
-              state.startupPreloadPendingModels?.isEmpty == true,
-              state.availability == nil,
-              state.modelLoadFailures.isEmpty,
-              state.stats.requestsServed >= 0,
-              state.stats.tokensGenerated >= 0,
-              state.stats.usageGaps >= 0,
-              !state.currentModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              state.advertisedModels?.contains(state.currentModel) == true,
-              state.warmModels == [state.currentModel]
-        else { return nil }
-        if let modelSwitch = state.modelSwitch,
-           modelSwitch.outcome != .serving || modelSwitch.remainingRequests != 0 {
-            return nil
-        }
-        return state
+        NudgeIdleStateEligibility.eligibleState(state, at: now)
     }
 
     private func candidateValid(ticket: Int, since: Date) -> Bool {

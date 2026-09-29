@@ -96,6 +96,11 @@ struct InactivityNudgePolicyTests {
             state(at: 2_000_000, pending: nil),
             state(at: 2_000_000, pending: ["model-b"]),
             state(at: 2_000_000, modelSwitch: .init(outcome: .switching, models: ["model-a"], remainingRequests: 0)),
+            state(at: 2_000_000, modelSwitch: .init(outcome: .draining, models: ["model-a"], remainingRequests: 0)),
+            state(at: 2_000_000, modelSwitch: .init(outcome: .failed, models: ["model-a"], remainingRequests: 0)),
+            state(at: 2_000_000, modelSwitch: .init(outcome: .timedOut, models: ["model-a"], remainingRequests: 0)),
+            state(at: 2_000_000, modelSwitch: .init(outcome: .switched, models: ["model-a"])),
+            state(at: 2_000_000, modelSwitch: .init(outcome: .switched, models: ["model-a"], remainingRequests: 1)),
             state(at: 2_000_000, modelSwitch: .init(outcome: .serving, models: ["model-a"])),
             state(at: 2_000_000, modelSwitch: .init(outcome: .serving, models: ["model-a"], remainingRequests: 1)),
             state(at: 2_000_000, advertised: nil),
@@ -114,6 +119,24 @@ struct InactivityNudgePolicyTests {
         var policy = InactivityNudgePolicy()
         #expect(policy.observe(state(at: 2_000_000, modelSwitch: .init(outcome: .serving,
             models: ["model-a"], remainingRequests: 0)), at: now, threshold: 0) == now)
+        var completedSwitch = InactivityNudgePolicy()
+        #expect(completedSwitch.observe(state(at: 2_000_000, modelSwitch: .init(outcome: .switched,
+            models: ["model-a"], remainingRequests: 0)), at: now, threshold: 0) == now)
+    }
+
+    @Test("a completed switch can start an idle window but a new transition resets it")
+    func completedSwitchIdleContinuity() {
+        var policy = InactivityNudgePolicy()
+        let switched: (TimeInterval) -> DaemonState = { tick in
+            state(at: tick, modelSwitch: .init(outcome: .switched,
+                models: ["model-a"], remainingRequests: 0))
+        }
+        #expect(policy.observe(switched(2_000_000), at: start, threshold: 20) == nil)
+        #expect(policy.observe(switched(2_000_010), at: start.addingTimeInterval(10), threshold: 20) == nil)
+        #expect(policy.observe(switched(2_000_020), at: start.addingTimeInterval(20), threshold: 20) == start)
+        #expect(policy.observe(state(at: 2_000_030, modelSwitch: .init(outcome: .switching,
+            models: ["model-a"], remainingRequests: 0)), at: start.addingTimeInterval(30), threshold: 20) == nil)
+        #expect(policy.observe(switched(2_000_040), at: start.addingTimeInterval(40), threshold: 20) == nil)
     }
 
     @Test("multiple advertised models remain eligible when only the current model is warm")

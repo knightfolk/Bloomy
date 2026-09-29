@@ -65,6 +65,27 @@ struct ManualNudgeStoreTests {
         await store.stop()
     }
 
+    @Test("manual nudge works after a completed CLI model switch")
+    func manualAfterCompletedSwitch() async {
+        let clock = ManualNudgeClock(instant)
+        let key = FakeConsumerKeyStore()
+        key.inject("watcher-test-key")
+        let spy = ManualNudgeSpy()
+        let store = makeStore(clock: clock, key: key) { _, canSend in
+            spy.preflights.append(await canSend())
+            spy.sends += 1
+            return .sent
+        }
+        store.observe(state(modelSwitch: .init(
+            outcome: .switched, models: ["model-a"], remainingRequests: 0
+        )))
+        #expect(store.manualUnavailableReason == nil)
+        #expect(await store.nudgeNow())
+        #expect(spy.preflights == [true])
+        #expect(spy.sends == 1)
+        await store.stop()
+    }
+
     @Test("missing dedicated nudge key prevents any send")
     func missingKey() async {
         let clock = ManualNudgeClock(instant)
@@ -100,6 +121,9 @@ struct ManualNudgeStoreTests {
             state(advertised: ["model-b"]),
             state(lifecycle: .init(outcome: .serving, remainingRequests: 1)),
             state(pending: ["model-b"]),
+            state(modelSwitch: .init(outcome: .switching, models: ["model-a"], remainingRequests: 0)),
+            state(modelSwitch: .init(outcome: .failed, models: ["model-a"], remainingRequests: 0)),
+            state(modelSwitch: .init(outcome: .switched, models: ["model-a"], remainingRequests: 1)),
         ]
         for candidate in ineligible {
             store.observe(candidate)
@@ -197,7 +221,8 @@ struct ManualNudgeStoreTests {
         requests: Int64 = 0,
         inferenceActive: Bool = false,
         lifecycle: ProviderLifecycleState = .init(outcome: .serving, remainingRequests: 0),
-        pending: [String] = []
+        pending: [String] = [],
+        modelSwitch: ProviderModelSwitchState? = nil
     ) -> DaemonState {
         let writtenAt = writtenAt ?? instant
         return DaemonState(
@@ -208,7 +233,8 @@ struct ManualNudgeStoreTests {
             startedAt: instant - 1_000, writtenAt: writtenAt, pid: 1,
             processIdentity: .init(pid: 1, startTimeMicros: 1),
             advertisedModels: advertised,
-            lifecycle: lifecycle, startupPreloadPendingModels: pending
+            lifecycle: lifecycle, startupPreloadPendingModels: pending,
+            modelSwitch: modelSwitch
         )
     }
 
