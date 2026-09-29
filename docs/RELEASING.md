@@ -28,11 +28,11 @@ Signing and notarization do not disable Gatekeeper. They provide the distributio
 
 Keep signing keys, passwords, and API keys out of the repository and release assets. Notarization profiles remain in Keychain.
 
-## Control app updates (Sparkle)
+## Bloomy app updates (Sparkle)
 
-Control uses Sparkle 2.9.6 for signed app updates. Provider CLI checks are read-only;
-Control never installs or enables updates to the CLI. Automatic checking and
-installation for Control are separate user opt-ins. Do not enable either by
+Bloomy uses Sparkle 2.9.6 for signed app updates. Provider CLI checks are read-only;
+Bloomy never installs or enables updates to the CLI. Automatic checking and
+installation for Bloomy are separate user opt-ins. Do not enable either by
 rewriting user defaults during packaging or release.
 
 The release feed and **public** Ed25519 key are in `docs/updates/config.json`.

@@ -2,26 +2,30 @@
 
 <img src="assets/brand/bloomy-concept.png" width="96" alt="Bloomy app icon concept">
 
-Bloomy is a native macOS menu-bar companion for a local Darkbloom
-provider. It turns provider telemetry into a compact infographic popup and
-keeps model and lifecycle controls behind explicit safety checks.
+**Meet the little compute companion for your Mac.** Bloomy is a native macOS
+menu-bar app for the official Darkbloom provider. It brings live provider
+status, measured work and earnings, energy estimates, and practical controls
+into one readable popup and dashboard. The new Bloomy character appears in the
+app icon and menu bar.
 
 Bloomy was previously named **Darkbloom Control**, and before that **Darkbloom
 Monitor**. The provider's official product and CLI are still named
 **Darkbloom**; commands such as `darkbloom login` have not changed.
 
-The **Darkbloom Control v1.8** release added safe live model selection,
-official fan-helper controls, native System/Light/Dark appearance, operational
-alerts and sanitized support packets, plus an explainable observe-only
-recommendation journal. It built on v1.7's compact model cards, daily-runtime
-forecasts, and menu-bar GPU ring.
+Bloomy can help when work goes quiet. Two optional tools in **Settings →
+Provider** are off by default: Automatic nudge can make a tiny request to your
+own warm model after an observed idle period; Automatic profit switching can
+change the model this Mac advertises when fresh demand, earnings, power, and
+idle-state evidence support a meaningful estimated gain. Both wait when the
+evidence is incomplete. Neither can promise public work or income.
 
 ## Download
 
 Download the Apple Silicon build from [Releases](https://github.com/knightfolk/Bloomy/releases/latest),
 unzip it, move the downloaded app to Applications, then open it. Published
 releases through **Darkbloom Control v1.9.3** use `Darkbloom Control.app`;
-the renamed bundle is `Bloomy.app`.
+the Bloomy release uses `Bloomy.app`. Check the release page for the version
+and signing status of the download you select.
 Quit an older monitor copy before launching the new one. macOS may still ask
 for first-launch confirmation or permission to read your external model drive.
 The Darkbloom Control v1.9.3 Apple Silicon release was Developer ID–signed and
@@ -38,12 +42,13 @@ download. The signed persistent Mac helper, physical-iPhone validation, and
 release packaging are still required before remote controls ship. No background
 remote-control service is installed or enabled by the current release.
 
-Automatic model changes also remain disabled. The app records an observe-only,
-replayable recommendation journal from fresh network and verified local evidence;
-it never turns a recommendation into a provider command.
+The separate recommendation journal remains observe-only and never turns a
+recommendation into a provider command. Automatic profit switching is an
+explicit, off-by-default setting with its own evidence and timing checks.
 
 ## Source highlights
 
+- Bloomy character icon and tintable menu-bar mark
 - Menu-bar activity status with clearly labeled model-average throughput
 - A compact, content-sized popup with short model pills and inline statistics
 - Calendar-day average token throughput, including a per-model
@@ -95,6 +100,13 @@ it never turns a recommendation into a provider command.
 - Evidence-backed local alerts, capped alert history, and a preview-first
   allowlist-only support packet
 - Explainable observe-only model recommendations with local replay history
+- Optional automatic nudge after 15, 30, or 60 minutes of observed idle time:
+  a tiny self-route request to your own warm model, with a dedicated Keychain
+  credential, fresh base-reward-only evidence, and strict attempt limits
+- Optional automatic profit switching among already downloaded compatible
+  models: a sustained estimated next-hour net advantage of at least 30% and
+  $0.05 after loading, with configurable timing, fresh evidence, idle checks,
+  and a maximum of three attempts per 24 hours
 - Built-in Chat with an explicit per-conversation destination — the local
   endpoint on this Mac (default) or the paid Darkbloom network — a separate
   resizable chat window sharing the same conversation, verified-model
@@ -188,7 +200,8 @@ its pop-out window keep the transcript in memory only, discard it on quit,
 and never write prompts or replies to any store. The Darkbloom consumer API
 key used by network Chat and the free post-switch self-test lives only in the
 macOS Keychain — never in preferences, files, or logs — and is separate from
-both the provider device token and the local endpoint token.
+both the provider device token and the local endpoint token. Automatic nudge
+uses its own separate Keychain credential.
 
 Historical throughput is derived from positive token/time deltas belonging to
 the same provider process and model. These completion counters are not a live
@@ -217,6 +230,14 @@ switch. A successful self-test proves that an owned machine responded; it does
 not guarantee public scheduler traffic. No test is sent when the switch outcome
 or fresh advertised selection cannot be confirmed.
 
+**Automatic nudge** is separate from that one-time post-switch test. With an
+explicitly saved, “my machine only” consumer key, it can send a request capped
+at eight output tokens after 15 minutes of observed idle time by default. It
+requires fresh account evidence of base rewards without work, pauses for busy
+or uncertain state, waits at least an hour between attempts, and allows at most
+three attempts in 24 hours. It runs only while Bloomy is open and has no paid
+fallback. See [automatic nudge](docs/INACTIVITY_NUDGE.md).
+
 **Models → Provider capacity** lets you save a concurrency limit from 1–24
 and choose how many models the provider may keep in memory. Darkbloom CLI 0.9.7
 currently caps effective concurrency at 8 per model engine, even when a higher
@@ -225,8 +246,10 @@ value is saved. The CLI 0.9.7 defaults are
 preserved and may differ from the global setting. Actual capacity depends on memory.
 Changes remain staged until **Save Changes**; **Refresh** preserves edits and
 **Discard edits** reloads saved values. These settings use the official provider
-configuration. Manual live warming, load-first replacement, and automatic
-demand-based switching are not supported by this app.
+configuration. Manual live warming and load-first replacement are not supported.
+The separate opt-in profit switch uses the CLI's graceful switch only after
+fresh evidence and an idle single-model state; see
+[automatic profit switching](docs/PROFIT_SWITCHING.md).
 
 Stop and Restart require a customer-impact confirmation when work is active or
 activity is unknown. Stop uses the CLI's native graceful drain: it pauses new
@@ -278,8 +301,10 @@ status and state files rather than private APIs.
   advisory only — the network decides reservation sufficiency per request,
   and HTTP 402 is final.
 - Only the official CLI is supported; do not install a custom provider branch
-  to enable monitor features. Live streaming throughput is not available, and
-  automatic demand-based model switching is not implemented.
+  to enable Bloomy features. Live streaming throughput is not available.
+  Automatic profit estimates use observed account earnings and Mac activity;
+  work on other devices can affect attribution, and future jobs are not
+  guaranteed.
 - Provider actions affect the local provider and may affect customer jobs; read
   confirmation dialogs before proceeding.
 
