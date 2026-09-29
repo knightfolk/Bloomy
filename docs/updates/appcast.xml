@@ -3,6 +3,21 @@
     <channel>
         <title>Darkbloom Control</title>
         <item>
+            <title>1.9.3</title>
+            <pubDate>Tue, 29 Sep 2026 03:08:11 -0700</pubDate>
+            <sparkle:version>126</sparkle:version>
+            <sparkle:shortVersionString>1.9.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Darkbloom Control v1.9.3
+
+After a confirmed **Use only this model** switch, Control sends one small test request through Darkbloom's free self-route to help load the selected model. The popup shows when the model responds and explains when the test is skipped or fails. A saved Chat API key is required; the request cannot fall back to paid fleet routing.
+
+This is an emergency workaround for CLI switches that leave a model unloaded. A successful test confirms that an owned provider responded, but it does not guarantee that the public scheduler will send jobs. The switch itself remains successful if the test cannot run.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/DarkbloomControl/releases/download/v1.9.3/Darkbloom-Control-1.9.3-mac-arm64.zip" length="6974350" type="application/octet-stream" sparkle:edSignature="4MRoYHLYDU/EKcDYj8+2QpPzbDy7pgg0KY+E4WaXQev1bIwZfBkfmUqFki/K7yGlYXHOho/nNUuFT9WOfK5hCg=="/>
+        </item>
+        <item>
             <title>1.9.2</title>
             <pubDate>Mon, 28 Sep 2026 22:24:36 -0700</pubDate>
             <sparkle:version>125</sparkle:version>
