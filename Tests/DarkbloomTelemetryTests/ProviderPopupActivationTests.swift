@@ -25,6 +25,50 @@ struct ProviderPopupActivationTests {
         #expect(store.errorMessage == nil)
     }
 
+    @Test("a confirmed switch runs one self-route warm-up without changing the saved selection")
+    func confirmedSwitchWarmsOnce() async throws {
+        let controller = ActivationController(snapshot: try activationSnapshot(
+            advertised: ["saved-model"]
+        ))
+        let probe = ActivationWarmupProbe(result: .sent)
+        let store = ProviderControlStore(controller: controller, warmupProbe: probe, now: { activationNow })
+        await store.refresh()
+        await store.switchToSingleModel("second-model")
+
+        #expect(await probe.calls == ["second-model|second-model"])
+        #expect(store.switchWarmupStatus == .result(modelID: "second-model", .sent, at: activationNow))
+        #expect(store.errorMessage == nil)
+        #expect(await controller.savedSelections.isEmpty)
+    }
+
+    @Test("a failed self-test does not undo a confirmed switch")
+    func failedWarmupDoesNotUndoSwitch() async throws {
+        let controller = ActivationController(snapshot: try activationSnapshot(advertised: ["saved-model"]))
+        let probe = ActivationWarmupProbe(result: .missingKey)
+        let store = ProviderControlStore(controller: controller, warmupProbe: probe, now: { activationNow })
+        await store.refresh()
+        await store.switchToSingleModel("second-model")
+
+        #expect(store.switchWarmupStatus == .result(modelID: "second-model", .missingKey, at: activationNow))
+        #expect(store.draft?.original.enabled == ["second-model"])
+        #expect(store.errorMessage == nil)
+    }
+
+    @Test("an uncertain switch does not send a test request")
+    func uncertainSwitchSkipsWarmup() async throws {
+        let controller = ActivationController(
+            snapshot: try activationSnapshot(advertised: ["saved-model"]),
+            switchOutcomeUncertain: true
+        )
+        let probe = ActivationWarmupProbe(result: .sent)
+        let store = ProviderControlStore(controller: controller, warmupProbe: probe, now: { activationNow })
+        await store.refresh()
+        await store.switchToSingleModel("second-model")
+
+        #expect(await probe.calls.isEmpty)
+        #expect(store.switchWarmupStatus == nil)
+    }
+
     @Test("running activation saves only the requested model and applies the saved selection")
     func savesAndApplies() async throws {
         let controller = ActivationController(snapshot: try activationSnapshot(advertised: ["saved-model"]))
@@ -168,11 +212,24 @@ struct ProviderPopupActivationTests {
     }
 }
 
+private actor ActivationWarmupProbe: SelfRouteWarmupProbing {
+    let result: SelfRouteWarmupResult
+    private(set) var calls: [String] = []
+
+    init(result: SelfRouteWarmupResult) { self.result = result }
+
+    func warm(modelID: String, family: String) async -> SelfRouteWarmupResult {
+        calls.append("\(modelID)|\(family)")
+        return result
+    }
+}
+
 private actor ActivationController: ProviderControlling {
     private var current: ProviderControlSnapshot
     private let saveFailure: ProviderConfigError?
     private let postSaveAdvertised: [String]?
     private let loseDaemonAfterSave: Bool
+    private let switchOutcomeUncertain: Bool
     private(set) var saveAttempts = 0
     private(set) var savedSelections: [[String]] = []
     private(set) var appliedSelections: [[String]] = []
@@ -183,12 +240,14 @@ private actor ActivationController: ProviderControlling {
         snapshot: ProviderControlSnapshot,
         saveFailure: ProviderConfigError? = nil,
         postSaveAdvertised: [String]? = nil,
-        loseDaemonAfterSave: Bool = false
+        loseDaemonAfterSave: Bool = false,
+        switchOutcomeUncertain: Bool = false
     ) {
         current = snapshot
         self.saveFailure = saveFailure
         self.postSaveAdvertised = postSaveAdvertised
         self.loseDaemonAfterSave = loseDaemonAfterSave
+        self.switchOutcomeUncertain = switchOutcomeUncertain
     }
 
     func refresh() async throws -> ProviderControlSnapshot { current }
@@ -234,7 +293,7 @@ private actor ActivationController: ProviderControlling {
         switchedModelIDs.append(modelID)
         current = try activationSnapshot(enabled: [modelID], advertised: [modelID])
         await onPhase?(.reconciling)
-        return .refreshed(current)
+        return switchOutcomeUncertain ? .outcomeUncertain : .refreshed(current)
     }
 
     func download(_ modelID: String, onOutput: (@Sendable (ProcessOutputChunk) -> Void)?) async throws {

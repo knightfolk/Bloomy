@@ -10,6 +10,39 @@ private let layoutNow = Date()
 @Suite("Monitor popover layout")
 @MainActor
 struct MonitorPopoverLayoutTests {
+    @Test("post-switch feedback fits the popup and distinguishes success from missing key")
+    func postSwitchFeedback() async throws {
+        let view = VStack(alignment: .leading, spacing: 8) {
+            SwitchWarmupFeedback(status: .result(
+                modelID: "gemma-4-26b-qat-4bit", .sent,
+                at: Date(timeIntervalSince1970: 1_800_000_000)
+            ))
+            SwitchWarmupFeedback(status: .result(
+                modelID: "gemma-4-26b-qat-4bit", .missingKey,
+                at: Date(timeIntervalSince1970: 1_800_000_000)
+            ))
+        }
+        .padding(16)
+        .frame(width: 560, alignment: .leading)
+        .background(Color(nsColor: .windowBackgroundColor))
+        let host = NSHostingController(rootView: view)
+        let fitted = host.sizeThatFits(in: NSSize(width: 560, height: 0))
+        #expect(fitted.width == 560)
+        #expect(fitted.height < 90)
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(fitted)
+        window.orderBack(nil)
+        defer { window.close() }
+        try await Task.sleep(for: .milliseconds(200))
+        host.view.layoutSubtreeIfNeeded()
+        guard ProcessInfo.processInfo.environment["DARKBLOOM_RENDER_EVIDENCE"] == "1" else { return }
+        let bitmap = try #require(host.view.bitmapImageRepForCachingDisplay(in: host.view.bounds))
+        host.view.cacheDisplay(in: host.view.bounds, to: bitmap)
+        try #require(bitmap.representation(using: .png, properties: [:]))
+            .write(to: URL(fileURLWithPath: "/tmp/darkbloom-switch-warmup-feedback.png"))
+    }
+
     @Test("three-column popup cards fit populated readings and long names", arguments: [false, true])
     func populatedPopupCards(dark: Bool) async throws {
         let ids = ["EigenLabs/Qwen3.8-27B-4bit-mtp", "gemma-4-26b-qat-4bit",

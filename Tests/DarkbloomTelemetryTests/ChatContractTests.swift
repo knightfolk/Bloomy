@@ -98,6 +98,25 @@ struct ChatContractTests {
         #expect(messages[2]["content"] as? String == "bye")
     }
 
+    @Test("post-switch probe is tiny and forced to the free self-route")
+    func selfRouteWarmupRequest() throws {
+        let request = try ChatCompletionRequest.makeSelfRouteWarmup(
+            consumerKey: "dk-synthetic-test-key", model: "gemma-4-26b"
+        ).urlRequest
+        #expect(request.url?.absoluteString == "https://api.darkbloom.dev/v1/chat/completions")
+        #expect(request.value(forHTTPHeaderField: "X-Darkbloom-Route") == "self")
+        #expect(request.timeoutInterval == 90)
+        let bodyData = try #require(request.httpBody)
+        let body = try #require(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+        #expect(body["model"] as? String == "gemma-4-26b")
+        #expect(body["max_tokens"] as? Int == 8)
+        #expect(body["stream"] as? Bool == false)
+        #expect((body["messages"] as? [[String: Any]])?.count == 1)
+        #expect(throws: ChatClientError.missingConsumerKey) {
+            _ = try ChatCompletionRequest.makeSelfRouteWarmup(consumerKey: "bad key", model: "gemma-4-26b")
+        }
+    }
+
     @Test("request validation rejects unbounded input before any network use")
     func requestBounds() {
         #expect(throws: ChatClientError.missingModelID) {

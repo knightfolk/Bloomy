@@ -107,6 +107,23 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
         )
     }
 
+    /// One tiny owner-only inference after a model switch. The mandatory self
+    /// header prevents a fallback to paid fleet routing; no caller can change
+    /// the endpoint or request size.
+    public static func makeSelfRouteWarmup(consumerKey: String, model: String) throws -> Self {
+        guard ConsumerAPIKey.isValid(consumerKey) else { throw ChatClientError.missingConsumerKey }
+        var request = try make(
+            url: URL(string: "https://api.darkbloom.dev/v1/chat/completions")!,
+            token: consumerKey,
+            model: model,
+            messages: [ChatMessagePayload(role: .user, content: "Reply OK.")],
+            timeout: 90,
+            maxTokens: 8
+        ).urlRequest
+        request.setValue("self", forHTTPHeaderField: "X-Darkbloom-Route")
+        return Self(urlRequest: request)
+    }
+
     /// Builds the request for the local hosting endpoint. `origin` must be a
     /// normalized `ChatLocalEndpoint` origin (`scheme://host[:port]`, no
     /// path); a URL carrying a path is rejected so `/v1` can never be
@@ -140,10 +157,11 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
         token: String?,
         model: String,
         messages: [ChatMessagePayload],
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        maxTokens: Int? = nil
     ) throws -> Self {
         try validate(model: model, messages: messages)
-        let body = try Self.encode(model: model, messages: messages)
+        let body = try Self.encode(model: model, messages: messages, maxTokens: maxTokens)
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.httpBody = body
@@ -168,13 +186,14 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
         }
     }
 
-    static func encode(model: String, messages: [ChatMessagePayload]) throws -> Data {
+    static func encode(model: String, messages: [ChatMessagePayload], maxTokens: Int? = nil) throws -> Data {
         struct Body: Encodable {
             let model: String
             let messages: [ChatMessagePayload]
             let stream = false
+            let max_tokens: Int?
         }
-        let data = try JSONEncoder().encode(Body(model: model, messages: messages))
+        let data = try JSONEncoder().encode(Body(model: model, messages: messages, max_tokens: maxTokens))
         guard data.count <= maximumBodyBytes else { throw ChatClientError.requestTooLarge }
         return data
     }

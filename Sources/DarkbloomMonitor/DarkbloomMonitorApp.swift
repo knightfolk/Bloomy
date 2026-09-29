@@ -141,7 +141,8 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         )
         // The consumer API key is a distinct credential from the provider
         // device token and the local endpoint token: it lives only in the
-        // Keychain and is used only for the paid network chat route.
+        // Keychain and is used for Chat and the explicit free self-route
+        // warm-up after a confirmed model switch.
         let consumerKeyStore = KeychainConsumerKeyStore()
         let chatStore = ChatStore(
             localClient: LocalChatClient(endpointProvider: AppLocalEndpointProvider(
@@ -160,6 +161,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         )
         let providerControlStore = ProviderControlStore(
             controller: controlService,
+            warmupProbe: SelfRouteWarmupClient(keyStore: consumerKeyStore),
             homeDirectory: home,
             refreshTelemetry: { [weak monitorStore] in
                 await monitorStore?.refreshTelemetryImmediately()

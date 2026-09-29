@@ -12,6 +12,11 @@ enum ProviderOperation: Equatable {
     case lifecycle(ProviderLifecycleAction)
 }
 
+enum SwitchWarmupStatus: Equatable {
+    case checking(modelID: String)
+    case result(modelID: String, SelfRouteWarmupResult, at: Date)
+}
+
 enum LifecycleConfirmation: Equatable {
     case stop(ProviderActivityRisk)
     case restart(ProviderActivityRisk)
@@ -40,8 +45,10 @@ final class ProviderControlStore: ObservableObject {
     @Published private(set) var pendingConfirmation: LifecycleConfirmation?
     @Published private(set) var errorMessage: String?
     @Published private(set) var latestDownloadProgressLine: String?
+    @Published private(set) var switchWarmupStatus: SwitchWarmupStatus?
 
     private let controller: any ProviderControlling
+    private let warmupProbe: (any SelfRouteWarmupProbing)?
     private let diagnosticSanitizer: UserDiagnosticSanitizer
     private let refreshTelemetry: @MainActor @Sendable () async -> Void
     private let awaitStartup: @MainActor @Sendable (Date) async throws -> Void
@@ -55,6 +62,7 @@ final class ProviderControlStore: ObservableObject {
 
     init(
         controller: any ProviderControlling,
+        warmupProbe: (any SelfRouteWarmupProbing)? = nil,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         refreshTelemetry: @escaping @MainActor @Sendable () async -> Void = {},
         now: @escaping @Sendable () -> Date = { Date() },
@@ -65,6 +73,7 @@ final class ProviderControlStore: ObservableObject {
     ) {
         self.awaitStartup = awaitStartup
         self.controller = controller
+        self.warmupProbe = warmupProbe
         diagnosticSanitizer = UserDiagnosticSanitizer(homeDirectory: homeDirectory)
         self.refreshTelemetry = refreshTelemetry
         self.now = now
@@ -127,6 +136,21 @@ final class ProviderControlStore: ObservableObject {
                     failureMessage: "The model switched, but controls could not refresh.",
                     uncertainFailureMessage: "The switch outcome could not be confirmed. Refresh model controls."
                 )
+                if !completion.isOutcomeUncertain,
+                   let refreshed = snapshot,
+                   refreshed.daemonState?.advertisedModels == [modelID],
+                   refreshed.sources.daemon.evaluated(
+                    at: now(),
+                    invalidReason: "Provider state unavailable",
+                    staleReason: "Provider state stale",
+                    futureReason: "Provider state timestamp invalid"
+                   ).isMarkedFresh,
+                   let family = refreshed.inventory.myCatalog.first(where: { $0.catalogID == modelID })?.family,
+                   let warmupProbe {
+                    switchWarmupStatus = .checking(modelID: modelID)
+                    let result = await warmupProbe.warm(modelID: modelID, family: family)
+                    switchWarmupStatus = .result(modelID: modelID, result, at: now())
+                }
             } catch is CancellationError {
                 // The service owns dispatch and cancellation boundaries.
             } catch let error as ProviderControlError {
@@ -930,6 +954,7 @@ final class ProviderControlStore: ObservableObject {
             operationPhase = nil
         }
         errorMessage = nil
+        switchWarmupStatus = nil
         return operationGeneration
     }
 

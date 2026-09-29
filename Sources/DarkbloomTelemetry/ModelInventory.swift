@@ -205,6 +205,8 @@ public struct ModelInventoryItem: Equatable, Identifiable, Sendable {
         enabledSelector ?? preloadSelector
     }
     public let displayName: String
+    /// Public model alias used by the consumer self-route; distinct from the local build ID.
+    public let family: String
     public let modelType: String
     public let capabilities: [String]
     public let sizeGB: Double
@@ -224,6 +226,7 @@ public struct ModelInventoryItem: Equatable, Identifiable, Sendable {
         localID: String?,
         configuredSelector: String? = nil,
         displayName: String,
+        family: String = "",
         modelType: String,
         capabilities: [String],
         sizeGB: Double,
@@ -249,6 +252,7 @@ public struct ModelInventoryItem: Equatable, Identifiable, Sendable {
         self.preloadSelector = preloadSelector
             ?? (isPreloaded ? configuredSelector : nil)
         self.displayName = displayName
+        self.family = family
         self.modelType = modelType
         self.capabilities = capabilities
         self.sizeGB = sizeGB
@@ -321,7 +325,7 @@ public enum ModelInventoryBuilder {
             let live: InventoryLiveState = activeID == model.id ? .active : (loaded.contains(model.id) ? .loadedIdle : .unloaded)
             return ModelInventoryItem(
                 catalogID: model.id, localID: downloaded ? model.id : nil,
-                displayName: model.displayName, modelType: model.modelType,
+                displayName: model.displayName, family: model.family, modelType: model.modelType,
                 capabilities: model.capabilities,
                 sizeGB: model.sizeGB, minimumRAMGB: model.minimumRAMGB,
                 requiredProviderCapabilities: model.requiredProviderCapabilities,

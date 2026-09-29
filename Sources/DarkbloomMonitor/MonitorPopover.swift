@@ -410,6 +410,9 @@ struct MonitorPopover: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let warmup = controlStore.switchWarmupStatus {
+                SwitchWarmupFeedback(status: warmup)
+            }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -454,7 +457,7 @@ struct MonitorPopover: View {
             }
             Button("Cancel", role: .cancel) { pendingSingleModelID = nil }
         } message: {
-            Text("Other advertised models stop receiving new work. Accepted work finishes before switching. You can restore the full saved selection in Models.")
+            Text("Other advertised models stop receiving new work. Accepted work finishes before switching. If a Chat API key is saved, one free test request will try to load this model on an owned provider. You can restore the saved selection in Models.")
         }
         .task { await store.refreshModelServingProfitability() }
     }

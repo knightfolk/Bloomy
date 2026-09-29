@@ -175,9 +175,9 @@ token, account ID, provider key, prompts, responses, or per-job content.
 Chat conversations are equally off-disk: the built-in Chat destination and
 its pop-out window keep the transcript in memory only, discard it on quit,
 and never write prompts or replies to any store. The Darkbloom consumer API
-key used by the paid chat route lives only in the macOS Keychain — never in
-preferences, files, or logs — and is separate from both the provider device
-token and the local endpoint token.
+key used by network Chat and the free post-switch self-test lives only in the
+macOS Keychain — never in preferences, files, or logs — and is separate from
+both the provider device token and the local endpoint token.
 
 Historical throughput is derived from positive token/time deltas belonging to
 the same provider process and model. These completion counters are not a live
@@ -196,6 +196,15 @@ configuration does not silently restart the provider. With Darkbloom 0.9.10 or
 newer, **Apply Live** can gracefully drain accepted requests and replace the
 advertised model selection on the existing coordinator session. Timeouts leave
 the provider draining and do not force-cancel work.
+
+The popup's **Use only this model** action follows a confirmed switch with one
+small self-route completion (eight output tokens maximum) when a consumer API
+key is saved in Chat. This is an emergency warm-up for a CLI switch that leaves
+the new model unloaded. It is free and cannot fall back to paid network routing.
+The popup reports a skipped or failed test without undoing a successful model
+switch. A successful self-test proves that an owned machine responded; it does
+not guarantee public scheduler traffic. No test is sent when the switch outcome
+or fresh advertised selection cannot be confirmed.
 
 **Models → Provider capacity** lets you save a concurrency limit from 1–24
 and choose how many models the provider may keep in memory. Darkbloom CLI 0.9.7
