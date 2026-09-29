@@ -10,6 +10,41 @@ private let layoutNow = Date()
 @Suite("Monitor popover layout")
 @MainActor
 struct MonitorPopoverLayoutTests {
+    @Test("three-column popup cards fit populated readings and long names", arguments: [false, true])
+    func populatedPopupCards(dark: Bool) async throws {
+        let ids = ["EigenLabs/Qwen3.8-27B-4bit-mtp", "gemma-4-26b-qat-4bit",
+                   "qwen3-vl-30b-a3b-instruct", "qwen3.5-35b-a3b",
+                   "qwen3.6-35b-a3b-vl-mtp-mxfp8", "nvidia-nemotron-3.5-lightning",
+                   "ternary-bonsai-2-27b", "qwen3.5-9b"]
+        let view = LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+            ForEach(ids, id: \.self) { id in
+                CompactModelCard(modelID: id, status: "Loaded · idle", tint: .orange,
+                    metrics: [
+                        ModelCardMetric(id: "speed", symbol: "speedometer", value: "124.7", caption: "avg tok/s today"),
+                        ModelCardMetric(id: "earnings", symbol: "dollarsign.circle", value: "$0.0124", caption: "est. net / active h")
+                    ], compact: true)
+            }
+        }.padding(16).frame(width: 560)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .environment(\.colorScheme, dark ? .dark : .light)
+        let host = NSHostingController(rootView: view)
+        let fitted = host.sizeThatFits(in: NSSize(width: 560, height: 0))
+        #expect(fitted.width == 560)
+        #expect(fitted.height < 500)
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(fitted)
+        window.orderBack(nil)
+        defer { window.close() }
+        try await Task.sleep(for: .milliseconds(200))
+        host.view.layoutSubtreeIfNeeded()
+        guard ProcessInfo.processInfo.environment["DARKBLOOM_RENDER_EVIDENCE"] == "1" else { return }
+        let bitmap = try #require(host.view.bitmapImageRepForCachingDisplay(in: host.view.bounds))
+        host.view.cacheDisplay(in: host.view.bounds, to: bitmap)
+        try #require(bitmap.representation(using: .png, properties: [:]))
+            .write(to: URL(fileURLWithPath: "/tmp/darkbloom-popup-cards-\(dark ? "dark" : "light").png"))
+    }
+
     @Test("network demand rows include enabled models only and rank urgent work first")
     func networkDemandRows() throws {
         let capacity = try NetworkCapacityParser.parse(
@@ -344,7 +379,7 @@ struct MonitorPopoverLayoutTests {
         #expect(controller.dashboardWindowController?.window === firstWindow)
         #expect(controller.dashboardWindowController?.navigation.selected == .settings)
         controller.invalidate()
-        #expect(controller.popoverContentSize == NSSize(width: 420, height: 430))
+        #expect(controller.popoverContentSize == NSSize(width: 560, height: 430))
     }
 
     @Test("fresh and stale model settings fit without horizontal growth")
@@ -437,7 +472,7 @@ struct MonitorPopoverLayoutTests {
             in: NSSize(width: 400, height: 0)
         )
 
-        #expect(proposedSize.width == 420)
+        #expect(proposedSize.width == 560)
         #expect(proposedSize.height < 650)
         if ProcessInfo.processInfo.environment["DARKBLOOM_RENDER_EVIDENCE"] == "1" {
             let window = NSWindow(contentViewController: hostingController)
@@ -481,9 +516,9 @@ struct MonitorPopoverLayoutTests {
             rootView: MonitorPopover(store: store)
                 .environmentObject(controlStore)
         )
-        let fitted = hostingController.sizeThatFits(in: NSSize(width: 420, height: 0))
+        let fitted = hostingController.sizeThatFits(in: NSSize(width: 560, height: 0))
 
-        #expect(fitted.width == 420)
+        #expect(fitted.width == 560)
         #expect(fitted.height <= 700)
         guard ProcessInfo.processInfo.environment["DARKBLOOM_RENDER_EVIDENCE"] == "1" else { return }
         let window = NSWindow(contentViewController: hostingController)

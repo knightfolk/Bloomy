@@ -424,7 +424,7 @@ struct MonitorPopover: View {
             .frame(height: popupBodyHeight(currentTime: currentTime))
         }
         .padding(16)
-        .frame(width: 420, alignment: .topLeading)
+        .frame(width: 560, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showsFans) {
             if let extras = store.providerExtras {
@@ -447,8 +447,8 @@ struct MonitorPopover: View {
     private func popupBodyHeight(currentTime: Date) -> CGFloat {
         let advertised = advertisedIDs(at: currentTime) ?? []
         let available = availableIDs(excluding: advertised)
-        let rows = (advertised.count + 1) / 2 + (available.count + 1) / 2
-        return min(470, CGFloat(rows) * 112 + 190)
+        let rows = (advertised.count + 2) / 3 + (available.count + 2) / 3
+        return min(470, CGFloat(rows) * 120 + 190)
     }
 
     private func advertisedIDs(at now: Date) -> [String]? {
@@ -500,12 +500,12 @@ struct MonitorPopover: View {
     }
 
     private func modelGrid(_ ids: [String]) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
             ForEach(ids, id: \.self) { id in
                 let state = models.first(where: { $0.name == id })?.state
                 CompactModelCard(modelID: id, status: modelStateLabel(state),
                                  tint: state == .active ? .green : state == .loadedIdle ? .orange : .secondary,
-                                 metrics: modelMetrics(id), selected: state == .active)
+                                 metrics: modelMetrics(id), selected: state == .active, compact: true)
             }
         }
     }

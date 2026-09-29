@@ -50,9 +50,10 @@ struct CompactModelCard: View {
     var tint: Color = .accentColor
     var metrics: [ModelCardMetric] = []
     var selected: Bool = false
+    var compact: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: compact ? 7 : 10) {
             HStack(alignment: .top, spacing: 7) {
                 familyImage
                     .foregroundStyle(tint)
@@ -61,15 +62,17 @@ struct CompactModelCard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(ModelDisplayName.short(modelID))
                         .font(.subheadline.weight(.semibold))
-                        .lineLimit(1).help(modelID)
+                        .lineLimit(compact ? 2 : 1).help(modelID)
                     Label(status, systemImage: "circle.fill")
                         .font(.caption).foregroundStyle(tint)
+                        .lineLimit(1)
                         .labelStyle(.titleAndIcon)
                 }
                 Spacer(minLength: 0)
             }
             if !metrics.isEmpty {
-                HStack(alignment: .top, spacing: 10) {
+                (compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 5))
+                         : AnyLayout(HStackLayout(alignment: .top, spacing: 10))) {
                     ForEach(metrics) { metric in
                         VStack(alignment: .leading, spacing: 3) {
                             Label(metric.value, systemImage: metric.symbol)
@@ -85,8 +88,8 @@ struct CompactModelCard: View {
                 }
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+        .padding(compact ? 10 : 12)
+        .frame(maxWidth: .infinity, minHeight: compact ? 104 : 92, alignment: .topLeading)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? tint : .primary.opacity(0.07), lineWidth: selected ? 1.5 : 1))
         .help(modelID)
