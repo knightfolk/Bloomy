@@ -3,6 +3,28 @@
     <channel>
         <title>Bloomy</title>
         <item>
+            <title>1.9.7</title>
+            <pubDate>Tue, 29 Sep 2026 15:07:26 -0700</pubDate>
+            <sparkle:version>132</sparkle:version>
+            <sparkle:shortVersionString>1.9.7</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Bloomy v1.9.7
+
+Swap now loads locally, then nudges through the network.
+
+- Bloomy first loads and verifies the selected model on this Mac through the local API, keeping all advertised models available.
+- After a successful local swap, Bloomy sends one network self-route nudge using the key already saved in Nudge. The request is capped at eight output tokens, with no paid fallback.
+- Local loading and the network nudge have separate status messages. A missing or rejected key, unavailable model, or failed nudge does not undo a successful local swap.
+- The nudge is skipped if the local request fails, is canceled, cannot be confirmed, or the provider becomes busy or changes. It does not enable automatic nudging.
+
+Enable **Hosting → Fleet + local API → This Mac only** for local swapping. Set up the existing **Nudge** key once for the network follow-up. Network nudges may reach another owned provider and do not guarantee public work.
+
+For Apple Silicon Macs running macOS 14 or newer.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/Bloomy/releases/download/v1.9.7/Bloomy-1.9.7-mac-arm64.zip" length="8522843" type="application/octet-stream" sparkle:edSignature="1EvnsVd66koM6yHkWxwpUnjkAyfWcSo5HhGtAj0xuPUs2SAt25URXiHjUqAStzQcxgPT+jlnd+z/H6O4TGNHCw=="/>
+        </item>
+        <item>
             <title>1.9.6</title>
             <pubDate>Tue, 29 Sep 2026 14:48:33 -0700</pubDate>
             <sparkle:version>131</sparkle:version>
