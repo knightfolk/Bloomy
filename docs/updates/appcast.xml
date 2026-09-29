@@ -3,6 +3,25 @@
     <channel>
         <title>Bloomy</title>
         <item>
+            <title>1.9.8</title>
+            <pubDate>Tue, 29 Sep 2026 15:50:16 -0700</pubDate>
+            <sparkle:version>133</sparkle:version>
+            <sparkle:shortVersionString>1.9.8</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Bloomy v1.9.8
+
+Fixes nudges getting stuck after a completed model selection change.
+
+- Automatic and manual nudges now recognize a completed model switch as ready when the provider is otherwise fresh, idle, and serving exactly one warm model.
+- The automatic watcher reports why it is paused instead of misleadingly saying it is watching when the provider is not eligible.
+- The 15-minute idle threshold, saved key, cooldown, and daily limit remain unchanged. Active, failed, or unconfirmed switches still block nudges.
+
+For Apple Silicon Macs running macOS 14 or newer.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/Bloomy/releases/download/v1.9.8/Bloomy-1.9.8-mac-arm64.zip" length="8522952" type="application/octet-stream" sparkle:edSignature="nSddagTUWmbEipDqBH/engQ/edCkXpMTkc9mC8hwxE8GqXbhl8+22EticxNgjGPdK3udZIzPlflwIEyQpbrgBw=="/>
+        </item>
+        <item>
             <title>1.9.7</title>
             <pubDate>Tue, 29 Sep 2026 15:07:26 -0700</pubDate>
             <sparkle:version>132</sparkle:version>
