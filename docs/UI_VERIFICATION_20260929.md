@@ -56,3 +56,11 @@ Nudge now shows a three-step guide automatically when its dedicated key is missi
 ## Completed setup clarity
 
 After setup, the Nudge panel now shows “Setup complete · Key saved.” The saved-key section explains that manual and automatic nudges share the existing key. The empty credential form is hidden until Replace key is selected; Cancel clears the replacement draft and restores the saved-key confirmation. Removal is separate under a disclosure. The initial save message no longer suggests an unexplained cancellation. Seven focused nudge tests and the Release build passed. Native computer use verified the completed state with the user's existing saved key, opened Replace key without entering anything, canceled, and confirmed the field disappeared. The existing automatic setting remained on at 15 minutes; no key was read, replaced, removed, or manually nudged by the verifier.
+
+## Published v1.9.5 release validation
+
+Source commit `c9644d1bd6ed48ad85f2f8c198ba2db604f8ccef`, version 1.9.5, build 130: all 956 Swift tests (907 telemetry/app, 21 protocol, 28 host), 17 packaging tests, and the Release build passed. The Developer ID signed app was accepted by Apple notarization, stapled, and passed signature and Gatekeeper verification.
+
+The final ZIP SHA-256 is `8262e583350718bcfd2bfffaa7e87b1dfa9a5d0714b10b6125fa74f5815645a6` (8,481,941 bytes). All three uploaded release assets matched GitHub's recorded sizes and SHA-256 digests before publication. Sparkle tests against the exact final ZIP verified normal 129-to-130 installation, deferred installation after a test process quit, test-process relaunch, and invalid-signature rejection (error 4005; old app remained 129). User preferences remained unchanged except Sparkle's last-check timestamp. The test server and test-only processes were stopped. Evidence remains in `.build/release-v1.9.5-130/upgrade-test/results.json` and accompanying logs.
+
+Release: https://github.com/knightfolk/Bloomy/releases/tag/v1.9.5. The provider and running review app were not changed by these updater tests. Live model application and real-key request dispatch remain outside the verification claims above.

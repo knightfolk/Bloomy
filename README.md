@@ -28,7 +28,7 @@ the Bloomy release uses `Bloomy.app`. Check the release page for the version
 and signing status of the download you select.
 Quit an older monitor copy before launching the new one. macOS may still ask
 for first-launch confirmation or permission to read your external model drive.
-Bloomy v1.9.4 is Developer ID signed and notarized by Apple, with a stapled
+Bloomy v1.9.5 is Developer ID signed and notarized by Apple, with a stapled
 notarization ticket and verified Gatekeeper acceptance.
 
 ## Coming soon
@@ -48,7 +48,10 @@ explicit, off-by-default setting with its own evidence and timing checks.
 
 - Bloomy character icon and tintable menu-bar mark
 - Menu-bar activity status with clearly labeled model-average throughput
-- A compact, content-sized popup with short model pills and inline statistics
+- A compact popup with equal-sized model cards, collapsible available models, and stable live readings
+- Manual Nudge with guided Keychain setup and a clear completed state
+- One-slot Auto plans with all selected models advertised and one chosen startup preload
+- Configurable idle reminders, separate from automatic nudge timing
 - Calendar-day average token throughput, including a per-model
   breakdown once more than one model has measured samples
 - Calendar-day earnings, average earnings per observed hour, and a local

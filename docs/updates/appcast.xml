@@ -3,6 +3,30 @@
     <channel>
         <title>Bloomy</title>
         <item>
+            <title>1.9.5</title>
+            <pubDate>Tue, 29 Sep 2026 14:06:38 -0700</pubDate>
+            <sparkle:version>130</sparkle:version>
+            <sparkle:shortVersionString>1.9.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Bloomy v1.9.5
+
+Bloomy makes it easier to see what your Mac is doing and take action when it is quiet.
+
+- **Manual Nudge** is now available in the dashboard toolbar and the fixed popup controls. A first-use guide links to Darkbloom's API console, explains the “my machine only” key restriction, and saves the key in macOS Keychain. Completed setup clearly confirms that manual and automatic nudges share one saved key. Replacing it is a separate action.
+- **Auto setup** saves all selected models with one resident model slot and one user-selected startup preload. Startup preload is explicitly enabled. Saving does not interrupt serving: Apply Live changes the advertised set, while the slot limit and startup preload take effect on the next provider start.
+- **Idle reminders** show Bloomy's mascot, an exclamation mark, and a steady idle label after five minutes of observed idle time. Choose Off, 5, 10, 15, or 30 minutes in Menu Bar settings. Reminders clear when work resumes or evidence is no longer fresh; they do not send requests.
+- **Automatic nudge** remains a separate opt-in with a 15-minute default. It now supports multiple advertised models when exactly one current model is warm, retaining the earnings checks, one-hour cooldown, and three-attempt daily limit. With several models advertised, nudges require the exact warm model ID from the self-route API; a family-only alias does not send a request.
+- **A steadier popup:** equal-sized model cards, a remembered Available collapse control, model refresh, and saved offline cards. GPU readings retain a clearly marked last sample when a read fails, instead of blinking away.
+- **Usable cooling controls:** corrected fan freshness handling, visible Refresh readings actions, and stable refresh labels in Settings and the popup Cooling panel.
+
+Nudges send one exclusive self-route request capped at eight output tokens, with no paid fallback. They do not guarantee public jobs, and a self-route response may come from another owned Mac. Existing keys, preferences, history, and provider settings are preserved. iPhone companion support remains in development.
+
+For Apple Silicon Macs running macOS 14 or newer.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/Bloomy/releases/download/v1.9.5/Bloomy-1.9.5-mac-arm64.zip" length="8481941" type="application/octet-stream" sparkle:edSignature="dv/9xT0rRLm7foR/bIZgO0ML2s/I8snUEvw9H696YO+87cIkgMbY9UJA+7xcNn3DrKP0jTqKzQNArnhQhpQiDw=="/>
+        </item>
+        <item>
             <title>1.9.4</title>
             <pubDate>Tue, 29 Sep 2026 10:38:40 -0700</pubDate>
             <sparkle:version>129</sparkle:version>
