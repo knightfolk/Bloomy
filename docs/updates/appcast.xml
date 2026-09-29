@@ -3,6 +3,33 @@
     <channel>
         <title>Darkbloom Control</title>
         <item>
+            <title>1.9.0</title>
+            <pubDate>Mon, 28 Sep 2026 18:19:00 -0700</pubDate>
+            <sparkle:version>123</sparkle:version>
+            <sparkle:shortVersionString>1.9.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Darkbloom Control v1.9.0
+
+- Redesign the menu-bar popup around your Mac's name, GPU utilization, fan readings
+  and controls, and a compact two-column grid of advertised and available models.
+- Use shared model cards with family icons, short names, full names on hover,
+  serving state, measured speed, and clearly labeled earnings when available.
+- Make Overview denser, standardize Activity filters, and reorganize Opportunity
+  into compact comparison cards with detailed reasoning available on demand.
+- Let Models expand to three columns when the window has enough room.
+- Rework Health & Logs with clearer source status, a selectable log table,
+  responsive filters, and full event details.
+- Bring earnings and estimated electricity costs together while keeping missing
+  measurements and observation coverage explicit.
+
+This update changes presentation without moving models or changing provider,
+fan, model-selection, or automatic-update preferences. The iOS companion and
+remote-control service remain coming soon.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/DarkbloomControl/releases/download/v1.9.0/Darkbloom-Control-1.9.0-mac-arm64.zip" length="6817092" type="application/octet-stream" sparkle:edSignature="aQF/dYaVYUsFA/f26Q2TXLnrOy2WTZuccUpXSQMmgmRR3corAKKwGPQ3wgs1B0KKOUGC7nDb4zTRMVgEFU8LDQ=="/>
+        </item>
+        <item>
             <title>1.8.0</title>
             <pubDate>Mon, 28 Sep 2026 15:41:57 -0700</pubDate>
             <sparkle:version>122</sparkle:version>
