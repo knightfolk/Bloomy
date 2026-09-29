@@ -54,6 +54,30 @@ struct ProviderPopupActivationTests {
         #expect(store.errorMessage == nil)
     }
 
+    @Test("an automatic nudge holds the provider action gate until it finishes")
+    func automaticNudgeHoldsActionGate() async throws {
+        let controller = ActivationController(snapshot: try activationSnapshot(advertised: ["saved-model"]))
+        let probe = HoldingActivationWarmupProbe()
+        let store = ProviderControlStore(controller: controller, now: { activationNow })
+        await store.refresh()
+        #expect(store.canAutomaticNudge)
+
+        let task = Task {
+            await store.performAutomaticNudge(modelID: "saved-model", family: "saved-model", probe: probe)
+        }
+        await probe.waitUntilStarted()
+        #expect(store.operation == .nudging)
+        #expect(!store.canAutomaticNudge)
+        #expect(store.singleModelSwitchUnavailableReason(for: "second-model") != nil)
+        await store.refresh()
+        #expect(store.operation == .nudging)
+
+        await probe.release()
+        #expect(await task.value == .sent)
+        #expect(store.operation == .idle)
+        #expect(store.canAutomaticNudge)
+    }
+
     @Test("an uncertain switch does not send a test request")
     func uncertainSwitchSkipsWarmup() async throws {
         let controller = ActivationController(
@@ -221,6 +245,30 @@ private actor ActivationWarmupProbe: SelfRouteWarmupProbing {
     func warm(modelID: String, family: String) async -> SelfRouteWarmupResult {
         calls.append("\(modelID)|\(family)")
         return result
+    }
+}
+
+private actor HoldingActivationWarmupProbe: SelfRouteWarmupProbing {
+    private var started = false
+    private var startedWaiter: CheckedContinuation<Void, Never>?
+    private var finishWaiter: CheckedContinuation<Void, Never>?
+
+    func warm(modelID: String, family: String) async -> SelfRouteWarmupResult {
+        started = true
+        startedWaiter?.resume()
+        startedWaiter = nil
+        await withCheckedContinuation { finishWaiter = $0 }
+        return .sent
+    }
+
+    func waitUntilStarted() async {
+        guard !started else { return }
+        await withCheckedContinuation { startedWaiter = $0 }
+    }
+
+    func release() {
+        finishWaiter?.resume()
+        finishWaiter = nil
     }
 }
 

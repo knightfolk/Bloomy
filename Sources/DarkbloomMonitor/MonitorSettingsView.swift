@@ -80,6 +80,9 @@ struct MonitorSettingsView: View {
                 providerSection(for: .updates, isVisible: isVisible)
             case .provider, .fans:
                 providerSection(for: page, isVisible: isVisible)
+                if page == .provider, let inactivityNudge = monitorStore?.inactivityNudge {
+                    InactivityNudgeSettingsView(store: inactivityNudge)
+                }
             case .companion:
                 Section("iPhone companion") {
                     LabeledContent("Signed background helper", value: "Coming soon")

@@ -38,6 +38,8 @@ final class MonitorStore: ObservableObject {
     private var networkPollingPolicy = NetworkPollingPolicy()
 
     @Published private(set) var snapshot: TelemetrySnapshot
+    /// App-owned watcher; telemetry observations drive its idle window.
+    var inactivityNudge: InactivityNudgeStore?
     @Published private(set) var alertHistory: [AlertRecord] = []
     @Published private(set) var alertHistoryAvailable = false
     @Published private(set) var thermalState: SystemThermalState
@@ -731,6 +733,7 @@ final class MonitorStore: ObservableObject {
     }
 
     func stop() async {
+        await inactivityNudge?.stop()
         gpuUsage.stop()
         providerExtrasTask?.cancel()
         await providerExtrasTask?.value
@@ -864,6 +867,7 @@ final class MonitorStore: ObservableObject {
         }
         let previousCurrentModel = self.snapshot.state.value?.currentModel
         self.snapshot = snapshot
+        inactivityNudge?.observe(snapshot)
         await recordOperationalAlertTransitions(from: snapshot)
         if previousCurrentModel != snapshot.state.value?.currentModel {
             await refreshRecommendation()

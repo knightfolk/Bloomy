@@ -183,6 +183,30 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
                 hostingSettingsStore?.options ?? HostingSettingsStore.loadOptions(from: .standard)
             }
         )
+        let nudgeKeyStore = KeychainConsumerKeyStore(
+            service: "dev.darkbloom.control.inactivity-nudge-key"
+        )
+        monitorStore.inactivityNudge = InactivityNudgeStore(
+            keyStore: nudgeKeyStore,
+            canAct: { [weak providerControlStore] in
+                providerControlStore?.canAutomaticNudge == true
+            },
+            send: { [weak providerControlStore] state, canSend in
+                guard let providerControlStore else { return nil }
+                let family = providerControlStore.snapshot?.inventory.myCatalog.first {
+                    $0.catalogID == state.currentModel
+                }?.family ?? ""
+                let probe = SelfRouteWarmupClient(
+                    keyStore: nudgeKeyStore,
+                    canSend: canSend
+                )
+                return await providerControlStore.performAutomaticNudge(
+                    modelID: state.currentModel,
+                    family: family,
+                    probe: probe
+                )
+            }
+        )
         monitorStore.attachRecommendationInventory { [weak providerControlStore] in
             providerControlStore?.snapshot
         }

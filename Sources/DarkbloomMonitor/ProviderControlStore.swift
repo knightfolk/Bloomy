@@ -5,6 +5,7 @@ import SwiftUI
 enum ProviderOperation: Equatable {
     case idle
     case refreshing
+    case nudging
     case saving
     case liveSwitch
     case downloading(String)
@@ -86,6 +87,24 @@ final class ProviderControlStore: ObservableObject {
     }
 
     var canApplyLive: Bool { applyLiveUnavailableReason == nil }
+
+    /// Automatic traffic may run only while provider controls have no user
+    /// mutation, pending confirmation, or unsaved model edits.
+    var canAutomaticNudge: Bool {
+        operation == .idle && pendingConfirmation == nil && draft?.hasChanges != true
+    }
+
+    /// Own the same operation gate used by model switches and lifecycle work
+    /// for the entire self-route request. The watcher owns cancellation.
+    func performAutomaticNudge(
+        modelID: String,
+        family: String,
+        probe: any SelfRouteWarmupProbing
+    ) async -> SelfRouteWarmupResult? {
+        guard canAutomaticNudge, let generation = begin(.nudging) else { return nil }
+        defer { finish(generation) }
+        return await probe.warm(modelID: modelID, family: family)
+    }
 
     func singleModelSwitchUnavailableReason(for modelID: String) -> String? {
         guard operation == .idle else { return "Another provider action is in progress" }
@@ -950,7 +969,7 @@ final class ProviderControlStore: ObservableObject {
         switch newOperation {
         case .saving, .liveSwitch, .downloading, .deleting, .lifecycle:
             operationPhase = .mutating
-        case .idle, .refreshing:
+        case .idle, .refreshing, .nudging:
             operationPhase = nil
         }
         errorMessage = nil

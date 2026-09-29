@@ -129,6 +129,21 @@ public struct AuthenticatedEarningsClient: AccountEarningsFetching, Sendable {
         self.database = database
     }
 
+    /// Fresh account rows only: no leaderboard or persisted-history fallback.
+    public func nudgeEvidence(since: Date) async -> NudgeEarningsEvidence {
+        do {
+            let token = try String(contentsOf: tokenURL, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            var request = try AccountEarningsRequest.make(token: token, limit: historyLimit).urlRequest
+            request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            return try await ChatRouteExecutor.execute(
+                request: request, session: ChatHTTPSession.shared, successCapacity: 2 * 1_024 * 1_024
+            ) { data in
+                NudgeEarningsEvidence.evaluate(try AccountEarningsParser.parse(data), since: since, now: Date())
+            }
+        } catch { return .unavailable }
+    }
+
     public func fetch(now: Date) async throws -> EarningsPresentationValue {
         let token = try String(contentsOf: tokenURL, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)

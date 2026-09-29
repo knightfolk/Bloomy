@@ -18,10 +18,16 @@ public protocol SelfRouteWarmupProbing: Sendable {
 public struct SelfRouteWarmupClient: SelfRouteWarmupProbing, Sendable {
     private let keyStore: any ConsumerKeyReading
     private let session: URLSession
+    private let canSend: @Sendable () async -> Bool
 
-    public init(keyStore: any ConsumerKeyReading, session: URLSession? = nil) {
+    public init(
+        keyStore: any ConsumerKeyReading,
+        session: URLSession? = nil,
+        canSend: @escaping @Sendable () async -> Bool = { true }
+    ) {
         self.keyStore = keyStore
         self.session = session ?? ChatHTTPSession.shared
+        self.canSend = canSend
     }
 
     public func warm(modelID: String, family: String) async -> SelfRouteWarmupResult {
@@ -52,6 +58,9 @@ public struct SelfRouteWarmupClient: SelfRouteWarmupProbing, Sendable {
             } else {
                 return .modelUnavailable
             }
+            // The models request can take long enough for a real job or a
+            // provider action to begin. Recheck immediately before POST.
+            guard !Task.isCancelled, await canSend() else { return .failed }
             guard let completionRequest = try keyStore.withConsumerKey({ key -> ChatCompletionRequest? in
                 guard ConsumerAPIKey.isValid(key) else { return nil }
                 return try ChatCompletionRequest.makeSelfRouteWarmup(consumerKey: key, model: alias)

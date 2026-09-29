@@ -39,6 +39,19 @@ struct SelfRouteWarmupTests {
         #expect(WarmupFixtureProtocol.paths() == ["/v1/models"])
     }
 
+    @Test("a newly busy provider prevents the completion after model lookup")
+    func preSendGuardSkipsCompletion() async {
+        WarmupFixtureProtocol.reset()
+        let result = await SelfRouteWarmupClient(
+            keyStore: FixedWarmupKey(key: "dk-synthetic-test-key"),
+            session: makeSession(),
+            canSend: { false }
+        ).warm(modelID: "gemma-4-26b-qat-4bit", family: "gemma-4-26b")
+
+        #expect(result == .failed)
+        #expect(WarmupFixtureProtocol.paths() == ["/v1/models"])
+    }
+
     private func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [WarmupFixtureProtocol.self]
