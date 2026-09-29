@@ -28,7 +28,7 @@ the Bloomy release uses `Bloomy.app`. Check the release page for the version
 and signing status of the download you select.
 Quit an older monitor copy before launching the new one. macOS may still ask
 for first-launch confirmation or permission to read your external model drive.
-Bloomy v1.9.5 is Developer ID signed and notarized by Apple, with a stapled
+Bloomy v1.9.6 is Developer ID signed and notarized by Apple, with a stapled
 notarization ticket and verified Gatekeeper acceptance.
 
 ## Coming soon
