@@ -1,8 +1,30 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+<?xml version="1.0" ?><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>Darkbloom Control</title>
         <item>
+            <title>1.9.1</title>
+            <pubDate>Mon, 28 Sep 2026 20:36:41 -0700</pubDate>
+            <sparkle:version>124</sparkle:version>
+            <sparkle:shortVersionString>1.9.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+
+            <enclosure url="https://github.com/knightfolk/DarkbloomControl/releases/download/v1.9.1/Darkbloom-Control-1.9.1-mac-arm64.zip" length="6886032" type="application/octet-stream" sparkle:edSignature="V9yTbGltKfmwnmWuPKXG7OQr9t4c1JaudatKzh5I1t6MfPM6AQWzHW5rAOehPKyKmM61GY0uh/X4GUi5hLUyAQ=="/>
+        <description sparkle:format="markdown"><![CDATA[# Darkbloom Control v1.9.1
+
+- Organize the sidebar into collapsible groups and split Settings into focused
+  pages, preserving unfinished edits when switching between Settings pages.
+- Simplify fan control around the official helper's on/off switch and live GPU
+  temperature and fan readings. Keep optional policy adjustments out of the way.
+- Hide unused legacy Gemma catalog entries while keeping configured or running
+  models visible and manageable.
+- Explain model-cache command timeouts without exposing private command output,
+  and include the macOS external-volume usage description in packaged apps.
+
+Fan changes still require the official helper's confirmation and administrator
+approval. This release does not implement custom fan curves or a replacement
+helper. iOS companion support remains in development for version 2.0.
+]]></description></item><item>
             <title>1.9.0</title>
             <pubDate>Mon, 28 Sep 2026 18:19:00 -0700</pubDate>
             <sparkle:version>123</sparkle:version>

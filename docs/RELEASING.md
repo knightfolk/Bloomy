@@ -52,7 +52,10 @@ review build. Verify `otool -L` resolves Sparkle through the app's Frameworks
 folder rather than a developer build path.
 
 Sign Sparkle's nested executable components inside-out with the release Developer
-ID, hardened runtime, and timestamp before signing the containing app. Follow
+ID, hardened runtime, and timestamp before signing the containing app. Include
+the standalone `Versions/B/Autoupdate` executable as well as `Updater.app`,
+`Downloader.xpc`, and `Installer.xpc`; signing only the framework does not
+replace the standalone executable signature. Follow
 Sparkle's signing guidance at https://sparkle-project.org/documentation/ rather
 than using `codesign --deep` as a signing shortcut. Notarize and staple the complete
 app, then create the final distribution ZIP before signing update metadata.
