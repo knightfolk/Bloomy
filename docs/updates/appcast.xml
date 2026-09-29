@@ -1,6 +1,33 @@
-<?xml version="1.0" ?><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>Darkbloom Control</title>
+        <item>
+            <title>1.9.2</title>
+            <pubDate>Mon, 28 Sep 2026 22:24:36 -0700</pubDate>
+            <sparkle:version>125</sparkle:version>
+            <sparkle:shortVersionString>1.9.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Darkbloom Control v1.9.2
+
+- Make the menu-bar popup easier to scan with three model cards per row, short
+  model names, compact speed and earnings readings, and full names on hover.
+- Show advertised and locally available models separately. Available models
+  can be added directly; a confirmed “Use only” action switches the running
+  provider to one downloaded model after accepted work drains.
+- Recommend one model resident at a time in Capacity, with a startup model
+  preference. Other enabled models can still load when requested. Saved model
+  choices remain visible in a muted state when live provider status is absent.
+- Clarify whether a model is serving now, in memory, or waiting to load, and
+  simplify the popup's fan status and controls.
+
+The provider CLI chooses among enabled models for incoming work. This release
+does not add an earnings-based switching scheduler. A saved capacity change
+requires a provider restart; switching the advertised model does not.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/DarkbloomControl/releases/download/v1.9.2/Darkbloom-Control-1.9.2-mac-arm64.zip" length="6954828" type="application/octet-stream" sparkle:edSignature="ckOO2IdhwdnCMQj6Q0Ak25nTjv+fRUJ66IjpfSk0d9vqv/vDoLlYHQWj/dMsuDOPXAkEomRY7IHcfvsfNTDCCQ=="/>
+        </item>
         <item>
             <title>1.9.1</title>
             <pubDate>Mon, 28 Sep 2026 20:36:41 -0700</pubDate>
@@ -8,9 +35,8 @@
             <sparkle:shortVersionString>1.9.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-
             <enclosure url="https://github.com/knightfolk/DarkbloomControl/releases/download/v1.9.1/Darkbloom-Control-1.9.1-mac-arm64.zip" length="6886032" type="application/octet-stream" sparkle:edSignature="V9yTbGltKfmwnmWuPKXG7OQr9t4c1JaudatKzh5I1t6MfPM6AQWzHW5rAOehPKyKmM61GY0uh/X4GUi5hLUyAQ=="/>
-        <description sparkle:format="markdown"><![CDATA[# Darkbloom Control v1.9.1
+            <description sparkle:format="markdown"><![CDATA[# Darkbloom Control v1.9.1
 
 - Organize the sidebar into collapsible groups and split Settings into focused
   pages, preserving unfinished edits when switching between Settings pages.
@@ -24,7 +50,9 @@
 Fan changes still require the official helper's confirmation and administrator
 approval. This release does not implement custom fan curves or a replacement
 helper. iOS companion support remains in development for version 2.0.
-]]></description></item><item>
+]]></description>
+        </item>
+        <item>
             <title>1.9.0</title>
             <pubDate>Mon, 28 Sep 2026 18:19:00 -0700</pubDate>
             <sparkle:version>123</sparkle:version>
