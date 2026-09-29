@@ -44,6 +44,7 @@ struct ModelCardMetric: Identifiable {
 
 struct CompactModelCard: View {
     static let accountAttribution = "History-based and account-derived: earnings recorded for this model on the account, divided by this Mac’s observed active serving hours. The account may include other machines, so this is not measured income on this Mac. Gross excludes electricity; estimated net subtracts estimated incremental power where a measured idle baseline exists. Not a guaranteed payout."
+    static let popupHeight: CGFloat = 168
     let modelID: String
     let status: String
     var symbol: String = "cpu"
@@ -51,6 +52,7 @@ struct CompactModelCard: View {
     var metrics: [ModelCardMetric] = []
     var selected: Bool = false
     var compact: Bool = false
+    var compactWidth: CGFloat? = nil
     var activate: (() -> Void)? = nil
     var activationUnavailableReason: String? = nil
     var activationHelp: String = "Add this model to the provider selection"
@@ -67,7 +69,8 @@ struct CompactModelCard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(ModelDisplayName.short(modelID))
                         .font(.subheadline.weight(.semibold))
-                        .lineLimit(compact ? 2 : 1).help(modelID)
+                        .lineLimit(compact ? 2 : 1, reservesSpace: compact && compactWidth != nil)
+                        .help(modelID)
                     Label(status, systemImage: "circle.fill")
                         .font(.caption).foregroundStyle(tint)
                         .lineLimit(1)
@@ -96,6 +99,9 @@ struct CompactModelCard: View {
                     }
                 }
             }
+            if compact && compactWidth != nil {
+                Spacer(minLength: 0)
+            }
             if activate != nil || switchModel != nil {
                 HStack(spacing: 5) {
                     if let activate {
@@ -106,6 +112,7 @@ struct CompactModelCard: View {
                         .disabled(activationUnavailableReason != nil)
                         .help(activationUnavailableReason ?? "Activate · \(activationHelp)")
                         .accessibilityLabel("Activate \(ModelDisplayName.short(modelID))")
+                        .accessibilityHint(activationUnavailableReason ?? activationHelp)
                     }
                     if let switchModel {
                         Button(action: switchModel) {
@@ -115,6 +122,7 @@ struct CompactModelCard: View {
                         .disabled(switchUnavailableReason != nil)
                         .help(switchUnavailableReason ?? "Make this the only advertised model. Current work drains before switching.")
                         .accessibilityLabel("Switch to \(ModelDisplayName.short(modelID)) only")
+                        .accessibilityHint(switchUnavailableReason ?? "Make this the only advertised model")
                     }
                 }
                 .buttonStyle(.bordered)
@@ -123,9 +131,11 @@ struct CompactModelCard: View {
         }
         .padding(compact ? 10 : 12)
         .frame(maxWidth: .infinity, minHeight: compact ? 104 : 92, alignment: .topLeading)
+        .frame(width: compact ? compactWidth : nil,
+               height: compact && compactWidth != nil ? Self.popupHeight : nil,
+               alignment: .topLeading)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? tint : .primary.opacity(0.07), lineWidth: selected ? 1.5 : 1))
-        .help(modelID)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(modelID), \(status)")
         .accessibilityValue(metrics.map { "\($0.value) \($0.caption)" }.joined(separator: ", "))
@@ -145,33 +155,33 @@ struct CompactGPUGauge: View {
     @ObservedObject var usage: SystemGPUUsageStore
     let now: Date
 
-    private var current: Double? {
-        guard let date = usage.sampledAt, (0...10).contains(now.timeIntervalSince(date)) else { return nil }
-        return usage.percentage
-    }
-
     var body: some View {
+        // A sample can arrive after TimelineView's date but before this render.
+        let reading = usage.reading(at: Date())
+        let current = reading.percentage
         HStack(spacing: 9) {
             ZStack {
                 Circle().stroke(.quaternary, lineWidth: 5)
                 if let current {
                     Circle().trim(from: 0, to: current / 100)
-                        .stroke(.purple, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                        .stroke(reading.isStale ? Color.secondary : .purple,
+                                style: StrokeStyle(lineWidth: 5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                 }
                 Text(current.map { String(format: "%.0f", $0) } ?? "—")
                     .font(.system(.subheadline, design: .rounded, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(reading.isStale ? .secondary : .primary)
             }.frame(width: 43, height: 43)
             VStack(alignment: .leading, spacing: 2) {
                 Text("GPU %").font(.caption.weight(.semibold))
-                Text(current == nil ? "Unavailable" : "Whole Mac")
+                Text(current == nil ? "Unavailable" : reading.isStale ? "Last sample" : "Whole Mac")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
         .help("Whole-Mac GPU use, including other apps. Unavailable readings are not zero.")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Whole-Mac GPU utilization")
-        .accessibilityValue(current.map { "\(Int($0)) percent" } ?? "Unavailable")
+        .accessibilityValue(current.map { "\(reading.isStale ? "Last sample, " : "")\(Int($0)) percent" } ?? "Unavailable")
     }
 }
 

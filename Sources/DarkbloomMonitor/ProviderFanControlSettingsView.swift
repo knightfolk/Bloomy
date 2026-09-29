@@ -98,9 +98,24 @@ struct ProviderFanControlSettingsView: View {
     @State private var mutationInFlight = false
     @State private var pendingAction: FanAction?
     @State private var feedback: String?
+    @State private var manuallyRefreshing = false
 
     var body: some View {
         Section(compactPresentation ? "" : "Provider · Fan control") {
+            HStack {
+                Text("Fan readings").font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Refresh readings", systemImage: "arrow.clockwise") {
+                    Task {
+                        manuallyRefreshing = true
+                        await store.refreshFan()
+                        manuallyRefreshing = false
+                    }
+                }
+                .disabled(manuallyRefreshing || mutationInFlight || store.mutationInFlight)
+                .accessibilityIdentifier("settings.provider.fan.refresh")
+                .accessibilityValue(manuallyRefreshing ? "Refreshing" : "Ready")
+            }
             switch store.snapshot?.fanStatus {
             case .available(let status, let checkedAt):
                 fanContent(status: status, fresh: true, checkedAt: checkedAt)

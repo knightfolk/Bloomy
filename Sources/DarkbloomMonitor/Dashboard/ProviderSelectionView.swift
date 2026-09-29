@@ -6,7 +6,8 @@ struct ProviderSelectionView: View {
     @ObservedObject var controlStore: ProviderControlStore
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 2)) { context in
+        TimelineView(.periodic(from: .now, by: 2)) { _ in
+            let now = Date()
             VStack(alignment: .leading, spacing: 10) {
                 Text("Selections").font(.headline)
                 if let control = controlStore.snapshot {
@@ -15,7 +16,7 @@ struct ProviderSelectionView: View {
                     Text("Settings last read " + control.capturedAt.formatted(date: .omitted, time: .shortened))
                         .font(.caption).foregroundStyle(.secondary)
                     if case .available(let state, _) = store.snapshot.state,
-                       (0...10).contains(context.date.timeIntervalSince1970 - state.writtenAt) {
+                       (0...10).contains(now.timeIntervalSince1970 - state.writtenAt) {
                         let runtime = ProviderRuntimePresentation.make(state)
                         Label(runtime.title, systemImage: runtimeSymbol(for: state))
                             .font(.callout.weight(.semibold))

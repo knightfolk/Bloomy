@@ -8,6 +8,8 @@ public struct ProviderConfigDraft: Equatable, Sendable {
     public var selection: ProviderModelSelection
     public let originalMaxModelSlots: Int?
     public var maxModelSlots: Int?
+    public let originalStartupPreload: Bool?
+    public var startupPreload: Bool?
     public let originalEngineV2MaxConcurrent: Int?
     public var engineV2MaxConcurrent: Int?
     fileprivate let sourceFileState: ProviderConfigFileState?
@@ -15,6 +17,7 @@ public struct ProviderConfigDraft: Equatable, Sendable {
     public var hasChanges: Bool {
         selection != original
             || maxModelSlots != originalMaxModelSlots
+            || startupPreload != originalStartupPreload
             || engineV2MaxConcurrent != originalEngineV2MaxConcurrent
     }
 
@@ -24,6 +27,8 @@ public struct ProviderConfigDraft: Equatable, Sendable {
         selection: ProviderModelSelection,
         originalMaxModelSlots: Int? = nil,
         maxModelSlots: Int? = nil,
+        originalStartupPreload: Bool? = nil,
+        startupPreload: Bool? = nil,
         originalEngineV2MaxConcurrent: Int? = nil,
         engineV2MaxConcurrent: Int? = nil
     ) {
@@ -32,6 +37,8 @@ public struct ProviderConfigDraft: Equatable, Sendable {
         self.selection = selection
         self.originalMaxModelSlots = originalMaxModelSlots
         self.maxModelSlots = maxModelSlots
+        self.originalStartupPreload = originalStartupPreload
+        self.startupPreload = startupPreload
         self.originalEngineV2MaxConcurrent = originalEngineV2MaxConcurrent
         self.engineV2MaxConcurrent = engineV2MaxConcurrent
         self.sourceFileState = nil
@@ -43,6 +50,8 @@ public struct ProviderConfigDraft: Equatable, Sendable {
         self.selection = document.selection
         self.originalMaxModelSlots = document.maxModelSlots
         self.maxModelSlots = document.maxModelSlots
+        self.originalStartupPreload = document.startupPreload
+        self.startupPreload = document.startupPreload
         self.originalEngineV2MaxConcurrent = document.engineV2MaxConcurrent
         self.engineV2MaxConcurrent = document.engineV2MaxConcurrent
         self.sourceFileState = sourceFileState
@@ -51,6 +60,7 @@ public struct ProviderConfigDraft: Equatable, Sendable {
     fileprivate init(
         publishedSelection: ProviderModelSelection,
         publishedMaxModelSlots: Int?,
+        publishedStartupPreload: Bool?,
         publishedEngineV2MaxConcurrent: Int?,
         sourceFileState: ProviderConfigFileState
     ) {
@@ -59,6 +69,8 @@ public struct ProviderConfigDraft: Equatable, Sendable {
         self.selection = publishedSelection
         self.originalMaxModelSlots = publishedMaxModelSlots
         self.maxModelSlots = publishedMaxModelSlots
+        self.originalStartupPreload = publishedStartupPreload
+        self.startupPreload = publishedStartupPreload
         self.originalEngineV2MaxConcurrent = publishedEngineV2MaxConcurrent
         self.engineV2MaxConcurrent = publishedEngineV2MaxConcurrent
         self.sourceFileState = sourceFileState
@@ -76,6 +88,12 @@ public struct ProviderConfigDraft: Equatable, Sendable {
         return draft
     }
 
+    public func withStartupPreload(_ startupPreload: Bool) -> Self {
+        var draft = self
+        draft.startupPreload = startupPreload
+        return draft
+    }
+
     public func withEngineV2MaxConcurrent(_ engineV2MaxConcurrent: Int) -> Self {
         var draft = self
         draft.engineV2MaxConcurrent = engineV2MaxConcurrent
@@ -88,6 +106,8 @@ public struct ProviderConfigDraft: Equatable, Sendable {
             && lhs.selection == rhs.selection
             && lhs.originalMaxModelSlots == rhs.originalMaxModelSlots
             && lhs.maxModelSlots == rhs.maxModelSlots
+            && lhs.originalStartupPreload == rhs.originalStartupPreload
+            && lhs.startupPreload == rhs.startupPreload
             && lhs.originalEngineV2MaxConcurrent == rhs.originalEngineV2MaxConcurrent
             && lhs.engineV2MaxConcurrent == rhs.engineV2MaxConcurrent
     }
@@ -211,6 +231,9 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
             maxModelSlots: draft.maxModelSlots != draft.originalMaxModelSlots
                 ? draft.maxModelSlots
                 : nil,
+            startupPreload: draft.startupPreload != draft.originalStartupPreload
+                ? draft.startupPreload
+                : nil,
             engineV2MaxConcurrent: draft.engineV2MaxConcurrent != draft.originalEngineV2MaxConcurrent
                 ? draft.engineV2MaxConcurrent
                 : nil
@@ -248,6 +271,7 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
             draft: ProviderConfigDraft(
                 publishedSelection: draft.selection,
                 publishedMaxModelSlots: draft.maxModelSlots,
+                publishedStartupPreload: draft.startupPreload,
                 publishedEngineV2MaxConcurrent: draft.engineV2MaxConcurrent,
                 sourceFileState: publishedState
             ),

@@ -8,13 +8,24 @@ struct PopupFanSummary: View {
     let open: () -> Void
 
     private var status: ProviderFanStatus? {
-        guard case .available(let value, let capturedAt) = store.snapshot?.fanStatus,
-              (0...ProviderExtrasSnapshot.maximumSourceAge).contains(now.timeIntervalSince(capturedAt)) else { return nil }
-        return value.helperIsFresh(at: now) ? value : value.withoutHelper()
+        switch store.snapshot?.fanStatus {
+        case .available(let value, _), .stale(let value, _, _):
+            return readingsAreFresh && !value.helperIsFresh(at: Date()) ? value.withoutHelper() : value
+        case .unavailable, nil:
+            return nil
+        }
+    }
+
+    private var readingsAreFresh: Bool {
+        guard case .available(_, let capturedAt) = store.snapshot?.fanStatus else { return false }
+        // This child observes the fan store independently of its parent's
+        // timeline; a new reading can be newer than the supplied tick date.
+        return (0...ProviderExtrasSnapshot.maximumSourceAge).contains(Date().timeIntervalSince(capturedAt))
     }
 
     private var state: String {
         guard let status else { return "Readings unavailable" }
+        guard readingsAreFresh else { return "Last readings · stale" }
         if status.helperErrorPresent || status.diagnosticErrorPresent || status.helper?.mode == "error" { return "Needs attention" }
         guard let enabled = ProviderFanControlSettingsView.toggleState(status) else { return "Check helper" }
         return enabled ? "Helper on" : "Helper off"
@@ -44,8 +55,14 @@ struct PopupFanSummary: View {
                                 }.joined(separator: " · "))
                                 .accessibilityLabel("\(fans.count) fans, highest speed \(Int(maximum)) RPM")
                         }
+                        if status?.displayedTemperatureCelsius == nil &&
+                            status?.displayedFans.compactMap(\.actualRPM).max() == nil {
+                            Text("Waiting for readings").foregroundStyle(.secondary)
+                        }
                     }
                     .font(.caption).monospacedDigit()
+                    .frame(minHeight: 15, alignment: .leading)
+                    .foregroundStyle(readingsAreFresh ? .primary : .secondary)
                 }
                 Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
             }

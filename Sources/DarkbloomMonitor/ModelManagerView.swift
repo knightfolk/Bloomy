@@ -530,9 +530,10 @@ struct ModelManagerView: View {
     @AppStorage(ModelGroupScope.capacity.defaultsKey) private var capacityGroupCollapsed = true
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            let now = Date()
             VStack(spacing: 0) {
-                modelList(currentTime: context.date)
+                modelList(currentTime: now)
                 Divider()
                 ModelManagerFooter(store: store)
             }

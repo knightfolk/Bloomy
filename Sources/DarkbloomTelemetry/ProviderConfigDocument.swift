@@ -7,8 +7,10 @@ public enum ProviderConfigError: Error, Equatable, Sendable {
     case missingInteger(String)
     case duplicateArray(String)
     case duplicateInteger(String)
+    case duplicateBoolean(String)
     case malformedArray(String)
     case malformedInteger(String)
+    case malformedBoolean(String)
     case nonStringValue(String)
     case unsupportedInteger(String, Int)
     case duplicateModel(String)
@@ -21,6 +23,8 @@ public struct ProviderConfigDocument: Equatable, Sendable {
     public let data: Data
     public let selection: ProviderModelSelection
     public let maxModelSlots: Int?
+    /// Absent means the CLI default; Auto writes `true` explicitly.
+    public let startupPreload: Bool?
     /// Saved concurrent request cap for each v2 engine slot. The app accepts
     /// 1...24; CLI versions may impose a lower runtime limit. An absent key
     /// leaves the CLI default unchanged.
@@ -30,6 +34,7 @@ public struct ProviderConfigDocument: Equatable, Sendable {
     private let enabledRange: Range<Int>
     private let preloadRange: Range<Int>
     private let maxModelSlotsRange: Range<Int>?
+    private let startupPreloadRange: Range<Int>?
     private let engineV2MaxConcurrentRange: Range<Int>?
     private let lineEnding: String
 
@@ -48,11 +53,13 @@ public struct ProviderConfigDocument: Equatable, Sendable {
         self.data = data
         self.selection = selection
         self.maxModelSlots = scan.integers["max_model_slots"]?.value
+        self.startupPreload = scan.booleans["startup_preload"]?.value
         self.engineV2MaxConcurrent = scan.integers["engine_v2_max_concurrent"]?.value
         self.revision = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         self.enabledRange = enabled.range
         self.preloadRange = preloaded.range
         self.maxModelSlotsRange = scan.integers["max_model_slots"]?.range
+        self.startupPreloadRange = scan.booleans["startup_preload"]?.range
         self.engineV2MaxConcurrentRange = scan.integers["engine_v2_max_concurrent"]?.range
         self.lineEnding = Self.detectLineEnding(in: data)
     }
@@ -60,6 +67,7 @@ public struct ProviderConfigDocument: Equatable, Sendable {
     public func rendering(
         _ selection: ProviderModelSelection,
         maxModelSlots requestedMaxModelSlots: Int? = nil,
+        startupPreload requestedStartupPreload: Bool? = nil,
         engineV2MaxConcurrent requestedEngineV2MaxConcurrent: Int? = nil
     ) throws -> Data {
         try Self.validate(selection)
@@ -93,10 +101,25 @@ public struct ProviderConfigDocument: Equatable, Sendable {
                     value: Data(String(requestedMaxModelSlots).utf8)
                 ))
             } else {
-                let insertion = Self.missingIntegerInsertion(
+                let insertion = Self.missingScalarInsertion(
                     key: "max_model_slots",
-                    value: requestedMaxModelSlots,
+                    value: String(requestedMaxModelSlots),
                     after: enabledRange,
+                    in: data,
+                    lineEnding: lineEnding
+                )
+                insertions[insertion.index, default: Data()].append(insertion.value)
+            }
+        }
+        if let requestedStartupPreload {
+            let value = requestedStartupPreload ? "true" : "false"
+            if let startupPreloadRange {
+                replacements.append((range: startupPreloadRange, value: Data(value.utf8)))
+            } else {
+                let insertion = Self.missingScalarInsertion(
+                    key: "startup_preload",
+                    value: value,
+                    after: maxModelSlotsRange ?? enabledRange,
                     in: data,
                     lineEnding: lineEnding
                 )
@@ -110,9 +133,9 @@ public struct ProviderConfigDocument: Equatable, Sendable {
                     value: Data(String(requestedEngineV2MaxConcurrent).utf8)
                 ))
             } else {
-                let insertion = Self.missingIntegerInsertion(
+                let insertion = Self.missingScalarInsertion(
                     key: "engine_v2_max_concurrent",
-                    value: requestedEngineV2MaxConcurrent,
+                    value: String(requestedEngineV2MaxConcurrent),
                     after: maxModelSlotsRange ?? enabledRange,
                     in: data,
                     lineEnding: lineEnding
@@ -178,9 +201,9 @@ public struct ProviderConfigDocument: Equatable, Sendable {
         return Data(result.utf8)
     }
 
-    private static func missingIntegerInsertion(
+    private static func missingScalarInsertion(
         key: String,
-        value: Int,
+        value: String,
         after valueRange: Range<Int>,
         in data: Data,
         lineEnding: String
@@ -260,9 +283,15 @@ private struct ProviderConfigInteger: Equatable {
     let value: Int
 }
 
+private struct ProviderConfigBoolean: Equatable {
+    let range: Range<Int>
+    let value: Bool
+}
+
 private struct ProviderConfigScan {
     var arrays: [String: ProviderConfigArray] = [:]
     var integers: [String: ProviderConfigInteger] = [:]
+    var booleans: [String: ProviderConfigBoolean] = [:]
 }
 
 private struct ProviderConfigScanner {
@@ -330,6 +359,13 @@ private struct ProviderConfigScanner {
                 skipHorizontalWhitespace()
                 result.integers[key] = try parseInteger(key: key)
                 try consumeTargetStatementRemainder(integerKey: key)
+            } else if key == "startup_preload" {
+                guard result.booleans[key] == nil else {
+                    throw ProviderConfigError.duplicateBoolean(key)
+                }
+                skipHorizontalWhitespace()
+                result.booleans[key] = try parseBoolean(key: key)
+                try consumeTargetStatementRemainder(booleanKey: key)
             } else {
                 index = skipStatement(from: index)
             }
@@ -349,6 +385,23 @@ private struct ProviderConfigScanner {
             throw ProviderConfigError.malformedInteger(key)
         }
         return ProviderConfigInteger(range: start..<index, value: value)
+    }
+
+    private mutating func parseBoolean(key: String) throws -> ProviderConfigBoolean {
+        let start = index
+        let token: [UInt8]
+        let value: Bool
+        if bytes[index...].starts(with: Array("true".utf8)) {
+            token = Array("true".utf8)
+            value = true
+        } else if bytes[index...].starts(with: Array("false".utf8)) {
+            token = Array("false".utf8)
+            value = false
+        } else {
+            throw ProviderConfigError.malformedBoolean(key)
+        }
+        index += token.count
+        return ProviderConfigBoolean(range: start..<index, value: value)
     }
 
     private func isBackendTableHeader(at start: Int) -> Bool {
@@ -500,6 +553,17 @@ private struct ProviderConfigScanner {
         }
         guard index == bytes.count || isNewline(at: index) else {
             throw ProviderConfigError.malformedInteger(key)
+        }
+        consumeNewline()
+    }
+
+    private mutating func consumeTargetStatementRemainder(booleanKey key: String) throws {
+        skipHorizontalWhitespace()
+        if index < bytes.count, bytes[index] == Self.comment {
+            skipComment()
+        }
+        guard index == bytes.count || isNewline(at: index) else {
+            throw ProviderConfigError.malformedBoolean(key)
         }
         consumeNewline()
     }

@@ -32,11 +32,13 @@ public struct MenuBarGPURing: Equatable, Sendable {
     public let utilization: Double
     public let temperatureCelsius: Double?
     public let tint: Tint
+    public let lastSampledAt: Date?
 
-    public init(utilization: Double, temperatureCelsius: Double?, tint: Tint) {
+    public init(utilization: Double, temperatureCelsius: Double?, tint: Tint, lastSampledAt: Date? = nil) {
         self.utilization = utilization
         self.temperatureCelsius = temperatureCelsius
         self.tint = tint
+        self.lastSampledAt = lastSampledAt
     }
 
     /// Fraction of the ring to fill: 0 is an empty track, 1 a complete ring.
@@ -44,7 +46,12 @@ public struct MenuBarGPURing: Equatable, Sendable {
 
     public var accessibilityDetail: String {
         let percent = utilization.formatted(.number.precision(.fractionLength(0)))
-        var detail = "Whole-Mac GPU use \(percent) percent"
+        var detail: String
+        if let lastSampledAt {
+            detail = "Whole-Mac GPU use, last sample \(percent) percent, captured \(lastSampledAt.formatted(date: .abbreviated, time: .standard))"
+        } else {
+            detail = "Whole-Mac GPU use \(percent) percent"
+        }
         if let temperatureCelsius {
             let temperature = temperatureCelsius.formatted(.number.precision(.fractionLength(0)))
             detail += ", GPU \(temperature) degrees Celsius"
@@ -73,6 +80,21 @@ public struct MenuBarGPURing: Equatable, Sendable {
             utilization: utilization,
             temperatureCelsius: temperature,
             tint: tint(for: temperature, thresholds: thresholds)
+        )
+    }
+
+    /// Keeps the ring's shape when sampling skips a reading while explicitly
+    /// marking the retained utilization as old. Temperature is never reused.
+    public static func lastSample(utilization: Double?, sampledAt: Date?) -> Self? {
+        guard let utilization,
+              utilization.isFinite,
+              (0...100).contains(utilization),
+              let sampledAt else { return nil }
+        return Self(
+            utilization: utilization,
+            temperatureCelsius: nil,
+            tint: .neutral,
+            lastSampledAt: sampledAt
         )
     }
 

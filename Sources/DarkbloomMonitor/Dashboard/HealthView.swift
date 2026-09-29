@@ -20,16 +20,17 @@ struct HealthView: View {
             if showsLogs {
                 LogsView(feed: store.snapshot.eventFeed)
             } else {
-                TimelineView(.periodic(from: .now, by: 5)) { context in
+                TimelineView(.periodic(from: .now, by: 5)) { _ in
+                    let now = Date()
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
                             overview
-                            issues(at: context.date)
+                            issues(at: now)
                             sourceFreshness
                             DisclosureGroup(isExpanded: $showsProvider) {
                                 VStack(alignment: .leading, spacing: 14) {
-                                    ProviderVersionView(snapshot: store.snapshot, now: context.date)
-                                    ProviderVerificationView(snapshot: store.snapshot, now: context.date)
+                                    ProviderVersionView(snapshot: store.snapshot, now: now)
+                                    ProviderVerificationView(snapshot: store.snapshot, now: now)
                                 }
                                 .padding(.top, 10)
                             } label: {

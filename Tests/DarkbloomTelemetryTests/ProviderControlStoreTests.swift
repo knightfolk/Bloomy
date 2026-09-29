@@ -148,6 +148,47 @@ struct ProviderControlStoreTests {
         #expect(store.draft?.selection.preloaded == [])
     }
 
+    @Test("Auto saves all enabled selectors, one alias-aware preload, one slot and startup preload")
+    func configuresAutomaticMode() async throws {
+        let controller = FakeProviderController.fixture(snapshot: automaticModeFixture(
+            enabled: ["saved", "second-model"]
+        ))
+        let store = ProviderControlStore(controller: controller, now: { providerControlTestNow })
+        await store.refresh()
+
+        #expect(store.automaticModeUnavailableReason(preferredModelID: "saved-model") == nil)
+        await store.configureAutomaticMode(preferredModelID: "saved-model")
+
+        let submitted = try #require(await controller.submittedDrafts.last)
+        #expect(submitted.selection.enabled == ["saved", "second-model"])
+        #expect(submitted.selection.preloaded == ["saved"])
+        #expect(submitted.maxModelSlots == 1)
+        #expect(submitted.startupPreload == true)
+        #expect(submitted.engineV2MaxConcurrent == 8)
+        #expect(store.savedAutomaticStartupModelID == "saved-model")
+        #expect(await controller.executedActions.isEmpty)
+        #expect(await controller.liveSwitchSelections.isEmpty)
+        #expect(store.draft?.hasChanges == false)
+    }
+
+    @Test("Auto refuses unsaved edits and models outside the saved enabled set")
+    func automaticModeRejectsUnsafeSelection() async throws {
+        let controller = FakeProviderController.fixture(snapshot: automaticModeFixture())
+        let store = ProviderControlStore(controller: controller, now: { providerControlTestNow })
+        await store.refresh()
+        #expect(store.automaticModeUnavailableReason(preferredModelID: "available-model") != nil)
+        await store.configureAutomaticMode(preferredModelID: "available-model")
+        #expect(await controller.saveCount == 0)
+
+        store.setPreloaded(true, modelID: "second-model")
+        let staged = store.draft
+        #expect(store.automaticModeUnavailableReason(preferredModelID: "saved-model")
+                == "Save or discard pending changes before changing Auto")
+        await store.configureAutomaticMode(preferredModelID: "saved-model")
+        #expect(store.draft == staged)
+        #expect(await controller.saveCount == 0)
+    }
+
     @Test("stages the global concurrent request cap independently")
     func stagesEngineV2MaxConcurrent() async throws {
         let controller = FakeProviderController.fixture()
@@ -1974,6 +2015,7 @@ private actor FakeProviderController: ProviderControlling {
     private(set) var deletedModels: [String] = []
     private(set) var executedActions: [Execution] = []
     private(set) var liveSwitchSelections: [[String]] = []
+    private(set) var submittedDrafts: [ProviderConfigDraft] = []
     private(set) var saveCount = 0
     private(set) var activityReadCount = 0
     private(set) var downloadCancellationCount = 0
@@ -2095,6 +2137,7 @@ private actor FakeProviderController: ProviderControlling {
 
     func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult {
         saveCount += 1
+        submittedDrafts.append(draft)
         if saveCancellation { throw CancellationError() }
         if let saveControlFailure { throw saveControlFailure }
         if let saveFailure { throw saveFailure }
@@ -2103,7 +2146,11 @@ private actor FakeProviderController: ProviderControlling {
             original: draft.selection,
             selection: draft.selection,
             originalMaxModelSlots: draft.maxModelSlots,
-            maxModelSlots: draft.maxModelSlots
+            maxModelSlots: draft.maxModelSlots,
+            originalStartupPreload: draft.startupPreload,
+            startupPreload: draft.startupPreload,
+            originalEngineV2MaxConcurrent: draft.engineV2MaxConcurrent,
+            engineV2MaxConcurrent: draft.engineV2MaxConcurrent
         )
         currentSnapshot = ProviderControlSnapshot(
             inventory: currentSnapshot.inventory,
@@ -2269,6 +2316,44 @@ private func fixtureSnapshot(
         draft: draft,
         capturedAt: Date(timeIntervalSince1970: 1_750_000_000),
         sources: sources
+    )
+}
+
+private func automaticModeFixture(
+    enabled: [String] = ["saved-model", "second-model"]
+) -> ProviderControlSnapshot {
+    let selection = ProviderModelSelection(enabled: enabled, preloaded: [])
+    let draft = ProviderConfigDraft(
+        sourceRevision: "auto-fixture-revision",
+        original: selection,
+        selection: selection,
+        originalMaxModelSlots: 3,
+        maxModelSlots: 3,
+        originalStartupPreload: false,
+        startupPreload: false,
+        originalEngineV2MaxConcurrent: 8,
+        engineV2MaxConcurrent: 8
+    )
+    let catalog = [
+        CatalogModel(id: "saved-model", displayName: "Saved Model", family: "saved",
+                     modelType: "text", capabilities: ["text"], sizeGB: 1,
+                     minimumRAMGB: 4, active: true),
+        CatalogModel(id: "second-model", displayName: "Second Model", family: "second",
+                     modelType: "text", capabilities: ["text"], sizeGB: 2,
+                     minimumRAMGB: 8, active: true),
+        CatalogModel(id: "available-model", displayName: "Available Model", family: "available",
+                     modelType: "text", capabilities: ["text"], sizeGB: 3,
+                     minimumRAMGB: 12, active: true),
+    ]
+    let local = catalog.map {
+        LocalModel(id: $0.id, modelType: "text", sizeBytes: 1, estimatedMemoryGB: nil)
+    }
+    return ProviderControlSnapshot(
+        inventory: ModelInventoryBuilder.build(catalog: catalog, local: local,
+                                               selection: selection, daemon: nil, loadedModels: []),
+        draft: draft,
+        capturedAt: providerControlTestNow,
+        sources: freshProviderSources()
     )
 }
 

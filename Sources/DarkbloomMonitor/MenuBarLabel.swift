@@ -114,7 +114,10 @@ struct MenuBarGPURingView: View {
     }
 
     private var arcColor: Color {
-        switch ring.tint {
+        if ring.lastSampledAt != nil {
+            return Color(nsColor: .secondaryLabelColor).opacity(0.45)
+        }
+        return switch ring.tint {
         case .green: Color(nsColor: .systemGreen)
         case .yellow: Color(nsColor: .systemYellow)
         case .red: Color(nsColor: .systemRed)
@@ -128,13 +131,26 @@ struct MenuBarLabel: View {
     let uptime: ObservedUptimeValue
     var family: ModelFamilyIcon = .darkbloom
     var ring: MenuBarGPURing? = nil
+    var attention: MenuBarAttention? = nil
 
     var body: some View {
         HStack(spacing: 8) {
             logo
                 .frame(width: 16, height: 18)
 
-            MenuBarMetric(text: presentation.metricText)
+            if let attention {
+                HStack(spacing: 3) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                    Text(attention.shortText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.orange)
+                .frame(width: MenuBarMetric.width, height: MenuBarMetric.height, alignment: .leading)
+            } else {
+                MenuBarMetric(text: presentation.metricText)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
@@ -144,21 +160,24 @@ struct MenuBarLabel: View {
     @ViewBuilder
     private var logo: some View {
         if let ring {
-            MenuBarGPURingView(ring: ring, family: family, statusNSColor: statusNSColor)
+            MenuBarGPURingView(ring: ring, family: logoFamily, statusNSColor: statusNSColor)
         } else {
             DarkbloomLogo(
-                image: DarkbloomLogoAsset.menuBarImage(tint: statusNSColor, family: family),
+                image: DarkbloomLogoAsset.menuBarImage(tint: statusNSColor, family: logoFamily),
                 tint: statusColor
             )
         }
     }
+
+    private var logoFamily: ModelFamilyIcon { attention == nil ? family : .darkbloom }
 
     private var statusColor: Color {
         Color(nsColor: statusNSColor)
     }
 
     private var statusNSColor: NSColor {
-        switch presentation.health.color {
+        if attention != nil { return .systemOrange }
+        return switch presentation.health.color {
         case .green: .systemGreen
         case .yellow: .systemYellow
         case .orange: .systemOrange
@@ -168,6 +187,9 @@ struct MenuBarLabel: View {
 
     private var accessibilityText: String {
         var text = "\(presentation.accessibilityLabel) \(uptime.accessibilityDescription)"
+        if let attention {
+            text += " Attention: \(attention.title). \(attention.detail)"
+        }
         if let detail = ring?.accessibilityDetail {
             text += " \(detail)"
         }
@@ -183,6 +205,9 @@ struct MenuBarLabel: View {
         }
         if let detail = ring?.accessibilityDetail {
             text += " · \(detail)"
+        }
+        if let attention {
+            text = "\(attention.title): \(attention.detail) · \(text)"
         }
         return text
     }

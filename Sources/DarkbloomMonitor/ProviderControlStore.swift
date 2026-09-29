@@ -430,6 +430,62 @@ final class ProviderControlStore: ObservableObject {
         self.draft = draft
     }
 
+    /// The saved Auto choice is a configuration fact, not proof that the
+    /// running provider has applied its slot limit or loaded the model.
+    var savedAutomaticStartupModelID: String? {
+        guard let draft, let snapshot,
+              draft.originalMaxModelSlots == 1,
+              draft.originalStartupPreload == true,
+              draft.original.preloaded.count == 1 else { return nil }
+        return Self.resolvedCatalogID(for: draft.original.preloaded[0], in: snapshot.inventory)
+    }
+
+    func automaticModeUnavailableReason(preferredModelID: String) -> String? {
+        guard operation == .idle else { return "Another provider action is in progress" }
+        guard pendingConfirmation == nil else { return "Finish the pending provider action first" }
+        guard let draft, let snapshot else { return "Provider configuration is unavailable" }
+        guard !draft.hasChanges else { return "Save or discard pending changes before changing Auto" }
+        guard draft == snapshot.draft, freshModelSources(in: snapshot) else {
+            return "Refresh model controls before changing Auto"
+        }
+        if let validation = draftValidationMessage { return validation }
+        guard !draft.original.enabled.isEmpty else { return "Enable a model before choosing Auto" }
+        var resolvedIDs = Set<String>()
+        var preferredSelector: String?
+        for selector in draft.original.enabled {
+            guard let id = Self.resolvedCatalogID(for: selector, in: snapshot.inventory),
+                  resolvedIDs.insert(id).inserted,
+                  let item = snapshot.inventory.myCatalog.first(where: { $0.catalogID == id }),
+                  item.isDownloaded, item.localID != nil, item.issue == nil else {
+                return "Refresh downloaded model selection before changing Auto"
+            }
+            if id == preferredModelID { preferredSelector = selector }
+        }
+        guard let preferredSelector else { return "Choose an enabled downloaded model" }
+        if draft.originalMaxModelSlots == 1,
+           draft.originalStartupPreload == true,
+           draft.original.preloaded == [preferredSelector] {
+            return "Auto is already saved with this startup model"
+        }
+        return nil
+    }
+
+    /// Save the existing enabled set with one startup preload and one resident
+    /// slot. Running capacity and preload change on the next provider start;
+    /// live advertisement remains a separate, explicitly gated action.
+    func configureAutomaticMode(preferredModelID: String) async {
+        guard automaticModeUnavailableReason(preferredModelID: preferredModelID) == nil,
+              var candidate = draft, let snapshot else { return }
+        guard let selector = candidate.original.enabled.first(where: {
+            Self.resolvedCatalogID(for: $0, in: snapshot.inventory) == preferredModelID
+        }) else { return }
+        candidate.selection.preloaded = [selector]
+        candidate.maxModelSlots = 1
+        candidate.startupPreload = true
+        self.draft = candidate
+        await save()
+    }
+
     /// Stage the provider-wide CBv2 concurrent-request cap. Per-model TOML
     /// overrides remain untouched and continue to take precedence at runtime.
     func setEngineV2MaxConcurrent(_ engineV2MaxConcurrent: Int) {
@@ -1142,7 +1198,8 @@ final class ProviderControlStore: ObservableObject {
         case .validationFailed(let reason):
             configValidationMessage(reason)
         case .invalidUTF8, .missingArray, .missingInteger, .duplicateArray,
-             .duplicateInteger, .malformedArray, .malformedInteger,
+             .duplicateInteger, .duplicateBoolean, .malformedArray, .malformedInteger,
+             .malformedBoolean,
              .nonStringValue, .unsupportedInteger, .duplicateModel:
             "Provider settings could not be read safely."
         }

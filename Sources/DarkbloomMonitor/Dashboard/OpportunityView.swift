@@ -113,7 +113,8 @@ private struct OpportunityModelListView: View {
     @State private var refreshing = false
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 10)) { context in
+        TimelineView(.periodic(from: .now, by: 10)) { _ in
+            let now = Date()
             VStack(alignment: .leading, spacing: 14) {
                 DisclosureGroup {
                     RecommendationEvidenceCard(
@@ -146,7 +147,7 @@ private struct OpportunityModelListView: View {
                     .disabled(refreshing)
                 }
                 if let capacity = store.networkCapacity.value {
-                    let current = PopupNetworkDemandPresentation.freshness(of: store.networkCapacity, at: context.date) == .current
+                    let current = PopupNetworkDemandPresentation.freshness(of: store.networkCapacity, at: now) == .current
                     HStack(spacing: 6) {
                         Circle().fill(current ? Color.green : Color.orange).frame(width: 6, height: 6)
                         Text(current ? "Live network" : "Last known demand")
@@ -184,11 +185,11 @@ private struct OpportunityModelListView: View {
                                                 if let controlStore {
                                                     OpportunityLocalModelCard(model: model, controlStore: controlStore,
                                                         metadata: metadata(model.id), price: store.publicPricing.value?.price(for: model.id),
-                                                        metadataIsCurrent: catalogCurrent(context.date), priceIsCurrent: pricingCurrent(context.date), networkIsCurrent: current)
+                                                        metadataIsCurrent: catalogCurrent(now), priceIsCurrent: pricingCurrent(now), networkIsCurrent: current)
                                                 } else {
                                                     OpportunityModelCard(model: model, local: nil, metadata: metadata(model.id),
-                                                        price: store.publicPricing.value?.price(for: model.id), metadataIsCurrent: catalogCurrent(context.date),
-                                                        priceIsCurrent: pricingCurrent(context.date), networkIsCurrent: current)
+                                                        price: store.publicPricing.value?.price(for: model.id), metadataIsCurrent: catalogCurrent(now),
+                                                        priceIsCurrent: pricingCurrent(now), networkIsCurrent: current)
                                                 }
                                             }
                                         }
@@ -199,7 +200,7 @@ private struct OpportunityModelListView: View {
                                             Text("RAM compares installed memory with the catalog minimum. It does not confirm free memory or runtime compatibility.")
                                             if let controlStore { OpportunityCatalogControls(store: store, controlStore: controlStore) }
                                             if let catalog = store.publicCatalog.value {
-                                                Text("Model details last read \(catalog.capturedAt.formatted(date: .omitted, time: .shortened))\(catalogCurrent(context.date) ? "" : " · stale")")
+                                                Text("Model details last read \(catalog.capturedAt.formatted(date: .omitted, time: .shortened))\(catalogCurrent(now) ? "" : " · stale")")
                                             }
                                         }.font(.callout).foregroundStyle(.secondary).padding(.top, 8)
                                     }.padding(.top, 6)

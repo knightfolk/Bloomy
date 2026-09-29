@@ -180,6 +180,7 @@ private struct GeneralSettingsView: View {
     @Binding var appearanceModeRaw: String
     @AppStorage("electricity.usdPerKWh") private var electricityRate = ""
     @AppStorage("electricity.enabled") private var electricityEnabled = false
+    @AppStorage(MenuBarAttentionPolicy.defaultsKey) private var idleAlertMinutes = MenuBarAttentionPolicy.defaultIdleMinutes
 
     var body: some View {
         Group {
@@ -233,6 +234,17 @@ private struct GeneralSettingsView: View {
                     }
                     .pickerStyle(.menu)
 
+                    Picker("Idle alert", selection: $idleAlertMinutes) {
+                        Text("Off").tag(0)
+                        ForEach(MenuBarAttentionPolicy.supportedMinutes.filter { $0 > 0 }, id: \.self) { minutes in
+                            Text("After \(minutes) minutes").tag(minutes)
+                        }
+                    }
+                    .accessibilityIdentifier("settings.menuBar.idleAlert")
+                    Text("Bloomy shows its mascot and ! when a warm provider stays idle. The alert clears when work resumes. This reminder does not send a nudge or change automatic nudge timing.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
                     Text("Automatic shows Working or today's model average during activity, and today's earnings while idle. An asterisk marks partial-day earnings coverage.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -266,6 +278,7 @@ private struct ProviderAdvancedSettingsHost: View {
     @ObservedObject var control: ProviderControlStore
     let page: SettingsPage
     let isVisible: Bool
+    @State private var isManuallyRefreshing = false
 
     var body: some View {
         Section {
@@ -278,10 +291,14 @@ private struct ProviderAdvancedSettingsHost: View {
                     }
                 }
                 Spacer()
-                Button(extras.isRefreshing ? "Refreshing…" : "Refresh") {
-                    Task { await extras.refresh() }
+                Button("Refresh") {
+                    isManuallyRefreshing = true
+                    Task {
+                        await extras.refresh()
+                        isManuallyRefreshing = false
+                    }
                 }
-                .disabled(extras.isRefreshing || extras.mutationInFlight)
+                .disabled(isManuallyRefreshing || extras.mutationInFlight)
             }
         }
         if control.draft?.hasChanges == true {

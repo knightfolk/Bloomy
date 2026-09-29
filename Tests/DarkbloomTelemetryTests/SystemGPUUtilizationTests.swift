@@ -26,20 +26,36 @@ struct SystemGPUUtilizationTests {
         #expect(SystemGPUUtilization.average([-2, 101]) == nil)
     }
 
-    @Test("GPU usage store timestamps only valid readings")
+    @Test("GPU usage store retains a captured last sample through failed reads without presenting it as current")
     @MainActor
-    func storeRefreshes() {
+    func storeRefreshes() throws {
         let sample = GPUReadingBox(value: 48)
         let store = SystemGPUUsageStore(read: { sample.value })
 
         store.refresh()
         #expect(store.percentage == 48)
-        #expect(store.sampledAt != nil)
+        let firstCapturedAt = try #require(store.sampledAt)
+        #expect(store.reading() == .current(percentage: 48, sampledAt: firstCapturedAt))
 
         sample.value = nil
         store.refresh()
         #expect(store.percentage == nil)
         #expect(store.sampledAt == nil)
+        #expect(store.lastGoodPercentage == 48)
+        #expect(store.lastGoodSampledAt == firstCapturedAt)
+        #expect(store.reading() == .stale(percentage: 48, sampledAt: firstCapturedAt))
+        #expect(store.reading(at: firstCapturedAt.addingTimeInterval(11)) == .stale(
+            percentage: 48, sampledAt: firstCapturedAt
+        ))
+
+        sample.value = 64
+        store.refresh()
+        #expect(store.percentage == 64)
+        #expect(store.lastGoodPercentage == 64)
+        #expect(store.lastGoodSampledAt == store.sampledAt)
+
+        store.stop()
+        #expect(store.reading() == .unavailable)
     }
 }
 

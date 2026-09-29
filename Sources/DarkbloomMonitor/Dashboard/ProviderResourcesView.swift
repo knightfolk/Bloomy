@@ -74,7 +74,8 @@ struct ProviderResourcesView: View {
     }
 
     private var gpuUtilizationMetric: some View {
-        let percentage = currentGPUPercentage
+        let reading = gpuUsage.reading()
+        let percentage = reading.percentage
         return HStack(spacing: 10) {
             ZStack {
                 Circle()
@@ -82,13 +83,15 @@ struct ProviderResourcesView: View {
                 if let percentage {
                     Circle()
                         .trim(from: 0, to: percentage / 100)
-                        .stroke(.purple, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                        .stroke(reading.isStale ? Color.secondary : Color.purple,
+                                style: StrokeStyle(lineWidth: 6, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                         .animation(.easeOut(duration: 0.35), value: percentage)
                     VStack(spacing: -2) {
                         Text(percentage.formatted(.number.precision(.fractionLength(0))))
                             .font(.system(.headline, design: .rounded, weight: .bold))
                             .monospacedDigit()
+                            .foregroundStyle(reading.isStale ? Color.secondary : Color.primary)
                         Text("%")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
@@ -105,14 +108,9 @@ struct ProviderResourcesView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("GPU use")
                     .font(.callout.weight(.semibold))
-                Text(percentage == nil ? "Not available" : "System-wide")
+                Text(percentage == nil ? "Not available" : reading.isStale ? "Last sample · whole Mac" : "System-wide")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if gpuSampleIsStale {
-                    Text("Last sample")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.orange)
-                }
             }
             Spacer(minLength: 0)
         }
@@ -230,27 +228,20 @@ struct ProviderResourcesView: View {
         return cpuUsage.percentage
     }
 
-    private var currentGPUPercentage: Double? {
-        guard let sampledAt = gpuUsage.sampledAt else { return nil }
-        let age = Date().timeIntervalSince(sampledAt)
-        guard age.isFinite, (0...10).contains(age) else { return nil }
-        return gpuUsage.percentage
-    }
-
-    private var gpuSampleIsStale: Bool {
-        guard let sampledAt = gpuUsage.sampledAt else { return false }
-        let age = Date().timeIntervalSince(sampledAt)
-        return !age.isFinite || age < 0 || age > 10
-    }
-
     private var cpuAccessibilityLabel: String {
         guard let percentage = currentCPUPercentage else { return "Mac-wide CPU utilization is being measured" }
         return "Mac-wide CPU utilization, \(percentage.formatted(.number.precision(.fractionLength(0)))) percent"
     }
 
     private var gpuAccessibilityLabel: String {
-        guard let percentage = currentGPUPercentage else { return "System-wide GPU utilization is unavailable" }
-        return "System-wide GPU utilization, \(percentage.formatted(.number.precision(.fractionLength(0)))) percent"
+        switch gpuUsage.reading() {
+        case .current(let percentage, _):
+            return "System-wide GPU utilization, \(percentage.formatted(.number.precision(.fractionLength(0)))) percent"
+        case .stale(let percentage, let sampledAt):
+            return "System-wide GPU utilization, last sample \(percentage.formatted(.number.precision(.fractionLength(0)))) percent, captured \(sampledAt.formatted(date: .abbreviated, time: .standard))"
+        case .unavailable:
+            return "System-wide GPU utilization is unavailable"
+        }
     }
 
     private func requestActivitySymbol(for mode: ProviderRequestActivityMode) -> String {

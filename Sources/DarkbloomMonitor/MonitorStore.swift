@@ -33,6 +33,9 @@ final class MonitorStore: ObservableObject {
     /// Narrowly scoped preferences dependency for the electricity settings,
     /// so tests can inject an isolated suite instead of mutating `.standard`.
     private let energyPreferences: UserDefaults
+    private let menuAttentionPreferences: UserDefaults
+    private var menuAttentionPolicy = MenuBarAttentionPolicy()
+    private var observedMenuAttentionThreshold: TimeInterval?
     static let earningsPollingInterval: Duration = .seconds(600)
     @Published private(set) var dashboardVisible = false
     private var networkPollingPolicy = NetworkPollingPolicy()
@@ -135,12 +138,14 @@ final class MonitorStore: ObservableObject {
         publicPollingJitter: @escaping @Sendable () -> Double = { Double.random(in: 0...0.2) },
         energyPreferences: UserDefaults = .standard,
         energyRecorder: EnergyRecorder? = nil,
-        gpuUsage: SystemGPUUsageStore? = nil
+        gpuUsage: SystemGPUUsageStore? = nil,
+        menuAttentionPreferences: UserDefaults = .standard
     ) {
         self.service = service
         self.providerExtras = providerExtras
         self.gpuUsage = gpuUsage ?? SystemGPUUsageStore()
         self.energyPreferences = energyPreferences
+        self.menuAttentionPreferences = menuAttentionPreferences
         self.energyRecorder = energyRecorder ?? EnergyRecorder(
             file: MonitorApplicationIdentity
                 .applicationSupportDirectory()
@@ -739,24 +744,46 @@ final class MonitorStore: ObservableObject {
         )
     }
 
+    /// Shares the same verified idle prompt with the status item and popup.
+    /// The policy's timer is independent of the opt-in automatic nudge.
+    var menuAttention: MenuBarAttention? {
+        guard let threshold = menuAttentionThreshold,
+              threshold == observedMenuAttentionThreshold else { return nil }
+        return menuAttentionPolicy.attention(for: snapshot, at: now(), idleThreshold: threshold)
+    }
+
+    private var menuAttentionThreshold: TimeInterval? {
+        let minutes = menuAttentionPreferences.object(forKey: MenuBarAttentionPolicy.defaultsKey) as? Int
+            ?? MenuBarAttentionPolicy.defaultIdleMinutes
+        return MenuBarAttentionPolicy.threshold(for: minutes)
+    }
+
     /// The menu-bar GPU ring, composed from the shared utilization sampler
     /// and the lifecycle-owned fan status polling. Nil means "render no ring".
     func menuGPURing(
         now: Date = Date(),
         thresholds: MenuBarGPURing.Thresholds = .standard
     ) -> MenuBarGPURing? {
-        MenuBarGPURing.make(
-            utilization: gpuUsage.percentage,
-            sampledAt: gpuUsage.sampledAt,
-            fanStatus: providerExtras?.snapshot?.fanStatus,
-            now: now,
-            thresholds: thresholds
-        )
+        switch gpuUsage.reading(at: now) {
+        case .current(let percentage, let sampledAt):
+            return MenuBarGPURing.make(
+                utilization: percentage,
+                sampledAt: sampledAt,
+                fanStatus: providerExtras?.snapshot?.fanStatus,
+                now: now,
+                thresholds: thresholds
+            )
+        case .stale(let percentage, let sampledAt):
+            return MenuBarGPURing.lastSample(utilization: percentage, sampledAt: sampledAt)
+        case .unavailable:
+            return nil
+        }
     }
 
     func stop() async {
         await profitSwitch?.stop()
         await inactivityNudge?.stop()
+        menuAttentionPolicy.reset()
         gpuUsage.stop()
         providerExtrasTask?.cancel()
         await providerExtrasTask?.value
@@ -889,6 +916,16 @@ final class MonitorStore: ObservableObject {
             }
         }
         let previousCurrentModel = self.snapshot.state.value?.currentModel
+        let attentionThreshold = menuAttentionThreshold
+        if attentionThreshold != observedMenuAttentionThreshold {
+            menuAttentionPolicy.reset()
+            observedMenuAttentionThreshold = attentionThreshold
+        }
+        if let attentionThreshold {
+            menuAttentionPolicy.observe(snapshot, at: now(), idleThreshold: attentionThreshold)
+        } else {
+            menuAttentionPolicy.reset()
+        }
         self.snapshot = snapshot
         inactivityNudge?.observe(snapshot)
         observeProfitSwitch()

@@ -122,6 +122,57 @@ struct ProviderExtrasTests {
         #expect(commands.first?.arguments == ["fan", "status", "--json"])
     }
 
+    @Test("fan helper updated during CLI read stays available in full and fan-only refreshes")
+    func fanTimestampAfterCommandStart() async {
+        let startedAt = Date(timeIntervalSinceReferenceDate: 100)
+        let completedAt = Date(timeIntervalSinceReferenceDate: 101)
+        let clock = ExtrasTestClock(startedAt)
+        let runner = ExtrasRunner(
+            results: ["fan status": .success(fanJSON(updatedAt: 101))],
+            onFanRead: { clock.set(completedAt) }
+        )
+        let client = ProviderExtrasClient(
+            policy: testPolicy(), runner: runner, now: { clock.now() },
+            testOnlyExecutable: URL(fileURLWithPath: "/usr/bin/true")
+        )
+
+        let snapshot = await client.refresh()
+        if case .available(let fan, let capturedAt) = snapshot.fanStatus {
+            #expect(fan.helper?.enabled == true)
+            #expect(capturedAt == completedAt)
+        } else {
+            Issue.record("full refresh dropped the helper updated during the command")
+        }
+
+        clock.set(startedAt)
+        let fanOnly = await client.refreshFan()
+        if case .available(let fan, let capturedAt) = fanOnly {
+            #expect(fan.helper?.enabled == true)
+            #expect(capturedAt == completedAt)
+        } else {
+            Issue.record("fan-only refresh dropped the helper updated during the command")
+        }
+    }
+
+    @Test("fan helper timestamps after command completion are still rejected")
+    func rejectsFutureFanTimestamp() async {
+        let completedAt = Date(timeIntervalSinceReferenceDate: 101)
+        let client = ProviderExtrasClient(
+            policy: testPolicy(),
+            runner: ExtrasRunner(results: ["fan status": .success(fanJSON(updatedAt: 102))]),
+            now: { completedAt },
+            testOnlyExecutable: URL(fileURLWithPath: "/usr/bin/true")
+        )
+        let result = await client.refreshFan()
+        if case .available(let fan, let capturedAt) = result {
+            #expect(fan.helper == nil)
+            #expect(!fan.diagnostic.fans.isEmpty)
+            #expect(capturedAt == completedAt)
+        } else {
+            Issue.record("direct diagnostics should remain available for a future helper timestamp")
+        }
+    }
+
     @Test("live fan refresh preserves other settings and never writes policy")
     func fanOnlyStoreRefresh() async {
         let client = StoreClient()
@@ -408,10 +459,12 @@ private actor ExtrasRunner: ProcessExecuting {
     }
 
     var results: [String: Result]
+    let onFanRead: (@Sendable () -> Void)?
     private(set) var commands: [ProcessCommand] = []
 
-    init(results: [String: Result]) {
+    init(results: [String: Result], onFanRead: (@Sendable () -> Void)? = nil) {
         self.results = results
+        self.onFanRead = onFanRead
     }
 
     func run(
@@ -422,6 +475,7 @@ private actor ExtrasRunner: ProcessExecuting {
     ) async throws -> CommandResult {
         commands.append(command)
         let key = command.arguments.prefix(2).joined(separator: " ")
+        if key == "fan status" { onFanRead?() }
         switch results[key] {
         case .success(let data):
             return CommandResult(exitCode: 0, standardOutput: data, standardError: Data())
@@ -432,6 +486,25 @@ private actor ExtrasRunner: ProcessExecuting {
         case nil:
             return CommandResult(exitCode: 0, standardOutput: Data(), standardError: Data())
         }
+    }
+}
+
+private final class ExtrasTestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var date: Date
+
+    init(_ date: Date) { self.date = date }
+
+    func now() -> Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return date
+    }
+
+    func set(_ date: Date) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.date = date
     }
 }
 

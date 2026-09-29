@@ -83,12 +83,13 @@ private struct DashboardModelSummary: View {
     let controlStore: ProviderControlStore?
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            let now = Date()
             VStack(alignment: .leading, spacing: 12) {
                 Text("Models").font(.title3.bold())
                 let presentation = PopupModelPresentation.make(
                     input: PopupModelSourceInput(snapshot: store.snapshot, controlSnapshot: controlStore?.snapshot),
-                    currentTime: context.date
+                    currentTime: now
                 )
                 if case .models(let models) = presentation {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], spacing: 10) {

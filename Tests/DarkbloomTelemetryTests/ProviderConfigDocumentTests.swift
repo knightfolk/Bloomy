@@ -4,6 +4,65 @@ import Testing
 
 @Suite("Provider config document")
 struct ProviderConfigDocumentTests {
+    @Test("startup preload is explicitly enabled without changing unrelated settings")
+    func rendersStartupPreload() throws {
+        let source = """
+        private_value = "preserve"
+        [backend]
+        enabled_models = ["model-a"]
+        max_model_slots = 3
+        startup_preload = false # operator choice
+        preload_models = []
+        [unrelated]
+        startup_preload = false
+
+        """
+        let document = try ProviderConfigDocument(data: Data(source.utf8))
+        #expect(document.startupPreload == false)
+        let rendered = try document.rendering(
+            ProviderModelSelection(enabled: ["model-a"], preloaded: ["model-a"]),
+            maxModelSlots: 1,
+            startupPreload: true
+        )
+        let text = String(decoding: rendered, as: UTF8.self)
+        #expect(text.contains("max_model_slots = 1"))
+        #expect(text.contains("startup_preload = true # operator choice"))
+        #expect(text.contains("[unrelated]\nstartup_preload = false"))
+        #expect(text.contains("private_value = \"preserve\""))
+        #expect(try ProviderConfigDocument(data: rendered).startupPreload == true)
+    }
+
+    @Test("missing startup preload is inserted only when explicitly requested")
+    func insertsStartupPreload() throws {
+        let source = "enabled_models = [\"model-a\"]\r\npreload_models = []\r\n"
+        let document = try ProviderConfigDocument(data: Data(source.utf8))
+        #expect(document.startupPreload == nil)
+        let preserved = try document.rendering(document.selection)
+        #expect(try ProviderConfigDocument(data: preserved).startupPreload == nil)
+        #expect(!String(decoding: preserved, as: UTF8.self).contains("startup_preload"))
+        let rendered = try document.rendering(document.selection,
+                                              maxModelSlots: 1, startupPreload: true)
+        let text = String(decoding: rendered, as: UTF8.self)
+        #expect(text.contains("startup_preload = true\r\n"))
+        #expect(try ProviderConfigDocument(data: rendered).startupPreload == true)
+    }
+
+    @Test("duplicate or malformed startup preload is rejected")
+    func rejectsBadStartupPreload() {
+        #expect(throws: ProviderConfigError.duplicateBoolean("startup_preload")) {
+            try ProviderConfigDocument(data: Data(
+                "enabled_models=[]\npreload_models=[]\nstartup_preload=true\nstartup_preload=false\n".utf8))
+        }
+        #expect(throws: ProviderConfigError.malformedBoolean("startup_preload")) {
+            try ProviderConfigDocument(data: Data(
+                "enabled_models=[]\npreload_models=[]\nstartup_preload=maybe\n".utf8))
+        }
+        #expect(throws: ProviderConfigError.malformedBoolean("startup_preload")) {
+            try ProviderConfigDocument(data: Data(
+                "enabled_models=[]\npreload_models=[]\nstartup_preload=trueish\n".utf8))
+        }
+    }
+
     @Test("reads and rewrites model selection from the backend table")
     func readsBackendModelSelection() throws {
         let source = """

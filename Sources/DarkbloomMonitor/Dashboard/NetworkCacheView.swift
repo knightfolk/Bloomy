@@ -44,11 +44,12 @@ struct NetworkCacheView: View {
     let isVisible: Bool
     @StateObject private var store = NetworkCacheStore()
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 10)) { context in
+        TimelineView(.periodic(from: .now, by: 10)) { _ in
+            let now = Date()
             VStack(alignment: .leading, spacing: 8) {
                 Label("Network cache health", systemImage: "externaldrive.connected.to.line.below").font(.headline)
                 if let value = store.source.value {
-                    let current = isCurrent(value, at: context.date)
+                    let current = isCurrent(value, at: now)
                     HStack(spacing: 20) {
                         Text("Cache routing: \(value.routingMode.rawValue)")
                         if let ready = value.plannerReady {

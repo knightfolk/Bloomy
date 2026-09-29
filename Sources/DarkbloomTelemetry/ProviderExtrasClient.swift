@@ -224,7 +224,7 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
 
         async let idle = readIdle(executable: executable, capturedAt: capturedAt)
         async let beta = readBeta(executable: executable, capturedAt: capturedAt)
-        async let fan = readFan(executable: executable, capturedAt: capturedAt)
+        async let fan = readFan(executable: executable)
         async let autoUpdate = readAutoUpdate(executable: executable, capturedAt: capturedAt)
 
         return await ProviderExtrasSnapshot(
@@ -243,7 +243,7 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
               let executable = resolveExecutable() else {
             return .unavailable(reason: "Darkbloom fan status is unavailable")
         }
-        return await readFan(executable: executable, capturedAt: capturedAt)
+        return await readFan(executable: executable)
     }
 
     public func saveIdle(minutes: Int) async throws {
@@ -366,15 +366,18 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
         }
     }
 
-    private func readFan(
-        executable: URL,
-        capturedAt: Date
-    ) async -> SourceAvailability<ProviderFanStatus> {
+    private func readFan(executable: URL) async -> SourceAvailability<ProviderFanStatus> {
         do {
             let result = try await run(
                 ProviderExtrasCommand.fanStatus(executable: executable)
             )
             guard result.exitCode == 0 else { throw ProviderExtrasParseError.invalidPayload }
+            // The helper may update its journal while the CLI is running. Compare
+            // its timestamp with completion, not the time before launching it.
+            let capturedAt = now()
+            guard capturedAt.timeIntervalSince1970.isFinite else {
+                throw ProviderExtrasParseError.invalidValue
+            }
             let value = try ProviderExtrasParser.parseFan(result.standardOutput)
             guard value.helperIsFresh(at: capturedAt) else {
                 if !value.diagnostic.gpuTemperatures.isEmpty || !value.diagnostic.fans.isEmpty {

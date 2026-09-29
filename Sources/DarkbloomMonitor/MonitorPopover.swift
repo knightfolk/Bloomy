@@ -358,29 +358,64 @@ enum PopupNetworkDemandPresentation {
     }
 }
 
+private struct PopupAvailableDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    configuration.isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
+                    configuration.label
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
+            if configuration.isExpanded {
+                configuration.content
+            }
+        }
+    }
+}
+
 struct MonitorPopover: View {
+    private static let popupWidth: CGFloat = 560
+    private static let modelCardWidth: CGFloat = (popupWidth - 32 - 2 - 16) / 3
     @ObservedObject var cliUpdates = CLIUpdateStatusStore.shared
     @ObservedObject var store: MonitorStore
     @EnvironmentObject private var controlStore: ProviderControlStore
     let openSettings: () -> Void
     let openDashboard: () -> Void
+    let openModels: () -> Void
     @State private var showsFans = false
     @State private var pendingSingleModelID: String?
+    @AppStorage("popover.availableExpanded") private var availableExpanded = false
     private static let machineName = Host.current().localizedName ?? "This Mac"
 
     init(
         store: MonitorStore,
         openSettings: @escaping () -> Void = {},
-        openDashboard: @escaping () -> Void = {}
+        openDashboard: @escaping () -> Void = {},
+        openModels: @escaping () -> Void = {}
     ) {
         self.store = store
         self.openSettings = openSettings
         self.openDashboard = openDashboard
+        self.openModels = openModels
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            content(currentTime: context.date)
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            // Published samples can arrive between timeline ticks. Evaluate
+            // freshness at render time, not against the previous tick.
+            content(currentTime: Date())
         }
     }
 
@@ -413,6 +448,13 @@ struct MonitorPopover: View {
             if let warmup = controlStore.switchWarmupStatus {
                 SwitchWarmupFeedback(status: warmup)
             }
+            if let attention = store.menuAttention {
+                Label(attention.detail, systemImage: "exclamationmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("popover.attention")
+            }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -432,7 +474,7 @@ struct MonitorPopover: View {
         .compositingGroup()
         .saturation(isOffline(at: currentTime) ? 0 : 1)
         .padding(16)
-        .frame(width: 560, alignment: .topLeading)
+        .frame(width: Self.popupWidth, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showsFans) {
             if let extras = store.providerExtras {
@@ -473,7 +515,7 @@ struct MonitorPopover: View {
     private func isOffline(at now: Date) -> Bool { providerRunning(at: now) == false }
 
     private func displayedSelection(at now: Date) -> [String]? {
-        if let advertised = advertisedIDs(at: now) { return advertised }
+        if !isOffline(at: now), let advertised = advertisedIDs(at: now) { return advertised }
         if let control = controlStore.snapshot {
             return control.inventory.myCatalog.filter { $0.isEnabled }.map(\.catalogID).sorted()
         }
@@ -483,8 +525,9 @@ struct MonitorPopover: View {
     private func popupBodyHeight(currentTime: Date) -> CGFloat {
         let advertised = displayedSelection(at: currentTime) ?? []
         let available = availableIDs(excluding: advertised)
-        let rows = (advertised.count + 2) / 3 + (available.count + 2) / 3
-        return min(470, CGFloat(rows) * 120 + 190)
+        let rows = (advertised.count + 2) / 3
+            + (availableExpanded ? (available.count + 2) / 3 : 0)
+        return min(470, CGFloat(rows) * (CompactModelCard.popupHeight + 8) + 190)
     }
 
     private func advertisedIDs(at now: Date) -> [String]? {
@@ -514,9 +557,6 @@ struct MonitorPopover: View {
                       : liveSelectionUnknown ? "Saved models · Live status unavailable" : "Advertised",
                       systemImage: "antenna.radiowaves.left.and.right")
                     .font(.subheadline.weight(.semibold))
-                if !liveSelectionUnknown && modelModePresentation(at: currentTime) == .automatic {
-                    AutoModelModeBadge(monochrome: isOffline(at: currentTime))
-                }
                 if controlStore.draft?.originalMaxModelSlots == 1 {
                     Label("1 slot saved", systemImage: "1.circle")
                         .font(.caption).foregroundStyle(.secondary)
@@ -524,35 +564,69 @@ struct MonitorPopover: View {
                 }
                 Spacer()
                 if let advertised { Text(advertised.count.formatted()).foregroundStyle(.secondary) }
+                Button {
+                    Task { await controlStore.refreshPreservingDraft() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(controlStore.operation != .idle)
+                .help("Refresh model controls")
+                .accessibilityLabel("Refresh model controls")
+                .accessibilityIdentifier("popover.models.refresh")
+            }
+            HStack(spacing: 10) {
+                PopupAutoModeControl(store: controlStore, openModels: openModels)
+                if let nudge = store.inactivityNudge {
+                    PopupNudgeControl(store: nudge)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                Spacer()
             }
             if let advertised {
                 if advertised.isEmpty {
-                    Text("No models advertised").font(.caption).foregroundStyle(.secondary)
+                    Text(isOffline(at: currentTime) ? "No saved models selected" : "No models advertised")
+                        .font(.caption).foregroundStyle(.secondary)
                 } else { modelGrid(advertised, now: currentTime) }
             } else {
                 Label("Advertising state unavailable", systemImage: "clock")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            HStack {
-                Label("Available on this Mac", systemImage: "internaldrive")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Text(available.count.formatted()).foregroundStyle(.secondary)
+            DisclosureGroup(isExpanded: $availableExpanded) {
+                if available.isEmpty {
+                    Text("No other downloaded models").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    modelGrid(available, now: currentTime, offersActivation: true)
+                }
+            } label: {
+                HStack {
+                    Label("Available on this Mac", systemImage: "internaldrive")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text(available.count.formatted()).foregroundStyle(.secondary)
+                }
             }
-            if available.isEmpty {
-                Text("No other downloaded models").font(.caption).foregroundStyle(.secondary)
-            } else { modelGrid(available, now: currentTime, offersActivation: true) }
+            .disclosureGroupStyle(PopupAvailableDisclosureStyle())
+            .accessibilityIdentifier("popover.availableModels")
         }
     }
 
     private func modelGrid(_ ids: [String], now: Date, offersActivation: Bool = false) -> some View {
-        let liveSelectionUnknown = advertisedIDs(at: now) == nil
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+        let liveSelectionUnknown = isOffline(at: now) || advertisedIDs(at: now) == nil
+        return LazyVGrid(columns: Array(repeating: GridItem(.fixed(Self.modelCardWidth), spacing: 8), count: 3),
+                         alignment: .leading, spacing: 8) {
             ForEach(ids, id: \.self) { id in
                 let state = models.first(where: { $0.name == id })?.state
-                CompactModelCard(modelID: id, status: liveSelectionUnknown ? (offersActivation ? "Downloaded" : isOffline(at: now) ? "Ready when online" : "Saved selection") : modelStateLabel(state),
+                let downloaded = controlStore.snapshot?.inventory.myCatalog.first(where: { $0.catalogID == id })?.isDownloaded == true
+                let status = liveSelectionUnknown
+                    ? (offersActivation ? (downloaded ? "Downloaded" : "Live state unknown")
+                       : isOffline(at: now) ? "Ready when online" : "Saved selection")
+                    : (offersActivation && state == nil && downloaded ? "Downloaded" : modelStateLabel(state))
+                CompactModelCard(modelID: id, status: status,
                                  tint: liveSelectionUnknown ? .secondary : state == .active ? .green : state == .loadedIdle ? .orange : .secondary,
-                                 metrics: modelMetrics(id), selected: !liveSelectionUnknown && state == .active, compact: true,
+                                 metrics: modelMetrics(id), selected: !liveSelectionUnknown && state == .active,
+                                 compact: true, compactWidth: Self.modelCardWidth,
                                  activate: offersActivation ? { _ = Task<Void, Never> { await controlStore.activateModel(id, providerKnownRunning: providerRunning(at: now)) } } : nil,
                                  activationUnavailableReason: controlStore.activationUnavailableReason(for: id, providerKnownRunning: providerRunning(at: now)),
                                  activationHelp: isOffline(at: now) ? "Save for the next provider start" : "Advertise this model alongside the others",

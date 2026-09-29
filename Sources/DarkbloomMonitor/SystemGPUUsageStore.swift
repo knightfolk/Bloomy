@@ -9,6 +9,26 @@ import SwiftUI
 final class SystemGPUUsageStore: ObservableObject {
     @Published private(set) var percentage: Double?
     @Published private(set) var sampledAt: Date?
+    @Published private(set) var lastGoodPercentage: Double?
+    @Published private(set) var lastGoodSampledAt: Date?
+
+    enum Reading: Equatable {
+        case current(percentage: Double, sampledAt: Date)
+        case stale(percentage: Double, sampledAt: Date)
+        case unavailable
+
+        var percentage: Double? {
+            switch self {
+            case .current(let percentage, _), .stale(let percentage, _): percentage
+            case .unavailable: nil
+            }
+        }
+
+        var isStale: Bool {
+            if case .stale = self { return true }
+            return false
+        }
+    }
 
     private let interval: Duration
     private let read: @MainActor () -> Double?
@@ -44,8 +64,21 @@ final class SystemGPUUsageStore: ObservableObject {
             sampledAt = nil
             return
         }
+        let now = Date()
         percentage = valid
-        sampledAt = Date()
+        sampledAt = now
+        lastGoodPercentage = valid
+        lastGoodSampledAt = now
+    }
+
+    func reading(at now: Date = Date()) -> Reading {
+        guard let lastGoodPercentage, let lastGoodSampledAt else { return .unavailable }
+        let age = now.timeIntervalSince(lastGoodSampledAt)
+        if percentage != nil, sampledAt == lastGoodSampledAt,
+           age.isFinite, (0...10).contains(age) {
+            return .current(percentage: lastGoodPercentage, sampledAt: lastGoodSampledAt)
+        }
+        return .stale(percentage: lastGoodPercentage, sampledAt: lastGoodSampledAt)
     }
 
     func stop() {
@@ -53,6 +86,8 @@ final class SystemGPUUsageStore: ObservableObject {
         samplingTask = nil
         percentage = nil
         sampledAt = nil
+        lastGoodPercentage = nil
+        lastGoodSampledAt = nil
     }
 }
 

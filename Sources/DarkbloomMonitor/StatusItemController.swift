@@ -56,7 +56,8 @@ final class StatusItemController: NSObject {
                 store: store,
                 controlStore: controlStore,
                 openSettings: { [weak self] in self?.showSettings() },
-                openDashboard: { [weak self] in self?.showDashboard() }
+                openDashboard: { [weak self] in self?.showDashboard() },
+                openModels: { [weak self] in self?.showDashboard(section: .models) }
             )
         )
     }
@@ -128,7 +129,8 @@ private struct StatusItemRootView: View {
                 presentation: store.menuPresentation(mode: displayMode),
                 uptime: store.observedUptime,
                 family: ModelFamilyIcon.select(snapshot: store.snapshot, now: Date()),
-                ring: store.menuGPURing()
+                ring: store.menuGPURing(),
+                attention: store.menuAttention
             )
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -144,14 +146,15 @@ private struct PopoverRootView: View {
     let controlStore: ProviderControlStore?
     let openSettings: () -> Void
     let openDashboard: () -> Void
+    let openModels: () -> Void
 
     @ViewBuilder
     var body: some View {
         if let controlStore {
-            MonitorPopover(store: store, openSettings: openSettings, openDashboard: openDashboard)
+            MonitorPopover(store: store, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels)
                 .environmentObject(controlStore)
         } else {
-            MonitorPopover(store: store, openSettings: openSettings, openDashboard: openDashboard)
+            MonitorPopover(store: store, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels)
         }
     }
 }

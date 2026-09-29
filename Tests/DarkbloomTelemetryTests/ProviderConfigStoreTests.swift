@@ -5,6 +5,45 @@ import Testing
 
 @Suite("Provider config store")
 struct ProviderConfigStoreTests {
+    @Test("Auto settings save one slot and startup preload in one guarded transaction")
+    func savesAutomaticStartupSettings() async throws {
+        let source = Data("""
+        private_value = "preserve"
+        [backend]
+        enabled_models = ["old-model"]
+        max_model_slots = 3
+        startup_preload = false
+        engine_v2_max_concurrent = 8
+        preload_models = []
+        [unrelated]
+        keep = true
+
+        """.utf8)
+        let harness = try ConfigStoreHarness.make(mode: 0o600, sourceData: source)
+        defer { harness.cleanup() }
+        let draft = try await harness.store.load()
+        let selected = draft.withSelection(ProviderModelSelection(
+            enabled: draft.original.enabled, preloaded: ["old-model"]
+        )).withMaxModelSlots(1).withStartupPreload(true)
+
+        let saved = try await harness.store.save(selected)
+
+        #expect(saved.restartRequired)
+        #expect(!saved.draft.hasChanges)
+        #expect(saved.draft.original.enabled == ["old-model"])
+        #expect(saved.draft.original.preloaded == ["old-model"])
+        #expect(saved.draft.originalMaxModelSlots == 1)
+        #expect(saved.draft.originalStartupPreload == true)
+        let published = try ProviderConfigDocument(data: Data(contentsOf: harness.configURL))
+        #expect(published.maxModelSlots == 1)
+        #expect(published.startupPreload == true)
+        #expect(published.engineV2MaxConcurrent == 8)
+        #expect(try Data(contentsOf: harness.backupURL) == source)
+        let text = try String(contentsOf: harness.configURL, encoding: .utf8)
+        #expect(text.contains("private_value = \"preserve\""))
+        #expect(text.contains("[unrelated]\nkeep = true"))
+    }
+
     @Test("load returns a clean draft from the exact source revision")
     func loadsDraft() async throws {
         let harness = try ConfigStoreHarness.make(mode: 0o600)

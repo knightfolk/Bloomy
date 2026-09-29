@@ -12,6 +12,8 @@ final class InactivityNudgeStore: ObservableObject {
     @Published private(set) var status = "Automatic nudge is off."
     @Published private(set) var keyPresent: Bool
     @Published private(set) var lastAttempt: Date?
+    @Published private(set) var isManuallyNudging = false
+    @Published private(set) var manualStatus: String?
 
     private let keyStore: any ConsumerKeyManaging
     private let defaults: UserDefaults
@@ -23,11 +25,24 @@ final class InactivityNudgeStore: ObservableObject {
     private var eligibleSince: Date?
     private var latestState: DaemonState?
     private var task: Task<Void, Never>?
+    private var manualTask: Task<Bool, Never>?
     private var generation = 0
     private var lastCheck: Date?
     private var attempts: [Double]
     private var invalidLedger = false
     private static let prefix = "inactivityNudge."
+
+    /// A manual request still needs fresh, idle evidence and an exclusive
+    /// self-route key, but it does not consume the automatic watcher's budget.
+    var manualUnavailableReason: String? {
+        if isManuallyNudging || task != nil { return "A nudge is already in progress." }
+        if !keyStore.hasKey { return "Add a nudge key below." }
+        if !canAct() { return "Finish the current provider action before nudging." }
+        if Self.manualEligibleState(latestState, at: now()) == nil {
+            return "Wait for fresh idle state with exactly one warm model."
+        }
+        return nil
+    }
 
     init(
         keyStore: any ConsumerKeyManaging = KeychainConsumerKeyStore(service: keyService),
@@ -76,6 +91,7 @@ final class InactivityNudgeStore: ObservableObject {
             try keyStore.store(key)
             keyPresent = keyStore.hasKey
             resetPending()
+            manualStatus = "Nudge key changed. Any pending nudge was canceled."
             return nil
         } catch {
             return "Could not save the key. Check its format and Keychain access."
@@ -86,18 +102,24 @@ final class InactivityNudgeStore: ObservableObject {
         resetPending()
         keyStore.remove()
         keyPresent = keyStore.hasKey
-        status = keyPresent ? "Keychain could not remove the key." : "Add a watcher key in Settings."
+        status = keyPresent ? "Keychain could not remove the key." : "Add a nudge key in Settings."
+        manualStatus = keyPresent ? "Keychain could not remove the nudge key."
+            : "Add a nudge key below."
     }
 
     func stop() async {
         let pending = task
+        let manual = manualTask
         resetPending()
         await pending?.value
+        _ = await manual?.value
     }
 
     private func resetPending() {
         generation += 1
         task?.cancel()
+        if manualTask != nil { manualStatus = "Manual nudge canceled." }
+        manualTask?.cancel()
         // Keep the task slot occupied until cancellation unwinds, so replacing
         // a key or toggling cannot create two concurrent network requests.
         policy.reset()
@@ -115,10 +137,13 @@ final class InactivityNudgeStore: ObservableObject {
     func observe(_ state: DaemonState?) {
         let instant = now()
         latestState = state
+        // A manual request owns this interval. Do not start an automatic
+        // account check or rebuild its continuous-idle window in parallel.
+        if isManuallyNudging { return }
         guard enabled, keyPresent else {
             policy.reset()
             eligibleSince = nil
-            status = enabled ? "Add a watcher key in Settings." : "Automatic nudge is off."
+            status = enabled ? "Add a nudge key in Settings." : "Automatic nudge is off."
             return
         }
         // While our task owns the control gate, keep consuming telemetry so
@@ -166,12 +191,119 @@ final class InactivityNudgeStore: ObservableObject {
             self.eligibleSince = nil
             switch outcome {
             case .sent: self.status = "Self-test responded. Watching for public work."
-            case .missingKey: self.status = "Watcher key is unavailable."
-            case .keyRejected: self.status = "Watcher key was rejected. Update it in Settings."
-            case .modelUnavailable: self.status = "Warm model is unavailable for self-routing."
+            case .missingKey: self.status = "Nudge key is unavailable."
+            case .keyRejected: self.status = "Nudge key was rejected. Update it in Settings."
+            case .modelUnavailable: self.status = "Warm model is unavailable for self-routing; no nudge was sent."
             case .failed, nil: self.status = "Nudge did not complete. Cooldown is active."
             }
         }
+    }
+
+    /// Sends one explicit, bounded self-route request through the existing
+    /// Keychain-backed client and provider operation gate. No earnings query,
+    /// automatic idle threshold, or automatic attempt ledger applies here.
+    @discardableResult
+    func nudgeNow() async -> Bool {
+        guard let reason = manualUnavailableReason else {
+            guard let state = Self.manualEligibleState(latestState, at: now()) else {
+                manualStatus = "Wait for fresh idle state with exactly one warm model."
+                return false
+            }
+            // A manual attempt starts a new automatic continuous-idle window.
+            policy.reset()
+            eligibleSince = nil
+            lastCheck = nil
+            isManuallyNudging = true
+            manualStatus = "Sending one self-route nudge."
+            let ticket = generation
+            let candidate = ManualCandidate(state: state)
+            let request = Task { @MainActor [weak self] () -> Bool in
+                guard let self else { return false }
+                defer {
+                    self.manualTask = nil
+                    self.isManuallyNudging = false
+                }
+                let outcome = await self.send(state) { [weak self] in
+                    await self?.manualCandidateValid(ticket: ticket, candidate: candidate) ?? false
+                }
+                guard self.generation == ticket else { return false }
+                guard !Task.isCancelled else {
+                    self.manualStatus = "Manual nudge canceled."
+                    return false
+                }
+                switch outcome {
+                case .sent:
+                    self.manualStatus = "Self-test responded. Public work is not guaranteed."
+                    return true
+                case .missingKey:
+                    self.keyPresent = self.keyStore.hasKey
+                    self.manualStatus = "Nudge key is unavailable. Add it below."
+                case .keyRejected:
+                    self.manualStatus = "Nudge key was rejected. Update it below."
+                case .modelUnavailable:
+                    self.manualStatus = "Warm model is unavailable for self-routing; no nudge was sent."
+                case .failed, nil:
+                    self.manualStatus = "Nudge did not complete."
+                }
+                return false
+            }
+            manualTask = request
+            return await withTaskCancellationHandler {
+                await request.value
+            } onCancel: {
+                request.cancel()
+            }
+        }
+        manualStatus = reason
+        return false
+    }
+
+    private struct ManualCandidate: Sendable {
+        let processIdentity: ProcessIdentity
+        let model: String
+        let stats: ProviderStats
+
+        init(state: DaemonState) {
+            processIdentity = state.processIdentity
+            model = state.currentModel
+            stats = state.stats
+        }
+    }
+
+    private func manualCandidateValid(ticket: Int, candidate: ManualCandidate) -> Bool {
+        guard !Task.isCancelled, generation == ticket, isManuallyNudging,
+              keyStore.hasKey,
+              let state = Self.manualEligibleState(latestState, at: now()) else { return false }
+        return state.processIdentity == candidate.processIdentity
+            && state.currentModel == candidate.model
+            && state.stats == candidate.stats
+    }
+
+    private static func manualEligibleState(_ state: DaemonState?, at now: Date) -> DaemonState? {
+        let seconds = now.timeIntervalSince1970
+        guard seconds.isFinite,
+              let state,
+              state.writtenAt.isFinite,
+              (0...10).contains(seconds - state.writtenAt),
+              !state.inferenceActive,
+              state.trust?.status == "online",
+              state.lifecycle?.outcome == .serving,
+              state.lifecycle?.remainingRequests == 0,
+              state.startupPreloadPendingModels?.isEmpty == true,
+              state.availability == nil,
+              state.modelLoadFailures.isEmpty,
+              state.stats.requestsServed >= 0,
+              state.stats.tokensGenerated >= 0,
+              state.stats.usageGaps >= 0,
+              !state.currentModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              state.advertisedModels?.contains(state.currentModel) == true,
+              state.warmModels == [state.currentModel]
+        else { return nil }
+        if let modelSwitch = state.modelSwitch,
+           modelSwitch.outcome != .serving || modelSwitch.remainingRequests != 0 {
+            return nil
+        }
+        return state
     }
 
     private func candidateValid(ticket: Int, since: Date) -> Bool {
@@ -199,5 +331,14 @@ final class InactivityNudgeStore: ObservableObject {
             return false
         }
         return true
+    }
+}
+
+/// A family alias is safe only when this provider advertises the one warm
+/// model alone. With multiple advertised builds, an alias could select a
+/// different (possibly cold) model, so the nudge requires the exact ID.
+enum NudgeSelfRouteModel {
+    static func familyFallback(for state: DaemonState, catalogFamily: String) -> String {
+        state.advertisedModels == [state.currentModel] ? catalogFamily : ""
     }
 }

@@ -332,8 +332,9 @@ struct ProviderLifecycleControls: View {
             if let currentTime {
                 controls(currentTime: currentTime)
             } else {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    controls(currentTime: context.date)
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    let now = Date()
+                    controls(currentTime: now)
                 }
             }
         }

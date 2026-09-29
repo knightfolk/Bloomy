@@ -41,7 +41,7 @@ public struct InactivityNudgePolicy: Sendable {
               state.stats.tokensGenerated >= 0,
               state.stats.usageGaps >= 0,
               !state.currentModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              state.advertisedModels == [state.currentModel],
+              state.advertisedModels?.contains(state.currentModel) == true,
               state.warmModels == [state.currentModel]
         else {
             reset()

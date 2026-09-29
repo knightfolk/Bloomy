@@ -19,13 +19,14 @@ struct NetworkHistoryView: View {
     @State private var metric = NetworkHistoryMetric.requests
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 10)) { context in
+        TimelineView(.periodic(from: .now, by: 10)) { _ in
+            let now = Date()
             VStack(alignment: .leading, spacing: 12) {
                 Text("The last 24 hours").font(.title2.bold())
                 Text("Work across the whole Darkbloom network.")
                     .font(.callout).foregroundStyle(.secondary)
                 if let series = source.value {
-                    let stale = isStale(series, at: context.date)
+                    let stale = isStale(series, at: now)
                     HStack {
                         Text(stale ? "Stale history · last-known values" : "Network source updated")
                         Spacer()

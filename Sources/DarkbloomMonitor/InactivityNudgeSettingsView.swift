@@ -14,6 +14,7 @@ struct InactivityNudgeSettingsView: View {
                 set: { store.setEnabled($0) }
             ))
             .accessibilityIdentifier("settings.inactivityNudge.enabled")
+            .disabled(store.isManuallyNudging)
 
             Picker("After no work for", selection: Binding(
                 get: { store.inactivityMinutes },
@@ -24,6 +25,7 @@ struct InactivityNudgeSettingsView: View {
                 Text("60 minutes").tag(60)
             }
             .accessibilityIdentifier("settings.inactivityNudge.minutes")
+            .disabled(store.isManuallyNudging)
 
             LabeledContent("Status", value: store.status)
                 .accessibilityIdentifier("settings.inactivityNudge.status")
@@ -38,21 +40,21 @@ struct InactivityNudgeSettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("The watcher pauses for busy or stale evidence, missing account data, model switches, or multiple warm models. It waits at least 1 hour between attempts and allows at most 3 attempts in any 24 hours, including failures. There is no paid fallback or keep-alive loop.")
+            Text("The automatic watcher pauses for busy or stale evidence, missing account data, model switches, or multiple warm models. It waits at least 1 hour between attempts and allows at most 3 attempts in any 24 hours, including failures. Manual nudges use the same key but require a separate tap and fresh idle state. There is no paid fallback or keep-alive loop.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
 
         Section("Nudge setup") {
-            Text("Use a Darkbloom consumer key restricted to “my machine only.” Bloomy stores it in the macOS Keychain as a dedicated watcher credential, separate from provider and local API tokens.")
+            Text("Use a Darkbloom consumer key restricted to “my machine only.” Bloomy stores one dedicated nudge key in the macOS Keychain for both manual and automatic requests, separate from provider and local API tokens.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            LabeledContent("Watcher key", value: store.keyPresent ? "Saved in Keychain" : "Not saved")
+            LabeledContent("Nudge key", value: store.keyPresent ? "Saved in Keychain" : "Not saved")
 
-            SecureField("Paste consumer key", text: $keyDraft)
+            SecureField("Paste nudge key", text: $keyDraft)
                 .textContentType(.password)
                 .privacySensitive()
                 .accessibilityIdentifier("settings.inactivityNudge.key")
@@ -93,7 +95,7 @@ struct InactivityNudgeSettingsView: View {
                     .accessibilityIdentifier("settings.inactivityNudge.keyError")
             }
 
-            Text("Activity is checked against account-wide earnings. Work from another Mac can keep this watcher idle. Billing can post late, so a quiet period does not prove the whole account had no work.")
+            Text("Automatic activity is checked against account-wide earnings. Work from another Mac can keep the watcher idle. Billing can post late, so a quiet period does not prove the whole account had no work. Manual nudges skip that earnings check.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

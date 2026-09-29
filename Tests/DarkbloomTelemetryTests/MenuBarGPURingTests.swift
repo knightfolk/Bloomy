@@ -164,6 +164,18 @@ struct MenuBarGPURingTests {
         #expect(noTemperature?.accessibilityDetail.contains("degrees") == false)
     }
 
+    @Test("retained ring is neutral, carries its original capture time, and identifies the last sample")
+    func lastSampleRing() {
+        let capturedAt = Self.fixedNow.addingTimeInterval(-60)
+        let ring = MenuBarGPURing.lastSample(utilization: 42, sampledAt: capturedAt)
+        #expect(ring?.utilization == 42)
+        #expect(ring?.lastSampledAt == capturedAt)
+        #expect(ring?.tint == .neutral)
+        #expect(ring?.temperatureCelsius == nil)
+        #expect(ring?.accessibilityDetail.hasPrefix("Whole-Mac GPU use, last sample 42 percent, captured ") == true)
+        #expect(MenuBarGPURing.lastSample(utilization: .nan, sampledAt: capturedAt) == nil)
+    }
+
     // MARK: store composition
 
     @Test("menu store composes the ring from the shared sampler and fan status")
@@ -207,7 +219,11 @@ struct MenuBarGPURingTests {
 
         sample.value = nil
         store.gpuUsage.refresh()
-        #expect(store.menuGPURing() == nil)
+        let retained = store.menuGPURing()
+        #expect(retained?.utilization == 55)
+        #expect(retained?.lastSampledAt == store.gpuUsage.lastGoodSampledAt)
+        #expect(retained?.temperatureCelsius == nil)
+        #expect(retained?.tint == .neutral)
     }
 
     @Test("monitor store lifecycle drives one shared sampler without a dashboard")
@@ -279,6 +295,7 @@ struct MenuBarGPURingTests {
             Self.makeRing(utilization: 0, helperTemperature: 61),
             Self.makeRing(utilization: 50, helperTemperature: 75),
             Self.makeRing(utilization: 100, helperTemperature: 90),
+            MenuBarGPURing.lastSample(utilization: 50, sampledAt: Self.fixedNow.addingTimeInterval(-60)),
         ]
         for ring in rings {
             let host = NSHostingController(rootView: MenuBarLabel(
@@ -290,6 +307,41 @@ struct MenuBarGPURingTests {
             let size = host.sizeThatFits(in: proposed)
             #expect(size == NSSize(width: 96, height: 18))
         }
+    }
+
+    @Test("idle alert keeps the menu-bar footprint and can export a visual fixture")
+    func idleAttentionFootprint() throws {
+        let presentation = MenuBarPresentation.make(
+            snapshot: .unavailable(now: Self.fixedNow),
+            thermal: .nominal,
+            earnings: .unavailable(reason: "fixture"),
+            mode: .statusOnly
+        )
+        let alert = MenuBarAttention(
+            title: "Provider idle",
+            detail: "No provider work observed for at least 5 minutes. Open Bloomy to review demand or send a manual nudge.",
+            shortText: "Idle 5m",
+            idleStartedAt: Self.fixedNow.addingTimeInterval(-300)
+        )
+        let host = NSHostingController(rootView: MenuBarLabel(
+            presentation: presentation,
+            uptime: .available(percent: 100, observedSeconds: 600),
+            family: .qwen,
+            attention: alert
+        ))
+        #expect(host.sizeThatFits(in: NSSize(width: 500, height: 100)) == NSSize(width: 96, height: 18))
+
+        guard ProcessInfo.processInfo.environment["DARKBLOOM_RENDER_EVIDENCE"] == "1" else { return }
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 96, height: 18))
+        window.orderBack(nil)
+        defer { window.close() }
+        host.view.layoutSubtreeIfNeeded()
+        let bitmap = try #require(host.view.bitmapImageRepForCachingDisplay(in: host.view.bounds))
+        host.view.cacheDisplay(in: host.view.bounds, to: bitmap)
+        try #require(bitmap.representation(using: .png, properties: [:]))
+            .write(to: URL(fileURLWithPath: "/tmp/darkbloom-menubar-idle-attention.png"))
     }
 
     @Test("status item keeps its fixed width while the ring is live")

@@ -6,13 +6,14 @@ struct ProviderThermalView: View {
     @ObservedObject var store: ProviderExtrasStore
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 5)) { context in
+        TimelineView(.periodic(from: .now, by: 5)) { _ in
+            let now = Date()
             Group {
                 switch store.snapshot?.fanStatus {
                 case .available(let status, let capturedAt):
                     content(
-                        status: status.helperIsFresh(at: context.date) ? status : status.withoutHelper(),
-                        stale: !Self.isFresh(capturedAt: capturedAt, at: context.date) || (!status.helperIsFresh(at: context.date) && status.diagnostic.fans.isEmpty && status.diagnostic.gpuTemperatures.isEmpty)
+                        status: status.helperIsFresh(at: now) ? status : status.withoutHelper(),
+                        stale: !Self.isFresh(capturedAt: capturedAt, at: now) || (!status.helperIsFresh(at: now) && status.diagnostic.fans.isEmpty && status.diagnostic.gpuTemperatures.isEmpty)
                     )
                 case .stale(let status, _, _):
                     content(status: status, stale: true)

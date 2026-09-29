@@ -199,9 +199,12 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             },
             send: { [weak providerControlStore] state, canSend in
                 guard let providerControlStore else { return nil }
-                let family = providerControlStore.snapshot?.inventory.myCatalog.first {
+                let catalogFamily = providerControlStore.snapshot?.inventory.myCatalog.first {
                     $0.catalogID == state.currentModel
                 }?.family ?? ""
+                let family = NudgeSelfRouteModel.familyFallback(
+                    for: state, catalogFamily: catalogFamily
+                )
                 let probe = SelfRouteWarmupClient(
                     keyStore: nudgeKeyStore,
                     canSend: canSend

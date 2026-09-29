@@ -81,7 +81,7 @@ struct InactivityNudgePolicyTests {
         #expect(policy.observe(state(at: 2_000_090), at: start.addingTimeInterval(90), threshold: 10) == nil)
     }
 
-    @Test("unknown lifecycle, pending startup, switches, and multiple routes cannot prove idle")
+    @Test("unknown lifecycle, pending startup, switches, and multiple warm models cannot prove idle")
     func failClosedOnAmbiguousServing() {
         let now = start
         let candidates: [DaemonState] = [
@@ -99,7 +99,6 @@ struct InactivityNudgePolicyTests {
             state(at: 2_000_000, modelSwitch: .init(outcome: .serving, models: ["model-a"])),
             state(at: 2_000_000, modelSwitch: .init(outcome: .serving, models: ["model-a"], remainingRequests: 1)),
             state(at: 2_000_000, advertised: nil),
-            state(at: 2_000_000, advertised: ["model-a", "model-b"]),
             state(at: 2_000_000, warm: ["model-a", "model-b"]),
             state(at: 2_000_000, advertised: ["model-b"]),
             state(at: 2_000_000, hasLoadFailure: true),
@@ -115,6 +114,21 @@ struct InactivityNudgePolicyTests {
         var policy = InactivityNudgePolicy()
         #expect(policy.observe(state(at: 2_000_000, modelSwitch: .init(outcome: .serving,
             models: ["model-a"], remainingRequests: 0)), at: now, threshold: 0) == now)
+    }
+
+    @Test("multiple advertised models remain eligible when only the current model is warm")
+    func multipleAdvertisedOneWarm() {
+        var policy = InactivityNudgePolicy()
+        let advertised = ["model-b", "model-a", "model-c"]
+        #expect(policy.observe(state(at: 2_000_000, advertised: advertised),
+                               at: start, threshold: 15) == nil)
+        #expect(policy.observe(state(at: 2_000_010, advertised: advertised),
+                               at: start.addingTimeInterval(10), threshold: 15) == nil)
+        #expect(policy.observe(state(at: 2_000_020, advertised: advertised),
+                               at: start.addingTimeInterval(20), threshold: 15) == start)
+        #expect(policy.observe(state(at: 2_000_030, advertised: advertised,
+                                     warm: ["model-a", "model-b"]),
+                               at: start.addingTimeInterval(30), threshold: 15) == nil)
     }
 
     @Test("complete lifetime or an older row proves the reward-only window")
