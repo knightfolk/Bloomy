@@ -121,6 +121,17 @@ struct DashboardPresentationTests {
         #expect(models == [DashboardModel(name: "gemma", state: .loadedIdle)])
     }
 
+    @Test("most recently used model is not presented as resident after unloading")
+    func unloadedMostRecentModel() {
+        let models = DashboardModelDeriver.models(
+            enabledFilter: "gemma",
+            loadedModels: [], warmModels: [], slotModels: [],
+            currentModel: "gemma", inferenceActive: false
+        )
+
+        #expect(models == [DashboardModel(name: "gemma", state: .availableUnloaded)])
+    }
+
     @Test("active-session average ignores unavailable and duplicate telemetry samples")
     func averagesUniqueAvailableTokenRates() {
         let identity = ProcessIdentity(pid: 42, startTimeMicros: 9_000)

@@ -365,6 +365,7 @@ struct MonitorPopover: View {
     let openSettings: () -> Void
     let openDashboard: () -> Void
     @State private var showsFans = false
+    @State private var pendingSingleModelID: String?
     private static let machineName = Host.current().localizedName ?? "This Mac"
 
     init(
@@ -437,6 +438,24 @@ struct MonitorPopover: View {
                 }
             }
         }
+        .confirmationDialog(
+            "Use \(ModelDisplayName.short(pendingSingleModelID ?? "model")) alone?",
+            isPresented: Binding(
+                get: { pendingSingleModelID != nil },
+                set: { if !$0 { pendingSingleModelID = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let modelID = pendingSingleModelID {
+                Button("Use only this model") {
+                    pendingSingleModelID = nil
+                    Task { await controlStore.switchToSingleModel(modelID) }
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingSingleModelID = nil }
+        } message: {
+            Text("Other advertised models stop receiving new work. Accepted work finishes before switching. You can restore the full saved selection in Models.")
+        }
         .task { await store.refreshModelServingProfitability() }
     }
 
@@ -451,10 +470,11 @@ struct MonitorPopover: View {
     private func isOffline(at now: Date) -> Bool { providerRunning(at: now) == false }
 
     private func displayedSelection(at now: Date) -> [String]? {
-        if isOffline(at: now), let control = controlStore.snapshot {
+        if let advertised = advertisedIDs(at: now) { return advertised }
+        if let control = controlStore.snapshot {
             return control.inventory.myCatalog.filter { $0.isEnabled }.map(\.catalogID).sorted()
         }
-        return advertisedIDs(at: now)
+        return nil
     }
 
     private func popupBodyHeight(currentTime: Date) -> CGFloat {
@@ -484,11 +504,21 @@ struct MonitorPopover: View {
     private func compactModels(currentTime: Date) -> some View {
         let advertised = displayedSelection(at: currentTime)
         let available = availableIDs(excluding: advertised ?? [])
+        let liveSelectionUnknown = advertisedIDs(at: currentTime) == nil
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label(isOffline(at: currentTime) ? "Selected · Offline" : "Advertised", systemImage: "antenna.radiowaves.left.and.right")
+                Label(isOffline(at: currentTime) ? "Selected · Offline"
+                      : liveSelectionUnknown ? "Saved models · Live status unavailable" : "Advertised",
+                      systemImage: "antenna.radiowaves.left.and.right")
                     .font(.subheadline.weight(.semibold))
-                if modelModePresentation(at: currentTime) == .automatic { AutoModelModeBadge(monochrome: isOffline(at: currentTime)) }
+                if !liveSelectionUnknown && modelModePresentation(at: currentTime) == .automatic {
+                    AutoModelModeBadge(monochrome: isOffline(at: currentTime))
+                }
+                if controlStore.draft?.originalMaxModelSlots == 1 {
+                    Label("1 slot saved", systemImage: "1.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .help("Saved capacity is one resident model. A restart is needed after changing the limit.")
+                }
                 Spacer()
                 if let advertised { Text(advertised.count.formatted()).foregroundStyle(.secondary) }
             }
@@ -513,24 +543,28 @@ struct MonitorPopover: View {
     }
 
     private func modelGrid(_ ids: [String], now: Date, offersActivation: Bool = false) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+        let liveSelectionUnknown = advertisedIDs(at: now) == nil
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
             ForEach(ids, id: \.self) { id in
                 let state = models.first(where: { $0.name == id })?.state
-                CompactModelCard(modelID: id, status: isOffline(at: now) ? (offersActivation ? "Downloaded" : "Ready when online") : modelStateLabel(state),
-                                 tint: isOffline(at: now) ? .secondary : state == .active ? .green : state == .loadedIdle ? .orange : .secondary,
-                                 metrics: modelMetrics(id), selected: !isOffline(at: now) && state == .active, compact: true,
-                                 activate: offersActivation ? { Task { await controlStore.activateModel(id, providerKnownRunning: providerRunning(at: now)) } } : nil,
+                CompactModelCard(modelID: id, status: liveSelectionUnknown ? (offersActivation ? "Downloaded" : isOffline(at: now) ? "Ready when online" : "Saved selection") : modelStateLabel(state),
+                                 tint: liveSelectionUnknown ? .secondary : state == .active ? .green : state == .loadedIdle ? .orange : .secondary,
+                                 metrics: modelMetrics(id), selected: !liveSelectionUnknown && state == .active, compact: true,
+                                 activate: offersActivation ? { _ = Task<Void, Never> { await controlStore.activateModel(id, providerKnownRunning: providerRunning(at: now)) } } : nil,
                                  activationUnavailableReason: controlStore.activationUnavailableReason(for: id, providerKnownRunning: providerRunning(at: now)),
-                                 activationHelp: isOffline(at: now) ? "Save for the next provider start" : "Save and advertise this model without restarting")
+                                 activationHelp: isOffline(at: now) ? "Save for the next provider start" : "Advertise this model alongside the others",
+                                 switchModel: !liveSelectionUnknown && displayedSelection(at: now) != [id]
+                                    ? { pendingSingleModelID = id } : nil,
+                                 switchUnavailableReason: controlStore.singleModelSwitchUnavailableReason(for: id))
             }
         }
     }
 
     private func modelStateLabel(_ state: DashboardModelState?) -> String {
         switch state {
-        case .active: "Active"
-        case .loadedIdle: "Loaded · idle"
-        case .availableUnloaded: "On demand"
+        case .active: "Serving now"
+        case .loadedIdle: "In memory"
+        case .availableUnloaded: "Loads on request"
         case nil: "State unavailable"
         }
     }
@@ -1192,7 +1226,7 @@ private struct AutoModelModeBadge: View {
             .padding(.vertical, 3)
             .foregroundStyle(monochrome ? Color.secondary : .blue)
             .background((monochrome ? Color.secondary : .blue).opacity(0.12), in: Capsule())
-            .help("Darkbloom selects and loads enabled models automatically for incoming work")
+            .help("Darkbloom selects and loads enabled models for incoming requests. Switch pins one advertised model until you change it.")
             .accessibilityLabel("Automatic model selection")
             .accessibilityHint("Enabled models load automatically when requested")
     }

@@ -8,6 +8,23 @@ private let activationNow = Date(timeIntervalSince1970: 1_750_000_000)
 @Suite("Popup model activation")
 @MainActor
 struct ProviderPopupActivationTests {
+    @Test("switching pins one model without publishing a staged selection")
+    func switchesToOneModel() async throws {
+        let controller = ActivationController(snapshot: try activationSnapshot(
+            enabled: ["saved-model", "second-model"], advertised: ["saved-model", "second-model"]
+        ))
+        let store = ProviderControlStore(controller: controller, now: { activationNow })
+        await store.refresh()
+
+        #expect(store.singleModelSwitchUnavailableReason(for: "second-model") == nil)
+        await store.switchToSingleModel("second-model")
+
+        #expect(await controller.switchedModelIDs == ["second-model"])
+        #expect(await controller.savedSelections.isEmpty)
+        #expect(store.draft?.original.enabled == ["second-model"])
+        #expect(store.errorMessage == nil)
+    }
+
     @Test("running activation saves only the requested model and applies the saved selection")
     func savesAndApplies() async throws {
         let controller = ActivationController(snapshot: try activationSnapshot(advertised: ["saved-model"]))
@@ -159,6 +176,7 @@ private actor ActivationController: ProviderControlling {
     private(set) var saveAttempts = 0
     private(set) var savedSelections: [[String]] = []
     private(set) var appliedSelections: [[String]] = []
+    private(set) var switchedModelIDs: [String] = []
     private(set) var lifecycleActions: [ProviderLifecycleAction] = []
 
     init(
@@ -205,6 +223,16 @@ private actor ActivationController: ProviderControlling {
         onPhase: ProviderMutationPhaseObserver?
     ) async throws -> ProviderMutationCompletion {
         appliedSelections.append(enabledModels)
+        await onPhase?(.reconciling)
+        return .refreshed(current)
+    }
+
+    func performSingleModelSwitch(
+        modelID: String,
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderMutationCompletion {
+        switchedModelIDs.append(modelID)
+        current = try activationSnapshot(enabled: [modelID], advertised: [modelID])
         await onPhase?(.reconciling)
         return .refreshed(current)
     }

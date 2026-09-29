@@ -896,15 +896,61 @@ struct ModelManagerView: View {
     private var capacityControls: some View {
         if let draft = store.draft {
             VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "1.circle.fill")
+                        .font(.title2).foregroundStyle(.tint)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("One model ready at a time").font(.headline)
+                        Text("Recommended for this Mac. Other enabled models can still receive work, but may need to load first.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    if draft.maxModelSlots == 1 {
+                        Label(draft.originalMaxModelSlots == 1 ? "Saved" : "Chosen · Save and restart",
+                              systemImage: draft.originalMaxModelSlots == 1 ? "checkmark.circle.fill" : "clock")
+                            .font(.caption.weight(.semibold))
+                    } else {
+                        Button("Use 1 slot") { store.setMaxModelSlots(1) }
+                            .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("models.capacity.oneSlot")
+                    }
+                }
+                .padding(16)
+                .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
                 capacityCard("Simultaneous requests", icon: "arrow.triangle.branch",
                     value: draft.engineV2MaxConcurrent, defaultValue: 4, selectableMaximum: 24,
                     explanation: "Maximum concurrent requests per model engine. Choose 1–24. Higher limits use more memory; CLI 0.9.7 caps actual per-model concurrency at 8. Model-specific overrides may also reduce it.",
                     set: store.setEngineV2MaxConcurrent)
                 capacityCard("Models kept in memory", icon: "memorychip",
                     value: draft.maxModelSlots, defaultValue: 3,
-                    explanation: "The provider can keep this many models loaded, when memory allows. This is separate from simultaneous requests.",
+                    explanation: "The provider can keep this many models loaded, when memory allows. This does not limit how many models are enabled or the number of simultaneous requests.",
                     set: store.setMaxModelSlots)
-                Label("Save, then restart the provider to apply these limits.", systemImage: "info.circle")
+                if draft.maxModelSlots == 1 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Start with", systemImage: "play.circle")
+                            .font(.headline)
+                        Picker("Start with", selection: Binding(
+                            get: { draft.selection.preloaded.count == 1 ? draft.selection.preloaded[0] : "" },
+                            set: { store.setPreferredStartupModel($0.isEmpty ? nil : $0) }
+                        )) {
+                            Text("No preference").tag("")
+                            ForEach(draft.selection.enabled, id: \.self) { selector in
+                                Text(ModelDisplayName.short(selector)).tag(selector)
+                            }
+                        }
+                        .labelsHidden()
+                        Text("This model loads first after restart. Incoming requests can load other enabled models into the same slot.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        if draft.selection.preloaded.count > 1 {
+                            Text("Multiple startup models are selected. Choose one here for a clear preference.")
+                                .font(.callout).foregroundStyle(.orange)
+                        }
+                    }
+                }
+                Label(draft.maxModelSlots != draft.originalMaxModelSlots
+                      ? "Save the new limit, then restart the provider. Its running limit will not change until restart."
+                      : "Changing either limit requires Save and a provider restart.",
+                      systemImage: "info.circle")
                     .font(.callout).foregroundStyle(.secondary)
             }.disabled(store.operation != .idle)
         } else {

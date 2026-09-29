@@ -379,12 +379,23 @@ dashboard separates Models into On this Mac, Available, and Capacity views.
 Compact model cards keep download/delete independent from enable/startup-load
 settings. Capacity exposes concurrent-request and resident-model limits; all
 changes share the staged draft and the validated configuration save path.
+The app recommends one resident slot and lets the user choose one enabled
+model to load first at startup. This does not cap the enabled selection or
+concurrent requests: in automatic mode the provider can replace that resident
+model when work for another enabled model arrives. The upstream CLI's unset
+slot default remains three, so existing configurations are displayed as saved.
 Refresh preserves edits; Discard edits explicitly reloads the saved settings.
 Model presentation is derived from the enabled-model filter plus loaded, warm,
 slot, and current-model state. Green means active, yellow means loaded but idle,
 and gray means available on demand. There is no separate Warm row action because
 the official CLI does not expose one. Saved selections can use Apply Live when
 fresh daemon state confirms the supported same-session switch capability.
+The popup also offers an explicit single-model switch. It confirms that the
+CLI will replace the entire advertised selection with that one downloaded
+model after accepted work drains; this path is distinct from Apply Live, which
+reapplies the complete saved selection. When live advertising is unavailable,
+the popup shows the saved selection with unavailable-state styling rather than
+claiming it is currently advertised or resident.
 `StatusItemController` owns an
 in-process Settings window whose SwiftUI view owns the persisted menu-bar
 metric picker, avoiding delegation to another registered app bundle.

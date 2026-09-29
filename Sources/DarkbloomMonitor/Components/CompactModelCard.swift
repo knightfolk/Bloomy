@@ -54,6 +54,8 @@ struct CompactModelCard: View {
     var activate: (() -> Void)? = nil
     var activationUnavailableReason: String? = nil
     var activationHelp: String = "Add this model to the provider selection"
+    var switchModel: (() -> Void)? = nil
+    var switchUnavailableReason: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 7 : 10) {
@@ -94,16 +96,29 @@ struct CompactModelCard: View {
                     }
                 }
             }
-            if let activate {
-                Button(action: activate) {
-                    Label("Activate", systemImage: "plus.circle")
-                        .frame(maxWidth: .infinity)
+            if activate != nil || switchModel != nil {
+                HStack(spacing: 5) {
+                    if let activate {
+                        Button(action: activate) {
+                            Label("Add", systemImage: "plus.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(activationUnavailableReason != nil)
+                        .help(activationUnavailableReason ?? "Activate · \(activationHelp)")
+                        .accessibilityLabel("Activate \(ModelDisplayName.short(modelID))")
+                    }
+                    if let switchModel {
+                        Button(action: switchModel) {
+                            Label(activate == nil ? "Use only" : "Only", systemImage: "arrow.left.arrow.right")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(switchUnavailableReason != nil)
+                        .help(switchUnavailableReason ?? "Make this the only advertised model. Current work drains before switching.")
+                        .accessibilityLabel("Switch to \(ModelDisplayName.short(modelID)) only")
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(activationUnavailableReason != nil)
-                .help(activationUnavailableReason ?? activationHelp)
-                .accessibilityLabel("Activate \(ModelDisplayName.short(modelID))")
             }
         }
         .padding(compact ? 10 : 12)

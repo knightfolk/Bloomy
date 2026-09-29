@@ -186,6 +186,10 @@ public protocol ProviderControlling: Sendable {
         enabledModels: [String],
         onPhase: ProviderMutationPhaseObserver?
     ) async throws -> ProviderMutationCompletion
+    func performSingleModelSwitch(
+        modelID: String,
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderMutationCompletion
     /// Hosting-aware lifecycle dispatch. Implementations apply the official
     /// local-endpoint start flags through the same bounded, reconciled path as
     /// every other lifecycle action.
@@ -223,6 +227,15 @@ public extension ProviderControlling {
     ) async throws -> ProviderMutationCompletion {
         throw ProviderControlError.liveSwitchUnavailable(
             "This controller does not support Apply Live"
+        )
+    }
+
+    func performSingleModelSwitch(
+        modelID: String,
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderMutationCompletion {
+        throw ProviderControlError.liveSwitchUnavailable(
+            "This controller does not support switching to one model"
         )
     }
 
@@ -588,6 +601,41 @@ public actor ProviderControlService: ProviderControlling {
         )
         return try await runDispatchedMutation(
             DarkbloomCommand.liveSwitch(executable: executable, models: modelIDs),
+            timeout: DarkbloomSourcePolicy.liveSwitchCommandTimeout,
+            outputLimit: DarkbloomSourcePolicy.mutationOutputByteLimit,
+            onOutput: nil,
+            onPhase: onPhase,
+            executable: executable
+        )
+    }
+
+    public func performSingleModelSwitch(
+        modelID: String,
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderMutationCompletion {
+        try beginCommand()
+        defer { endCommand() }
+        let executable = try resolveExecutable()
+        let snapshot = try await refresh(
+            using: executable,
+            allowStaleModelSources: false,
+            freshResidencyRequirement: nil
+        )
+        switch snapshot.liveSwitchAvailability {
+        case .available: break
+        case .inProgress:
+            throw ProviderControlError.liveSwitchUnavailable(
+                "A live model switch is already in progress"
+            )
+        case .unavailable(let reason):
+            throw ProviderControlError.liveSwitchUnavailable(reason)
+        }
+        let localIDs = try resolvedLocalModelIDs(for: [modelID], in: snapshot.inventory)
+        guard localIDs.count == 1 else {
+            throw ProviderControlError.inventoryUnavailable(Self.invalidSelectionMessage)
+        }
+        return try await runDispatchedMutation(
+            DarkbloomCommand.liveSwitch(executable: executable, models: localIDs),
             timeout: DarkbloomSourcePolicy.liveSwitchCommandTimeout,
             outputLimit: DarkbloomSourcePolicy.mutationOutputByteLimit,
             onOutput: nil,

@@ -499,7 +499,7 @@ struct MonitorPopoverLayoutTests {
         ]
         let now = Date()
         let service = TelemetryService(
-            source: AutoModeTelemetrySource(now: now, modelIDs: modelIDs, offline: offline),
+            source: AutoModeTelemetrySource(now: now, modelIDs: modelIDs, offline: offline, warmCount: 1),
             now: { now }
         )
         let store = MonitorStore(
@@ -509,7 +509,8 @@ struct MonitorPopoverLayoutTests {
         )
         await store.refreshTelemetryImmediately()
         let controlStore = ProviderControlStore(
-            controller: InertSettingsController(sources: offline ? .allFresh : .unknown, savedIDs: offline ? modelIDs : [])
+            controller: InertSettingsController(sources: offline ? .allFresh : .unknown,
+                                               savedIDs: offline ? modelIDs : [], slots: 1)
         )
         await controlStore.refresh()
         let hostingController = NSHostingController(
@@ -622,11 +623,13 @@ private actor AutoModeTelemetrySource: TelemetrySource {
     let now: Date
     let modelIDs: [String]
     let offline: Bool
+    let warmCount: Int
 
-    init(now: Date, modelIDs: [String], offline: Bool = false) {
+    init(now: Date, modelIDs: [String], offline: Bool = false, warmCount: Int = 2) {
         self.now = now
         self.modelIDs = modelIDs
         self.offline = offline
+        self.warmCount = warmCount
     }
 
     func readDaemonState() async throws -> DaemonState {
@@ -636,7 +639,7 @@ private actor AutoModeTelemetrySource: TelemetrySource {
             schema: 1,
             version: "0.9.11",
             currentModel: modelIDs[0],
-            warmModels: Array(modelIDs.prefix(2)),
+            warmModels: Array(modelIDs.prefix(warmCount)),
             stats: ProviderStats(tokensGenerated: 11_092, requestsServed: 124, usageGaps: 0),
             trust: TrustState(
                 level: "hardware",
@@ -658,7 +661,7 @@ private actor AutoModeTelemetrySource: TelemetrySource {
     func readLoadedModels() async throws -> LoadedModelsState {
         LoadedModelsState(
             schema: 1,
-            models: Array(modelIDs.prefix(2)),
+            models: Array(modelIDs.prefix(warmCount)),
             updatedAt: now.timeIntervalSince1970
         )
     }
@@ -679,12 +682,14 @@ private struct UnusedError: Error {}
 private actor InertSettingsController: ProviderControlling {
     private let value: ProviderControlSnapshot
 
-    init(sources: ProviderControlSourceStates = .allFresh, savedIDs: [String] = []) {
+    init(sources: ProviderControlSourceStates = .allFresh, savedIDs: [String] = [], slots: Int? = nil) {
         let selection = ProviderModelSelection(enabled: savedIDs, preloaded: [])
         let draft = ProviderConfigDraft(
             sourceRevision: "layout-fixture",
             original: selection,
-            selection: selection
+            selection: selection,
+            originalMaxModelSlots: slots,
+            maxModelSlots: slots
         )
         let catalog = [
             CatalogModel(

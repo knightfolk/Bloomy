@@ -542,6 +542,25 @@ struct ProviderControlServiceTests {
         #expect(await harness.runner.sourceArguments.count == 6)
     }
 
+    @Test("single-model switch dispatches only the chosen downloaded model")
+    func switchesOneModelWithoutSavingOtherSelections() async throws {
+        let harness = try ServiceHarness.make(selection: ProviderModelSelection(
+            enabled: ["gemma-4-26b-qat-4bit", "gpt-oss"], preloaded: []
+        ))
+        defer { harness.cleanup() }
+        await harness.telemetry.setDaemon(liveSwitchDaemon(configPath: harness.configURL.path))
+
+        _ = try await harness.service.performSingleModelSwitch(
+            modelID: "gpt-oss-20b", onPhase: nil
+        )
+
+        let invocation = try #require(await harness.runner.switchInvocations.first)
+        #expect(invocation.command.arguments == [
+            "switch", "--timeout", "600", "--model", "gpt-oss-20b"
+        ])
+        #expect(await harness.configStore.saveCount == 0)
+    }
+
     @Test("older provider and active switch dispatch nothing")
     func liveSwitchFailsClosed() async throws {
         let harness = try ServiceHarness.make()

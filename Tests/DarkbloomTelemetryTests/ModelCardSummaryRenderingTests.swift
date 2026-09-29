@@ -268,6 +268,16 @@ struct ModelCardSummaryRenderingTests {
             width: 1280,
             to: URL(fileURLWithPath: "/tmp/darkbloom-models-2x2-1280.png")
         )
+        let capacityDefaults = UserDefaults(suiteName: "darkbloom.capacity-render.\(UUID().uuidString)")!
+        capacityDefaults.set(true, forKey: ModelGroupScope.enabled.defaultsKey)
+        capacityDefaults.set(true, forKey: ModelGroupScope.available.defaultsKey)
+        capacityDefaults.set(false, forKey: ModelGroupScope.capacity.defaultsKey)
+        try writeGroupedSnapshot(
+            ModelManagerView(store: compactStore, telemetry: telemetry)
+                .defaultAppStorage(capacityDefaults),
+            width: 760,
+            to: URL(fileURLWithPath: "/tmp/darkbloom-one-slot-capacity.png")
+        )
     }
 
     /// Renders the full manager inside an offscreen window and lets
@@ -400,7 +410,8 @@ private actor EvidenceFourModelsController: ProviderControlling {
                 catalog: catalog, local: local, selection: selection,
                 daemon: nil, loadedModels: ["qwen/qwen3.8-27b"]
             ),
-            draft: ProviderConfigDraft(sourceRevision: "evidence-2x2", original: selection, selection: selection),
+            draft: ProviderConfigDraft(sourceRevision: "evidence-2x2", original: selection,
+                                       selection: selection, originalMaxModelSlots: 1, maxModelSlots: 1),
             capturedAt: now,
             sources: ProviderControlSourceStates(
                 catalog: .fresh(evidenceAt: now), localModels: .fresh(evidenceAt: now),

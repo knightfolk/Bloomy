@@ -135,6 +135,19 @@ struct ProviderControlStoreTests {
         #expect(store.canSave)
     }
 
+    @Test("one-slot startup preference stages one enabled model")
+    func stagesStartupPreference() async throws {
+        let store = ProviderControlStore(controller: FakeProviderController.fixture())
+        await store.refresh()
+
+        store.setPreferredStartupModel("saved-model")
+        #expect(store.draft?.selection.preloaded == ["saved-model"])
+        store.setPreferredStartupModel("unknown-model")
+        #expect(store.draft?.selection.preloaded == ["saved-model"])
+        store.setPreferredStartupModel(nil)
+        #expect(store.draft?.selection.preloaded == [])
+    }
+
     @Test("stages the global concurrent request cap independently")
     func stagesEngineV2MaxConcurrent() async throws {
         let controller = FakeProviderController.fixture()

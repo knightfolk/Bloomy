@@ -78,6 +78,68 @@ final class ProviderControlStore: ObservableObject {
 
     var canApplyLive: Bool { applyLiveUnavailableReason == nil }
 
+    func singleModelSwitchUnavailableReason(for modelID: String) -> String? {
+        guard operation == .idle else { return "Another provider action is in progress" }
+        guard pendingConfirmation == nil else { return "Finish the pending provider action first" }
+        guard let draft, let snapshot else { return "Provider configuration is unavailable" }
+        guard !draft.hasChanges else { return "Save or discard pending changes before switching" }
+        guard draft.sourceRevision == snapshot.draft.sourceRevision,
+              draft.original == snapshot.draft.original,
+              freshModelSources(in: snapshot) else {
+            return "Refresh model controls before switching"
+        }
+        guard let item = snapshot.inventory.myCatalog.first(where: { $0.catalogID == modelID }),
+              item.isDownloaded, item.localID != nil, item.issue == nil else {
+            return "This downloaded model is unavailable"
+        }
+        guard let daemon = snapshot.daemonState,
+              snapshot.sources.daemon.evaluated(
+                at: now(),
+                invalidReason: "Provider state is unavailable",
+                staleReason: "Provider state is stale",
+                futureReason: "Provider state timestamp is in the future"
+              ).isMarkedFresh,
+              let advertised = daemon.advertisedModels else {
+            return "Refresh current provider state before switching"
+        }
+        if advertised == [modelID] { return "This is already the selected model" }
+        return liveActivationUnavailableReason(in: snapshot)
+    }
+
+    /// The CLI switch command replaces and persists the entire advertised set.
+    /// Keep this explicit rather than changing Apply Live's full-set behavior.
+    func switchToSingleModel(_ modelID: String) async {
+        guard singleModelSwitchUnavailableReason(for: modelID) == nil,
+              let generation = begin(.liveSwitch) else { return }
+        let controller = self.controller
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let completion = try await controller.performSingleModelSwitch(
+                    modelID: modelID,
+                    onPhase: { [weak self] phase in
+                        await self?.advanceMutationPhase(phase, generation: generation)
+                    }
+                )
+                await reconcileCompletedMutation(
+                    completion,
+                    preserving: nil,
+                    failureMessage: "The model switched, but controls could not refresh.",
+                    uncertainFailureMessage: "The switch outcome could not be confirmed. Refresh model controls."
+                )
+            } catch is CancellationError {
+                // The service owns dispatch and cancellation boundaries.
+            } catch let error as ProviderControlError {
+                errorMessage = controlErrorMessage(error, action: "switch models")
+            } catch {
+                errorMessage = "Could not switch models."
+            }
+            finish(generation)
+        }
+        currentTask = task
+        await awaitTask(task)
+    }
+
     /// The popup action only changes one downloaded model. A staged settings
     /// draft must be resolved separately so this action cannot publish it.
     func activationUnavailableReason(
@@ -309,6 +371,19 @@ final class ProviderControlStore: ObservableObject {
     func setMaxModelSlots(_ maxModelSlots: Int) {
         guard var draft, maxModelSlots > 0 else { return }
         draft.maxModelSlots = maxModelSlots
+        self.draft = draft
+    }
+
+    /// A single preload is the start-up preference for the one-slot setup.
+    /// Runtime request routing remains the provider's responsibility.
+    func setPreferredStartupModel(_ modelID: String?) {
+        guard var draft else { return }
+        if let modelID {
+            guard draft.selection.enabled.contains(modelID) else { return }
+            draft.selection.preloaded = [modelID]
+        } else {
+            draft.selection.preloaded = []
+        }
         self.draft = draft
     }
 

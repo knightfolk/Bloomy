@@ -307,10 +307,9 @@ public enum DashboardModelDeriver {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty } ?? []
         let current = currentModel?.trimmingCharacters(in: .whitespacesAndNewlines)
-        var loaded = Set(loadedModels + warmModels + slotModels)
-        if let current, !current.isEmpty {
-            loaded.insert(current)
-        }
+        // The CLI retains current_model as the most recently used model after
+        // unloading. Residency comes only from loaded, warm, or slot evidence.
+        let loaded = Set(loadedModels + warmModels + slotModels)
 
         var seen = Set<String>()
         let inventory = (enabled + loadedModels + warmModels + slotModels + [current ?? ""])
