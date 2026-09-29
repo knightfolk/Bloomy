@@ -29,6 +29,9 @@ struct PopupNudgeControl: View {
             if !store.keyPresent {
                 ScrollView { NudgeSetupGuide(store: store).padding(.vertical, 4) }
             } else {
+            Label("Setup complete · Key saved", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .accessibilityIdentifier("nudge.setup.complete")
             Text("Send one free, exclusive self-route request capped at 8 output tokens. It may reach another owned machine serving the same model. A response does not guarantee public work.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -58,7 +61,7 @@ struct PopupNudgeControl: View {
             }
 
             Divider()
-            Text("Nudge key and automatic option")
+            Text("Automatic nudge and key settings")
                 .font(.headline)
             Form {
                 InactivityNudgeSettingsView(store: store)

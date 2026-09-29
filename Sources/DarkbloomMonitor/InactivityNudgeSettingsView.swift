@@ -6,6 +6,7 @@ struct InactivityNudgeSettingsView: View {
     @ObservedObject var store: InactivityNudgeStore
     @State private var keyDraft = ""
     @State private var keyError: String?
+    @State private var isReplacingKey = false
 
     var body: some View {
         Section("Automatic nudge") {
@@ -49,64 +50,58 @@ struct InactivityNudgeSettingsView: View {
         if !store.keyPresent {
             Section { NudgeSetupGuide(store: store) }
         } else {
-        Section("Nudge setup") {
-            Text("Use a Darkbloom consumer key restricted to “my machine only.” Bloomy stores one dedicated nudge key in the macOS Keychain for both manual and automatic requests, separate from provider and local API tokens.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Section("Saved nudge key") {
+                Label("Saved securely in Keychain", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text("Manual and automatic nudges use this same key. You do not need to enter it again.")
+                    .font(.callout).foregroundStyle(.secondary)
 
-            LabeledContent("Nudge key", value: store.keyPresent ? "Saved in Keychain" : "Not saved")
-
-            SecureField("Paste nudge key", text: $keyDraft)
-                .textContentType(.password)
-                .privacySensitive()
-                .accessibilityIdentifier("settings.inactivityNudge.key")
-
-            HStack {
-                Button("Save key") {
-                    keyError = store.saveKey(keyDraft)
-                    if keyError == nil {
-                        keyDraft = ""
+                if isReplacingKey {
+                    SecureField("Paste replacement key", text: $keyDraft)
+                        .textContentType(.password)
+                        .privacySensitive()
+                        .accessibilityIdentifier("settings.inactivityNudge.key")
+                    HStack {
+                        Button("Save replacement") {
+                            keyError = store.saveKey(keyDraft)
+                            if keyError == nil {
+                                keyDraft = ""
+                                isReplacingKey = false
+                            }
+                        }
+                        .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("settings.inactivityNudge.saveKey")
+                        Button("Cancel") { clearKeyDraft() }
+                            .accessibilityIdentifier("settings.inactivityNudge.cancelKey")
                     }
-                }
-                .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityIdentifier("settings.inactivityNudge.saveKey")
-
-                if !keyDraft.isEmpty {
-                    Button("Cancel") {
-                        keyDraft = ""
-                        keyError = nil
+                    Text("Your current key stays saved until you save a replacement.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let keyError {
+                        Text(keyError).foregroundStyle(.red)
+                            .accessibilityIdentifier("settings.inactivityNudge.keyError")
                     }
-                    .accessibilityIdentifier("settings.inactivityNudge.cancelKey")
+                } else {
+                    Button("Replace key…") { isReplacingKey = true }
+                        .accessibilityIdentifier("settings.inactivityNudge.replaceKey")
                 }
 
-                Spacer()
-
-                Button("Remove key", role: .destructive) {
-                    keyDraft = ""
-                    keyError = nil
-                    store.removeKey()
+                DisclosureGroup("Remove saved key") {
+                    Text("Manual and automatic nudges will be unavailable until you set up a key again.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Remove key", role: .destructive) {
+                        clearKeyDraft()
+                        store.removeKey()
+                    }
+                    .accessibilityIdentifier("settings.inactivityNudge.removeKey")
                 }
-                .disabled(!store.keyPresent)
-                .accessibilityIdentifier("settings.inactivityNudge.removeKey")
             }
+            .onDisappear { clearKeyDraft() }
+        }
+    }
 
-            if let keyError {
-                Text(keyError)
-                    .font(.callout)
-                    .foregroundStyle(.red)
-                    .accessibilityIdentifier("settings.inactivityNudge.keyError")
-            }
-
-            Text("Automatic activity is checked against account-wide earnings. Work from another Mac can keep the watcher idle. Billing can post late, so a quiet period does not prove the whole account had no work. Manual nudges skip that earnings check.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .onDisappear {
-            keyDraft = ""
-            keyError = nil
-        }
-        }
+    private func clearKeyDraft() {
+        keyDraft = ""
+        keyError = nil
+        isReplacingKey = false
     }
 }

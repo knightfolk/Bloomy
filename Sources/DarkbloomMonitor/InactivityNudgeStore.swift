@@ -91,7 +91,7 @@ final class InactivityNudgeStore: ObservableObject {
             try keyStore.store(key)
             keyPresent = keyStore.hasKey
             resetPending()
-            manualStatus = "Nudge key changed. Any pending nudge was canceled."
+            manualStatus = "Nudge key saved securely."
             return nil
         } catch {
             return "Could not save the key. Check its format and Keychain access."
