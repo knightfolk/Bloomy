@@ -51,6 +51,9 @@ struct CompactModelCard: View {
     var metrics: [ModelCardMetric] = []
     var selected: Bool = false
     var compact: Bool = false
+    var activate: (() -> Void)? = nil
+    var activationUnavailableReason: String? = nil
+    var activationHelp: String = "Add this model to the provider selection"
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 7 : 10) {
@@ -70,7 +73,11 @@ struct CompactModelCard: View {
                 }
                 Spacer(minLength: 0)
             }
-            if !metrics.isEmpty {
+            if compact && metrics.count == 1 && metrics.first?.id == "unknown" {
+                Label("No history yet", systemImage: "clock")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .help("Speed and earnings appear after this model serves requests")
+            } else if !metrics.isEmpty {
                 (compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 5))
                          : AnyLayout(HStackLayout(alignment: .top, spacing: 10))) {
                     ForEach(metrics) { metric in
@@ -87,13 +94,24 @@ struct CompactModelCard: View {
                     }
                 }
             }
+            if let activate {
+                Button(action: activate) {
+                    Label("Activate", systemImage: "plus.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(activationUnavailableReason != nil)
+                .help(activationUnavailableReason ?? activationHelp)
+                .accessibilityLabel("Activate \(ModelDisplayName.short(modelID))")
+            }
         }
         .padding(compact ? 10 : 12)
         .frame(maxWidth: .infinity, minHeight: compact ? 104 : 92, alignment: .topLeading)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? tint : .primary.opacity(0.07), lineWidth: selected ? 1.5 : 1))
         .help(modelID)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("\(modelID), \(status)")
         .accessibilityValue(metrics.map { "\($0.value) \($0.caption)" }.joined(separator: ", "))
     }

@@ -78,6 +78,97 @@ final class ProviderControlStore: ObservableObject {
 
     var canApplyLive: Bool { applyLiveUnavailableReason == nil }
 
+    /// The popup action only changes one downloaded model. A staged settings
+    /// draft must be resolved separately so this action cannot publish it.
+    func activationUnavailableReason(
+        for modelID: String,
+        providerKnownRunning: Bool? = nil
+    ) -> String? {
+        guard operation == .idle else { return "Another provider action is in progress" }
+        guard pendingConfirmation == nil else {
+            return "Finish the pending provider action before activating a model"
+        }
+        guard let draft, let snapshot else { return "Provider configuration is unavailable" }
+        guard !draft.hasChanges else {
+            return "Save or discard pending changes before activating a model"
+        }
+        guard draft.sourceRevision == snapshot.draft.sourceRevision,
+              draft.original == snapshot.draft.original else {
+            return "Refresh model controls before activating a model"
+        }
+        guard freshModelSources(in: snapshot) else {
+            return "Refresh model controls before activating a model"
+        }
+        guard let item = snapshot.inventory.myCatalog.first(where: { $0.catalogID == modelID }),
+              item.isDownloaded, item.localID != nil, item.issue == nil else {
+            return "This downloaded model is unavailable"
+        }
+        if let validation = draftValidationMessage { return validation }
+        let saved = draft.original.enabled.contains {
+            Self.resolvedCatalogID(for: $0, in: snapshot.inventory) == modelID
+        }
+        guard let daemon = snapshot.daemonState else {
+            guard providerKnownRunning == false else {
+                return "Refresh current provider state before activating a model"
+            }
+            return saved ? "This model is already saved for the next start" : nil
+        }
+        guard snapshot.sources.daemon.evaluated(
+            at: now(),
+            invalidReason: "Provider state is unavailable",
+            staleReason: "Provider state is stale",
+            futureReason: "Provider state timestamp is in the future"
+        ).isMarkedFresh else {
+            return "Refresh current provider state before activating a model"
+        }
+        guard let advertised = daemon.advertisedModels else {
+            return "Refresh advertised models before activating a model"
+        }
+        guard !hasUnexpectedAdvertisedModels(advertised, in: snapshot) else {
+            return "The running model selection differs from saved settings. Use Models to review it."
+        }
+        if advertised.contains(modelID) {
+            return "This model is already active"
+        }
+        return liveActivationUnavailableReason(in: snapshot)
+    }
+
+    private func hasUnexpectedAdvertisedModels(
+        _ advertised: [String],
+        in snapshot: ProviderControlSnapshot
+    ) -> Bool {
+        let saved = Set(snapshot.draft.original.enabled.compactMap {
+            Self.resolvedCatalogID(for: $0, in: snapshot.inventory)
+        })
+        return !Set(advertised).isSubset(of: saved)
+    }
+
+    private func freshModelSources(in snapshot: ProviderControlSnapshot) -> Bool {
+        let currentTime = now()
+        return snapshot.sources.catalog.evaluated(
+            at: currentTime,
+            invalidReason: "Model catalog is unavailable",
+            staleReason: "Model catalog is stale",
+            futureReason: "Model catalog timestamp is in the future"
+        ).isMarkedFresh && snapshot.sources.localModels.evaluated(
+            at: currentTime,
+            invalidReason: "Local models are unavailable",
+            staleReason: "Local models are stale",
+            futureReason: "Local models timestamp is in the future"
+        ).isMarkedFresh
+    }
+
+    private func liveActivationUnavailableReason(in snapshot: ProviderControlSnapshot) -> String? {
+        switch snapshot.liveSwitchAvailability {
+        case .available: nil
+        case .inProgress: "A live model switch is already in progress"
+        case .unavailable(let reason):
+            Self.safeLiveSwitchDiagnostics.contains(reason)
+                ? diagnosticSanitizer.sanitize(reason)
+                : "Apply Live is unavailable"
+        }
+    }
+
     var applyLiveUnavailableReason: String? {
         guard operation == .idle else { return "Another provider action is in progress" }
         guard let draft, let snapshot else { return "Provider configuration is unavailable" }
@@ -305,6 +396,118 @@ final class ProviderControlStore: ObservableObject {
                 errorMessage = controlErrorMessage(error, action: "apply models live")
             } catch {
                 errorMessage = "Could not apply the saved model selection live."
+            }
+            finish(generation)
+        }
+        currentTask = task
+        await awaitTask(task)
+    }
+
+    /// Enable and save this model, then apply the saved selection to a running
+    /// provider without a lifecycle restart. An offline provider picks it up
+    /// on its next start.
+    func activateModel(_ modelID: String, providerKnownRunning: Bool? = nil) async {
+        guard activationUnavailableReason(
+            for: modelID,
+            providerKnownRunning: providerKnownRunning
+        ) == nil,
+              let initialDraft = draft,
+              let initialSnapshot = snapshot,
+              let generation = begin(.saving) else { return }
+        let alreadySaved = initialDraft.original.enabled.contains {
+            Self.resolvedCatalogID(for: $0, in: initialSnapshot.inventory) == modelID
+        }
+        let controller = self.controller
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var saved = false
+            var applyingLive = false
+            do {
+                var current = initialSnapshot
+                var savedDraft = initialDraft
+                if !alreadySaved {
+                    var selection = initialDraft.selection
+                    Self.setMembership(true, modelID: modelID, in: &selection.enabled)
+                    let completion = try await controller.performSave(
+                        initialDraft.withSelection(selection),
+                        onPhase: { [weak self] phase in
+                            await self?.advanceMutationPhase(phase, generation: generation)
+                        }
+                    )
+                    saved = true
+                    savedDraft = completion.result.draft
+                    draft = savedDraft
+                    // The save is published even if its follow-up refresh is
+                    // uncertain. Never dispatch Apply Live from old evidence.
+                    do {
+                        current = try await refreshControlsAfterCompletedMutation()
+                        accept(current)
+                    } catch {
+                        invalidateActionableSnapshot()
+                        errorMessage = "Model was saved, but current provider state could not refresh. Apply Live was not attempted."
+                        finish(generation)
+                        return
+                    }
+                }
+                if initialSnapshot.daemonState != nil, current.daemonState == nil {
+                    errorMessage = "Model was saved, but current provider state could not be confirmed. Apply Live was not attempted."
+                    finish(generation)
+                    return
+                }
+                if current.daemonState != nil {
+                    guard current.draft.original == savedDraft.original,
+                          current.draft.original.enabled.contains(where: {
+                            Self.resolvedCatalogID(for: $0, in: current.inventory) == modelID
+                          }),
+                          freshModelSources(in: current),
+                          current.sources.daemon.evaluated(
+                            at: now(),
+                            invalidReason: "Provider state is unavailable",
+                            staleReason: "Provider state is stale",
+                            futureReason: "Provider state timestamp is in the future"
+                          ).isMarkedFresh,
+                          let advertised = current.daemonState?.advertisedModels,
+                          !hasUnexpectedAdvertisedModels(advertised, in: current),
+                          liveActivationUnavailableReason(in: current) == nil else {
+                        errorMessage = "Model was saved, but Apply Live is unavailable. Refresh model controls before trying again."
+                        finish(generation)
+                        return
+                    }
+                    if !advertised.contains(modelID) {
+                        applyingLive = true
+                        let completion = try await controller.performLiveSwitch(
+                            enabledModels: savedDraft.original.enabled,
+                            onPhase: { [weak self] phase in
+                                await self?.advanceMutationPhase(phase, generation: generation)
+                            }
+                        )
+                        await reconcileCompletedMutation(
+                            completion,
+                            preserving: draft,
+                            failureMessage: "The live switch completed, but model controls could not refresh.",
+                            uncertainFailureMessage:
+                                "The live switch outcome could not be confirmed; model controls could not refresh."
+                        )
+                    }
+                }
+            } catch is CancellationError {
+                if saved {
+                    errorMessage = "Model was saved, but Apply Live was not completed. Refresh model controls before trying again."
+                }
+            } catch let error as ProviderControlError {
+                let detail = controlErrorMessage(
+                    error,
+                    action: applyingLive ? "apply models live" : "save"
+                )
+                errorMessage = saved ? "Model was saved, but \(detail)" : detail
+            } catch let error as ProviderConfigError {
+                errorMessage = configErrorMessage(error)
+            } catch {
+                errorMessage = saved
+                    ? "Model was saved, but could not apply the selection live."
+                    : (applyingLive
+                        ? "Could not apply the saved model selection live."
+                        : "Could not save the model selection.")
             }
             finish(generation)
         }

@@ -387,26 +387,27 @@ struct MonitorPopover: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             providerHeader(currentTime: currentTime)
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 CompactGPUGauge(usage: store.gpuUsage, now: currentTime)
-                Spacer(minLength: 0)
-                VStack(alignment: .trailing, spacing: 3) {
-                    Button { showsFans = true } label: {
-                        Label("Fans", systemImage: "fan")
-                    }
-                    if let fanSummary = fanSummary(at: currentTime) {
-                        Text(fanSummary).font(.caption2).foregroundStyle(.secondary).monospacedDigit()
-                    }
+                Divider().frame(height: 38)
+                if let extras = store.providerExtras {
+                    PopupFanSummary(store: extras, now: currentTime) { showsFans = true }
+                } else {
+                    Label("Fan readings unavailable", systemImage: "fan")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .disabled(store.providerExtras == nil)
-                .help("Fan readings and controls")
-                .accessibilityIdentifier("popup.fans")
-                Button(action: openDashboard) { Image(systemName: "rectangle.grid.2x2") }
-                    .help("Open dashboard").accessibilityLabel("Open dashboard")
             }
+            .padding(12)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
             if case .available(.updateAvailable(_, let latest), let checkedAt) = cliUpdates.status,
                currentTime.timeIntervalSince(checkedAt) < 6 * 60 * 60 {
                 Button("CLI \(latest) available", action: openSettings).font(.caption)
+            }
+            if let error = controlStore.errorMessage {
+                Label(error, systemImage: "exclamationmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Divider()
             ScrollView {
@@ -423,29 +424,41 @@ struct MonitorPopover: View {
             }
             .frame(height: popupBodyHeight(currentTime: currentTime))
         }
+        .tint(isOffline(at: currentTime) ? .gray : .accentColor)
+        .compositingGroup()
+        .saturation(isOffline(at: currentTime) ? 0 : 1)
         .padding(16)
         .frame(width: 560, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showsFans) {
             if let extras = store.providerExtras {
-                PopupFanPanel(extras: extras, control: controlStore)
+                PopupFanPanel(extras: extras) { label, mutation in
+                    await controlStore.performSettingsMutation(label, mutation: mutation)
+                }
             }
         }
         .task { await store.refreshModelServingProfitability() }
     }
 
-    private func fanSummary(at now: Date) -> String? {
-        guard case .available(let raw, let capturedAt) = store.providerExtras?.snapshot?.fanStatus,
-              (0...ProviderExtrasSnapshot.maximumSourceAge).contains(now.timeIntervalSince(capturedAt)) else { return nil }
-        let status = raw.helperIsFresh(at: now) ? raw : raw.withoutHelper()
-        let temperature = status.displayedTemperatureCelsius.map { String(format: "%.0f°C", $0) }
-        let rpm = status.displayedFans.compactMap(\.actualRPM).max().map { String(format: "%.0f RPM", $0) }
-        let values = [temperature, rpm].compactMap { $0 }
-        return values.isEmpty ? nil : values.joined(separator: " · ")
+    private func providerRunning(at now: Date) -> Bool? {
+        guard case .available(_, let capturedAt) = store.snapshot.status,
+              (0...10).contains(now.timeIntervalSince(capturedAt)) else { return nil }
+        return ProviderLifecycleSourceInput(daemonState: store.snapshot.state, status: store.snapshot.status,
+            controlDaemonState: controlStore.snapshot?.sources.daemon,
+            currentTime: now).providerKnownRunning
+    }
+
+    private func isOffline(at now: Date) -> Bool { providerRunning(at: now) == false }
+
+    private func displayedSelection(at now: Date) -> [String]? {
+        if isOffline(at: now), let control = controlStore.snapshot {
+            return control.inventory.myCatalog.filter { $0.isEnabled }.map(\.catalogID).sorted()
+        }
+        return advertisedIDs(at: now)
     }
 
     private func popupBodyHeight(currentTime: Date) -> CGFloat {
-        let advertised = advertisedIDs(at: currentTime) ?? []
+        let advertised = displayedSelection(at: currentTime) ?? []
         let available = availableIDs(excluding: advertised)
         let rows = (advertised.count + 2) / 3 + (available.count + 2) / 3
         return min(470, CGFloat(rows) * 120 + 190)
@@ -469,20 +482,20 @@ struct MonitorPopover: View {
     }
 
     private func compactModels(currentTime: Date) -> some View {
-        let advertised = advertisedIDs(at: currentTime)
+        let advertised = displayedSelection(at: currentTime)
         let available = availableIDs(excluding: advertised ?? [])
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Advertised", systemImage: "antenna.radiowaves.left.and.right")
+                Label(isOffline(at: currentTime) ? "Selected · Offline" : "Advertised", systemImage: "antenna.radiowaves.left.and.right")
                     .font(.subheadline.weight(.semibold))
-                if modelModePresentation(at: currentTime) == .automatic { AutoModelModeBadge() }
+                if modelModePresentation(at: currentTime) == .automatic { AutoModelModeBadge(monochrome: isOffline(at: currentTime)) }
                 Spacer()
                 if let advertised { Text(advertised.count.formatted()).foregroundStyle(.secondary) }
             }
             if let advertised {
                 if advertised.isEmpty {
                     Text("No models advertised").font(.caption).foregroundStyle(.secondary)
-                } else { modelGrid(advertised) }
+                } else { modelGrid(advertised, now: currentTime) }
             } else {
                 Label("Advertising state unavailable", systemImage: "clock")
                     .font(.caption).foregroundStyle(.secondary)
@@ -495,17 +508,20 @@ struct MonitorPopover: View {
             }
             if available.isEmpty {
                 Text("No other downloaded models").font(.caption).foregroundStyle(.secondary)
-            } else { modelGrid(available) }
+            } else { modelGrid(available, now: currentTime, offersActivation: true) }
         }
     }
 
-    private func modelGrid(_ ids: [String]) -> some View {
+    private func modelGrid(_ ids: [String], now: Date, offersActivation: Bool = false) -> some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
             ForEach(ids, id: \.self) { id in
                 let state = models.first(where: { $0.name == id })?.state
-                CompactModelCard(modelID: id, status: modelStateLabel(state),
-                                 tint: state == .active ? .green : state == .loadedIdle ? .orange : .secondary,
-                                 metrics: modelMetrics(id), selected: state == .active, compact: true)
+                CompactModelCard(modelID: id, status: isOffline(at: now) ? (offersActivation ? "Downloaded" : "Ready when online") : modelStateLabel(state),
+                                 tint: isOffline(at: now) ? .secondary : state == .active ? .green : state == .loadedIdle ? .orange : .secondary,
+                                 metrics: modelMetrics(id), selected: !isOffline(at: now) && state == .active, compact: true,
+                                 activate: offersActivation ? { Task { await controlStore.activateModel(id, providerKnownRunning: providerRunning(at: now)) } } : nil,
+                                 activationUnavailableReason: controlStore.activationUnavailableReason(for: id, providerKnownRunning: providerRunning(at: now)),
+                                 activationHelp: isOffline(at: now) ? "Save for the next provider start" : "Save and advertise this model without restarting")
             }
         }
     }
@@ -622,6 +638,8 @@ struct MonitorPopover: View {
 
             Spacer()
 
+            Button(action: openDashboard) { Image(systemName: "rectangle.grid.2x2") }
+                .help("Open dashboard").accessibilityLabel("Open dashboard")
             Button(action: openSettings) {
                 Image(systemName: "gearshape")
             }
@@ -649,7 +667,7 @@ struct MonitorPopover: View {
             VStack(alignment: .leading, spacing: 3) {
                 Label(Self.machineName, systemImage: "desktopcomputer")
                     .font(.headline).lineLimit(1).help(Self.machineName)
-                Text(store.snapshot.menuStatus.accessibilityLabel)
+                Text(isOffline(at: currentTime) ? "Offline · selections ready for next start" : store.snapshot.menuStatus.accessibilityLabel)
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -1166,13 +1184,14 @@ private struct ModelStatusPill: View {
 }
 
 private struct AutoModelModeBadge: View {
+    var monochrome = false
     var body: some View {
         Label("Auto", systemImage: "arrow.triangle.2.circlepath")
             .font(.system(size: 10, weight: .semibold, design: .rounded))
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .foregroundStyle(.blue)
-            .background(Color.blue.opacity(0.12), in: Capsule())
+            .foregroundStyle(monochrome ? Color.secondary : .blue)
+            .background((monochrome ? Color.secondary : .blue).opacity(0.12), in: Capsule())
             .help("Darkbloom selects and loads enabled models automatically for incoming work")
             .accessibilityLabel("Automatic model selection")
             .accessibilityHint("Enabled models load automatically when requested")
@@ -1183,22 +1202,20 @@ enum PopupModelName {
     static func short(_ id: String) -> String { ModelDisplayName.short(id) }
 }
 
-private struct PopupFanPanel: View {
+struct PopupFanPanel: View {
     @ObservedObject var extras: ProviderExtrasStore
-    @ObservedObject var control: ProviderControlStore
+    let performMutation: ProviderExtrasMutationExecutor
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Label("Fan controls", systemImage: "fan").font(.title2.bold())
+                Label("Cooling", systemImage: "fan").font(.title2.bold())
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }.padding()
             Form {
-                ProviderFanControlSettingsView(store: extras) { label, mutation in
-                    await control.performSettingsMutation(label, mutation: mutation)
-                }
+                ProviderFanControlSettingsView(store: extras, performMutation: performMutation, compactPresentation: true)
             }.formStyle(.grouped)
         }
         .frame(width: 560, height: 520)

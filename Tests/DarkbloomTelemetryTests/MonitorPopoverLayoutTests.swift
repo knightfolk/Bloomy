@@ -490,8 +490,8 @@ struct MonitorPopoverLayoutTests {
         }
     }
 
-    @Test("automatic mode and on-demand models fit the production popup width")
-    func automaticModePopupLayout() async throws {
+    @Test("automatic mode and offline selections fit the production popup width", arguments: [false, true])
+    func automaticModePopupLayout(offline: Bool) async throws {
         let modelIDs = [
             "EigenLabs/Qwen3.8-27B-4bit-mtp",
             "gemma-4-26b-qat-4bit",
@@ -499,7 +499,7 @@ struct MonitorPopoverLayoutTests {
         ]
         let now = Date()
         let service = TelemetryService(
-            source: AutoModeTelemetrySource(now: now, modelIDs: modelIDs),
+            source: AutoModeTelemetrySource(now: now, modelIDs: modelIDs, offline: offline),
             now: { now }
         )
         let store = MonitorStore(
@@ -509,7 +509,7 @@ struct MonitorPopoverLayoutTests {
         )
         await store.refreshTelemetryImmediately()
         let controlStore = ProviderControlStore(
-            controller: InertSettingsController(sources: .unknown)
+            controller: InertSettingsController(sources: offline ? .allFresh : .unknown, savedIDs: offline ? modelIDs : [])
         )
         await controlStore.refresh()
         let hostingController = NSHostingController(
@@ -532,7 +532,7 @@ struct MonitorPopoverLayoutTests {
         let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: bitmap)
         try #require(bitmap.representation(using: .png, properties: [:]))
-            .write(to: URL(fileURLWithPath: "/tmp/darkbloom-auto-model-popup.png"))
+            .write(to: URL(fileURLWithPath: "/tmp/darkbloom-\(offline ? "offline" : "auto")-model-popup.png"))
     }
 
     @Test("lifecycle controls bind to an inert shared store and remain compact")
@@ -621,13 +621,16 @@ private struct UnusedTelemetrySource: TelemetrySource {
 private actor AutoModeTelemetrySource: TelemetrySource {
     let now: Date
     let modelIDs: [String]
+    let offline: Bool
 
-    init(now: Date, modelIDs: [String]) {
+    init(now: Date, modelIDs: [String], offline: Bool = false) {
         self.now = now
         self.modelIDs = modelIDs
+        self.offline = offline
     }
 
     func readDaemonState() async throws -> DaemonState {
+        if offline { throw UnusedError() }
         let timestamp = now.timeIntervalSince1970
         return DaemonState(
             schema: 1,
@@ -662,6 +665,7 @@ private actor AutoModeTelemetrySource: TelemetrySource {
 
     func readStatus() async throws -> StatusSnapshot {
         var status = StatusSnapshot()
+        status.daemon = offline ? "stopped" : "running"
         status.configuredModel = "auto-select"
         status.enabledModelFilter = modelIDs.joined(separator: ",")
         return status
@@ -675,8 +679,8 @@ private struct UnusedError: Error {}
 private actor InertSettingsController: ProviderControlling {
     private let value: ProviderControlSnapshot
 
-    init(sources: ProviderControlSourceStates = .allFresh) {
-        let selection = ProviderModelSelection(enabled: [], preloaded: [])
+    init(sources: ProviderControlSourceStates = .allFresh, savedIDs: [String] = []) {
+        let selection = ProviderModelSelection(enabled: savedIDs, preloaded: [])
         let draft = ProviderConfigDraft(
             sourceRevision: "layout-fixture",
             original: selection,
@@ -705,13 +709,13 @@ private actor InertSettingsController: ProviderControlling {
             ),
         ]
         let inventory = ModelInventoryBuilder.build(
-            catalog: catalog,
+            catalog: catalog + savedIDs.map { CatalogModel(id: $0, displayName: $0, family: "model", modelType: "llm", capabilities: [], sizeGB: 8, minimumRAMGB: 16, active: true) },
             local: [LocalModel(
                 id: "downloaded-model",
                 modelType: "llm",
                 sizeBytes: 8_500_000_000,
                 estimatedMemoryGB: nil
-            )],
+            )] + savedIDs.map { LocalModel(id: $0, modelType: "llm", sizeBytes: 8_000_000_000, estimatedMemoryGB: nil) },
             selection: selection,
             daemon: nil,
             loadedModels: []

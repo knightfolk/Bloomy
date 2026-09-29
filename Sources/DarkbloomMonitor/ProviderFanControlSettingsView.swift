@@ -75,15 +75,18 @@ struct ProviderFanControlSettingsView: View {
     @ObservedObject var store: ProviderExtrasStore
     let performMutation: ProviderExtrasMutationExecutor
     var isVisible: Bool
+    var compactPresentation: Bool
 
     init(
         store: ProviderExtrasStore,
         performMutation: @escaping ProviderExtrasMutationExecutor,
-        isVisible: Bool = true
+        isVisible: Bool = true,
+        compactPresentation: Bool = false
     ) {
         self.store = store
         self.performMutation = performMutation
         self.isVisible = isVisible
+        self.compactPresentation = compactPresentation
     }
 
     @State private var speedPercent = ProviderFanPolicy.default.speedPercent
@@ -97,7 +100,7 @@ struct ProviderFanControlSettingsView: View {
     @State private var feedback: String?
 
     var body: some View {
-        Section("Provider · Fan control") {
+        Section(compactPresentation ? "" : "Provider · Fan control") {
             switch store.snapshot?.fanStatus {
             case .available(let status, let checkedAt):
                 fanContent(status: status, fresh: true, checkedAt: checkedAt)
@@ -143,9 +146,8 @@ struct ProviderFanControlSettingsView: View {
     private func fanContent(status: ProviderFanStatus, fresh: Bool, checkedAt: Date) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Fan control")
-                    .font(.headline)
-                Text("Turn Darkbloom's fan helper on or off. Readings update while this page is open.")
+                if !compactPresentation { Text("Fan control").font(.headline) }
+                Text(compactPresentation ? "Automatic cooling while you host." : "Turn Darkbloom's fan helper on or off. Readings update while this page is open.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

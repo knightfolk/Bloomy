@@ -17,8 +17,8 @@ struct ProviderFanControlSettingsViewTests {
         }
     }
 
-    @Test("fan controls render at the settings page size")
-    func renders() async throws {
+    @Test("fan controls render at settings and popup sizes", arguments: [false, true])
+    func renders(compact: Bool) async throws {
         let now = Date()
         let status = ProviderFanStatus(
             capability: ProviderFanStatus.controlCapability,
@@ -72,15 +72,19 @@ struct ProviderFanControlSettingsViewTests {
         )
         let store = ProviderExtrasStore(client: FanSettingsFixtureClient(snapshot: snapshot))
         await store.refresh()
-        let content = Form {
-            ProviderFanControlSettingsView(store: store) { _, _ in false }
-        }
-        .formStyle(.grouped)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        let content = Group {
+            if compact {
+                PopupFanPanel(extras: store) { _, _ in false }
+            } else {
+                Form {
+                    ProviderFanControlSettingsView(store: store) { _, _ in false }
+                }.formStyle(.grouped)
+            }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
         let host = NSHostingController(rootView: content)
         let window = NSWindow(contentViewController: host)
         window.isReleasedWhenClosed = false
-        let settingsSize = NSSize(width: 800, height: 560)
+        let settingsSize = NSSize(width: compact ? 560 : 800, height: compact ? 520 : 560)
         window.setContentSize(settingsSize)
         window.orderBack(nil)
         defer { window.close() }
@@ -89,17 +93,26 @@ struct ProviderFanControlSettingsViewTests {
         host.view.frame = NSRect(origin: .zero, size: settingsSize)
         host.view.layoutSubtreeIfNeeded()
 
-        #expect(window.contentView?.frame.width == 800)
-        #expect(window.contentView?.frame.height == 560)
+        #expect(window.contentView?.frame.width == settingsSize.width)
+        #expect(window.contentView?.frame.height == settingsSize.height)
 
         guard ProcessInfo.processInfo.environment["DARKBLOOM_RENDER_EVIDENCE"] == "1" else {
             return
         }
+        let summary = NSHostingView(rootView: PopupFanSummary(store: store, now: now, open: {})
+            .padding(12).frame(width: 365).background(Color(nsColor: .windowBackgroundColor)))
+        summary.frame = NSRect(origin: .zero, size: summary.fittingSize)
+        summary.layoutSubtreeIfNeeded()
+        let bitmap = try #require(summary.bitmapImageRepForCachingDisplay(in: summary.bounds))
+        summary.cacheDisplay(in: summary.bounds, to: bitmap)
+        try #require(bitmap.representation(using: .png, properties: [:]))
+            .write(to: URL(fileURLWithPath: "/tmp/darkbloom-popup-cooling.png"))
+
         let capture = Process()
         capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         capture.arguments = [
             "-x", "-l", String(window.windowNumber),
-            "/tmp/darkbloom-fan-control-settings.png",
+            "/tmp/darkbloom-fan-control-\(compact ? "popup" : "settings").png",
         ]
         try capture.run()
         capture.waitUntilExit()
