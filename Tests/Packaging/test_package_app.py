@@ -83,6 +83,8 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(info['CFBundleVersion'], '1')
         self.assertEqual(info['LSMinimumSystemVersion'], '14.0')
         self.assertTrue(info['LSUIElement'])
+        self.assertEqual(info['NSRemovableVolumesUsageDescription'],
+            'Access model caches on external drives to show and manage downloaded models.')
         self.assertEqual((app / 'Contents/Resources/DarkbloomMonitor_DarkbloomMonitor.bundle/mark.svg').read_text(), '<svg/>')
         manifest = json.loads((self.output / 'artifact-manifest.json').read_text())
         self.assertEqual(manifest['schema'], 1)

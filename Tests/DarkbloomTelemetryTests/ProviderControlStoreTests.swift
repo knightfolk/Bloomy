@@ -1040,6 +1040,45 @@ struct ProviderControlStoreTests {
         #expect(!store.errorMessage.orEmpty.contains("do-not-display"))
     }
 
+    @Test("refresh displays only fixed model-source failure categories")
+    func mapsSafeRefreshInventoryFailures() async throws {
+        let safeMessages = [
+            "Model catalog is unavailable: command timed out. If the model cache is on an external volume, check this app's macOS file access.",
+            "Local model list is unavailable: command could not launch.",
+            "Model catalog is unavailable: command exited with code 7.",
+            "Local model list is unavailable: command exited with code -9.",
+            "Model catalog is unavailable: command output exceeded the allowed size.",
+        ]
+        for message in safeMessages {
+            let controller = FakeProviderController.fixture()
+            let store = ProviderControlStore(controller: controller)
+            await controller.failRefresh(with: .inventoryUnavailable(message))
+
+            await store.refresh()
+
+            #expect(store.errorMessage == message)
+        }
+
+        let unsafeMessages = [
+            "Model catalog is unavailable: command exited with code 7. Authorization: Bearer arbitrary-secret",
+            "Model catalog is unavailable: command exited with code 07.",
+            "Model catalog is unavailable: command exited with code 999999999999999999999.",
+            "Model catalog is unavailable: command could not launch at /private/arbitrary-secret.",
+            "Model catalog is unavailable: command timed out. Authorization: Bearer arbitrary-secret",
+            "Other source is unavailable: command exited with code 7.",
+        ]
+        for message in unsafeMessages {
+            let controller = FakeProviderController.fixture()
+            let store = ProviderControlStore(controller: controller)
+            await controller.failRefresh(with: .inventoryUnavailable(message))
+
+            await store.refresh()
+
+            #expect(store.errorMessage == "Could not refresh model controls.")
+            #expect(!store.errorMessage.orEmpty.contains("arbitrary-secret"))
+        }
+    }
+
     @Test("active restart requires confirmation but remains executable")
     func confirmsActiveRestart() async throws {
         let controller = FakeProviderController.fixture(activityRisks: [.active, .active])
@@ -1838,6 +1877,7 @@ private actor FakeProviderController: ProviderControlling {
 
     private var currentSnapshot: ProviderControlSnapshot
     private var refreshFailure: Failure?
+    private var refreshControlFailure: ProviderControlError?
     private var activityRisks: [ProviderActivityRisk]
     private let blockDownload: Bool
     private let downloadChunks: [ProcessOutputChunk]
@@ -1969,6 +2009,7 @@ private actor FakeProviderController: ProviderControlling {
             await reconciliationRefreshGate.refresh()
         }
         if let refreshFailure { throw refreshFailure }
+        if let refreshControlFailure { throw refreshControlFailure }
         return currentSnapshot
     }
 
@@ -1976,6 +2017,10 @@ private actor FakeProviderController: ProviderControlling {
 
     func failRefresh(with failure: Failure) {
         refreshFailure = failure
+    }
+
+    func failRefresh(with failure: ProviderControlError) {
+        refreshControlFailure = failure
     }
 
     func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult {

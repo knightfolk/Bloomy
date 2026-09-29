@@ -838,9 +838,18 @@ public actor ProviderControlService: ProviderControlling {
         } catch let error as CancellationError {
             throw error
         } catch {
+            let detail = Self.safeModelSourceFailureDetail(error)
             if allowStaleSources, let lastCatalog {
                 catalog = lastCatalog
-                catalogState = .stale("Model catalog is stale; showing the last successful result")
+                catalogState = .stale(Self.modelSourceMessage(
+                    "Model catalog is stale; showing the last successful result",
+                    detail: detail
+                ))
+            } else {
+                catalogState = .unavailable(Self.modelSourceMessage(
+                    "Model catalog is unavailable",
+                    detail: detail
+                ))
             }
         }
 
@@ -863,17 +872,32 @@ public actor ProviderControlService: ProviderControlling {
         } catch let error as CancellationError {
             throw error
         } catch {
+            let detail = Self.safeModelSourceFailureDetail(error)
             if allowStaleSources, let lastLocalModels {
                 local = lastLocalModels
                 effectiveCacheDirectory = lastEffectiveCacheDirectory
-                localState = .stale("Local model list is stale; download state may be outdated")
+                localState = .stale(Self.modelSourceMessage(
+                    "Local model list is stale; download state may be outdated",
+                    detail: detail
+                ))
+            } else {
+                localState = .unavailable(Self.modelSourceMessage(
+                    "Local model list is unavailable",
+                    detail: detail
+                ))
             }
         }
 
         guard let catalog else {
+            if case .unavailable(let reason) = catalogState {
+                throw ProviderControlError.inventoryUnavailable(reason)
+            }
             throw ProviderControlError.inventoryUnavailable("Model catalog is unavailable")
         }
         guard let local else {
+            if case .unavailable(let reason) = localState {
+                throw ProviderControlError.inventoryUnavailable(reason)
+            }
             throw ProviderControlError.inventoryUnavailable("Local model list is unavailable")
         }
         return ModelSources(
@@ -883,6 +907,27 @@ public actor ProviderControlService: ProviderControlling {
             localState: localState,
             effectiveCacheDirectory: effectiveCacheDirectory
         )
+    }
+
+    private static func modelSourceMessage(_ base: String, detail: String?) -> String {
+        guard let detail else { return base }
+        return "\(base): \(detail)"
+    }
+
+    /// Keep diagnostics useful without forwarding CLI stderr, launch paths, or
+    /// localized system errors, any of which may include private information.
+    private static func safeModelSourceFailureDetail(_ error: Error) -> String? {
+        guard let error = error as? ProcessRunnerError else { return nil }
+        switch error {
+        case .timedOut:
+            return "command timed out. If the model cache is on an external volume, check this app's macOS file access."
+        case .launchFailed:
+            return "command could not launch."
+        case .nonzeroExit(let code, _):
+            return "command exited with code \(code)."
+        case .outputLimitExceeded:
+            return "command output exceeded the allowed size."
+        }
     }
 
     private func liveStateFreshness(

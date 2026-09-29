@@ -178,7 +178,9 @@ def assemble(executable, resources, output, version, build_number,
                 CFBundleIconFile='AppIcon',
                 CFBundleExecutable='DarkbloomMonitor', CFBundlePackageType='APPL',
                 CFBundleShortVersionString=version, CFBundleVersion=build_number,
-                LSMinimumSystemVersion='14.0', LSUIElement=True)
+                LSMinimumSystemVersion='14.0', LSUIElement=True,
+                NSRemovableVolumesUsageDescription=(
+                    'Access model caches on external drives to show and manage downloaded models.'))
     if sparkle_framework is not None:
         info.update(SUEnableAutomaticChecks=False, SUAutomaticallyUpdate=False,
                     SUAllowsAutomaticUpdates=True)

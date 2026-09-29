@@ -160,6 +160,55 @@ struct ProviderControlServiceTests {
         #expect(await localHarness.runner.sourceArguments.count == 2)
     }
 
+    @Test("model-source failures retain safe runner categories without exposing raw diagnostics")
+    func reportsSafeModelSourceFailures() async throws {
+        let cases: [(ProcessRunnerError, String)] = [
+            (
+                .timedOut,
+                "command timed out. If the model cache is on an external volume, check this app's macOS file access."
+            ),
+            (.launchFailed("private launch path"), "command could not launch."),
+            (.nonzeroExit(code: 7, message: "private stderr"), "command exited with code 7."),
+            (.outputLimitExceeded(limit: 123), "command output exceeded the allowed size."),
+        ]
+
+        for (failure, detail) in cases {
+            let catalogHarness = try ServiceHarness.make()
+            defer { catalogHarness.cleanup() }
+            await catalogHarness.runner.failNextCatalog(with: failure)
+            await #expect(throws: ProviderControlError.inventoryUnavailable(
+                "Model catalog is unavailable: \(detail)"
+            )) {
+                try await catalogHarness.service.refresh()
+            }
+
+            let localHarness = try ServiceHarness.make()
+            defer { localHarness.cleanup() }
+            await localHarness.runner.failNextLocal(with: failure)
+            await #expect(throws: ProviderControlError.inventoryUnavailable(
+                "Local model list is unavailable: \(detail)"
+            )) {
+                try await localHarness.service.refresh()
+            }
+        }
+    }
+
+    @Test("a timed-out model source keeps the previous result marked stale")
+    func preservesStaleSourceOnTimeout() async throws {
+        let harness = try ServiceHarness.make()
+        defer { harness.cleanup() }
+        let original = try await harness.service.refresh()
+        await harness.runner.failNextLocal(with: .timedOut)
+
+        let refreshed = try await harness.service.refresh()
+
+        #expect(refreshed.inventory.myCatalog == original.inventory.myCatalog)
+        #expect(refreshed.sources.catalog == .fresh(evidenceAt: serviceNow))
+        #expect(refreshed.sources.localModels == .stale(
+            "Local model list is stale; download state may be outdated: command timed out. If the model cache is on an external volume, check this app's macOS file access."
+        ))
+    }
+
     @Test("delete requires a fresh inventory")
     func deleteRequiresFreshInventory() async throws {
         let harness = try ServiceHarness.make()
@@ -1325,6 +1374,7 @@ private actor ServiceRunnerFake: LaunchReportingProcessExecuting {
     private enum Response: Sendable {
         case data(Data)
         case failure
+        case runnerError(ProcessRunnerError)
         case cancellation
     }
 
@@ -1432,6 +1482,8 @@ private actor ServiceRunnerFake: LaunchReportingProcessExecuting {
 
     func failNextCatalog() { nextCatalog = .failure }
     func failNextLocal() { nextLocal = .failure }
+    func failNextCatalog(with error: ProcessRunnerError) { nextCatalog = .runnerError(error) }
+    func failNextLocal(with error: ProcessRunnerError) { nextLocal = .runnerError(error) }
     func cancelNextCatalog() { nextCatalog = .cancellation }
     func useNextCatalog(_ data: Data) { nextCatalog = .data(data) }
     func useNextLocal(_ data: Data) { nextLocal = .data(data) }
@@ -1530,6 +1582,7 @@ private actor ServiceRunnerFake: LaunchReportingProcessExecuting {
         switch selected {
         case .data(let data): return data
         case .failure: throw ServiceFakeError.sourceFailed
+        case .runnerError(let error): throw error
         case .cancellation: throw CancellationError()
         }
     }

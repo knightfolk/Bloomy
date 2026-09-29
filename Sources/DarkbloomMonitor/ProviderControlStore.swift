@@ -190,6 +190,10 @@ final class ProviderControlStore: ObservableObject {
                 accept(refreshed, preserving: stagedDraft)
             } catch is CancellationError {
                 // Cancellation is an intentional state transition, not a user-facing failure.
+            } catch ProviderControlError.inventoryUnavailable(let reason) {
+                errorMessage = Self.safeRefreshInventoryDiagnostic(reason)
+                    .map { diagnosticSanitizer.sanitize($0) }
+                    ?? "Could not refresh model controls."
             } catch {
                 errorMessage = "Could not refresh model controls."
             }
@@ -851,6 +855,29 @@ final class ProviderControlStore: ObservableObject {
         "Model catalog is unavailable",
         "Local model list is unavailable",
     ]
+
+    private static let safeRefreshInventoryDiagnostics: Set<String> = [
+        "Model catalog is unavailable",
+        "Local model list is unavailable",
+        "Model catalog is unavailable: command timed out. If the model cache is on an external volume, check this app's macOS file access.",
+        "Local model list is unavailable: command timed out. If the model cache is on an external volume, check this app's macOS file access.",
+        "Model catalog is unavailable: command could not launch.",
+        "Local model list is unavailable: command could not launch.",
+        "Model catalog is unavailable: command output exceeded the allowed size.",
+        "Local model list is unavailable: command output exceeded the allowed size.",
+    ]
+
+    private static func safeRefreshInventoryDiagnostic(_ reason: String) -> String? {
+        if safeRefreshInventoryDiagnostics.contains(reason) { return reason }
+        for source in ["Model catalog", "Local model list"] {
+            let prefix = "\(source) is unavailable: command exited with code "
+            guard reason.hasPrefix(prefix), reason.hasSuffix(".") else { continue }
+            let codeText = reason.dropFirst(prefix.count).dropLast()
+            guard let code = Int32(codeText), String(code) == codeText else { continue }
+            return reason
+        }
+        return nil
+    }
 
     private static let safeLiveSwitchDiagnostics: Set<String> = [
         "Refresh current provider state before applying live",
