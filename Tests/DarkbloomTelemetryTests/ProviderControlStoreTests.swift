@@ -1977,6 +1977,169 @@ private let postExitLocalDeletedJSON = Data(#"""
 @Suite("Local swap store")
 @MainActor
 struct LocalSwapStoreTests {
+    @Test("local residency is confirmed before one guarded network nudge")
+    func localThenNetworkNudge() async throws {
+        let loaded = try swapFixture(warm: "second-model")
+        let controller = FakeProviderController.fixture(
+            snapshot: try swapFixture(), activityRisks: [.idle, .idle, .idle, .idle]
+        )
+        let sequence = SwapSequenceRecorder()
+        let request = FakeLocalSwapRequest(result: .sent, afterGuard: {
+            await sequence.record("local")
+            await controller.replaceSnapshot(loaded)
+        })
+        let store = ProviderControlStore(
+            controller: controller, swapProbe: request,
+            swapNudge: { modelID, canSend in
+                guard await canSend() else { return .failed }
+                await sequence.record("network:\(modelID)")
+                return .sent
+            },
+            now: { providerControlTestNow }, swapConfirmationSleep: {}
+        )
+        await store.refresh()
+        await store.swapToModel("second-model")
+
+        #expect(await sequence.events == ["local", "network:second-model"])
+        #expect(store.swapStatus == .confirmed(modelID: "second-model", at: providerControlTestNow))
+        #expect(store.swapNudgeStatus == .result(modelID: "second-model", .sent, at: providerControlTestNow))
+        #expect(store.draft?.original.enabled == ["saved-model", "second-model"])
+        #expect(await controller.saveCount == 0)
+        #expect(await controller.liveSwitchSelections.isEmpty)
+    }
+
+    @Test("a missing nudge key keeps the confirmed local swap")
+    func missingNudgeKeyPreservesLocalSuccess() async throws {
+        let loaded = try swapFixture(warm: "second-model")
+        let controller = FakeProviderController.fixture(
+            snapshot: try swapFixture(), activityRisks: [.idle, .idle, .idle]
+        )
+        let request = FakeLocalSwapRequest(result: .sent, afterGuard: { await controller.replaceSnapshot(loaded) })
+        let store = ProviderControlStore(
+            controller: controller, swapProbe: request,
+            swapNudge: { _, _ in .missingKey },
+            now: { providerControlTestNow }, swapConfirmationSleep: {}
+        )
+        await store.refresh()
+        await store.swapToModel("second-model")
+        #expect(store.swapStatus == .confirmed(modelID: "second-model", at: providerControlTestNow))
+        #expect(store.swapNudgeStatus == .result(modelID: "second-model", .missingKey, at: providerControlTestNow))
+    }
+
+    @Test("no network nudge follows an uncertain or failed local request", arguments: [LocalModelSwapResult.sent, .failed])
+    func noNudgeWithoutCompletedLocalRequest(localResult: LocalModelSwapResult) async throws {
+        let controller = FakeProviderController.fixture(
+            snapshot: try swapFixture(), activityRisks: [.idle, .idle]
+        )
+        let request = FakeLocalSwapRequest(result: localResult)
+        let nudge = SwapSequenceRecorder()
+        let store = ProviderControlStore(
+            controller: controller, swapProbe: request,
+            swapNudge: { _, _ in await nudge.record("network"); return .sent },
+            now: { providerControlTestNow }, swapConfirmationSleep: {}
+        )
+        await store.refresh()
+        await store.swapToModel("second-model")
+        #expect(await nudge.events.isEmpty)
+        #expect(store.swapNudgeStatus == nil)
+    }
+
+    @Test("even a timeout that loaded the target does not trigger the network nudge")
+    func localTimeoutConfirmedButNoNudge() async throws {
+        let loaded = try swapFixture(warm: "second-model")
+        let controller = FakeProviderController.fixture(
+            snapshot: try swapFixture(), activityRisks: [.idle, .idle]
+        )
+        let request = FakeLocalSwapRequest(result: .failed, afterGuard: { await controller.replaceSnapshot(loaded) })
+        let nudge = SwapSequenceRecorder()
+        let store = ProviderControlStore(
+            controller: controller, swapProbe: request,
+            swapNudge: { _, _ in await nudge.record("network"); return .sent },
+            now: { providerControlTestNow }, swapConfirmationSleep: {}
+        )
+        await store.refresh()
+        await store.swapToModel("second-model")
+        #expect(store.swapStatus == .confirmed(modelID: "second-model", at: providerControlTestNow))
+        #expect(await nudge.events.isEmpty)
+    }
+
+    @Test("changed work or provider identity before nudge POST prevents sending", arguments: [true, false])
+    func rechecksBeforeNudgePost(workBecameActive: Bool) async throws {
+        let loaded = try swapFixture(warm: "second-model")
+        let changed = try swapFixture(warm: "second-model", pid: 43)
+        let controller = FakeProviderController.fixture(
+            snapshot: try swapFixture(),
+            activityRisks: workBecameActive ? [.idle, .idle, .idle, .active] : [.idle, .idle, .idle]
+        )
+        let request = FakeLocalSwapRequest(result: .sent, afterGuard: { await controller.replaceSnapshot(loaded) })
+        let nudge = SwapSequenceRecorder()
+        let store = ProviderControlStore(
+            controller: controller, swapProbe: request,
+            swapNudge: { _, canSend in
+                if !workBecameActive { await controller.replaceSnapshot(changed) }
+                guard await canSend() else { return .failed }
+                await nudge.record("network")
+                return .sent
+            },
+            now: { providerControlTestNow }, swapConfirmationSleep: {}
+        )
+        await store.refresh()
+        await store.swapToModel("second-model")
+        #expect(store.swapStatus == .confirmed(modelID: "second-model", at: providerControlTestNow))
+        #expect(store.swapNudgeStatus == .result(modelID: "second-model", .failed, at: providerControlTestNow))
+        #expect(await nudge.events.isEmpty)
+    }
+
+    @Test("the provider action gate remains held through the network nudge")
+    func nudgeKeepsOperationGate() async throws {
+        let loaded = try swapFixture(warm: "second-model")
+        let gate = TelemetryRefreshGate()
+        let controller = FakeProviderController.fixture(
+            snapshot: try swapFixture(), activityRisks: [.idle, .idle, .idle, .idle]
+        )
+        let request = FakeLocalSwapRequest(result: .sent, afterGuard: { await controller.replaceSnapshot(loaded) })
+        let store = ProviderControlStore(
+            controller: controller, swapProbe: request,
+            swapNudge: { _, canSend in
+                await gate.refresh()
+                return await canSend() ? .sent : .failed
+            },
+            now: { providerControlTestNow }, swapConfirmationSleep: {}
+        )
+        await store.refresh()
+        let task = Task { await store.swapToModel("second-model") }
+        #expect(await gate.waitUntilStarted())
+        #expect(store.operation == .nudging)
+        #expect(!store.canAutomaticNudge)
+        await gate.release()
+        await task.value
+        #expect(store.operation == .idle)
+    }
+
+    @Test("cancelling the local phase never starts the network nudge")
+    func cancelledLocalPhaseSkipsNudge() async throws {
+        let gate = TelemetryRefreshGate()
+        let controller = FakeProviderController.fixture(
+            snapshot: try swapFixture(), activityRisks: [.idle]
+        )
+        let request = FakeLocalSwapRequest(result: .sent, beforeGuard: { await gate.refresh() })
+        let nudge = SwapSequenceRecorder()
+        let store = ProviderControlStore(
+            controller: controller, swapProbe: request,
+            swapNudge: { _, _ in await nudge.record("network"); return .sent },
+            now: { providerControlTestNow }, swapConfirmationSleep: {}
+        )
+        await store.refresh()
+        let task = Task { await store.swapToModel("second-model") }
+        #expect(await gate.waitUntilStarted())
+        store.cancelCurrentOperation()
+        await gate.release()
+        await task.value
+        #expect(await nudge.events.isEmpty)
+        #expect(store.swapNudgeStatus == nil)
+        #expect(store.operation == .idle)
+    }
+
     @Test("a local load replaces the one resident model while preserving all advertised and saved models")
     func confirmsOnlyFromLocalResidency() async throws {
         let initial = try swapFixture()
@@ -2064,6 +2227,11 @@ struct LocalSwapStoreTests {
         #expect(await request.sentModels.isEmpty)
         #expect(store.swapStatus == .failed(modelID: "second-model", .failed, at: providerControlTestNow))
     }
+}
+
+private actor SwapSequenceRecorder {
+    private(set) var events: [String] = []
+    func record(_ value: String) { events.append(value) }
 }
 
 private actor FakeLocalSwapRequest: LocalModelSwapRequesting {

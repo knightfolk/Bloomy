@@ -68,5 +68,27 @@ struct CompactPopoverCardLayoutTests {
         host.view.cacheDisplay(in: host.view.bounds, to: bitmap)
         try #require(bitmap.representation(using: .png, properties: [:]))
             .write(to: URL(fileURLWithPath: "/tmp/darkbloom-mixed-compact-cards.png"))
+
+        let feedback = NSHostingController(rootView: VStack(alignment: .leading, spacing: 18) {
+            ModelSwapFeedback(status: .confirmed(modelID: "gemma-4-26b-qat-4bit", at: Date()),
+                              nudgeStatus: .checking(modelID: "gemma-4-26b-qat-4bit"))
+            Divider()
+            ModelSwapFeedback(status: .confirmed(modelID: "gemma-4-26b-qat-4bit", at: Date()),
+                              nudgeStatus: .result(modelID: "gemma-4-26b-qat-4bit", .sent, at: Date()))
+            Divider()
+            ModelSwapFeedback(status: .confirmed(modelID: "gemma-4-26b-qat-4bit", at: Date()),
+                              nudgeStatus: .result(modelID: "gemma-4-26b-qat-4bit", .missingKey, at: Date()))
+        }.padding(16).frame(width: 560).background(Color(nsColor: .windowBackgroundColor)))
+        let feedbackSize = feedback.sizeThatFits(in: NSSize(width: 560, height: 0))
+        let feedbackWindow = NSWindow(contentViewController: feedback)
+        feedbackWindow.isReleasedWhenClosed = false
+        feedbackWindow.setContentSize(feedbackSize)
+        feedbackWindow.orderBack(nil)
+        defer { feedbackWindow.close() }
+        feedback.view.layoutSubtreeIfNeeded()
+        let feedbackBitmap = try #require(feedback.view.bitmapImageRepForCachingDisplay(in: feedback.view.bounds))
+        feedback.view.cacheDisplay(in: feedback.view.bounds, to: feedbackBitmap)
+        try #require(feedbackBitmap.representation(using: .png, properties: [:]))
+            .write(to: URL(fileURLWithPath: "/tmp/bloomy-swap-network-feedback.png"))
     }
 }

@@ -459,7 +459,7 @@ struct MonitorPopover: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let swap = controlStore.swapStatus {
-                ModelSwapFeedback(status: swap, openHosting: openHosting)
+                ModelSwapFeedback(status: swap, nudgeStatus: controlStore.swapNudgeStatus, openHosting: openHosting)
             }
             if let warmup = controlStore.switchWarmupStatus {
                 SwitchWarmupFeedback(status: warmup)
@@ -533,7 +533,7 @@ struct MonitorPopover: View {
             }
             Button("Cancel", role: .cancel) { pendingSwapModelID = nil }
         } message: {
-            Text("Keep all advertised models available. Bloomy sends a tiny request directly to this Mac’s local provider API to load this model into the single slot. Swap is available when the provider is idle. Incoming work can change the loaded model again. No cloud API key is needed.")
+            Text("Keep all advertised models available. Bloomy loads this model through this Mac’s local API, verifies it is ready, then sends one network self-route nudge using your saved Nudge key. If work arrives, the nudge is skipped. Incoming work can change the loaded model again. The local swap still works without a Nudge key.")
         }
         .task { await store.refreshModelServingProfitability() }
     }

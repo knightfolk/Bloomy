@@ -393,8 +393,13 @@ slot, one consistent resident model, idle state, and a unified loopback endpoint
 whose discovery PID and live process start time match the network provider.
 The endpoint is resolved again and activity rechecked before inference. A
 standalone server or a saved Hosting preference cannot authorize this action.
-Swap changes neither configuration nor advertisement and never falls back to
-the network. Fresh same-process daemon and loaded-model evidence must agree
+Swap changes neither configuration nor advertisement. After a successful local
+request and confirmed sole-target residency, it explicitly sends one network
+self-route nudge with the existing Nudge key; this is a follow-up, not a fallback
+for failed local loading. Both steps share the provider operation gate. The
+network request rechecks idle state, identity, advertising, and local residency
+before POST and never substitutes a family alias or a paid route. Local success
+and network nudge status remain separate. Fresh same-process daemon and loaded-model evidence must agree
 on the target as the sole resident before success is reported; failed or
 canceled requests are reconciled because loading may already have occurred.
 Saved selections can use Apply Live when

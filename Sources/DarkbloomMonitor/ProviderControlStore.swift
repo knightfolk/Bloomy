@@ -25,6 +25,11 @@ enum ModelSwapStatus: Equatable {
     case failed(modelID: String, LocalModelSwapResult, at: Date)
 }
 
+typealias SwapNudgeRequest = @Sendable (
+    String,
+    @escaping @Sendable () async -> Bool
+) async -> SelfRouteWarmupResult
+
 enum LifecycleConfirmation: Equatable {
     case stop(ProviderActivityRisk)
     case restart(ProviderActivityRisk)
@@ -55,10 +60,12 @@ final class ProviderControlStore: ObservableObject {
     @Published private(set) var latestDownloadProgressLine: String?
     @Published private(set) var switchWarmupStatus: SwitchWarmupStatus?
     @Published private(set) var swapStatus: ModelSwapStatus?
+    @Published private(set) var swapNudgeStatus: SwitchWarmupStatus?
 
     private let controller: any ProviderControlling
     private let warmupProbe: (any SelfRouteWarmupProbing)?
     private let swapProbe: (any LocalModelSwapRequesting)?
+    private let swapNudge: SwapNudgeRequest?
     private let diagnosticSanitizer: UserDiagnosticSanitizer
     private let refreshTelemetry: @MainActor @Sendable () async -> Void
     private let awaitStartup: @MainActor @Sendable (Date) async throws -> Void
@@ -75,6 +82,7 @@ final class ProviderControlStore: ObservableObject {
         controller: any ProviderControlling,
         warmupProbe: (any SelfRouteWarmupProbing)? = nil,
         swapProbe: (any LocalModelSwapRequesting)? = nil,
+        swapNudge: SwapNudgeRequest? = nil,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         refreshTelemetry: @escaping @MainActor @Sendable () async -> Void = {},
         now: @escaping @Sendable () -> Date = { Date() },
@@ -90,6 +98,7 @@ final class ProviderControlStore: ObservableObject {
         self.controller = controller
         self.warmupProbe = warmupProbe
         self.swapProbe = swapProbe
+        self.swapNudge = swapNudge
         diagnosticSanitizer = UserDiagnosticSanitizer(homeDirectory: homeDirectory)
         self.refreshTelemetry = refreshTelemetry
         self.now = now
@@ -209,6 +218,38 @@ final class ProviderControlStore: ObservableObject {
                         ) {
                             swapStatus = .confirmed(modelID: modelID, at: now())
                             await refreshTelemetry()
+                            if result == .sent, !Task.isCancelled, let swapNudge {
+                                // A local load may finish while a real job or a
+                                // restart begins. Revalidate before starting the
+                                // optional network self-route model lookup.
+                                guard !Task.isCancelled,
+                                      let beforeNudge = try? await controller.refresh(),
+                                      modelSwapConfirmed(
+                                        modelID: modelID, snapshot: beforeNudge, at: now(),
+                                        expectedIdentity: initialIdentity,
+                                        expectedAdvertised: expectedAdvertised
+                                      ),
+                                      await controller.activityRisk() == .idle else {
+                                    swapNudgeStatus = .result(modelID: modelID, .failed, at: now())
+                                    return
+                                }
+                                swapNudgeStatus = .checking(modelID: modelID)
+                                let nudgeResult = await swapNudge(modelID) {
+                                    guard !Task.isCancelled,
+                                          let current = try? await controller.refresh(),
+                                          modelSwapConfirmed(
+                                            modelID: modelID, snapshot: current, at: now(),
+                                            expectedIdentity: initialIdentity,
+                                            expectedAdvertised: expectedAdvertised
+                                          ) else { return false }
+                                    return await controller.activityRisk() == .idle
+                                }
+                                swapNudgeStatus = .result(
+                                    modelID: modelID,
+                                    Task.isCancelled ? .failed : nudgeResult,
+                                    at: now()
+                                )
+                            }
                             return
                         }
                         if fresh.daemonState?.processIdentity != initialIdentity ||
@@ -1158,6 +1199,7 @@ final class ProviderControlStore: ObservableObject {
         errorMessage = nil
         switchWarmupStatus = nil
         swapStatus = nil
+        swapNudgeStatus = nil
         return operationGeneration
     }
 

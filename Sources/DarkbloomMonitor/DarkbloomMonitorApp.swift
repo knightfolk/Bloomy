@@ -164,10 +164,17 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             pricingClient: PublicPricingClient(),
             keyStore: consumerKeyStore
         )
+        let nudgeKeyStore = KeychainConsumerKeyStore(
+            service: "dev.darkbloom.control.inactivity-nudge-key"
+        )
         let providerControlStore = ProviderControlStore(
             controller: controlService,
             warmupProbe: SelfRouteWarmupClient(keyStore: consumerKeyStore),
             swapProbe: LocalModelSwapClient(endpointProvider: AppModelSwapEndpointProvider(discovery: localEndpointClient)),
+            swapNudge: { modelID, canSend in
+                await SelfRouteWarmupClient(keyStore: nudgeKeyStore, canSend: canSend)
+                    .warm(modelID: modelID, family: "")
+            },
             homeDirectory: home,
             refreshTelemetry: { [weak monitorStore] in
                 await monitorStore?.refreshTelemetryImmediately()
@@ -190,9 +197,6 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             }
         )
         monitorStore.profitSwitch = ProfitSwitchStore(control: providerControlStore)
-        let nudgeKeyStore = KeychainConsumerKeyStore(
-            service: "dev.darkbloom.control.inactivity-nudge-key"
-        )
         monitorStore.inactivityNudge = InactivityNudgeStore(
             keyStore: nudgeKeyStore,
             canAct: { [weak providerControlStore] in
