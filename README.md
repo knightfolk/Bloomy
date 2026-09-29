@@ -49,6 +49,7 @@ explicit, off-by-default setting with its own evidence and timing checks.
 - Bloomy character icon and tintable menu-bar mark
 - Menu-bar activity status with clearly labeled model-average throughput
 - A compact popup with equal-sized model cards, collapsible available models, and stable live readings
+- Swap the loaded model through this Mac’s local API while keeping the advertised selection
 - Manual Nudge with guided Keychain setup and a clear completed state
 - One-slot Auto plans with all selected models advertised and one chosen startup preload
 - Configurable idle reminders, separate from automatic nudge timing

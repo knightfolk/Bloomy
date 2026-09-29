@@ -1974,6 +1974,158 @@ private let postExitLocalDeletedJSON = Data(#"""
 ]}
 """#.utf8)
 
+@Suite("Local swap store")
+@MainActor
+struct LocalSwapStoreTests {
+    @Test("a local load replaces the one resident model while preserving all advertised and saved models")
+    func confirmsOnlyFromLocalResidency() async throws {
+        let initial = try swapFixture()
+        let loaded = try swapFixture(warm: "second-model")
+        let controller = FakeProviderController.fixture(snapshot: initial, activityRisks: [.idle, .idle])
+        let request = FakeLocalSwapRequest(result: .sent, afterGuard: { await controller.replaceSnapshot(loaded) })
+        let store = ProviderControlStore(
+            controller: controller, swapProbe: request, now: { providerControlTestNow },
+            swapConfirmationSleep: {}
+        )
+        await store.refresh()
+        #expect(store.swapModelUnavailableReason(for: "second-model") == nil)
+        await store.swapToModel("second-model")
+
+        #expect(store.swapStatus == .confirmed(modelID: "second-model", at: providerControlTestNow))
+        #expect(await request.sentModels == ["second-model"])
+        #expect(store.draft?.original.enabled == ["saved-model", "second-model"])
+        #expect(store.snapshot?.daemonState?.advertisedModels == ["saved-model", "second-model"])
+        #expect(await controller.saveCount == 0)
+        #expect(await controller.liveSwitchSelections.isEmpty)
+    }
+
+    @Test("a successful HTTP response without local residency is not a confirmed swap")
+    func remoteOrUnloadedResponseStaysUnconfirmed() async throws {
+        let controller = FakeProviderController.fixture(
+            snapshot: try swapFixture(), activityRisks: [.idle, .idle]
+        )
+        let request = FakeLocalSwapRequest(result: .sent)
+        let store = ProviderControlStore(
+            controller: controller, swapProbe: request, now: { providerControlTestNow },
+            swapConfirmationSleep: {}
+        )
+        await store.refresh()
+        await store.swapToModel("second-model")
+
+        #expect(store.swapStatus == .unconfirmed(modelID: "second-model", at: providerControlTestNow))
+        #expect(await controller.saveCount == 0)
+        #expect(await controller.liveSwitchSelections.isEmpty)
+    }
+
+    @Test("a timeout can still confirm a completed local load")
+    func timeoutReconciles() async throws {
+        let loaded = try swapFixture(warm: "second-model")
+        let controller = FakeProviderController.fixture(
+            snapshot: try swapFixture(), activityRisks: [.idle, .idle]
+        )
+        let request = FakeLocalSwapRequest(result: .failed, afterGuard: { await controller.replaceSnapshot(loaded) })
+        let store = ProviderControlStore(
+            controller: controller, swapProbe: request, now: { providerControlTestNow },
+            swapConfirmationSleep: {}
+        )
+        await store.refresh()
+        await store.swapToModel("second-model")
+        #expect(store.swapStatus == .confirmed(modelID: "second-model", at: providerControlTestNow))
+    }
+
+    @Test("new activity before POST blocks the local request")
+    func newActivityBlocks() async throws {
+        let controller = FakeProviderController.fixture(
+            snapshot: try swapFixture(), activityRisks: [.idle, .active]
+        )
+        let request = FakeLocalSwapRequest(result: .sent)
+        let store = ProviderControlStore(controller: controller, swapProbe: request,
+                                         now: { providerControlTestNow }, swapConfirmationSleep: {})
+        await store.refresh()
+        await store.swapToModel("second-model")
+        #expect(await request.sentModels.isEmpty)
+        #expect(store.swapStatus == .failed(modelID: "second-model", .failed, at: providerControlTestNow))
+    }
+
+    @Test("a process or advertised-set change before POST blocks the local request", arguments: [true, false])
+    func changedRuntimeBlocks(processChanged: Bool) async throws {
+        let changed = try swapFixture(
+            advertised: processChanged ? ["saved-model", "second-model"] : ["saved-model"],
+            pid: processChanged ? 43 : 42
+        )
+        let controller = FakeProviderController.fixture(
+            snapshot: try swapFixture(), activityRisks: [.idle]
+        )
+        let request = FakeLocalSwapRequest(result: .sent, beforeGuard: { await controller.replaceSnapshot(changed) })
+        let store = ProviderControlStore(controller: controller, swapProbe: request,
+                                         now: { providerControlTestNow }, swapConfirmationSleep: {})
+        await store.refresh()
+        await store.swapToModel("second-model")
+        #expect(await request.sentModels.isEmpty)
+        #expect(store.swapStatus == .failed(modelID: "second-model", .failed, at: providerControlTestNow))
+    }
+}
+
+private actor FakeLocalSwapRequest: LocalModelSwapRequesting {
+    let result: LocalModelSwapResult
+    let beforeGuard: @Sendable () async -> Void
+    let afterGuard: @Sendable () async -> Void
+    private(set) var sentModels: [String] = []
+
+    init(
+        result: LocalModelSwapResult,
+        beforeGuard: @escaping @Sendable () async -> Void = {},
+        afterGuard: @escaping @Sendable () async -> Void = {}
+    ) {
+        self.result = result
+        self.beforeGuard = beforeGuard
+        self.afterGuard = afterGuard
+    }
+
+    func request(
+        modelID: String,
+        expectedProcessIdentity: ProcessIdentity,
+        canSend: @escaping @Sendable () async -> Bool
+    ) async -> LocalModelSwapResult {
+        await beforeGuard()
+        guard await canSend() else { return .failed }
+        sentModels.append(modelID)
+        await afterGuard()
+        return result
+    }
+}
+
+private func swapFixture(
+    warm: String = "saved-model",
+    advertised: [String] = ["saved-model", "second-model"],
+    pid: Int = 42
+) throws -> ProviderControlSnapshot {
+    let base = fixtureSnapshot()
+    let selection = ProviderModelSelection(enabled: ["saved-model", "second-model"], preloaded: ["saved-model"])
+    let draft = ProviderConfigDraft(
+        sourceRevision: "swap-fixture", original: selection, selection: selection,
+        originalMaxModelSlots: 1, maxModelSlots: 1
+    )
+    let raw: [String: Any] = [
+        "schema": 1, "version": "0.9.11", "current_model": warm,
+        "warm_models": [warm], "advertised_models": advertised,
+        "stats": ["tokens_generated": 0, "requests_served": 0, "usage_gaps": 0],
+        "trust": ["trust_level": "hardware", "status": "online", "reason": "same_binary",
+                  "received_at": providerControlTestNow.timeIntervalSince1970],
+        "capacity": ["total_memory_gb": 64, "gpu_memory_active_gb": 1, "gpu_memory_cache_gb": 0],
+        "slots": [], "inference_active": false,
+        "started_at": providerControlTestNow.timeIntervalSince1970 - 100,
+        "written_at": providerControlTestNow.timeIntervalSince1970,
+        "pid": pid, "process_identity": ["pid": pid, "start_time_micros": 1234]
+    ]
+    let daemon = try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: raw))
+    return ProviderControlSnapshot(
+        inventory: base.inventory, draft: draft, daemonState: daemon,
+        residentModelIDs: [warm], capturedAt: providerControlTestNow,
+        sources: freshProviderSources()
+    )
+}
+
 private actor FakeProviderController: ProviderControlling {
     enum Failure: Error, Sendable {
         case secret(String)

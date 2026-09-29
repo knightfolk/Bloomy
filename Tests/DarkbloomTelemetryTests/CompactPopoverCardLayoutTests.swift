@@ -15,19 +15,20 @@ struct CompactPopoverCardLayoutTests {
                                        value: "$0.0124", caption: "est. net / active h")
         let cases: [(String, [ModelCardMetric], Bool, Bool)] = [
             ("EigenLabs/Qwen3.8-27B-4bit-mtp", [], false, false),
-            ("qwen3.6-35b-a3b-vl-mtp-mxfp8", [speed], false, true),
+            ("gemma-4-26b-qat-4bit", [speed], false, true),
             ("nvidia-nemotron-3.5-lightning", [speed, earnings], false, false),
-            ("gemma-4-26b-qat-4bit", [], true, true),
+            ("qwen3.6-35b-a3b-vl-mtp-mxfp8", [], true, true),
             ("qwen3-vl-30b-a3b-instruct", [speed], true, false),
             ("ternary-bonsai-2-27b", [speed, earnings], true, true),
         ]
 
         for (id, metrics, activate, useOnly) in cases {
             let card = CompactModelCard(
-                modelID: id, status: activate ? "Downloaded" : "Serving now",
+                modelID: id, status: activate ? "Downloaded" : useOnly ? "Loads on request" : "In memory",
                 metrics: metrics, compact: true, compactWidth: width,
                 activate: activate ? {} : nil,
                 activationUnavailableReason: activate ? "Refresh model controls before activating a model" : nil,
+                swapModel: !activate && useOnly ? {} : nil,
                 switchModel: useOnly ? {} : nil,
                 switchUnavailableReason: useOnly ? "Refresh current provider state before switching" : nil
             )
@@ -41,9 +42,10 @@ struct CompactPopoverCardLayoutTests {
             ForEach(cases.indices, id: \.self) { index in
                 let (id, metrics, activate, useOnly) = cases[index]
                 CompactModelCard(
-                    modelID: id, status: activate ? "Downloaded" : "Serving now",
+                    modelID: id, status: activate ? "Downloaded" : useOnly ? "Loads on request" : "In memory",
                     metrics: metrics, compact: true, compactWidth: width,
                     activate: activate ? {} : nil,
+                    swapModel: !activate && useOnly ? {} : nil,
                     switchModel: useOnly ? {} : nil
                 )
             }

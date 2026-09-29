@@ -134,7 +134,8 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
         origin: URL,
         token: String?,
         model: String,
-        messages: [ChatMessagePayload]
+        messages: [ChatMessagePayload],
+        maxTokens: Int? = nil
     ) throws -> Self {
         if let token {
             guard !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -149,7 +150,10 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
               components.query == nil, components.fragment == nil,
               let url = URL(string: origin.absoluteString + "/v1/chat/completions")
         else { throw ChatClientError.invalidEndpoint }
-        return try make(url: url, token: token, model: model, messages: messages, timeout: localTimeoutInterval)
+        return try make(
+            url: url, token: token, model: model, messages: messages,
+            timeout: localTimeoutInterval, maxTokens: maxTokens
+        )
     }
 
     private static func make(

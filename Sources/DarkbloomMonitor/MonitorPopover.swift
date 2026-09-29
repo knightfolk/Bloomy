@@ -394,8 +394,10 @@ struct MonitorPopover: View {
     let openSettings: () -> Void
     let openDashboard: () -> Void
     let openModels: () -> Void
+    let openHosting: () -> Void
     @State private var showsFans = false
     @State private var pendingSingleModelID: String?
+    @State private var pendingSwapModelID: String?
     @AppStorage("popover.availableExpanded") private var availableExpanded = false
     private static let machineName = Host.current().localizedName ?? "This Mac"
 
@@ -403,12 +405,14 @@ struct MonitorPopover: View {
         store: MonitorStore,
         openSettings: @escaping () -> Void = {},
         openDashboard: @escaping () -> Void = {},
-        openModels: @escaping () -> Void = {}
+        openModels: @escaping () -> Void = {},
+        openHosting: @escaping () -> Void = {}
     ) {
         self.store = store
         self.openSettings = openSettings
         self.openDashboard = openDashboard
         self.openModels = openModels
+        self.openHosting = openHosting
     }
 
     var body: some View {
@@ -453,6 +457,9 @@ struct MonitorPopover: View {
                 Label(error, systemImage: "exclamationmark.circle")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if let swap = controlStore.swapStatus {
+                ModelSwapFeedback(status: swap, openHosting: openHosting)
             }
             if let warmup = controlStore.switchWarmupStatus {
                 SwitchWarmupFeedback(status: warmup)
@@ -509,6 +516,24 @@ struct MonitorPopover: View {
             Button("Cancel", role: .cancel) { pendingSingleModelID = nil }
         } message: {
             Text("Other advertised models stop receiving new work. Accepted work finishes before switching. If a Chat API key is saved, one free test request will try to load this model on an owned provider. You can restore the saved selection in Models.")
+        }
+        .confirmationDialog(
+            "Swap to \(ModelDisplayName.short(pendingSwapModelID ?? "model"))?",
+            isPresented: Binding(
+                get: { pendingSwapModelID != nil },
+                set: { if !$0 { pendingSwapModelID = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let modelID = pendingSwapModelID {
+                Button("Request swap") {
+                    pendingSwapModelID = nil
+                    Task { await controlStore.swapToModel(modelID) }
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingSwapModelID = nil }
+        } message: {
+            Text("Keep all advertised models available. Bloomy sends a tiny request directly to this Mac’s local provider API to load this model into the single slot. Swap is available when the provider is idle. Incoming work can change the loaded model again. No cloud API key is needed.")
         }
         .task { await store.refreshModelServingProfitability() }
     }
@@ -630,6 +655,9 @@ struct MonitorPopover: View {
                                  activate: offersActivation ? { _ = Task<Void, Never> { await controlStore.activateModel(id, providerKnownRunning: providerRunning(at: now)) } } : nil,
                                  activationUnavailableReason: controlStore.activationUnavailableReason(for: id, providerKnownRunning: providerRunning(at: now)),
                                  activationHelp: isOffline(at: now) ? "Save for the next provider start" : "Advertise this model alongside the others",
+                                 swapModel: !liveSelectionUnknown && !offersActivation && state != .active && state != .loadedIdle
+                                    ? { pendingSwapModelID = id } : nil,
+                                 swapUnavailableReason: controlStore.swapModelUnavailableReason(for: id),
                                  switchModel: !liveSelectionUnknown && displayedSelection(at: now) != [id]
                                     ? { pendingSingleModelID = id } : nil,
                                  switchUnavailableReason: controlStore.singleModelSwitchUnavailableReason(for: id))

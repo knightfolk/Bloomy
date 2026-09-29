@@ -56,6 +56,8 @@ struct CompactModelCard: View {
     var activate: (() -> Void)? = nil
     var activationUnavailableReason: String? = nil
     var activationHelp: String = "Add this model to the provider selection"
+    var swapModel: (() -> Void)? = nil
+    var swapUnavailableReason: String? = nil
     var switchModel: (() -> Void)? = nil
     var switchUnavailableReason: String? = nil
 
@@ -102,7 +104,7 @@ struct CompactModelCard: View {
             if compact && compactWidth != nil {
                 Spacer(minLength: 0)
             }
-            if activate != nil || switchModel != nil {
+            if activate != nil || swapModel != nil || switchModel != nil {
                 HStack(spacing: 5) {
                     if let activate {
                         Button(action: activate) {
@@ -114,9 +116,19 @@ struct CompactModelCard: View {
                         .accessibilityLabel("Activate \(ModelDisplayName.short(modelID))")
                         .accessibilityHint(activationUnavailableReason ?? activationHelp)
                     }
+                    if let swapModel {
+                        Button(action: swapModel) {
+                            Label("Swap", systemImage: "arrow.triangle.2.circlepath")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(swapUnavailableReason != nil)
+                        .help(swapUnavailableReason ?? "Load this model while keeping all advertised models available")
+                        .accessibilityLabel("Swap to \(ModelDisplayName.short(modelID))")
+                        .accessibilityHint(swapUnavailableReason ?? "Keep all advertised models available")
+                    }
                     if let switchModel {
                         Button(action: switchModel) {
-                            Label(activate == nil ? "Use only" : "Only", systemImage: "arrow.left.arrow.right")
+                            Label(activate == nil && swapModel == nil ? "Use only" : "Only", systemImage: "1.circle")
                                 .frame(maxWidth: .infinity)
                         }
                         .disabled(switchUnavailableReason != nil)

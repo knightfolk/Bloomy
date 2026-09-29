@@ -167,6 +167,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         let providerControlStore = ProviderControlStore(
             controller: controlService,
             warmupProbe: SelfRouteWarmupClient(keyStore: consumerKeyStore),
+            swapProbe: LocalModelSwapClient(endpointProvider: AppModelSwapEndpointProvider(discovery: localEndpointClient)),
             homeDirectory: home,
             refreshTelemetry: { [weak monitorStore] in
                 await monitorStore?.refreshTelemetryImmediately()

@@ -387,8 +387,17 @@ slot default remains three, so existing configurations are displayed as saved.
 Refresh preserves edits; Discard edits explicitly reloads the saved settings.
 Model presentation is derived from the enabled-model filter plus loaded, warm,
 slot, and current-model state. Green means active, yellow means loaded but idle,
-and gray means available on demand. There is no separate Warm row action because
-the official CLI does not expose one. Saved selections can use Apply Live when
+and gray means available on demand. Popup Swap sends a bounded eight-token local
+completion for an already advertised, unloaded model. It requires one saved
+slot, one consistent resident model, idle state, and a unified loopback endpoint
+whose discovery PID and live process start time match the network provider.
+The endpoint is resolved again and activity rechecked before inference. A
+standalone server or a saved Hosting preference cannot authorize this action.
+Swap changes neither configuration nor advertisement and never falls back to
+the network. Fresh same-process daemon and loaded-model evidence must agree
+on the target as the sole resident before success is reported; failed or
+canceled requests are reconciled because loading may already have occurred.
+Saved selections can use Apply Live when
 fresh daemon state confirms the supported same-session switch capability.
 The popup also offers an explicit single-model switch. It confirms that the
 CLI will replace the entire advertised selection with that one downloaded

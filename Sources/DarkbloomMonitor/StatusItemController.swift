@@ -57,7 +57,8 @@ final class StatusItemController: NSObject {
                 controlStore: controlStore,
                 openSettings: { [weak self] in self?.showSettings() },
                 openDashboard: { [weak self] in self?.showDashboard() },
-                openModels: { [weak self] in self?.showDashboard(section: .models) }
+                openModels: { [weak self] in self?.showDashboard(section: .models) },
+                openHosting: { [weak self] in self?.showDashboard(section: .hosting) }
             )
         )
     }
@@ -147,14 +148,15 @@ private struct PopoverRootView: View {
     let openSettings: () -> Void
     let openDashboard: () -> Void
     let openModels: () -> Void
+    let openHosting: () -> Void
 
     @ViewBuilder
     var body: some View {
         if let controlStore {
-            MonitorPopover(store: store, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels)
+            MonitorPopover(store: store, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
                 .environmentObject(controlStore)
         } else {
-            MonitorPopover(store: store, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels)
+            MonitorPopover(store: store, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
         }
     }
 }

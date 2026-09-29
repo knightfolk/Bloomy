@@ -18,6 +18,13 @@ enum SwitchWarmupStatus: Equatable {
     case result(modelID: String, SelfRouteWarmupResult, at: Date)
 }
 
+enum ModelSwapStatus: Equatable {
+    case checking(modelID: String)
+    case confirmed(modelID: String, at: Date)
+    case unconfirmed(modelID: String, at: Date)
+    case failed(modelID: String, LocalModelSwapResult, at: Date)
+}
+
 enum LifecycleConfirmation: Equatable {
     case stop(ProviderActivityRisk)
     case restart(ProviderActivityRisk)
@@ -47,13 +54,16 @@ final class ProviderControlStore: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var latestDownloadProgressLine: String?
     @Published private(set) var switchWarmupStatus: SwitchWarmupStatus?
+    @Published private(set) var swapStatus: ModelSwapStatus?
 
     private let controller: any ProviderControlling
     private let warmupProbe: (any SelfRouteWarmupProbing)?
+    private let swapProbe: (any LocalModelSwapRequesting)?
     private let diagnosticSanitizer: UserDiagnosticSanitizer
     private let refreshTelemetry: @MainActor @Sendable () async -> Void
     private let awaitStartup: @MainActor @Sendable (Date) async throws -> Void
     private let now: @Sendable () -> Date
+    private let swapConfirmationSleep: @Sendable () async -> Void
     /// Saved hosting start flags, re-applied by every monitor-initiated start
     /// or restart so a later popup restart cannot silently drop the endpoint
     /// from the new provider registration.
@@ -64,9 +74,13 @@ final class ProviderControlStore: ObservableObject {
     init(
         controller: any ProviderControlling,
         warmupProbe: (any SelfRouteWarmupProbing)? = nil,
+        swapProbe: (any LocalModelSwapRequesting)? = nil,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         refreshTelemetry: @escaping @MainActor @Sendable () async -> Void = {},
         now: @escaping @Sendable () -> Date = { Date() },
+        swapConfirmationSleep: @escaping @Sendable () async -> Void = {
+            try? await Task.sleep(for: .seconds(1))
+        },
         awaitStartup: @escaping @MainActor @Sendable (Date) async throws -> Void = { _ in },
         hostingOptions: @escaping @MainActor () -> HostingOptions = {
             HostingSettingsStore.loadOptions(from: .standard)
@@ -75,9 +89,11 @@ final class ProviderControlStore: ObservableObject {
         self.awaitStartup = awaitStartup
         self.controller = controller
         self.warmupProbe = warmupProbe
+        self.swapProbe = swapProbe
         diagnosticSanitizer = UserDiagnosticSanitizer(homeDirectory: homeDirectory)
         self.refreshTelemetry = refreshTelemetry
         self.now = now
+        self.swapConfirmationSleep = swapConfirmationSleep
         self.hostingOptions = hostingOptions
     }
 
@@ -104,6 +120,117 @@ final class ProviderControlStore: ObservableObject {
         guard canAutomaticNudge, let generation = begin(.nudging) else { return nil }
         defer { finish(generation) }
         return await probe.warm(modelID: modelID, family: family)
+    }
+
+    /// A request for an already advertised model can cause the provider to
+    /// load it on demand. No provider configuration or advertised set changes.
+    /// Completion is confirmed only by fresh telemetry from this same Mac.
+    func swapModelUnavailableReason(for modelID: String) -> String? {
+        guard operation == .idle else { return "Another provider action is in progress" }
+        guard pendingConfirmation == nil else { return "Finish the pending provider action first" }
+        guard swapProbe != nil else { return "Swap is unavailable in this build" }
+        guard let snapshot, let draft else { return "Provider configuration is unavailable" }
+        guard !draft.hasChanges else { return "Save or discard pending changes before swapping" }
+        guard draft.sourceRevision == snapshot.draft.sourceRevision,
+              draft.original == snapshot.draft.original,
+              freshModelSources(in: snapshot) else {
+            return "Refresh model controls before swapping"
+        }
+        guard let item = snapshot.inventory.myCatalog.first(where: { $0.catalogID == modelID }),
+              item.isDownloaded, item.localID != nil, item.issue == nil else {
+            return "This downloaded model is unavailable"
+        }
+        return modelSwapStateReason(modelID: modelID, snapshot: snapshot, at: now())
+    }
+
+    func swapToModel(_ modelID: String) async {
+        guard swapModelUnavailableReason(for: modelID) == nil,
+              let initial = snapshot?.daemonState,
+              let advertised = initial.advertisedModels,
+              let swapProbe,
+              let generation = begin(.nudging) else { return }
+        let controller = self.controller
+        let initialIdentity = initial.processIdentity
+        let now = self.now
+        let expectedAdvertised = Set(advertised)
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if case .checking = swapStatus {
+                    swapStatus = .unconfirmed(modelID: modelID, at: now())
+                }
+                finish(generation)
+            }
+            do {
+                let latest = try await controller.refresh()
+                guard modelSwapStateReason(
+                    modelID: modelID, snapshot: latest, at: now(),
+                    expectedIdentity: initialIdentity,
+                    expectedAdvertised: expectedAdvertised
+                ) == nil,
+                    await controller.activityRisk() == .idle else {
+                    errorMessage = "Provider activity changed. Refresh before swapping."
+                    return
+                }
+                accept(latest, preserving: draft)
+                swapStatus = .checking(modelID: modelID)
+                let result = await swapProbe.request(
+                    modelID: modelID,
+                    expectedProcessIdentity: initialIdentity
+                ) {
+                    guard !Task.isCancelled,
+                          let fresh = try? await controller.refresh() else { return false }
+                    guard modelSwapStateReason(
+                        modelID: modelID, snapshot: fresh, at: now(),
+                        expectedIdentity: initialIdentity,
+                        expectedAdvertised: expectedAdvertised
+                    ) == nil else { return false }
+                    return await controller.activityRisk() == .idle
+                }
+                guard result == .sent || result == .failed else {
+                    swapStatus = .failed(modelID: modelID, result, at: now())
+                    return
+                }
+                for attempt in 0..<5 {
+                    let fresh: ProviderControlSnapshot?
+                    if Task.isCancelled {
+                        fresh = await Task.detached {
+                            try? await controller.refresh()
+                        }.value
+                    } else {
+                        fresh = try? await controller.refresh()
+                    }
+                    if let fresh {
+                        accept(fresh, preserving: draft)
+                        if modelSwapConfirmed(
+                            modelID: modelID, snapshot: fresh, at: now(),
+                            expectedIdentity: initialIdentity,
+                            expectedAdvertised: expectedAdvertised
+                        ) {
+                            swapStatus = .confirmed(modelID: modelID, at: now())
+                            await refreshTelemetry()
+                            return
+                        }
+                        if fresh.daemonState?.processIdentity != initialIdentity ||
+                            Set(fresh.daemonState?.advertisedModels ?? []) != expectedAdvertised {
+                            break
+                        }
+                    }
+                    if Task.isCancelled { break }
+                    if attempt < 4 { await swapConfirmationSleep() }
+                }
+                swapStatus = result == .sent
+                    ? .unconfirmed(modelID: modelID, at: now())
+                    : .failed(modelID: modelID, result, at: now())
+                await refreshTelemetry()
+            } catch is CancellationError {
+                swapStatus = .unconfirmed(modelID: modelID, at: now())
+            } catch {
+                errorMessage = "Current provider state could not be checked. Refresh before swapping."
+            }
+        }
+        currentTask = task
+        await awaitTask(task)
     }
 
     func singleModelSwitchUnavailableReason(for modelID: String) -> String? {
@@ -1030,6 +1157,7 @@ final class ProviderControlStore: ObservableObject {
         }
         errorMessage = nil
         switchWarmupStatus = nil
+        swapStatus = nil
         return operationGeneration
     }
 
@@ -1295,6 +1423,84 @@ final class ProviderControlStore: ObservableObject {
         let sanitized = String(String.UnicodeScalarView(allowed))
         return String(sanitized.prefix(80))
     }
+}
+
+private func modelSwapStateReason(
+    modelID: String,
+    snapshot: ProviderControlSnapshot,
+    at now: Date,
+    expectedIdentity: ProcessIdentity? = nil,
+    expectedAdvertised: Set<String>? = nil
+) -> String? {
+    guard snapshot.sources.daemon.evaluated(
+        at: now,
+        invalidReason: "Provider state unavailable",
+        staleReason: "Provider state stale",
+        futureReason: "Provider state timestamp invalid"
+    ).isMarkedFresh,
+        snapshot.sources.loadedModels.evaluated(
+            at: now,
+            invalidReason: "Loaded models unavailable",
+            staleReason: "Loaded models stale",
+            futureReason: "Loaded models timestamp invalid"
+        ).isMarkedFresh,
+        let daemon = snapshot.daemonState,
+        let advertised = daemon.advertisedModels else {
+        return "Refresh local model status before swapping"
+    }
+    guard expectedIdentity == nil || daemon.processIdentity == expectedIdentity else {
+        return "Provider changed; refresh before swapping"
+    }
+    guard expectedAdvertised == nil || Set(advertised) == expectedAdvertised else {
+        return "Advertised models changed; refresh before swapping"
+    }
+    guard advertised.contains(modelID) else { return "Add this model to the advertised set first" }
+    guard snapshot.draft.originalMaxModelSlots == 1,
+          daemon.warmModels.count == 1,
+          snapshot.residentModelIDs == Set(daemon.warmModels) else {
+        return "Swap requires one saved model slot and one loaded model"
+    }
+    guard !snapshot.residentModelIDs.contains(modelID) else { return "This model is already loaded" }
+    guard !daemon.inferenceActive,
+          (daemon.lifecycle?.remainingRequests ?? 0) == 0,
+          (daemon.modelSwitch?.remainingRequests ?? 0) == 0 else {
+        return "Wait for current work to finish before swapping"
+    }
+    if let lifecycle = daemon.lifecycle,
+       lifecycle.outcome != .serving {
+        return "Wait for the provider to finish its current action"
+    }
+    if let modelSwitch = daemon.modelSwitch,
+       [.validating, .draining, .switching].contains(modelSwitch.outcome) {
+        return "Wait for the current model switch to finish"
+    }
+    return nil
+}
+
+private func modelSwapConfirmed(
+    modelID: String,
+    snapshot: ProviderControlSnapshot,
+    at now: Date,
+    expectedIdentity: ProcessIdentity,
+    expectedAdvertised: Set<String>
+) -> Bool {
+    guard snapshot.sources.daemon.evaluated(
+        at: now,
+        invalidReason: "Provider state unavailable",
+        staleReason: "Provider state stale",
+        futureReason: "Provider state timestamp invalid"
+    ).isMarkedFresh,
+        snapshot.sources.loadedModels.evaluated(
+            at: now,
+            invalidReason: "Loaded models unavailable",
+            staleReason: "Loaded models stale",
+            futureReason: "Loaded models timestamp invalid"
+        ).isMarkedFresh,
+        let daemon = snapshot.daemonState,
+        daemon.processIdentity == expectedIdentity,
+        Set(daemon.advertisedModels ?? []) == expectedAdvertised else { return false }
+    return snapshot.draft.originalMaxModelSlots == 1 &&
+        daemon.warmModels == [modelID] && snapshot.residentModelIDs == [modelID]
 }
 
 private final class UserDiagnosticSanitizer: @unchecked Sendable {
