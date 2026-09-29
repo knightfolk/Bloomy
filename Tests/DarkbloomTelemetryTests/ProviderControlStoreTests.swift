@@ -1555,6 +1555,33 @@ struct ProviderControlStoreTests {
         #expect(settings.extrasStore === monitorStore.providerExtras)
         #expect(size == NSSize(width: 900, height: 650))
     }
+
+    @Test("native Settings scene leaves startup view when delegate publishes stores")
+    func nativeSettingsSceneObservesStartup() async throws {
+        let delegate = DarkbloomMonitorAppDelegate()
+        let host = NSHostingController(rootView: AppSettingsObservedSceneRoot(delegate: delegate))
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.orderBack(nil)
+        defer { window.close() }
+
+        #expect(host.sizeThatFits(in: NSSize(width: 1_200, height: 900))
+            == NSSize(width: 420, height: 180))
+
+        let monitorStore = MonitorStore(
+            service: TelemetryService(source: InertStoreTelemetrySource()),
+            initial: .unavailable(now: Date(timeIntervalSince1970: 1_750_000_000))
+        )
+        let controlStore = ProviderControlStore(controller: FakeProviderController.fixture())
+        delegate.attachStores(monitor: monitorStore, control: controlStore)
+        try await Task.sleep(for: .milliseconds(150))
+        host.view.layoutSubtreeIfNeeded()
+
+        #expect(delegate.monitorStore === monitorStore)
+        #expect(delegate.controlStore === controlStore)
+        #expect(host.sizeThatFits(in: NSSize(width: 1_200, height: 900))
+            == NSSize(width: 900, height: 650))
+    }
 }
 
 enum PostExitProviderMutation: String, CaseIterable, Sendable {

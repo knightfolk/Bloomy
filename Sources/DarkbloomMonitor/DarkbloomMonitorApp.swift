@@ -8,10 +8,7 @@ struct DarkbloomMonitorApp: App {
 
     var body: some Scene {
         Settings {
-            AppSettingsSceneRoot(
-                controlStore: appDelegate.controlStore,
-                monitorStore: appDelegate.monitorStore
-            )
+            AppSettingsObservedSceneRoot(delegate: appDelegate)
         }
         .commands {
             CommandGroup(after: .appInfo) {
@@ -58,6 +55,11 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
 
     func showChat() {
         statusItemController?.showChatWindow()
+    }
+
+    func attachStores(monitor: MonitorStore, control: ProviderControlStore) {
+        monitorStore = monitor
+        controlStore = control
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -215,8 +217,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             providerControlStore?.snapshot
         }
         hostingSettingsStore.attachControlStore(providerControlStore)
-        self.monitorStore = monitorStore
-        controlStore = providerControlStore
+        attachStores(monitor: monitorStore, control: providerControlStore)
         statusItemController = StatusItemController(
             store: monitorStore,
             controlStore: providerControlStore,
@@ -245,6 +246,17 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             await CLIUpdateStatusStore.shared.stop()
             await monitorStore.stop()
         }
+    }
+}
+
+struct AppSettingsObservedSceneRoot: View {
+    @ObservedObject var delegate: DarkbloomMonitorAppDelegate
+
+    var body: some View {
+        AppSettingsSceneRoot(
+            controlStore: delegate.controlStore,
+            monitorStore: delegate.monitorStore
+        )
     }
 }
 
