@@ -28,10 +28,8 @@ the Bloomy release uses `Bloomy.app`. Check the release page for the version
 and signing status of the download you select.
 Quit an older monitor copy before launching the new one. macOS may still ask
 for first-launch confirmation or permission to read your external model drive.
-The Darkbloom Control v1.9.3 Apple Silicon release was Developer ID–signed and
-notarized by Apple, with a stapled notarization ticket. Gatekeeper verification
-passed on that bundle. Check the release notes for the signing status of future
-Bloomy downloads.
+Bloomy v1.9.4 is Developer ID signed and notarized by Apple, with a stapled
+notarization ticket and verified Gatekeeper acceptance.
 
 ## Coming soon
 
@@ -351,6 +349,9 @@ See [release signing and notarization](docs/RELEASING.md) for distribution packa
 
 ## Upgrade from Darkbloom Control or Darkbloom Monitor
 
+Built-in updates preserve the installed app folder name while showing Bloomy
+inside the app. After quitting, you may rename that folder to `Bloomy.app`.
+For a manual upgrade, replace the old app with the downloaded `Bloomy.app`.
 Quit the old app before opening Bloomy. Quitting the app
 does not stop the official provider CLI. Keep only one installed app copy in
 your chosen Applications folder; remove an old login item if you had configured

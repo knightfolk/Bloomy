@@ -1,13 +1,13 @@
-# Bloomy gives Darkbloom providers a clearer view of their Mac
+# Meet Bloomy: a friendlier home for your Darkbloom provider
 
-*New character and optional, evidence-led tools arrive in the native macOS menu-bar companion*
+Bloomy v1.9.4 is here. Formerly Darkbloom Control, the native Mac companion returns with a playful compute mascot, a refreshed identity, and practical tools for running your Darkbloom provider.
 
-**Release draft — publish after the v1.9.4 download, signing, and notarization are verified.**
+A compact menu-bar popup and full dashboard bring together live provider health, model activity, recorded earnings, energy estimates, forecasts, and alerts. Built-in Chat, Hosting controls, model management, and official fan-helper controls keep everyday tasks close at hand.
 
-Bloomy is the new name and face of Darkbloom Control, the native macOS companion for the official Darkbloom provider. Its friendly compute-companion icon sits alongside a compact menu-bar popup and a larger dashboard, bringing provider status, model activity, recorded earnings, energy estimates, and controls into one place.
+Two new opt-in features help respond to idle time: automatic nudges default to 15 minutes and use a dedicated Keychain-protected key; profit-aware switching considers sustained demand and estimated net earnings, including loading time. Configurable timing, cooldowns, and attempt limits discourage repeated switching. Darkbloom’s coordinator continues assigning public work.
 
-Bloomy v1.9.4 adds two optional ways to respond when a provider is idle. Automatic nudge can send a tiny request to the Mac's own warm model after an observed idle period, using a dedicated key stored in the macOS Keychain. Automatic profit switching can choose a downloaded model that this Mac can serve when fresh network, earnings, power, memory, and idle-state evidence point to a sustained estimated advantage. It accounts for loading time and requires at least a 30% and $0.05 estimated net improvement over the next hour. Both features are off by default, have attempt limits, and pause when the evidence is uncertain.
+Bloomy preserves existing settings and history and includes signed automatic updates. The Apple Silicon release for macOS 14 or newer is Developer ID signed and notarized by Apple.
 
-The app also offers a readable model overview, daily-runtime what-if forecasts, alert history, official fan-helper controls, and built-in Chat with an on-Mac destination and a separately gated paid network route. Manual model and provider controls remain available. Bloomy changes only what this Mac advertises; Darkbloom's coordinator still assigns public requests. Observed earnings and estimated profit do not guarantee future work or income.
+[Download Bloomy v1.9.4](https://github.com/knightfolk/Bloomy/releases/tag/v1.9.4).
 
-Bloomy v1.9.4 is planned as an Apple Silicon download for macOS 14 or newer at [GitHub Releases](https://github.com/knightfolk/Bloomy/releases). The Darkbloom provider and CLI keep their names. An iPhone companion and remote control are in development and are not part of this release.
+Both automation features are off by default. Earnings estimates do not guarantee future income. iPhone support remains in development.
