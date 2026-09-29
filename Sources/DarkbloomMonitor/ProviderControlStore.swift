@@ -136,7 +136,7 @@ final class ProviderControlStore: ObservableObject {
 
     /// The CLI switch command replaces and persists the entire advertised set.
     /// Keep this explicit rather than changing Apply Live's full-set behavior.
-    func switchToSingleModel(_ modelID: String) async {
+    func switchToSingleModel(_ modelID: String, sendWarmup: Bool = true) async {
         guard singleModelSwitchUnavailableReason(for: modelID) == nil,
               let generation = begin(.liveSwitch) else { return }
         let controller = self.controller
@@ -155,7 +155,7 @@ final class ProviderControlStore: ObservableObject {
                     failureMessage: "The model switched, but controls could not refresh.",
                     uncertainFailureMessage: "The switch outcome could not be confirmed. Refresh model controls."
                 )
-                if !completion.isOutcomeUncertain,
+                if sendWarmup, !completion.isOutcomeUncertain,
                    let refreshed = snapshot,
                    refreshed.daemonState?.advertisedModels == [modelID],
                    refreshed.sources.daemon.evaluated(

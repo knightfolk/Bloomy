@@ -6,6 +6,45 @@ import Testing
 @Suite("Monitor earnings state")
 @MainActor
 struct MonitorStoreEarningsTests {
+    @Test("cached profit stays visible but loses automation eligibility after account failure or stale power")
+    func profitAutomationRequiresFreshSources() async throws {
+        let instant = Date(timeIntervalSince1970: 7_200)
+        let hour = DateInterval(start: instant.addingTimeInterval(-3_600), duration: 3_600)
+        let intervals = stride(from: 0, to: 3_600, by: 30).map { offset in
+            EnergyInterval(start: hour.start.addingTimeInterval(Double(offset)),
+                end: hour.start.addingTimeInterval(Double(offset + 30)),
+                kWh: offset < 1_800 ? 0.0001 : 0.0002, usdPerKWh: 0.2,
+                source: "fixture", estimated: false, activeModelID: "model",
+                inferenceActive: offset >= 1_800)
+        }
+        let suite = "ProfitSource-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "electricity.enabled")
+        defaults.set("0.2", forKey: "electricity.usdPerKWh")
+        let client = ProfitSourceClient(hour: hour)
+        let energy = EnergyRecordingSnapshot(reading: .init(date: instant, watts: 24, source: "fixture", estimated: false),
+            intervals: intervals, issue: nil)
+        let store = MonitorStore(service: TelemetryService(source: EmptySource()), initial: .unavailable(now: instant),
+            initialEnergy: energy, earningsClient: client, now: { instant }, energyPreferences: defaults)
+        await store.refreshEarnings()
+        #expect(!store.modelServingProfitAverages.isEmpty)
+        #expect(store.profitSwitchEvidenceCapturedAt == instant)
+        await store.refreshEarnings()
+        #expect(!store.modelServingProfitAverages.isEmpty)
+        #expect(store.modelServingProfitCapturedAt == nil)
+        #expect(store.profitSwitchEvidenceCapturedAt == nil)
+
+        let staleEnergy = EnergyRecordingSnapshot(reading: .init(date: instant.addingTimeInterval(-31),
+            watts: 24, source: "fixture", estimated: false), intervals: intervals, issue: nil)
+        let stale = MonitorStore(service: TelemetryService(source: EmptySource()), initial: .unavailable(now: instant),
+            initialEnergy: staleEnergy, earningsClient: ProfitSourceClient(hour: hour),
+            now: { instant }, energyPreferences: defaults)
+        await stale.refreshEarnings()
+        #expect(!stale.modelServingProfitAverages.isEmpty)
+        #expect(stale.profitSwitchEvidenceCapturedAt == nil)
+    }
+
     @Test("model work uses the calendar query and clears observations after read failure")
     func calendarModelWork() async throws {
         let now = Date(timeIntervalSince1970: 1788562800)
@@ -267,5 +306,19 @@ private actor CalendarWorkClient: AccountEarningsFetching {
         if reads > 1 { throw TestFailure() }
         return [ModelWorkEarnings(model: "model", queryPeriod: range, sourceCapturedAt: range.end,
             workMicroUSD: 100, jobs: 1, recordedHours: 1, unknownHours: 0, uncertainBoundaryHours: 1)]
+    }
+}
+
+private actor ProfitSourceClient: AccountEarningsFetching {
+    let hour: DateInterval
+    var calls = 0
+    init(hour: DateInterval) { self.hour = hour }
+    func fetch(now: Date) async throws -> EarningsPresentationValue {
+        calls += 1
+        if calls > 1 { throw TestFailure() }
+        return .available(microUSD: 1_000_000)
+    }
+    func activityByModel(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ModelActivityBucket]? {
+        [.init(interval: hour, model: "model", workMicroUSD: 1_000_000)]
     }
 }

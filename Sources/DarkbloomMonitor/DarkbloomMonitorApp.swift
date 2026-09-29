@@ -183,6 +183,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
                 hostingSettingsStore?.options ?? HostingSettingsStore.loadOptions(from: .standard)
             }
         )
+        monitorStore.profitSwitch = ProfitSwitchStore(control: providerControlStore)
         let nudgeKeyStore = KeychainConsumerKeyStore(
             service: "dev.darkbloom.control.inactivity-nudge-key"
         )

@@ -40,6 +40,9 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var snapshot: TelemetrySnapshot
     /// App-owned watcher; telemetry observations drive its idle window.
     var inactivityNudge: InactivityNudgeStore?
+    /// App-owned opt-in watcher. It receives only accepted telemetry and
+    /// current source availability, so failed refreshes cannot look live.
+    var profitSwitch: ProfitSwitchStore?
     @Published private(set) var alertHistory: [AlertRecord] = []
     @Published private(set) var alertHistoryAvailable = false
     @Published private(set) var thermalState: SystemThermalState
@@ -54,6 +57,7 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var modelEarnings: [ModelEarnings]
     @Published private(set) var modelWorkEarnings: [ModelWorkEarnings] = []
     @Published private(set) var modelServingProfitAverages: [ModelServingProfitAverage] = []
+    @Published private(set) var modelServingProfitCapturedAt: Date?
     @Published private(set) var networkCapacity: SourceAvailability<NetworkCapacitySnapshot>
     @Published private(set) var recommendationDecision: RecommendationDecision?
     @Published private(set) var recommendationHistory: [RecommendationDecision] = []
@@ -98,6 +102,7 @@ final class MonitorStore: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var earningsPollingTask: Task<Void, Never>?
     private var networkCapacityPollingTask: Task<Void, Never>?
+    private var accountEarningsCapturedAt: Date?
     private var earningsRefreshTask: Task<AccountRefreshState, Never>?
     private var shutdownTask: Task<Void, Never>?
     private var thermalObserver: NSObjectProtocol?
@@ -362,6 +367,8 @@ final class MonitorStore: ObservableObject {
               let last = energy?.intervals.last?.end,
               last > first else {
             modelServingProfitAverages = []
+            modelServingProfitCapturedAt = nil
+            observeProfitSwitch()
             return
         }
 
@@ -374,12 +381,16 @@ final class MonitorStore: ObservableObject {
             calendar: .current
         ) else {
             modelServingProfitAverages = []
+            modelServingProfitCapturedAt = nil
+            observeProfitSwitch()
             return
         }
         modelServingProfitAverages = ModelProfitability.servingAverages(
             activity: activity,
             energy: energy?.intervals ?? []
         )
+        modelServingProfitCapturedAt = accountEarningsCapturedAt
+        observeProfitSwitch()
     }
 
     func modelHourlyEarningsAverages(in range: DateInterval) async throws -> [ModelHourlyEarningsAverage]? {
@@ -405,6 +416,7 @@ final class MonitorStore: ObservableObject {
     func refreshEarnings() async {
         if let earningsRefreshTask {
             let refresh = await earningsRefreshTask.value
+            accountEarningsCapturedAt = refresh.accountCapturedAt
             earnings = refresh.earnings
             todayEarnings = refresh.todayEarnings
             weekEarnings = refresh.weekEarnings
@@ -491,7 +503,13 @@ final class MonitorStore: ObservableObject {
                 refreshedTodayEarnings = nil
                 refreshedWeekEarnings = nil
             }
+            let accountCapturedAt: Date?
+            switch refreshedEarnings {
+            case .available, .observed, .day: accountCapturedAt = refreshedAt
+            case .stale, .unavailable: accountCapturedAt = nil
+            }
             return AccountRefreshState(
+                accountCapturedAt: accountCapturedAt,
                 earnings: refreshedEarnings,
                 jobSummary: refreshedJobSummary,
                 todayEarnings: refreshedTodayEarnings,
@@ -502,6 +520,7 @@ final class MonitorStore: ObservableObject {
         }
         earningsRefreshTask = task
         let refresh = await task.value
+        accountEarningsCapturedAt = refresh.accountCapturedAt
         earnings = refresh.earnings
         todayEarnings = refresh.todayEarnings
         weekEarnings = refresh.weekEarnings
@@ -546,7 +565,7 @@ final class MonitorStore: ObservableObject {
             while !Task.isCancelled {
                 await self?.refreshNetworkCapacity()
                 guard let delay = self?.networkPollingPolicy.delay(
-                    dashboardVisible: self?.dashboardVisible ?? false,
+                    dashboardVisible: self?.dashboardVisible == true || self?.profitSwitch?.enabled == true,
                     jitter: self?.publicPollingJitter() ?? 0
                 ) else { return }
                 guard let sleep = self?.publicPollingSleep else { return }
@@ -613,6 +632,7 @@ final class MonitorStore: ObservableObject {
             else { return }
             guard value.isFresh(at: now()) else {
                 markNetworkCapacityRefreshFailed()
+                observeProfitSwitch()
                 await refreshRecommendation()
                 return
             }
@@ -622,6 +642,7 @@ final class MonitorStore: ObservableObject {
             networkCapacity = .available(value: value, capturedAt: value.capturedAt)
             latestNetworkCapacityCapturedAt = value.capturedAt
             networkPollingPolicy.succeeded()
+            observeProfitSwitch()
             await refreshRecommendation()
         } catch is CancellationError {
             return
@@ -629,6 +650,7 @@ final class MonitorStore: ObservableObject {
             guard !Task.isCancelled, shutdownTask == nil else { return }
             guard refreshGeneration == networkCapacityRefreshGeneration else { return }
             markNetworkCapacityRefreshFailed()
+            observeProfitSwitch()
             await refreshRecommendation()
         }
     }
@@ -733,6 +755,7 @@ final class MonitorStore: ObservableObject {
     }
 
     func stop() async {
+        await profitSwitch?.stop()
         await inactivityNudge?.stop()
         gpuUsage.stop()
         providerExtrasTask?.cancel()
@@ -868,6 +891,7 @@ final class MonitorStore: ObservableObject {
         let previousCurrentModel = self.snapshot.state.value?.currentModel
         self.snapshot = snapshot
         inactivityNudge?.observe(snapshot)
+        observeProfitSwitch()
         await recordOperationalAlertTransitions(from: snapshot)
         if previousCurrentModel != snapshot.state.value?.currentModel {
             await refreshRecommendation()
@@ -962,6 +986,26 @@ final class MonitorStore: ObservableObject {
         }
     }
 
+    var profitSwitchEvidenceCapturedAt: Date? {
+        guard energyPreferences.bool(forKey: "electricity.enabled"),
+              ElectricityCost.rate(energyPreferences.string(forKey: "electricity.usdPerKWh") ?? "") != nil,
+              let sourceDate = accountEarningsCapturedAt,
+              (0...900).contains(now().timeIntervalSince(sourceDate)),
+              let reading = energy?.reading, energy?.issue == nil,
+              (0...30).contains(now().timeIntervalSince(reading.date)),
+              let calibratedAt = modelServingProfitCapturedAt else { return nil }
+        return min(sourceDate, calibratedAt)
+    }
+
+    private func observeProfitSwitch() {
+        profitSwitch?.observe(
+            telemetry: snapshot,
+            network: networkCapacity,
+            profits: modelServingProfitAverages,
+            profitsCapturedAt: profitSwitchEvidenceCapturedAt
+        )
+    }
+
     private static func staleOrUnavailable(
         previous: EarningsPresentationValue,
         reason: String
@@ -990,6 +1034,7 @@ final class MonitorStore: ObservableObject {
 }
 
 private struct AccountRefreshState: Sendable {
+    let accountCapturedAt: Date?
     let earnings: EarningsPresentationValue
     let jobSummary: SourceAvailability<JobCompletionSummary>
     let todayEarnings: ObservedEarningsWindow?
