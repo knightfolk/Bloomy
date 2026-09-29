@@ -24,8 +24,12 @@ final class DashboardNavigation: ObservableObject {
     @Published var selected: DashboardDestination {
         didSet { defaults.set(selected.rawValue, forKey: "dashboard.selectedSection") }
     }
+    @Published var settingsPage: SettingsPage {
+        didSet { defaults.set(settingsPage.rawValue, forKey: "dashboard.settingsPage") }
+    }
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        settingsPage = defaults.string(forKey: "dashboard.settingsPage").flatMap(SettingsPage.init(rawValue:)) ?? .appearance
         selected = defaults.string(forKey: "dashboard.selectedSection").flatMap(DashboardDestination.init(rawValue:)) ?? .overview
     }
 }
@@ -37,20 +41,39 @@ struct DashboardRootView: View {
     var chatStore: ChatStore? = nil
     var openChatWindow: (() -> Void)? = nil
     @ObservedObject var navigation: DashboardNavigation
+    @AppStorage("sidebar.monitor.expanded") private var monitorExpanded = true
+    @AppStorage("sidebar.workspace.expanded") private var workspaceExpanded = true
+    @AppStorage("sidebar.diagnostics.expanded") private var diagnosticsExpanded = true
+    @AppStorage("sidebar.settings.expanded") private var settingsExpanded = true
     private var selectedRaw: String { navigation.selected.rawValue }
 
     var body: some View {
         NavigationSplitView {
-            List(selection: Binding<DashboardDestination?>(
-                get: { DashboardDestination(rawValue: selectedRaw) ?? .overview },
-                set: { if let value = $0 { navigation.selected = value } }
-            )) {
-                ForEach(DashboardDestination.allCases) { section in
-                    Label(section.rawValue, systemImage: section.symbol)
-                        .tag(section)
+            List {
+                DisclosureGroup("Monitor", isExpanded: $monitorExpanded) {
+                    destinationRows([.overview, .activity, .opportunity])
+                }
+                DisclosureGroup("Workspace", isExpanded: $workspaceExpanded) {
+                    destinationRows([.chat, .models, .hosting])
+                }
+                DisclosureGroup("Diagnostics", isExpanded: $diagnosticsExpanded) {
+                    destinationRows([.health])
+                }
+                DisclosureGroup("Settings", isExpanded: $settingsExpanded) {
+                    ForEach(SettingsPage.allCases) { page in
+                        sidebarRow(
+                            title: page.rawValue,
+                            symbol: page.symbol,
+                            selected: navigation.selected == .settings && navigation.settingsPage == page
+                        ) {
+                            navigation.settingsPage = page
+                            navigation.selected = .settings
+                        }
+                    }
                 }
             }
-            .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 260)
         } detail: {
             if selectedRaw == DashboardDestination.overview.rawValue || DashboardDestination(rawValue: selectedRaw) == nil {
                 DashboardOverviewView(store: store, controlStore: controlStore)
@@ -89,18 +112,62 @@ struct DashboardRootView: View {
                 MonitorSettingsView(
                     extrasStore: store.providerExtras,
                     controlStore: controlStore,
-                    monitorStore: store
+                    monitorStore: store,
+                    selection: navigation.settingsPage
                 )
             } else {
                 HealthView(store: store)
             }
         }
         .toolbar {
-            Button { navigation.selected = .settings } label: { Label("Settings", systemImage: "gearshape") }
+            Button { settingsExpanded = true; navigation.selected = .settings } label: { Label("Settings", systemImage: "gearshape") }
                 .help("Open Settings")
+        }
+        .onChange(of: navigation.selected) { _, destination in
+            switch destination {
+            case .overview, .activity, .opportunity: monitorExpanded = true
+            case .chat, .models, .hosting: workspaceExpanded = true
+            case .health: diagnosticsExpanded = true
+            case .settings: settingsExpanded = true
+            }
         }
         .onChange(of: store.snapshot.status.value?.version) { _, _ in
             hostingStore?.refreshEnvironment()
         }
     }
+
+    private func destinationRows(_ destinations: [DashboardDestination]) -> some View {
+        ForEach(destinations) { destination in
+            sidebarRow(
+                title: destination.rawValue,
+                symbol: destination.symbol,
+                selected: navigation.selected == destination
+            ) {
+                navigation.selected = destination
+            }
+        }
+    }
+
+    private func sidebarRow(
+        title: String,
+        symbol: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    selected ? Color.accentColor.opacity(0.18) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 7)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
+    }
+
 }

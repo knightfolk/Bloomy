@@ -2,6 +2,7 @@ import Foundation
 
 public protocol ProviderExtrasProviding: Sendable {
     func refresh() async -> ProviderExtrasSnapshot
+    func refreshFan() async -> SourceAvailability<ProviderFanStatus>
     func saveIdle(minutes: Int) async throws
     func setBeta(id: String, enabled: Bool) async throws
     func setAutoUpdate(enabled: Bool) async throws
@@ -12,6 +13,10 @@ public protocol ProviderExtrasProviding: Sendable {
 }
 
 public extension ProviderExtrasProviding {
+    func refreshFan() async -> SourceAvailability<ProviderFanStatus> {
+        await refresh().fanStatus
+    }
+
     func setAutoUpdate(enabled: Bool) async throws {
         throw ProviderExtrasMutationError.commandFailed
     }
@@ -229,6 +234,16 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
             fanStatus: fan,
             autoUpdateStatus: autoUpdate
         )
+    }
+
+    /// Lightweight read for visible fan controls; other provider settings are not polled.
+    public func refreshFan() async -> SourceAvailability<ProviderFanStatus> {
+        let capturedAt = now()
+        guard capturedAt.timeIntervalSince1970.isFinite,
+              let executable = resolveExecutable() else {
+            return .unavailable(reason: "Darkbloom fan status is unavailable")
+        }
+        return await readFan(executable: executable, capturedAt: capturedAt)
     }
 
     public func saveIdle(minutes: Int) async throws {

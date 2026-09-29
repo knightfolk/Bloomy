@@ -60,6 +60,22 @@ struct DashboardWindowTests {
         controller.close()
     }
 
+    @Test("Settings remembers its page independently and rejects unknown saved pages")
+    func settingsPagePersistence() throws {
+        let suite = "SettingsPageNavigation-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let navigation = DashboardNavigation(defaults: defaults)
+        #expect(navigation.settingsPage == .appearance)
+        navigation.settingsPage = .fans
+        navigation.selected = .models
+        let restored = DashboardNavigation(defaults: defaults)
+        #expect(restored.selected == .models)
+        #expect(restored.settingsPage == .fans)
+        defaults.set("unknown future page", forKey: "dashboard.settingsPage")
+        #expect(DashboardNavigation(defaults: defaults).settingsPage == .appearance)
+    }
+
     @Test("unified Settings renders at minimum dashboard size", arguments: ["light", "dark"])
     func settingsMinimumSize(appearance: String) async throws {
         let suite = "DashboardSettingsRender-\(UUID().uuidString)"
@@ -97,6 +113,16 @@ struct DashboardWindowTests {
         try capture.run()
         capture.waitUntilExit()
         #expect(capture.terminationStatus == 0)
+
+        controller.navigation.settingsPage = .menuBar
+        try await Task.sleep(for: .milliseconds(350))
+        window.contentView?.layoutSubtreeIfNeeded()
+        let alternateCapture = Process()
+        alternateCapture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        alternateCapture.arguments = ["-x", "-l", String(window.windowNumber), "/tmp/darkbloom-unified-settings-menu-bar-\(appearance).png"]
+        try alternateCapture.run()
+        alternateCapture.waitUntilExit()
+        #expect(alternateCapture.terminationStatus == 0)
     }
 
     @Test("Hosting page renders in the dashboard at its minimum width", arguments: ["light", "dark"])

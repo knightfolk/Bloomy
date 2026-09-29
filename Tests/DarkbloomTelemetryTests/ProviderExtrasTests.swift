@@ -107,6 +107,36 @@ struct ProviderExtrasTests {
         }
     }
 
+    @Test("live fan refresh invokes only the read-only fan command")
+    func fanOnlyRefresh() async {
+        let runner = ExtrasRunner(results: ["fan status": .success(fanJSON(updatedAt: 100))])
+        let client = ProviderExtrasClient(
+            policy: testPolicy(), runner: runner,
+            now: { Date(timeIntervalSinceReferenceDate: 100) },
+            testOnlyExecutable: URL(fileURLWithPath: "/usr/bin/true")
+        )
+        let result = await client.refreshFan()
+        #expect(result.value != nil)
+        let commands = await runner.commands
+        #expect(commands.count == 1)
+        #expect(commands.first?.arguments == ["fan", "status", "--json"])
+    }
+
+    @Test("live fan refresh preserves other settings and never writes policy")
+    func fanOnlyStoreRefresh() async {
+        let client = StoreClient()
+        let store = ProviderExtrasStore(client: client)
+        await store.refresh()
+        let before = store.snapshot
+        await store.refreshFan()
+        #expect(await client.fanRefreshCount == 1)
+        #expect(await client.refreshCount == 1)
+        #expect(await client.saveCount == 0)
+        #expect(store.snapshot?.idlePolicy == before?.idlePolicy)
+        #expect(store.snapshot?.capturedAt == before?.capturedAt)
+        await store.stop()
+    }
+
     @Test("reads each source independently and does not expose command stderr")
     func independentAvailabilityAndPrivacy() async {
         let runner = ExtrasRunner(results: [
@@ -410,6 +440,11 @@ private actor StoreClient: ProviderExtrasProviding {
     func failReads() { failing = true }
     private(set) var refreshCount = 0
     private(set) var saveCount = 0
+    private(set) var fanRefreshCount = 0
+    func refreshFan() async -> SourceAvailability<ProviderFanStatus> {
+        fanRefreshCount += 1
+        return .unavailable(reason: "fixture")
+    }
 
     func refresh() async -> ProviderExtrasSnapshot {
         refreshCount += 1

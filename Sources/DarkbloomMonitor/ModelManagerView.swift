@@ -198,7 +198,14 @@ struct ModelGrouping: Equatable {
     ) -> ModelGrouping {
         var seenCatalogIDs = Set<String>()
         var catalog: [ModelInventoryItem] = []
-        for item in myCatalog + available where seenCatalogIDs.insert(item.catalogID).inserted {
+        for item in myCatalog + available
+        where ModelCatalogVisibility.includes(
+            item.catalogID,
+            inUse: isEnabled(item) || item.isEnabled || item.isPreloaded
+                || item.enabledSelector != nil || item.preloadSelector != nil
+                || item.liveState != .unloaded
+        )
+            && seenCatalogIDs.insert(item.catalogID).inserted {
             catalog.append(item)
         }
         let filtered = ModelManagerPresentation.filtered(catalog, search: search)

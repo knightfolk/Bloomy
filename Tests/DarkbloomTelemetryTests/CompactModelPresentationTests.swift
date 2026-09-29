@@ -29,6 +29,9 @@ struct CompactModelPresentationTests {
         #expect(try PopupModelGroups.advertised(snapshot: snapshot(json), control: nil, now: now) == [])
         json["advertised_models"] = ["model-b", "model-a", "model-a"]
         #expect(try PopupModelGroups.advertised(snapshot: snapshot(json), control: nil, now: now) == ["model-a", "model-b"])
+        json["advertised_models"] = ["gemma-4-26b", "gemma-4-26b-8bit", "gemma-4-26b-qat-4bit", "Qwen3.5-9B"]
+        #expect(try PopupModelGroups.advertised(snapshot: snapshot(json), control: nil, now: now) ==
+            ["Qwen3.5-9B", "gemma-4-26b", "gemma-4-26b-8bit", "gemma-4-26b-qat-4bit"])
         #expect(try PopupModelGroups.advertised(snapshot: snapshot(json), control: nil, now: now.addingTimeInterval(11)) == nil)
         #expect(try PopupModelGroups.advertised(snapshot: snapshot(json, capturedAt: now.addingTimeInterval(-11)), control: nil, now: now) == nil)
         var stopped = StatusSnapshot()

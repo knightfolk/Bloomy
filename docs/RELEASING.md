@@ -1,5 +1,19 @@
 # Release signing and notarization
 
+## Feature-work release cadence
+
+Kevin authorized this cadence on 2026-09-28: during active feature development,
+check for a coherent verified checkpoint every 30 minutes. Commit, merge when
+needed, push, and publish a signed and notarized patch release when ready. Do
+not publish unfinished changes or bypass a failing release check to meet the
+clock. Skip idle periods and checkpoints with no new releasable changes.
+
+Continue the 1.x patch series (1.9.1, 1.9.2, and onward). Reserve **2.0.0** for
+full iOS app support. The verification and signing requirements below still
+apply to every release.
+
+## Required release verification
+
 Build and test the exact commit to release. Package with `tools/package_app.py`, using absolute executable/resource/output paths and the version from `VERSION`. The downloadable build targets Apple Silicon and macOS 14 or newer.
 
 1. First sign embedded Sparkle components inside-out as described below. Then sign the assembled app using a valid **Developer ID Application** identity, hardened runtime, and secure timestamp: `codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP"`.

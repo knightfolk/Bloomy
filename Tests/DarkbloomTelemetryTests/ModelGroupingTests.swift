@@ -6,6 +6,43 @@ import Testing
 @Suite("Model grouping")
 @MainActor
 struct ModelGroupingTests {
+    @Test("retired Gemma catalog entries stay out of model cards without hiding current variants")
+    func retiredCatalogEntries() {
+        let ids = ["gemma-4-26b", "gemma-4-26b-8bit", "gemma-4-26b-qat-4bit", "Qwen3.5-9B"]
+        let grouping = ModelGrouping.partition(
+            myCatalog: ids.map { item($0, downloaded: true) },
+            available: [], search: "",
+            isEnabled: { $0.catalogID == "gemma-4-26b-qat-4bit" }
+        )
+
+        #expect(grouping.enabled.map(\.catalogID) == ["gemma-4-26b-qat-4bit"])
+        #expect(grouping.available.map(\.catalogID) == ["Qwen3.5-9B"])
+        #expect(!ModelCatalogVisibility.includes("gemma-4-26b"))
+        #expect(!ModelCatalogVisibility.includes("gemma-4-26b-8bit"))
+        #expect(ModelCatalogVisibility.includes("gemma-4-26b-qat-4bit"))
+        #expect(ModelCatalogVisibility.includes("Qwen3.5-9B"))
+    }
+
+    @Test("configured or resident retired models remain visible so controls and status are reachable")
+    func retiredModelInUse() {
+        let selected = item("gemma-4-26b", downloaded: true, enabled: true)
+        let resident = item("gemma-4-26b-8bit", downloaded: true, liveState: .loadedIdle)
+        let staged = item("gemma-4-26b", downloaded: false)
+
+        let grouping = ModelGrouping.partition(
+            myCatalog: [selected, resident], available: [], search: "",
+            isEnabled: { _ in false }
+        )
+        #expect(Set(grouping.available.map(\.catalogID)) ==
+            ["gemma-4-26b", "gemma-4-26b-8bit"])
+
+        let stagedGrouping = ModelGrouping.partition(
+            myCatalog: [], available: [staged], search: "",
+            isEnabled: { _ in true }
+        )
+        #expect(stagedGrouping.enabled.map(\.catalogID) == ["gemma-4-26b"])
+    }
+
     @Test("catalog partitions into enabled and available with no third section")
     func partitionsCatalog() {
         let enabledModel = item("vendor/enabled", downloaded: true)
@@ -152,7 +189,9 @@ struct ModelGroupingTests {
     private func item(
         _ id: String,
         name: String? = nil,
-        downloaded: Bool
+        downloaded: Bool,
+        enabled: Bool = false,
+        liveState: InventoryLiveState = .unloaded
     ) -> ModelInventoryItem {
         ModelInventoryItem(
             catalogID: id,
@@ -163,9 +202,9 @@ struct ModelGroupingTests {
             sizeGB: 4.5,
             minimumRAMGB: 8,
             isDownloaded: downloaded,
-            isEnabled: false,
+            isEnabled: enabled,
             isPreloaded: false,
-            liveState: .unloaded,
+            liveState: liveState,
             issue: nil
         )
     }

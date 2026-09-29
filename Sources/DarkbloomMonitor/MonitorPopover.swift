@@ -456,7 +456,15 @@ struct MonitorPopover: View {
     }
 
     private func availableIDs(excluding advertised: [String]) -> [String] {
-        let local = controlStore.snapshot?.inventory.myCatalog.map(\.catalogID) ?? models.map(\.name)
+        let currentModelIDs = Set(models.map(\.name))
+        let local = controlStore.snapshot?.inventory.myCatalog.filter { item in
+            ModelCatalogVisibility.includes(
+                item.catalogID,
+                inUse: item.isEnabled || item.isPreloaded || item.enabledSelector != nil
+                    || item.preloadSelector != nil || item.liveState != .unloaded
+                    || currentModelIDs.contains(item.catalogID)
+            )
+        }.map(\.catalogID) ?? Array(currentModelIDs)
         return Array(Set(local).subtracting(advertised)).sorted()
     }
 

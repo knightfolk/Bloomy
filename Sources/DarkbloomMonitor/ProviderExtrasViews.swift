@@ -97,6 +97,8 @@ struct ProviderThermalView: View {
 struct ProviderAdvancedSettingsView: View {
     @ObservedObject var store: ProviderExtrasStore
     let performMutation: ProviderExtrasMutationExecutor
+    let showsAutoUpdate: Bool
+    let showsFanControls: Bool
 
     @State private var idleMinutesText = ""
     @State private var idleDraftDirty = false
@@ -106,10 +108,14 @@ struct ProviderAdvancedSettingsView: View {
 
     init(
         store: ProviderExtrasStore,
-        performMutation: @escaping ProviderExtrasMutationExecutor
+        performMutation: @escaping ProviderExtrasMutationExecutor,
+        showsAutoUpdate: Bool = true,
+        showsFanControls: Bool = true
     ) {
         self.store = store
         self.performMutation = performMutation
+        self.showsAutoUpdate = showsAutoUpdate
+        self.showsFanControls = showsFanControls
     }
 
     var body: some View {
@@ -120,8 +126,12 @@ struct ProviderAdvancedSettingsView: View {
             Section("Provider · Experimental features") {
                 betaSection
             }
-            ProviderAutoUpdateSettingsView(store: store, performMutation: performMutation)
-            ProviderFanControlSettingsView(store: store, performMutation: performMutation)
+            if showsAutoUpdate {
+                ProviderAutoUpdateSettingsView(store: store, performMutation: performMutation)
+            }
+            if showsFanControls {
+                ProviderFanControlSettingsView(store: store, performMutation: performMutation)
+            }
             if let feedback {
                 Text(feedback)
                     .font(.caption)

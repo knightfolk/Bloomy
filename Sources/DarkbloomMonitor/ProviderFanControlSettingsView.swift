@@ -74,10 +74,24 @@ struct ProviderAutoUpdateSettingsView: View {
 struct ProviderFanControlSettingsView: View {
     @ObservedObject var store: ProviderExtrasStore
     let performMutation: ProviderExtrasMutationExecutor
+    var isVisible: Bool
 
-    @State private var speedText = "80"
-    @State private var temperatureText = "45"
+    init(
+        store: ProviderExtrasStore,
+        performMutation: @escaping ProviderExtrasMutationExecutor,
+        isVisible: Bool = true
+    ) {
+        self.store = store
+        self.performMutation = performMutation
+        self.isVisible = isVisible
+    }
+
+    @State private var speedPercent = ProviderFanPolicy.default.speedPercent
+    @State private var triggerTemperature = ProviderFanPolicy.default.triggerTemperatureCelsius
     @State private var draftDirty = false
+    @State private var selectedPreset: FanPreset?
+    @State private var showsPolicyEditor = false
+    @State private var showsAdvancedActions = false
     @State private var mutationInFlight = false
     @State private var pendingAction: FanAction?
     @State private var feedback: String?
@@ -85,10 +99,10 @@ struct ProviderFanControlSettingsView: View {
     var body: some View {
         Section("Provider · Fan control") {
             switch store.snapshot?.fanStatus {
-            case .available(let status, _):
-                fanContent(status: status, fresh: true)
-            case .stale(let status, _, _):
-                fanContent(status: status, fresh: false)
+            case .available(let status, let checkedAt):
+                fanContent(status: status, fresh: true, checkedAt: checkedAt)
+            case .stale(let status, let checkedAt, _):
+                fanContent(status: status, fresh: false, checkedAt: checkedAt)
             case .unavailable, nil:
                 Text("Fan diagnostics are unavailable. Refresh after updating the Darkbloom CLI.")
                     .foregroundStyle(.secondary)
@@ -102,6 +116,17 @@ struct ProviderFanControlSettingsView: View {
         }
         .onAppear { syncDraft() }
         .onChange(of: store.snapshot?.fanStatus) { _, _ in syncDraft() }
+        .task(id: isVisible) {
+            guard isVisible else { return }
+            while !Task.isCancelled {
+                await store.refreshFan()
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    return
+                }
+            }
+        }
         .alert(item: $pendingAction) { action in
             Alert(
                 title: Text(action.title),
@@ -115,12 +140,12 @@ struct ProviderFanControlSettingsView: View {
     }
 
     @ViewBuilder
-    private func fanContent(status: ProviderFanStatus, fresh: Bool) -> some View {
+    private func fanContent(status: ProviderFanStatus, fresh: Bool, checkedAt: Date) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Official Darkbloom fan helper")
-                    .font(.body.weight(.medium))
-                Text("Uses a fixed 60–90% target only while the signed provider is active and the GPU reaches the trigger temperature.")
+                Text("Fan control")
+                    .font(.headline)
+                Text("Turn Darkbloom's fan helper on or off. Readings update while this page is open.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -129,110 +154,208 @@ struct ProviderFanControlSettingsView: View {
             SettingsStateBadge(stateLabel(status))
         }
 
-        if let helper = status.helper {
-            HStack(spacing: 16) {
-                Label(String(format: "%.1f °C", helper.gpuTemperatureCelsius ?? 0), systemImage: "thermometer.medium")
-                    .opacity(helper.gpuTemperatureCelsius == nil ? 0 : 1)
-                Text("Trigger \(String(format: "%.0f °C", helper.triggerTemperatureCelsius))")
-                Text("Target \(String(format: "%.0f%%", helper.speedPercent))")
-                Text(helper.mode.replacingOccurrences(of: "_", with: " ").capitalized)
-            }
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
-        }
+        readings(status: status, fresh: fresh, checkedAt: checkedAt)
 
         if !fresh {
-            Text("Refresh before changing fan control.")
+            Text("These are the last known readings. Refresh before changing fan control.")
                 .font(.caption)
                 .foregroundStyle(.orange)
         } else if !status.advertisesOfficialControl {
-            Text("This CLI does not advertise the supported fan-helper capability.")
+            Text("This Darkbloom installation does not offer fan control.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         } else {
-            if status.supportsOfficialControl {
-                policyEditor(status: status)
+            if let toggleIsOn = Self.toggleState(status) {
+                Toggle("Use Darkbloom fan control", isOn: Binding(
+                    get: { toggleIsOn },
+                    set: { requestedOn in
+                        if requestedOn { stagePolicy(.enable) }
+                        else { pendingAction = .disable }
+                    }
+                ))
+                .disabled(!fresh || !status.supportsOfficialControl || mutationInFlight || store.mutationInFlight)
+                .accessibilityIdentifier("settings.provider.fan.enabled")
             } else {
-                Text("The CLI reports that this Mac does not support fan-policy changes. Recovery actions remain available for an installed helper.")
+                Text("The helper's on/off status is unavailable. Refresh to try again.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            HStack(spacing: 10) {
-                if status.loaded {
-                    if status.supportsOfficialControl {
-                        Button("Save Policy…") { stagePolicy(.configure) }
-                            .disabled(!canSubmitPolicy)
+            if !status.supportsOfficialControl {
+                Text("This Mac does not support changing the fan policy.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                DisclosureGroup("Fan policy", isExpanded: $showsPolicyEditor) {
+                    policyEditor(status: status)
+                    if status.loaded {
+                        Button("Save Fan Policy…") { stagePolicy(.configure) }
+                            .disabled(!fresh || !draftDirty || !canSubmitPolicy)
+                            .accessibilityIdentifier("settings.provider.fan.save")
                     }
-                    Button("Disable…", role: .destructive) {
-                        pendingAction = .disable
-                    }
-                    .disabled(mutationInFlight || store.mutationInFlight)
-                } else if status.supportsOfficialControl {
-                    Button(status.installed ? "Enable…" : "Install & Enable…") {
-                        stagePolicy(.enable)
-                    }
-                    .disabled(!canSubmitPolicy)
-                }
-                if status.installed {
-                    Button("Uninstall Helper…", role: .destructive) {
-                        pendingAction = .uninstall
-                    }
-                    .disabled(mutationInFlight || store.mutationInFlight)
                 }
             }
-            Text("macOS will request administrator approval. Disabling or uninstalling restores automatic fan control.")
+            if status.installed || status.loaded {
+                DisclosureGroup("Advanced helper actions", isExpanded: $showsAdvancedActions) {
+                    HStack(spacing: 10) {
+                        if status.loaded {
+                            Button("Disable…", role: .destructive) {
+                                pendingAction = .disable
+                            }
+                            .disabled(mutationInFlight || store.mutationInFlight)
+                        }
+                        if status.installed {
+                            Button("Uninstall Helper…", role: .destructive) {
+                                pendingAction = .uninstall
+                            }
+                            .disabled(mutationInFlight || store.mutationInFlight)
+                        }
+                    }
+                    Text("These actions stop this helper and release any fans it controls.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text("Changing fan control asks for macOS administrator approval.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private func policyEditor(status: ProviderFanStatus) -> some View {
-        HStack(spacing: 14) {
-            Text("Fan target")
-            TextField("80", text: speedBinding)
-                .frame(width: 58)
-                .textFieldStyle(.roundedBorder)
-                .monospacedDigit()
-                .accessibilityLabel("Fan target percent")
-                .accessibilityIdentifier("settings.provider.fan.speed")
-            Text("%")
+    @ViewBuilder
+    private func readings(status: ProviderFanStatus, fresh: Bool, checkedAt: Date) -> some View {
+        let temperature = status.displayedTemperatureCelsius
+        let fans = status.displayedFans
+        VStack(alignment: .leading, spacing: 8) {
+            Text(fresh ? "Latest readings" : "Last known readings")
+                .font(.callout.weight(.semibold))
+            Text("Checked \(checkedAt.formatted(date: .omitted, time: .standard))")
+                .font(.caption)
                 .foregroundStyle(.secondary)
-            Text("at")
-            TextField("45", text: temperatureBinding)
-                .frame(width: 58)
-                .textFieldStyle(.roundedBorder)
-                .monospacedDigit()
-                .accessibilityLabel("Fan trigger temperature")
-                .accessibilityIdentifier("settings.provider.fan.temperature")
-            Text("°C")
-                .foregroundStyle(.secondary)
-            if draftDirty {
-                Text("Unsaved")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.orange)
+            HStack(alignment: .top, spacing: 24) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("GPU temperature").font(.caption).foregroundStyle(.secondary)
+                    Text(temperature.map { String(format: "%.1f °C", $0) } ?? "Not reported")
+                        .font(.title3.weight(.semibold))
+                        .monospacedDigit()
+                }
+                if let fan = fans.first {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Fan speed").font(.caption).foregroundStyle(.secondary)
+                        Text(Self.rpm(fan.actualRPM))
+                            .font(.title3.weight(.semibold))
+                            .monospacedDigit()
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Target speed").font(.caption).foregroundStyle(.secondary)
+                        Text(Self.rpm(fan.targetRPM))
+                            .font(.title3.weight(.semibold))
+                            .monospacedDigit()
+                    }
+                }
             }
-            Spacer()
+            if fans.count > 1 {
+                ForEach(fans.dropFirst()) { fan in
+                    Text("Fan \(fan.index + 1): \(Self.rpm(fan.actualRPM)) · target \(Self.rpm(fan.targetRPM))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if fans.isEmpty {
+                Text("Fan speed is not reported by this Mac.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let helper = status.helper {
+                Text(helper.mode == "error" ? "Fan helper needs attention" : (helper.providerActive ? "Provider active" : "Waiting for provider activity"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    static func toggleState(_ status: ProviderFanStatus) -> Bool? {
+        guard status.loaded else { return false }
+        return status.helper?.enabled
+    }
+
+    private func policyEditor(status: ProviderFanStatus) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Choose a starting point")
+                    .font(.body.weight(.medium))
+                Spacer()
+                if draftDirty {
+                    Text("Unsaved")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                }
+            }
+            HStack(spacing: 8) {
+                ForEach(FanPreset.allCases) { preset in
+                    Button(preset.title) { select(preset) }
+                        .buttonStyle(.bordered)
+                        .tint(selectedPreset == preset ? .accentColor : .secondary)
+                        .accessibilityLabel("Choose \(preset.title) fan policy")
+                        .accessibilityValue(selectedPreset == preset ? "Selected" : "Not selected")
+                        .accessibilityIdentifier("settings.provider.fan.preset.\(preset.rawValue)")
+                }
+            }
+            Text("Starting points only. Adjust either slider before saving.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("Fan target")
+                    Spacer()
+                    Text(Self.percent(speedPercent))
+                        .monospacedDigit()
+                        .fontWeight(.semibold)
+                }
+                Slider(value: speedBinding, in: ProviderFanPolicy.speedRange, step: 1)
+                    .accessibilityLabel("Fan target")
+                    .accessibilityValue(Self.percent(speedPercent))
+                    .accessibilityHint("Target fan speed after the trigger temperature is reached")
+                    .accessibilityIdentifier("settings.provider.fan.speed")
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("Start at GPU temperature")
+                    Spacer()
+                    Text(Self.temperature(triggerTemperature))
+                        .monospacedDigit()
+                        .fontWeight(.semibold)
+                }
+                Slider(value: temperatureBinding, in: ProviderFanPolicy.triggerTemperatureRange, step: 1)
+                    .accessibilityLabel("GPU trigger temperature")
+                    .accessibilityValue(Self.temperature(triggerTemperature))
+                    .accessibilityHint("GPU temperature where the fan target starts")
+                    .accessibilityIdentifier("settings.provider.fan.temperature")
+            }
+            Label(
+                "At \(Self.temperature(triggerTemperature)), target \(Self.percent(speedPercent)) while the provider is active.",
+                systemImage: "fanblades"
+            )
+            .font(.callout.weight(.medium))
+            Text("This policy has one temperature trigger and one fan target.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .disabled(!status.supportsOfficialControl || mutationInFlight || store.mutationInFlight)
     }
 
-    private var speedBinding: Binding<String> {
-        Binding(get: { speedText }, set: { speedText = $0; draftDirty = true })
+    private var speedBinding: Binding<Double> {
+        Binding(get: { speedPercent }, set: { speedPercent = $0; draftDirty = true; selectedPreset = nil })
     }
 
-    private var temperatureBinding: Binding<String> {
-        Binding(get: { temperatureText }, set: { temperatureText = $0; draftDirty = true })
+    private var temperatureBinding: Binding<Double> {
+        Binding(get: { triggerTemperature }, set: { triggerTemperature = $0; draftDirty = true; selectedPreset = nil })
     }
 
     private var policy: ProviderFanPolicy? {
-        guard let speed = Double(speedText.trimmingCharacters(in: .whitespacesAndNewlines)),
-              let temperature = Double(temperatureText.trimmingCharacters(in: .whitespacesAndNewlines))
-        else { return nil }
         return ProviderFanPolicy(
-            speedPercent: speed,
-            triggerTemperatureCelsius: temperature
+            speedPercent: speedPercent,
+            triggerTemperatureCelsius: triggerTemperature
         )
     }
 
@@ -249,8 +372,29 @@ struct ProviderFanControlSettingsView: View {
                 triggerTemperatureCelsius: $0.triggerTemperatureCelsius
             )
         } ?? .default
-        speedText = String(format: "%.0f", policy.speedPercent)
-        temperatureText = String(format: "%.0f", policy.triggerTemperatureCelsius)
+        speedPercent = policy.speedPercent
+        triggerTemperature = policy.triggerTemperatureCelsius
+        selectedPreset = FanPreset.allCases.first { $0.policy == policy }
+    }
+
+    private func select(_ preset: FanPreset) {
+        speedPercent = preset.policy.speedPercent
+        triggerTemperature = preset.policy.triggerTemperatureCelsius
+        selectedPreset = preset
+        draftDirty = true
+    }
+
+    private static func percent(_ value: Double) -> String {
+        String(format: "%.0f%%", value)
+    }
+
+    private static func temperature(_ value: Double) -> String {
+        String(format: "%.0f °C", value)
+    }
+
+    private static func rpm(_ value: Double?) -> String {
+        guard let value else { return "Not reported" }
+        return String(format: "%.0f RPM", value)
     }
 
     private func stagePolicy(_ kind: FanAction.Kind) {
@@ -275,8 +419,13 @@ struct ProviderFanControlSettingsView: View {
             }
             mutationInFlight = false
             if succeeded {
-                draftDirty = false
-                syncDraft()
+                switch action {
+                case .enable, .configure:
+                    draftDirty = false
+                    syncDraft()
+                case .disable, .uninstall:
+                    break
+                }
                 feedback = action.successMessage
             } else {
                 feedback = store.errorMessage ?? "Darkbloom could not change fan control."
@@ -289,8 +438,26 @@ struct ProviderFanControlSettingsView: View {
         guard status.loaded else { return "Disabled" }
         guard let helper = status.helper else { return "Status unavailable" }
         if helper.mode == "error" { return "Needs attention" }
+        if !helper.enabled { return "Disabled" }
         if helper.providerActive { return "Enabled · Provider active" }
         return "Enabled · Waiting"
+    }
+}
+
+enum FanPreset: String, CaseIterable, Identifiable {
+    case quiet
+    case balanced
+    case cooling
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+
+    var policy: ProviderFanPolicy {
+        switch self {
+        case .quiet: ProviderFanPolicy(speedPercent: 60, triggerTemperatureCelsius: 45)!
+        case .balanced: ProviderFanPolicy(speedPercent: 75, triggerTemperatureCelsius: 45)!
+        case .cooling: ProviderFanPolicy(speedPercent: 90, triggerTemperatureCelsius: 40)!
+        }
     }
 }
 
@@ -325,9 +492,9 @@ private enum FanAction: Identifiable {
         case .enable(let policy), .configure(let policy):
             "Darkbloom will target \(String(format: "%.0f%%", policy.speedPercent)) when the GPU reaches \(String(format: "%.0f °C", policy.triggerTemperatureCelsius)). macOS will request administrator approval."
         case .disable:
-            "This immediately restores macOS automatic fan control and stops the helper."
+            "This stops the helper and releases any fans it controls."
         case .uninstall:
-            "This restores macOS automatic fan control and removes the official Darkbloom helper."
+            "This removes the Darkbloom helper and releases any fans it controls."
         }
     }
 
@@ -353,8 +520,8 @@ private enum FanAction: Identifiable {
         switch self {
         case .enable: "Fan control enabled."
         case .configure: "Fan policy updated."
-        case .disable: "Fan control disabled; macOS automatic control restored."
-        case .uninstall: "Fan helper removed; macOS automatic control restored."
+        case .disable: "Darkbloom fan helper disabled."
+        case .uninstall: "Darkbloom fan helper removed."
         }
     }
 }

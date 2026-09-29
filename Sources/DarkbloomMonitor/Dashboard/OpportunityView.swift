@@ -41,7 +41,14 @@ enum OpportunityPresentation {
     }
 
     static func ordered(_ models: [NetworkModelCapacity]) -> [NetworkModelCapacity] {
-        models.sorted {
+        models.filter {
+            ModelCatalogVisibility.includes(
+                $0.id,
+                inUse: $0.ready || $0.canAccept || $0.routableProviders > 0
+                    || $0.warmProviders > 0 || $0.runningProviders > 0
+                    || $0.activeRequests > 0 || $0.queuedRequests > 0
+            )
+        }.sorted {
             let left = $0.ready && $0.canAccept, right = $1.ready && $1.canAccept
             if left != right { return left }
             if $0.queuedRequests != $1.queuedRequests { return $0.queuedRequests > $1.queuedRequests }

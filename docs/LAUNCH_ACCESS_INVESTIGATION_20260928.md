@@ -82,3 +82,29 @@ mutation was requested by this investigation. The final process check observed
 that production Control had a different PID than at the start and its installed
 version was 1.9.0; the cause of that transition was not established. Both provider
 PIDs remained unchanged.
+
+## Scoped permission retest
+
+With explicit user approval, reset only `SystemPolicyRemovableVolumes` for
+`dev.darkbloom.monitor.beta`. `tccutil` reported success. Relaunched the same
+Developer ID signed comparison Beta through Launch Services after separate
+approval for that exact build. Its Models page loaded all ten catalog entries,
+seven downloaded catalog models, and the effective cache path
+`/Volumes/Sol/LLMS/HuggingFace-cache/hub`. A second manual Refresh completed with
+the populated inventory intact and no source error. No new permission prompt
+was observed. This establishes a successful scoped reset/relaunch recovery in
+Beta; it does not establish which stale TCC association caused the original
+block, nor prove a production permission repair is necessary. No model download,
+configuration save, provider restart, or production permission reset was performed.
+
+The live catalog sizing snapshot totals 175,507,402,968 bytes across ten entries,
+plus a 236,127,665-byte assistant artifact. The user identifies `gemma-4-26b` and
+`gemma-4-26b-8bit` as unused legacy entries despite both being marked active by
+the catalog. Excluding those entries yields 119,771,449,621 bytes including the
+assistant. Of these eight current entries, only Qwen3.5-9B was absent from the
+local inventory (6,113,952,230 bytes). Inventory presence is not a checksum audit.
+
+The provider subsequently exited around 20:19:36–20:19:38, before the full app
+test suite began at 20:20:08. Kevin confirmed that he stopped it manually because
+it was not receiving traffic. Leave it stopped; this was not a drive-test or
+monitor-update failure.

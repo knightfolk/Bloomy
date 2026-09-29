@@ -48,6 +48,37 @@ final class ProviderExtrasStore: ObservableObject {
         await refresh(force: false)
     }
 
+    /// Shares the refresh gate with full polling and mutations. Leaving the fan
+    /// page cancels this read; no policy is written by live readings.
+    func refreshFan() async {
+        guard !mutationInFlight else { return }
+        guard snapshot != nil else { await refresh(); return }
+        if let previous = refreshTask { await previous.value; return }
+        isRefreshing = true
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
+        let client = self.client
+        let task = Task { @MainActor [weak self] in
+            let fan = await client.refreshFan()
+            guard let self, !Task.isCancelled, self.refreshGeneration == generation,
+                  let current = self.snapshot else { return }
+            self.snapshot = ProviderExtrasSnapshot(
+                capturedAt: current.capturedAt,
+                idlePolicy: current.idlePolicy,
+                betaFeatures: current.betaFeatures,
+                fanStatus: Self.retainLastGood(fan, previous: current.fanStatus,
+                    reason: "Darkbloom fan status refresh failed"),
+                autoUpdateStatus: current.autoUpdateStatus
+            )
+        }
+        refreshTask = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        if refreshGeneration == generation {
+            refreshTask = nil
+            isRefreshing = false
+        }
+    }
+
     private func refresh(force: Bool) async {
         if let previous = refreshTask {
             if force { previous.cancel() }

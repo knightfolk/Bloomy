@@ -92,6 +92,25 @@ struct OpportunityComparisonTests {
         #expect(OpportunityPresentation.demand(closed) == "Not accepting")
     }
 
+    @Test("network comparison hides idle retired entries but keeps live ones")
+    func retiredNetworkEntries() {
+        let idleLegacy = ["gemma-4-26b", "gemma-4-26b-8bit"].map { id in
+            NetworkModelCapacity(
+                id: id, ready: false, canAccept: false,
+                routableProviders: 0, warmProviders: 0, runningProviders: 0,
+                coldProviders: 0, activeRequests: 0, queuedRequests: 0,
+                queueLimit: 0, aggregateTokensPerSecond: 0,
+                estimatedTimeToFirstTokenMS: 0, tokenBudgetRemaining: 0,
+                tokenBudgetTotal: 0
+            )
+        }
+        let current = [model("gemma-4-26b-qat-4bit", active: 1), model("Qwen3.5-9B", active: 1)]
+        #expect(Set(OpportunityPresentation.ordered(idleLegacy + current).map(\.id)) ==
+            ["gemma-4-26b-qat-4bit", "Qwen3.5-9B"])
+        #expect(OpportunityPresentation.ordered([model("gemma-4-26b", active: 1)]).map(\.id) ==
+            ["gemma-4-26b"])
+    }
+
     @Test("display name only comes from matching metadata")
     func matchedName() {
         let value = model("organization/technical-id", active: 1)
