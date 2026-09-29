@@ -436,6 +436,15 @@ struct MonitorPopover: View {
             }
             .padding(12)
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+            HStack(spacing: 10) {
+                PopupAutoModeControl(store: controlStore, openModels: openModels)
+                if let nudge = store.inactivityNudge {
+                    PopupNudgeControl(store: nudge)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                Spacer()
+            }
             if case .available(.updateAvailable(_, let latest), let checkedAt) = cliUpdates.status,
                currentTime.timeIntervalSince(checkedAt) < 6 * 60 * 60 {
                 Button("CLI \(latest) available", action: openSettings).font(.caption)
@@ -574,15 +583,6 @@ struct MonitorPopover: View {
                 .help("Refresh model controls")
                 .accessibilityLabel("Refresh model controls")
                 .accessibilityIdentifier("popover.models.refresh")
-            }
-            HStack(spacing: 10) {
-                PopupAutoModeControl(store: controlStore, openModels: openModels)
-                if let nudge = store.inactivityNudge {
-                    PopupNudgeControl(store: nudge)
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                }
-                Spacer()
             }
             if let advertised {
                 if advertised.isEmpty {

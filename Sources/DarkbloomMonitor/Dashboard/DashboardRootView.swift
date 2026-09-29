@@ -120,6 +120,10 @@ struct DashboardRootView: View {
             }
         }
         .toolbar {
+            if let nudge = store.inactivityNudge {
+                PopupNudgeControl(store: nudge)
+                    .labelStyle(.titleAndIcon)
+            }
             Button { settingsExpanded = true; navigation.selected = .settings } label: { Label("Settings", systemImage: "gearshape") }
                 .help("Open Settings")
         }
