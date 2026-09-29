@@ -1525,6 +1525,36 @@ struct ProviderControlStoreTests {
         #expect(appIdentity == ObjectIdentifier(controlStore))
         #expect(statusIdentity == appIdentity)
     }
+
+    @Test("native Settings scene renders the full shared settings view")
+    func nativeSettingsSceneUsesSharedStores() async throws {
+        let monitorStore = MonitorStore(
+            service: TelemetryService(source: InertStoreTelemetrySource()),
+            initial: .unavailable(now: Date(timeIntervalSince1970: 1_750_000_000))
+        )
+        let controlStore = ProviderControlStore(controller: FakeProviderController.fixture())
+        let root = AppSettingsSceneRoot(
+            controlStore: controlStore,
+            monitorStore: monitorStore
+        )
+        let settings = ProviderSettingsRoot(
+            controlStore: controlStore,
+            monitorStore: monitorStore
+        )
+        let host = NSHostingController(rootView: root)
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.orderBack(nil)
+        defer { window.close() }
+        let size = host.sizeThatFits(in: NSSize(width: 1_200, height: 900))
+
+        #expect(root.controlStore === controlStore)
+        #expect(root.monitorStore === monitorStore)
+        #expect(settings.controlStore === controlStore)
+        #expect(settings.monitorStore === monitorStore)
+        #expect(settings.extrasStore === monitorStore.providerExtras)
+        #expect(size == NSSize(width: 900, height: 650))
+    }
 }
 
 enum PostExitProviderMutation: String, CaseIterable, Sendable {

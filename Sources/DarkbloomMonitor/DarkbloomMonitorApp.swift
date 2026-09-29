@@ -8,7 +8,10 @@ struct DarkbloomMonitorApp: App {
 
     var body: some Scene {
         Settings {
-            EmptyView()
+            AppSettingsSceneRoot(
+                controlStore: appDelegate.controlStore,
+                monitorStore: appDelegate.monitorStore
+            )
         }
         .commands {
             CommandGroup(after: .appInfo) {
@@ -31,7 +34,7 @@ struct DarkbloomMonitorApp: App {
 @MainActor
 final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private let instanceGuard: SingleInstanceGuard
-    private var store: MonitorStore?
+    @Published private(set) var monitorStore: MonitorStore?
     @Published private(set) var controlStore: ProviderControlStore?
     private var statusItemController: StatusItemController?
 
@@ -212,7 +215,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             providerControlStore?.snapshot
         }
         hostingSettingsStore.attachControlStore(providerControlStore)
-        store = monitorStore
+        self.monitorStore = monitorStore
         controlStore = providerControlStore
         statusItemController = StatusItemController(
             store: monitorStore,
@@ -237,21 +240,22 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
     func applicationWillTerminate(_ notification: Notification) {
         statusItemController?.invalidate()
         controlStore?.cancelCurrentOperation()
-        guard let store else { return }
+        guard let monitorStore else { return }
         Task {
             await CLIUpdateStatusStore.shared.stop()
-            await store.stop()
+            await monitorStore.stop()
         }
     }
 }
 
 struct AppSettingsSceneRoot: View {
     let controlStore: ProviderControlStore?
+    var monitorStore: MonitorStore? = nil
 
     @ViewBuilder
     var body: some View {
-        if let controlStore {
-            ProviderSettingsRoot(controlStore: controlStore)
+        if let controlStore, let monitorStore {
+            ProviderSettingsRoot(controlStore: controlStore, monitorStore: monitorStore)
         } else {
             ProgressView("Starting \(MonitorApplicationIdentity.displayName)…")
                 .frame(width: 420, height: 180)
@@ -261,10 +265,16 @@ struct AppSettingsSceneRoot: View {
 
 struct ProviderSettingsRoot: View {
     @ObservedObject var controlStore: ProviderControlStore
+    var monitorStore: MonitorStore? = nil
+    var extrasStore: ProviderExtrasStore? { monitorStore?.providerExtras }
 
     var body: some View {
-        MonitorSettingsView()
-            .environmentObject(controlStore)
+        MonitorSettingsView(
+            extrasStore: extrasStore,
+            controlStore: controlStore,
+            monitorStore: monitorStore
+        )
+        .frame(width: 900, height: 650)
     }
 }
 
