@@ -47,6 +47,35 @@ struct ActionHistoryStoreTests {
         #expect(!text.contains("private-account"))
     }
 
+    @Test("a successful job retry clears only the job ingestion warning")
+    func ingestionRecovery() async throws {
+        let url = location()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let store = ActionHistoryStore(url: url)
+        let now = Date()
+        func account(model: String) -> AccountEarningsResponse {
+            .init(accountID: "test-account", earnings: [
+                .init(id: 42, providerID: "test-provider", providerKey: "unused",
+                      model: model, amountMicroUSD: 56, promptTokens: 3,
+                      completionTokens: 8, createdAt: now.addingTimeInterval(-10))
+            ], count: 1, historyLimit: 1000, recentCount: 1)
+        }
+        await store.ingest(account(model: "invalid model"), capturedAt: now)
+        #expect(store.storageError != nil)
+        await store.ingest(.init(accountID: "test-account", earnings: [], count: 0,
+                                 historyLimit: 1000, recentCount: 0), capturedAt: now)
+        #expect(store.storageError != nil)
+        await store.ingest(account(model: "gemma"), capturedAt: now)
+        #expect(store.storageError == nil)
+        #expect(store.events.count == 1)
+
+        store.record(action: .nudge, trigger: .manual, outcome: .started, model: "invalid model")
+        let actionError = store.storageError
+        #expect(actionError != nil)
+        await store.ingest(account(model: "gemma"), capturedAt: now)
+        #expect(store.storageError == actionError)
+    }
+
     @Test("storage errors remain visible instead of claiming recording succeeded")
     func unavailableStorage() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("history-file-\(UUID())")

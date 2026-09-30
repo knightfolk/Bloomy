@@ -346,7 +346,11 @@ public final class ActionHistoryDatabase: @unchecked Sendable {
     }
 
     private static func sameIdentity(_ first: ActionHistoryEvent, _ second: ActionHistoryEvent) -> Bool {
-        first.id == second.id && first.occurredAt == second.occurredAt
+        // SQLite persists Unix-epoch REAL. Converting that Double back to
+        // Date can shift its reference-epoch representation by a fraction of
+        // a microsecond, even when the stored timestamp is unchanged.
+        first.id == second.id
+            && first.occurredAt.timeIntervalSince1970 == second.occurredAt.timeIntervalSince1970
             && first.action == second.action && first.trigger == second.trigger
             && first.model == second.model && first.correlationID == second.correlationID
             && first.job?.earningID == second.job?.earningID

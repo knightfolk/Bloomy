@@ -34,6 +34,59 @@ struct ActionHistoryDatabaseTests {
         #expect(ActionHistoryEvent.deterministicID(namespace: "earning", key: "813") != id)
     }
 
+    @Test("fractional account timestamp replays after a SQLite round trip")
+    func fractionalTimestampReplay() throws {
+        let url = temporaryDatabaseURL()
+        let occurred = fixedNow.addingTimeInterval(-60).addingTimeInterval(0.000002)
+        let captured = fixedNow.addingTimeInterval(-5).addingTimeInterval(0.000003)
+        let event = ActionHistoryEvent(
+            id: ActionHistoryEvent.deterministicID(namespace: "account", key: "fractional-812"),
+            occurredAt: occurred, updatedAt: captured,
+            action: .job, trigger: .provider, outcome: .succeeded,
+            model: "qwen3-coder",
+            job: ActionHistoryJob(earningID: 812, promptTokens: 120,
+                                  completionTokens: 40, amountMicroUSD: 17)
+        )
+        do {
+            let database = try makeDatabase(url: url)
+            try database.record(event)
+        }
+        let reopened = try makeDatabase(url: url)
+        let persisted = try #require(reopened.recent().first)
+        // The Date reference-epoch value loses a fraction of a microsecond
+        // when stored as SQLite's Unix-epoch REAL, despite representing the
+        // same persisted timestamp.
+        #expect(persisted.occurredAt != event.occurredAt)
+        #expect(persisted.occurredAt.timeIntervalSince1970 == event.occurredAt.timeIntervalSince1970)
+        try reopened.record(event)
+        #expect(try reopened.retainedRecordCount() == 1)
+    }
+
+    @Test("a genuinely different timestamp cannot reuse an action ID")
+    func timestampConflict() throws {
+        let database = try makeDatabase(url: temporaryDatabaseURL())
+        let id = ActionHistoryEvent.deterministicID(namespace: "account", key: "timestamp-conflict")
+        let occurred = fixedNow.addingTimeInterval(-60).addingTimeInterval(0.000002)
+        let first = ActionHistoryEvent(
+            id: id, occurredAt: occurred, action: .job,
+            trigger: .provider, outcome: .succeeded,
+            model: "qwen3-coder",
+            job: ActionHistoryJob(earningID: 813, promptTokens: 10,
+                                  completionTokens: 20, amountMicroUSD: 5)
+        )
+        try database.record(first)
+        let conflicting = ActionHistoryEvent(
+            id: id, occurredAt: occurred.addingTimeInterval(0.001),
+            action: .job, trigger: .provider, outcome: .succeeded,
+            model: "qwen3-coder",
+            job: first.job
+        )
+        #expect(throws: ActionHistoryDatabaseError.conflictingID) {
+            try database.record(conflicting)
+        }
+        #expect(try database.retainedRecordCount() == 1)
+    }
+
     @Test("newer account data corrects an earning without making a second row")
     func correctedEarning() throws {
         let database = try makeDatabase(url: temporaryDatabaseURL())
