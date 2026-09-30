@@ -42,6 +42,32 @@ struct ModelCardMetric: Identifiable {
     let caption: String
 }
 
+/// A network reading keeps its source freshness separate from its timestamp.
+struct ModelCardDemand: Equatable {
+    let model: NetworkModelCapacity?
+    let isCurrent: Bool
+
+    var title: String {
+        guard let model else { return "Demand unavailable" }
+        return isCurrent ? "\(model.demandBand.rawValue.capitalized) demand" : "Demand stale"
+    }
+
+    var counts: String {
+        guard let model else { return "Waiting for network" }
+        return "\(model.activeRequests.formatted()) active · \(model.queuedRequests.formatted()) queued"
+    }
+
+    var tint: Color {
+        guard isCurrent, let model else { return .secondary }
+        switch model.demandBand {
+        case .low: return .green
+        case .moderate: return .yellow
+        case .high: return .orange
+        case .urgent: return .red
+        }
+    }
+}
+
 struct CompactModelCard: View {
     static let accountAttribution = "History-based and account-derived: earnings recorded for this model on the account, divided by this Mac’s observed active serving hours. The account may include other machines, so this is not measured income on this Mac. Gross excludes electricity; estimated net subtracts estimated incremental power where a measured idle baseline exists. Not a guaranteed payout."
     static let popupHeight: CGFloat = 168
@@ -53,6 +79,8 @@ struct CompactModelCard: View {
     var selected: Bool = false
     var compact: Bool = false
     var compactWidth: CGFloat? = nil
+    var contentOnly = false
+    var demand: ModelCardDemand? = nil
     var activate: (() -> Void)? = nil
     var activationUnavailableReason: String? = nil
     var activationHelp: String = "Add this model to the provider selection"
@@ -79,6 +107,22 @@ struct CompactModelCard: View {
                         .labelStyle(.titleAndIcon)
                 }
                 Spacer(minLength: 0)
+            }
+            if let demand {
+                HStack(spacing: 6) {
+                    Label(demand.title, systemImage: "chart.line.uptrend.xyaxis")
+                        .foregroundStyle(demand.tint)
+                    Spacer(minLength: 4)
+                    Text(demand.counts).foregroundStyle(.secondary).monospacedDigit()
+                }
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .background(demand.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                .help("Network-wide requests for this model. \(demand.isCurrent ? "Current reading." : "A fresh reading is unavailable; retained counts are last known.")")
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("model.\(modelID).demand")
             }
             if compact && metrics.count == 1 && metrics.first?.id == "unknown" {
                 Label("No history yet", systemImage: "clock")
@@ -141,13 +185,13 @@ struct CompactModelCard: View {
                 .controlSize(.small)
             }
         }
-        .padding(compact ? 10 : 12)
-        .frame(maxWidth: .infinity, minHeight: compact ? 104 : 92, alignment: .topLeading)
+        .padding(contentOnly ? 0 : compact ? 10 : 12)
+        .frame(maxWidth: .infinity, minHeight: contentOnly ? nil : compact ? 104 : 92, alignment: .topLeading)
         .frame(width: compact ? compactWidth : nil,
                height: compact && compactWidth != nil ? Self.popupHeight : nil,
                alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? tint : .primary.opacity(0.07), lineWidth: selected ? 1.5 : 1))
+        .background(contentOnly ? Color.clear : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? tint : .primary.opacity(0.07), lineWidth: contentOnly ? 0 : selected ? 1.5 : 1))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(modelID), \(status)")
         .accessibilityValue(metrics.map { "\($0.value) \($0.caption)" }.joined(separator: ", "))

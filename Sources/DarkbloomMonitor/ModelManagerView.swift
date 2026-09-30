@@ -163,6 +163,13 @@ struct ModelManagerTelemetry {
     var tokenRates: [ModelTokenRateAverage] = []
     var servingAverages: [ModelServingProfitAverage] = []
     var networkCapacity: NetworkCapacitySnapshot?
+    var networkSourceAvailable = true
+
+    func demand(modelID: String, at date: Date) -> ModelCardDemand {
+        let model = networkCapacity?.models.first { $0.id == modelID }
+        return ModelCardDemand(model: model,
+            isCurrent: networkSourceAvailable && networkCapacity?.isFresh(at: date) == true && model != nil)
+    }
 }
 
 /// The two collapsible model groups shown in the model manager. `capacity`
@@ -520,6 +527,7 @@ struct ModelManagerView: View {
     @ObservedObject var store: ProviderControlStore
     var networkContext: (String, Date) -> [String] = { _, _ in [] }
     var telemetry = ModelManagerTelemetry()
+    var refreshDemand: (() async -> Void)? = nil
     @State private var deletion: ModelDeletionConfirmation?
     @State private var search = ""
     @State private var inspectedModel: ModelInventoryItem?
@@ -594,6 +602,15 @@ struct ModelManagerView: View {
             HStack(spacing: 12) {
                 modelSearchField
                 Spacer(minLength: 4)
+                demandFreshness(at: currentTime)
+                if let refreshDemand {
+                    Button { Task { await refreshDemand() } } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Refresh network demand")
+                    .accessibilityLabel("Refresh network demand")
+                }
             }
             GeometryReader { geometry in
                 ScrollView {
@@ -631,6 +648,17 @@ struct ModelManagerView: View {
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 8)
+    }
+
+    private func demandFreshness(at date: Date) -> some View {
+        let current = telemetry.networkSourceAvailable && telemetry.networkCapacity?.isFresh(at: date) == true
+        let age = telemetry.networkCapacity.map { max(0, Int(date.timeIntervalSince($0.capturedAt))) }
+        let text = age.map { current ? "Demand · updated \($0)s ago" : "Demand · last known \($0)s ago" }
+            ?? "Demand unavailable"
+        return Label(text, systemImage: current ? "dot.radiowaves.left.and.right" : "clock")
+            .font(.caption).foregroundStyle(.secondary)
+            .help("Network demand refreshes automatically while the dashboard is open.")
+            .accessibilityIdentifier("models.demandFreshness")
     }
 
     /// While searching, groups with matches stay expanded so results are
@@ -689,7 +717,7 @@ struct ModelManagerView: View {
 
     private func subtitle(for scope: ModelGroupScope, items: [ModelInventoryItem]) -> String {
         if scope == .enabled {
-            return "Runtime earnings on cards are what-if estimates, not a schedule"
+            return "Available to receive work"
         }
         let downloaded = items.filter(\.isDownloaded).count
         let notDownloaded = items.count - downloaded
@@ -775,7 +803,7 @@ struct ModelManagerView: View {
     }
 
     private func demand(for item: ModelInventoryItem, at date: Date) -> NetworkModelCapacity? {
-        guard let capacity = telemetry.networkCapacity, capacity.isFresh(at: date) else { return nil }
+        guard telemetry.networkSourceAvailable, let capacity = telemetry.networkCapacity, capacity.isFresh(at: date) else { return nil }
         return capacity.models.first { $0.id == item.catalogID }
     }
 
@@ -814,7 +842,8 @@ struct ModelManagerView: View {
                 forecast: forecast,
                 runPercent: runPercent,
                 setRunPercent: { setWhatIfRunPercent($0, for: item) },
-                showsDetails: expanded
+                showsDetails: expanded,
+                demandPresentation: telemetry.demand(modelID: item.catalogID, at: date)
             )
             if expanded {
                 if item.isDownloaded, let snapshot = store.snapshot {
@@ -838,10 +867,10 @@ struct ModelManagerView: View {
                 cardControls(item: item, at: date)
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(expanded ? 16 : 12)
+        .frame(maxWidth: .infinity, minHeight: expanded ? nil : 192, alignment: .topLeading)
         .background(
-            .quaternary.opacity(item.isDownloaded ? 0.4 : 0.22),
+            Color(nsColor: .controlBackgroundColor).opacity(item.isDownloaded ? 1 : 0.65),
             in: RoundedRectangle(cornerRadius: 14)
         )
         .overlay(alignment: .topLeading) {
@@ -1041,7 +1070,7 @@ enum ModelCardLayout {
     static let maximumCardWidth: CGFloat = 460
     static let rowSpacing: CGFloat = 14
     /// Expected compact-card height; the previous card measured ~530pt.
-    static let estimatedCardHeight: CGFloat = 268
+    static let estimatedCardHeight: CGFloat = 192
 
     static func columnCount(for width: CGFloat) -> Int {
         let threeColumnWidth = CGFloat(maximumColumns) * minimumCardWidth
@@ -1078,6 +1107,7 @@ struct ModelCardSummary: View {
     let runPercent: Int
     let setRunPercent: (Int) -> Void
     var showsDetails = false
+    var demandPresentation: ModelCardDemand? = nil
 
     /// Informational content of not-yet-downloaded cards is muted, while the
     /// Download action stays fully opaque and enabled whenever it is allowed.
@@ -1098,18 +1128,33 @@ struct ModelCardSummary: View {
     // MARK: - Compact card face
 
     private var cardFace: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Group {
-                identityRow
-                if item.isDownloaded {
-                    historyStrip
-                } else {
-                    catalogStrip
-                }
-            }
-            .opacity(item.isDownloaded ? 1 : Self.mutedOpacity)
-            whatIfControl
+        CompactModelCard(modelID: item.catalogID,
+            status: item.isDownloaded ? (item.liveState == .active ? "Serving now" : item.liveState == .loadedIdle ? "Ready in memory" : "Loads on request") : "Not downloaded",
+            symbol: modelSymbol, tint: item.isDownloaded ? accent : .secondary,
+            metrics: compactMetrics, contentOnly: true,
+            demand: demandPresentation ?? ModelCardDemand(model: capacity, isCurrent: capacity != nil))
+    }
+
+    private var compactMetrics: [ModelCardMetric] {
+        if !item.isDownloaded {
+            return [
+                .init(id: "size", symbol: "arrow.down.circle", value: ModelFormatting.size(item.sizeGB), caption: "download"),
+                .init(id: "ram", symbol: "memorychip", value: "\(item.minimumRAMGB) GB", caption: "minimum RAM")
+            ]
         }
+        var metrics: [ModelCardMetric] = []
+        if hasMeasuredSpeed {
+            metrics.append(.init(id: "speed", symbol: "speedometer", value: speedValue, caption: "avg tok/s today"))
+        }
+        if hasAccountEarnings, let serving {
+            metrics.append(.init(id: "earnings", symbol: "dollarsign.circle",
+                value: Self.money(serving.profitUSDPerActiveHour ?? serving.grossUSDPerActiveHour),
+                caption: serving.profitUSDPerActiveHour != nil ? "est. net / active h" : "gross / active h"))
+        }
+        if metrics.isEmpty {
+            metrics.append(.init(id: "unknown", symbol: "clock", value: "Learning", caption: "No history yet"))
+        }
+        return metrics
     }
 
     private var identityRow: some View {

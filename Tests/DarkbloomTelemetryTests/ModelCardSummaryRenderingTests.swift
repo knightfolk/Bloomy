@@ -40,6 +40,28 @@ struct ModelCardSummaryRenderingTests {
         #expect(ModelCardLayout.estimatedCardHeight < 300)
     }
 
+    @Test("demand keeps failed and expired readings visibly stale")
+    func demandFreshness() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let model = NetworkModelCapacity(id: "gemma", ready: true, canAccept: true,
+            routableProviders: 8, warmProviders: 3, runningProviders: 5, coldProviders: 1,
+            activeRequests: 4, queuedRequests: 1, queueLimit: 8, aggregateTokensPerSecond: 125,
+            estimatedTimeToFirstTokenMS: 240, tokenBudgetRemaining: 750, tokenBudgetTotal: 1_000)
+        var telemetry = ModelManagerTelemetry(networkCapacity: .init(models: [model], capturedAt: now))
+        #expect(telemetry.demand(modelID: "gemma", at: now).title == "Urgent demand")
+        #expect(telemetry.demand(modelID: "gemma", at: now).counts == "4 active · 1 queued")
+        telemetry.networkSourceAvailable = false
+        #expect(telemetry.demand(modelID: "gemma", at: now).title == "Demand stale")
+        #expect(!telemetry.demand(modelID: "gemma", at: now).isCurrent)
+        #expect(telemetry.demand(modelID: "gemma", at: now).model == model)
+        telemetry.networkSourceAvailable = true
+        #expect(!telemetry.demand(modelID: "gemma", at: now.addingTimeInterval(121)).isCurrent)
+        #expect(!telemetry.demand(modelID: "gemma", at: now.addingTimeInterval(-6)).isCurrent)
+        #expect(telemetry.demand(modelID: "other", at: now).title == "Demand unavailable")
+        telemetry.networkCapacity = nil
+        #expect(telemetry.demand(modelID: "gemma", at: now).model == nil)
+    }
+
     @Test("enabled models lead the catalog without reordering the remaining results")
     func enabledModelsLead() {
         func item(_ id: String) -> ModelInventoryItem {
@@ -59,7 +81,7 @@ struct ModelCardSummaryRenderingTests {
         #expect(sorted.map(\.catalogID) == ["vendor/enabled-a", "vendor/enabled-b", "vendor/first", "vendor/last"])
     }
 
-    @Test("compact downloaded card keeps the what-if slider and roughly halves the footprint", arguments: [300.0, 400.0])
+    @Test("compact card uses popup styling and keeps hosting controls", arguments: [300.0, 400.0])
     func rendersCompactCard(width: Double) throws {
         let item = ModelInventoryItem(
             catalogID: "google/gemma-4",

@@ -27,8 +27,10 @@ struct ModelsView: View {
                     telemetry: ModelManagerTelemetry(
                         tokenRates: monitorStore?.currentModelTokenRateAverages ?? [],
                         servingAverages: monitorStore?.modelServingProfitAverages ?? [],
-                        networkCapacity: monitorStore?.networkCapacity.value
-                    )
+                        networkCapacity: monitorStore?.networkCapacity.value,
+                        networkSourceAvailable: monitorStore.map { if case .available = $0.networkCapacity { true } else { false } } ?? false
+                    ),
+                    refreshDemand: monitorStore.map { store in { await store.refreshNetworkCapacity() } }
                 )
             } else {
                 ContentUnavailableView("Model controls unavailable", systemImage: "cpu",
