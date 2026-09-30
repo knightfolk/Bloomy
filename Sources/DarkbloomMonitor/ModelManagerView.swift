@@ -1129,7 +1129,7 @@ struct ModelCardSummary: View {
 
     private var cardFace: some View {
         CompactModelCard(modelID: item.catalogID,
-            status: item.isDownloaded ? (item.liveState == .active ? "Serving now" : item.liveState == .loadedIdle ? "Ready in memory" : "Loads on request") : "Not downloaded",
+            status: item.isDownloaded ? (item.liveState == .active ? "Serving now" : item.liveState == .loadedIdle ? "Ready in memory" : "Not loaded") : "Not downloaded",
             symbol: modelSymbol, tint: item.isDownloaded ? accent : .secondary,
             metrics: compactMetrics, contentOnly: true,
             demand: demandPresentation ?? ModelCardDemand(model: capacity, isCurrent: capacity != nil))
