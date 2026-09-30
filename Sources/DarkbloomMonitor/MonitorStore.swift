@@ -4,6 +4,7 @@ import SwiftUI
 
 @MainActor
 final class MonitorStore: ObservableObject {
+    var actionHistory: ActionHistoryStore?
     let providerExtras: ProviderExtrasStore?
     /// Whole-Mac GPU utilization sampler owned by the app lifecycle so the
     /// menu-bar ring keeps working with no dashboard open. Views observe it;

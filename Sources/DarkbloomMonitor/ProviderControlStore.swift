@@ -51,6 +51,12 @@ enum LifecycleConfirmation: Equatable {
 
 @MainActor
 final class ProviderControlStore: ObservableObject {
+    var actionHistory: ActionHistoryStore?
+    private var historyOperationID: UUID?
+    private var historySwapID: UUID?
+    private var historyNudgeID: UUID?
+    private var historyWarmupID: UUID?
+    private var historyCancelled = false
     @Published private(set) var snapshot: ProviderControlSnapshot?
     @Published private(set) var draft: ProviderConfigDraft?
     @Published private(set) var operation: ProviderOperation = .idle
@@ -58,9 +64,9 @@ final class ProviderControlStore: ObservableObject {
     @Published private(set) var pendingConfirmation: LifecycleConfirmation?
     @Published private(set) var errorMessage: String?
     @Published private(set) var latestDownloadProgressLine: String?
-    @Published private(set) var switchWarmupStatus: SwitchWarmupStatus?
-    @Published private(set) var swapStatus: ModelSwapStatus?
-    @Published private(set) var swapNudgeStatus: SwitchWarmupStatus?
+    @Published private(set) var switchWarmupStatus: SwitchWarmupStatus? { didSet { recordSelectionWarmup() } }
+    @Published private(set) var swapStatus: ModelSwapStatus? { didSet { recordSwapStatus() } }
+    @Published private(set) var swapNudgeStatus: SwitchWarmupStatus? { didSet { recordSwapNudgeStatus() } }
 
     private let controller: any ProviderControlling
     private let warmupProbe: (any SelfRouteWarmupProbing)?
@@ -304,9 +310,9 @@ final class ProviderControlStore: ObservableObject {
 
     /// The CLI switch command replaces and persists the entire advertised set.
     /// Keep this explicit rather than changing Apply Live's full-set behavior.
-    func switchToSingleModel(_ modelID: String, sendWarmup: Bool = true) async {
+    func switchToSingleModel(_ modelID: String, sendWarmup: Bool = true, trigger: ActionHistoryTrigger = .manual) async {
         guard singleModelSwitchUnavailableReason(for: modelID) == nil,
-              let generation = begin(.liveSwitch) else { return }
+              let generation = begin(.liveSwitch, trigger: trigger, model: modelID) else { return }
         let controller = self.controller
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -755,7 +761,7 @@ final class ProviderControlStore: ObservableObject {
         ) == nil,
               let initialDraft = draft,
               let initialSnapshot = snapshot,
-              let generation = begin(.saving) else { return }
+              let generation = begin(.saving, model: modelID, historyAction: .modelSelection) else { return }
         let alreadySaved = initialDraft.original.enabled.contains {
             Self.resolvedCatalogID(for: $0, in: initialSnapshot.inventory) == modelID
         }
@@ -1047,8 +1053,13 @@ final class ProviderControlStore: ObservableObject {
         failureMessage: String? = nil,
         mutation: @escaping @Sendable () async throws -> Void
     ) async -> Bool {
+        let historyAction: ActionHistoryAction = label == "hosting" ? .hosting
+            : label.hasPrefix("fan control") ? .cooling
+            : label == "idle memory policy" ? .idleSettings
+            : label.hasPrefix("beta ") ? .betaSettings
+            : label == "automatic provider updates" ? .providerUpdates : .saveSettings
         guard pendingConfirmation == nil, draft?.hasChanges != true,
-              let generation = begin(.saving) else { return false }
+              let generation = begin(.saving, historyAction: historyAction) else { return false }
         var succeeded = false
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1096,6 +1107,7 @@ final class ProviderControlStore: ObservableObject {
     }
 
     func cancelCurrentOperation() {
+        historyCancelled = currentTask != nil
         currentTask?.cancel()
     }
 
@@ -1186,9 +1198,83 @@ final class ProviderControlStore: ObservableObject {
         return "Provider remains in graceful drain. \(remaining) accepted request(s) remain; new requests are paused. Select Stop again to continue."
     }
 
-    private func begin(_ newOperation: ProviderOperation) -> UInt64? {
+    private func recordSelectionWarmup() {
+        switch switchWarmupStatus {
+        case .checking(let model):
+            historyWarmupID = actionHistory?.record(action: .nudge, trigger: .manual,
+                outcome: .started, model: model, correlationID: historyOperationID)
+        case .result(_, let result, _):
+            let outcome: ActionHistoryOutcome
+            let reason: ActionHistoryReason?
+            switch result {
+            case .sent: outcome = .succeeded; reason = nil
+            case .missingKey: outcome = .skipped; reason = .keyMissing
+            case .keyRejected: outcome = .failed; reason = .keyRejected
+            case .modelUnavailable: outcome = .skipped; reason = .modelUnavailable
+            case .failed: outcome = .unconfirmed; reason = .requestFailed
+            }
+            actionHistory?.finish(historyWarmupID, outcome: outcome, reason: reason)
+        case nil: historyWarmupID = nil
+        }
+    }
+
+    private func recordSwapStatus() {
+        switch swapStatus {
+        case .checking(let model):
+            historySwapID = actionHistory?.record(action: .swap, trigger: .manual, outcome: .started, model: model)
+        case .confirmed: actionHistory?.finish(historySwapID, outcome: .succeeded)
+        case .unconfirmed: actionHistory?.finish(historySwapID, outcome: .unconfirmed, reason: .notConfirmed)
+        case .failed: actionHistory?.finish(historySwapID, outcome: .failed, reason: .requestFailed)
+        case nil: break
+        }
+    }
+
+    private func recordSwapNudgeStatus() {
+        switch swapNudgeStatus {
+        case .checking(let model):
+            historyNudgeID = actionHistory?.record(action: .nudge, trigger: .swap, outcome: .started,
+                model: model, correlationID: historySwapID)
+        case .result(let model, let result, _):
+            if historyNudgeID == nil {
+                historyNudgeID = actionHistory?.record(action: .nudge, trigger: .swap, outcome: .started,
+                    model: model, correlationID: historySwapID)
+            }
+            let outcome: ActionHistoryOutcome
+            let reason: ActionHistoryReason?
+            switch result {
+            case .sent: outcome = .succeeded; reason = nil
+            case .missingKey: outcome = .skipped; reason = .keyMissing
+            case .keyRejected: outcome = .failed; reason = .keyRejected
+            case .modelUnavailable: outcome = .skipped; reason = .modelUnavailable
+            case .failed: outcome = .unconfirmed; reason = .requestFailed
+            }
+            actionHistory?.finish(historyNudgeID, outcome: outcome, reason: reason)
+        case nil: historyNudgeID = nil
+        }
+    }
+
+    private func begin(_ newOperation: ProviderOperation, trigger: ActionHistoryTrigger = .manual, model: String? = nil, historyAction: ActionHistoryAction? = nil) -> UInt64? {
         guard operation == .idle else { return nil }
         operationGeneration &+= 1
+        historyCancelled = false
+        let action: ActionHistoryAction?
+        var recordedModel = model
+        switch newOperation {
+        case .idle, .refreshing, .nudging: action = nil
+        case .saving: action = historyAction ?? .saveSettings
+        case .liveSwitch: action = .modelSelection
+        case .downloading(let id): action = .downloadModel; recordedModel = id
+        case .deleting(let id): action = .deleteModel; recordedModel = id
+        case .lifecycle(let value):
+            switch value {
+            case .start: action = .startProvider
+            case .stop: action = .stopProvider
+            case .restart: action = .restartProvider
+            }
+        }
+        historyOperationID = action.map {
+            actionHistory?.record(action: $0, trigger: trigger, outcome: .started, model: recordedModel)
+        } ?? nil
         operation = newOperation
         switch newOperation {
         case .saving, .liveSwitch, .downloading, .deleting, .lifecycle:
@@ -1213,6 +1299,10 @@ final class ProviderControlStore: ObservableObject {
 
     private func finish(_ generation: UInt64) {
         guard operationGeneration == generation else { return }
+        actionHistory?.finish(historyOperationID,
+            outcome: historyCancelled || Task.isCancelled ? .cancelled : (pendingConfirmation != nil ? .skipped : (errorMessage == nil ? .succeeded : .unconfirmed)),
+            reason: pendingConfirmation != nil ? .confirmationRequired : (errorMessage == nil ? nil : .notConfirmed))
+        historyOperationID = nil
         currentTask = nil
         operation = .idle
         operationPhase = nil

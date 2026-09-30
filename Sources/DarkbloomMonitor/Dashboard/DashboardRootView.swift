@@ -2,6 +2,7 @@ import SwiftUI
 
 enum DashboardDestination: String, CaseIterable, Identifiable {
     case overview = "Overview", chat = "Chat", activity = "Activity", opportunity = "Opportunity"
+    case history = "Action History"
     case models = "Models", hosting = "Hosting", health = "Health & Logs", settings = "Settings"
     var id: String { rawValue }
     var symbol: String {
@@ -13,6 +14,7 @@ enum DashboardDestination: String, CaseIterable, Identifiable {
         case .models: "cpu"
         case .hosting: "antenna.radiowaves.left.and.right"
         case .health: "waveform.path.ecg"
+        case .history: "clock.arrow.circlepath"
         case .settings: "gearshape"
         }
     }
@@ -57,7 +59,7 @@ struct DashboardRootView: View {
                     destinationRows([.chat, .models, .hosting])
                 }
                 DisclosureGroup("Diagnostics", isExpanded: $diagnosticsExpanded) {
-                    destinationRows([.health])
+                    destinationRows([.history, .health])
                 }
                 DisclosureGroup("Settings", isExpanded: $settingsExpanded) {
                     ForEach(SettingsPage.allCases) { page in
@@ -108,6 +110,12 @@ struct DashboardRootView: View {
                         description: Text("Provider hosting controls are not available in this session.")
                     )
                 }
+            } else if navigation.selected == .history {
+                if let history = store.actionHistory {
+                    ActionHistoryView(store: history)
+                } else {
+                    Text("Action history is unavailable in this session.")
+                }
             } else if navigation.selected == .settings {
                 MonitorSettingsView(
                     extrasStore: store.providerExtras,
@@ -131,7 +139,7 @@ struct DashboardRootView: View {
             switch destination {
             case .overview, .activity, .opportunity: monitorExpanded = true
             case .chat, .models, .hosting: workspaceExpanded = true
-            case .health: diagnosticsExpanded = true
+            case .health, .history: diagnosticsExpanded = true
             case .settings: settingsExpanded = true
             }
         }

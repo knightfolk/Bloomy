@@ -63,6 +63,7 @@ final class ProfitSwitchStore: ObservableObject {
 
     func updateTiming(_ value: ProfitSwitchTiming) {
         timing = value
+        control.actionHistory?.record(action: .profitSettings, trigger: .manual, outcome: .succeeded)
         defaults.set(try? JSONEncoder().encode(value), forKey: Self.prefix + "timing")
         generation += 1
         task?.cancel()
@@ -74,6 +75,7 @@ final class ProfitSwitchStore: ObservableObject {
 
     func setEnabled(_ value: Bool) {
         enabled = value
+        control.actionHistory?.record(action: .profitSettings, trigger: .manual, outcome: .succeeded, reason: value ? .completed : .disabled)
         defaults.set(value, forKey: Self.prefix + "enabled")
         generation += 1
         task?.cancel()
@@ -189,7 +191,7 @@ final class ProfitSwitchStore: ObservableObject {
             self.status = "Switching to \(proposal.modelID) for an estimated profit advantage."
             // No automatic consumer inference: the inactivity watcher has its
             // own credential, rate limit, and independent evidence requirements.
-            await self.control.switchToSingleModel(proposal.modelID, sendWarmup: false)
+            await self.control.switchToSingleModel(proposal.modelID, sendWarmup: false, trigger: .automatic)
             let ended = self.now()
             let elapsed = ended.timeIntervalSince(started)
             if elapsed.isFinite, elapsed >= 0 {

@@ -1137,16 +1137,23 @@ struct ProviderControlStoreTests {
     func confirmsActiveRestart() async throws {
         let controller = FakeProviderController.fixture(activityRisks: [.active, .active])
         let store = ProviderControlStore(controller: controller)
+        let historyURL = FileManager.default.temporaryDirectory.appendingPathComponent("control-history-\(UUID())/actions.sqlite3")
+        defer { try? FileManager.default.removeItem(at: historyURL.deletingLastPathComponent()) }
+        let history = ActionHistoryStore(url: historyURL)
+        store.actionHistory = history
         await store.refresh()
 
         await store.request(.restart)
         #expect(store.pendingConfirmation == .restart(.active))
         #expect(await controller.executedActions.isEmpty)
+        #expect(history.events.first?.outcome == .skipped)
+        #expect(history.events.first?.reason == .confirmationRequired)
 
         await store.confirmPendingLifecycle()
         #expect(await controller.executedActions.map(\.action) == [.restart])
         #expect(await controller.activityReadCount == 2)
         #expect(store.pendingConfirmation == nil)
+        #expect(history.events.filter { $0.outcome == .succeeded }.count == 1)
     }
 
     @Test("unknown stop requires confirmation and the override executes after a final read")

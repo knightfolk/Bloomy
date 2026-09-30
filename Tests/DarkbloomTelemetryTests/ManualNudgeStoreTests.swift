@@ -76,6 +76,10 @@ struct ManualNudgeStoreTests {
             spy.sends += 1
             return .sent
         }
+        let historyURL = FileManager.default.temporaryDirectory.appendingPathComponent("nudge-history-\(UUID())/actions.sqlite3")
+        defer { try? FileManager.default.removeItem(at: historyURL.deletingLastPathComponent()) }
+        let history = ActionHistoryStore(url: historyURL)
+        store.actionHistory = history
         store.observe(state(modelSwitch: .init(
             outcome: .switched, models: ["model-a"], remainingRequests: 0
         )))
@@ -83,6 +87,10 @@ struct ManualNudgeStoreTests {
         #expect(await store.nudgeNow())
         #expect(spy.preflights == [true])
         #expect(spy.sends == 1)
+        let nudges = history.events.filter { $0.action == .nudge }
+        #expect(nudges.count == 1)
+        #expect(nudges.first?.trigger == .manual)
+        #expect(nudges.first?.outcome == .succeeded)
         await store.stop()
     }
 

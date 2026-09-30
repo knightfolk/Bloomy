@@ -119,7 +119,7 @@ struct InactivityNudgeStoreTests {
                 spy.sends += 1
                 spy.lastModel = state.currentModel
                 spy.preflightAllowed = await preflight()
-                return .sent
+                return spy.outcome
             }
         )
         store.setEnabled(true)
@@ -194,6 +194,32 @@ struct InactivityNudgeStoreTests {
         await third.stop()
     }
 
+    @Test("disabled polling does not flood history and rejected sends are not duplicate skips")
+    func historyTransitions() async throws {
+        let clock = NudgeTestClock(epoch)
+        let key = FakeConsumerKeyStore()
+        key.inject("watcher-test-key")
+        let spy = NudgeTestSpy()
+        spy.outcome = .keyRejected
+        let store = makeStore(defaults: makeDefaults(), clock: clock, key: key, spy: spy)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("watcher-history-\(UUID())/actions.sqlite3")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let history = ActionHistoryStore(url: url)
+        store.actionHistory = history
+        for offset in stride(from: 0, through: 3600, by: 10) {
+            clock.set(epoch + Double(offset))
+            store.observe(state(at: epoch + Double(offset)))
+        }
+        #expect(history.events.filter { $0.action == .watcher && $0.reason == .disabled }.count == 1)
+        clock.set(epoch)
+        store.setEnabled(true)
+        driveIdle(store, clock: clock, minutes: 15)
+        #expect(await eventually { history.events.contains { $0.action == .nudge && $0.outcome == .failed } })
+        #expect(history.events.filter { $0.action == .nudge && $0.reason == .keyRejected }.count == 1)
+        #expect(!history.events.contains { $0.action == .watcher && $0.reason == .keyRejected })
+        await store.stop()
+    }
+
     private func makeStore(
         defaults: UserDefaults,
         clock: NudgeTestClock,
@@ -214,7 +240,7 @@ struct InactivityNudgeStoreTests {
                 spy.sends += 1
                 spy.lastModel = state.currentModel
                 spy.preflightAllowed = await preflight()
-                return .sent
+                return spy.outcome
             }
         )
     }
@@ -280,6 +306,7 @@ private final class NudgeTestClock: @unchecked Sendable {
 @MainActor
 private final class NudgeTestSpy {
     var evidence: NudgeEarningsEvidence
+    var outcome: SelfRouteWarmupResult = .sent
     var earningsChecks = 0
     var sends = 0
     var lastSince: Date?

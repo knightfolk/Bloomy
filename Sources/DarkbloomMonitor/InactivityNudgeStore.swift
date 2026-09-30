@@ -6,6 +6,8 @@ import DarkbloomTelemetry
 /// no independent background timer and cannot run while Bloomy is closed.
 @MainActor
 final class InactivityNudgeStore: ObservableObject {
+    var actionHistory: ActionHistoryStore?
+    private var lastRecordedPause: ActionHistoryReason?
     static let keyService = "dev.darkbloom.control.inactivity-nudge-key"
     @Published private(set) var enabled: Bool
     @Published private(set) var inactivityMinutes: Int
@@ -74,6 +76,7 @@ final class InactivityNudgeStore: ObservableObject {
 
     func setEnabled(_ value: Bool) {
         enabled = value
+        actionHistory?.record(action: .nudgeSettings, trigger: .manual, outcome: .succeeded, reason: value ? .completed : .disabled)
         defaults.set(value, forKey: Self.prefix + "enabled")
         resetPending()
         status = value ? "Waiting for fresh idle evidence." : "Automatic nudge is off."
@@ -82,6 +85,7 @@ final class InactivityNudgeStore: ObservableObject {
     func setInactivityMinutes(_ value: Int) {
         guard [15, 30, 60].contains(value) else { return }
         inactivityMinutes = value
+        actionHistory?.record(action: .nudgeSettings, trigger: .manual, outcome: .succeeded)
         defaults.set(value, forKey: Self.prefix + "minutes")
         resetPending()
     }
@@ -91,6 +95,7 @@ final class InactivityNudgeStore: ObservableObject {
             try keyStore.store(key)
             keyPresent = keyStore.hasKey
             resetPending()
+            actionHistory?.record(action: .nudgeKey, trigger: .manual, outcome: .succeeded)
             manualStatus = "Nudge key saved securely."
             return nil
         } catch {
@@ -102,6 +107,7 @@ final class InactivityNudgeStore: ObservableObject {
         resetPending()
         keyStore.remove()
         keyPresent = keyStore.hasKey
+        actionHistory?.record(action: .nudgeKey, trigger: .manual, outcome: keyPresent ? .failed : .succeeded, reason: keyPresent ? .requestFailed : .disabled)
         status = keyPresent ? "Keychain could not remove the key." : "Add a nudge key in Settings."
         manualStatus = keyPresent ? "Keychain could not remove the nudge key."
             : "Add a nudge key below."
@@ -144,6 +150,7 @@ final class InactivityNudgeStore: ObservableObject {
             policy.reset()
             eligibleSince = nil
             status = enabled ? "Add a nudge key in Settings." : "Automatic nudge is off."
+            recordWatcherPause(enabled ? .keyMissing : .disabled)
             return
         }
         // While our task owns the control gate, keep consuming telemetry so
@@ -152,14 +159,16 @@ final class InactivityNudgeStore: ObservableObject {
             policy.reset()
             eligibleSince = nil
             status = "Paused while provider settings are changing."
+            recordWatcherPause(.providerBusy)
             return
         }
         eligibleSince = policy.observe(state, at: instant, threshold: Double(inactivityMinutes) * 60)
         guard task == nil else { return }
         guard let since = eligibleSince, let state else {
-            status = NudgeIdleStateEligibility.eligibleState(state, at: instant) == nil
-                ? "Paused: waiting for fresh, idle provider state."
-                : "Watching for \(inactivityMinutes) minutes of continuous idle time."
+            let ready = NudgeIdleStateEligibility.eligibleState(state, at: instant) != nil
+            status = ready ? "Watching for \(inactivityMinutes) minutes of continuous idle time."
+                : "Paused: waiting for fresh, idle provider state."
+            recordWatcherPause(ready ? nil : .providerNotReady)
             return
         }
         guard budgetAvailable(at: instant) else { return }
@@ -176,6 +185,7 @@ final class InactivityNudgeStore: ObservableObject {
                 self.status = result == .workRecorded
                     ? "Account work was recorded; no nudge needed."
                     : "Waiting for complete base-reward-only earnings evidence."
+                self.recordWatcherPause(result == .workRecorded ? .workRecorded : .earningsUnavailable)
                 return
             }
             let attemptTime = self.now()
@@ -185,7 +195,7 @@ final class InactivityNudgeStore: ObservableObject {
             self.defaults.set(self.attempts, forKey: Self.prefix + "attempts")
             self.lastAttempt = attemptTime
             self.status = "Sending one self-route nudge."
-            let outcome = await self.send(state) { [weak self] in
+            let outcome = await self.recordedSend(state, trigger: .automatic) { [weak self] in
                 await self?.candidateValid(ticket: ticket, since: since) ?? false
             }
             guard self.generation == ticket else { return }
@@ -225,7 +235,7 @@ final class InactivityNudgeStore: ObservableObject {
                     self.manualTask = nil
                     self.isManuallyNudging = false
                 }
-                let outcome = await self.send(state) { [weak self] in
+                let outcome = await self.recordedSend(state, trigger: .manual) { [weak self] in
                     await self?.manualCandidateValid(ticket: ticket, candidate: candidate) ?? false
                 }
                 guard self.generation == ticket else { return false }
@@ -258,6 +268,38 @@ final class InactivityNudgeStore: ObservableObject {
         }
         manualStatus = reason
         return false
+    }
+
+    private func recordedSend(
+        _ state: DaemonState, trigger: ActionHistoryTrigger,
+        canSend: @escaping @Sendable () async -> Bool
+    ) async -> SelfRouteWarmupResult? {
+        let id = actionHistory?.record(action: .nudge, trigger: trigger,
+            outcome: .started, model: state.currentModel)
+        let outcome = await send(state, canSend)
+        let result: ActionHistoryOutcome
+        let reason: ActionHistoryReason?
+        if Task.isCancelled { result = .cancelled; reason = nil }
+        else {
+            switch outcome {
+            case .sent: result = .succeeded; reason = .completed
+            case .missingKey: result = .skipped; reason = .keyMissing
+            case .keyRejected: result = .failed; reason = .keyRejected
+            case .modelUnavailable: result = .skipped; reason = .modelUnavailable
+            case .failed: result = .failed; reason = .requestFailed
+            case nil: result = .skipped; reason = .providerBusy
+            }
+        }
+        actionHistory?.finish(id, outcome: result, reason: reason)
+        return outcome
+    }
+
+    private func recordWatcherPause(_ reason: ActionHistoryReason?) {
+        guard reason != lastRecordedPause else { return }
+        lastRecordedPause = reason
+        guard let reason else { return }
+        actionHistory?.record(action: .watcher, trigger: .automatic, outcome: .skipped,
+            model: latestState?.currentModel, reason: reason)
     }
 
     private struct ManualCandidate: Sendable {
@@ -298,15 +340,18 @@ final class InactivityNudgeStore: ObservableObject {
         guard seconds.isFinite, !invalidLedger,
               attempts.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= seconds }) else {
             status = "Paused: attempt history or system clock needs attention."
+            recordWatcherPause(.providerNotReady)
             return false
         }
         attempts.removeAll { seconds - $0 >= 86_400 }
         guard attempts.count < 3 else {
             status = "Daily limit reached (3 attempts in 24 hours)."
+            recordWatcherPause(.dailyLimit)
             return false
         }
         if let latest = attempts.max(), seconds - latest < 3_600 {
             status = "Cooldown: at least 1 hour between attempts."
+            recordWatcherPause(.cooldown)
             return false
         }
         return true

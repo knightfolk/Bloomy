@@ -116,17 +116,20 @@ public struct AuthenticatedEarningsClient: AccountEarningsFetching, Sendable {
     private let session: URLSession
     private let historyLimit: Int
     private let database: EarningsDatabase?
+    private let observeAccount: (@Sendable (AccountEarningsResponse, Date) async -> Void)?
 
     public init(
         homeDirectory: URL,
         session: URLSession = .shared,
         historyLimit: Int = 1_000,
-        database: EarningsDatabase? = nil
+        database: EarningsDatabase? = nil,
+        observeAccount: (@Sendable (AccountEarningsResponse, Date) async -> Void)? = nil
     ) {
         tokenURL = homeDirectory.appendingPathComponent(".darkbloom/auth_token")
         self.session = session
         self.historyLimit = historyLimit
         self.database = database
+        self.observeAccount = observeAccount
     }
 
     /// Fresh account rows only: no leaderboard or persisted-history fallback.
@@ -151,6 +154,7 @@ public struct AuthenticatedEarningsClient: AccountEarningsFetching, Sendable {
         let (data, response) = try await session.data(for: request.urlRequest)
         try validate(response)
         let account = try AccountEarningsParser.parse(data)
+        await observeAccount?(account, now)
         try await database?.ingest(account, capturedAt: now)
 
         let recentHistory = AccountEarningsParser.rolling24Hours(account, now: now)

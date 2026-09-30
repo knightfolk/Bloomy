@@ -86,6 +86,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             unifiedEvents: UnifiedLogStreamer().events()
         )
         let applicationSupport = MonitorApplicationIdentity.applicationSupportDirectory()
+        let actionHistory = ActionHistoryStore(url: applicationSupport.appendingPathComponent("actions.sqlite3"))
         let alertHistoryDatabase = try? AlertHistoryDatabase(
             url: applicationSupport.appendingPathComponent("alerts.sqlite3")
         )
@@ -103,7 +104,10 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         )
         let earningsClient = AuthenticatedEarningsClient(
             homeDirectory: home,
-            database: earningsDatabase
+            database: earningsDatabase,
+            observeAccount: { [weak actionHistory] account, capturedAt in
+                await actionHistory?.ingest(account, capturedAt: capturedAt)
+            }
         )
         let monitorStore = MonitorStore(
             service: service,
@@ -120,6 +124,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             publicPricingClient: PublicPricingClient(),
             networkSeriesClient: NetworkSeriesClient()
         )
+        monitorStore.actionHistory = actionHistory
         let configExecutable = policy.cliCandidates.first(where: {
             FileManager.default.isExecutableFile(atPath: $0.path)
         }) ?? policy.cliCandidates[0]
@@ -196,6 +201,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
                 hostingSettingsStore?.options ?? HostingSettingsStore.loadOptions(from: .standard)
             }
         )
+        providerControlStore.actionHistory = actionHistory
         monitorStore.profitSwitch = ProfitSwitchStore(control: providerControlStore)
         monitorStore.inactivityNudge = InactivityNudgeStore(
             keyStore: nudgeKeyStore,
@@ -221,6 +227,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
                 )
             }
         )
+        monitorStore.inactivityNudge?.actionHistory = actionHistory
         monitorStore.attachRecommendationInventory { [weak providerControlStore] in
             providerControlStore?.snapshot
         }
