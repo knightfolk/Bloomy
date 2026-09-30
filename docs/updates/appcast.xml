@@ -3,6 +3,29 @@
     <channel>
         <title>Bloomy</title>
         <item>
+            <title>1.9.9</title>
+            <pubDate>Tue, 29 Sep 2026 18:08:50 -0700</pubDate>
+            <sparkle:version>134</sparkle:version>
+            <sparkle:shortVersionString>1.9.9</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Bloomy v1.9.9
+
+A persistent Action History makes Bloomy's actions easier to understand.
+
+- Open **Diagnostics → Action History** to search and filter actions, reported jobs, and base rewards.
+- See manual, automatic, and swap-triggered nudges with their outcomes, plus model changes, provider controls, hosting, cooling, and related settings actions.
+- Interrupted attempts remain visible after an app restart. Skipped automatic nudges record a reason without filling history on every telemetry poll.
+- Reported account earnings retain model, earning ID, time, token counts, and amount. These records are account-wide, may be incomplete, and do not imply a nudge caused later work. Base rewards are clearly distinguished from jobs.
+- History stays on this Mac, with up to 30 days or 5,000 entries. Credentials, provider keys, prompts, responses, and raw diagnostic errors are excluded. Recording failures are visible.
+
+Action recording begins with this update; previous app actions cannot be reconstructed. Recent account earnings may be backfilled from the server's available history.
+
+For Apple Silicon Macs running macOS 14 or newer.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/Bloomy/releases/download/v1.9.9/Bloomy-1.9.9-mac-arm64.zip" length="8635249" type="application/octet-stream" sparkle:edSignature="mvGvzpiKrLN0JJtOZalEaCADtXwM0xdO5k2Xe0eWHCsBLb+FKWLWSUVL/eAmH4EzO7CiFXdZrujvztLzalq0Bg=="/>
+        </item>
+        <item>
             <title>1.9.8</title>
             <pubDate>Tue, 29 Sep 2026 15:50:16 -0700</pubDate>
             <sparkle:version>133</sparkle:version>

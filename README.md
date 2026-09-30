@@ -19,6 +19,11 @@ change the model this Mac advertises when fresh demand, earnings, power, and
 idle-state evidence support a meaningful estimated gain. Both wait when the
 evidence is incomplete. Neither can promise public work or income.
 
+Open **Diagnostics → Action History** for persistent nudge outcomes, provider
+and model actions, and reported account-wide jobs and base rewards. History is
+kept locally for up to 30 days or 5,000 entries, without credentials or prompt
+contents. Earning IDs identify account records, not individual serving requests.
+
 ## Download
 
 Download the Apple Silicon build from [Releases](https://github.com/knightfolk/Bloomy/releases/latest),
@@ -28,7 +33,7 @@ the Bloomy release uses `Bloomy.app`. Check the release page for the version
 and signing status of the download you select.
 Quit an older monitor copy before launching the new one. macOS may still ask
 for first-launch confirmation or permission to read your external model drive.
-Bloomy v1.9.8 is Developer ID signed and notarized by Apple, with a stapled
+Bloomy v1.9.9 is Developer ID signed and notarized by Apple, with a stapled
 notarization ticket and verified Gatekeeper acceptance.
 
 ## Coming soon
