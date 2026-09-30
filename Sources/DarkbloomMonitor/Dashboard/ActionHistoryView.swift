@@ -324,7 +324,7 @@ struct ActionHistoryView: View {
         }
     }
 
-    private static func currency(_ amountMicroUSD: Int64) -> String {
-        (Decimal(amountMicroUSD) / Decimal(1_000_000)).formatted(.currency(code: "USD"))
+    static func currency(_ amountMicroUSD: Int64) -> String {
+        (Decimal(amountMicroUSD) / Decimal(1_000_000)).formatted(.currency(code: "USD").precision(.fractionLength(6)))
     }
 }

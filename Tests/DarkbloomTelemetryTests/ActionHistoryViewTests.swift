@@ -8,6 +8,12 @@ import Testing
 @Suite("Action history rendering", .serialized)
 @MainActor
 struct ActionHistoryViewTests {
+    @Test("subcent earnings preserve all six fractional digits")
+    func preciseEarnings() {
+        #expect(ActionHistoryView.currency(56).contains("0.000056"))
+        #expect(ActionHistoryView.currency(1_250).contains("0.001250"))
+    }
+
     @Test("account actions, skipped nudges, jobs, and rewards fit a 900 by 650 window")
     func renderHistory() async throws {
         let directory = FileManager.default.temporaryDirectory
