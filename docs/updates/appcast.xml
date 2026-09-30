@@ -3,6 +3,23 @@
     <channel>
         <title>Bloomy</title>
         <item>
+            <title>1.9.11</title>
+            <pubDate>Tue, 29 Sep 2026 18:36:37 -0700</pubDate>
+            <sparkle:version>136</sparkle:version>
+            <sparkle:shortVersionString>1.9.11</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Bloomy v1.9.11
+
+Action History now reliably recognizes previously saved jobs with fractional timestamps after a refresh or restart. A successful job retry clears its temporary save warning while preserving warnings about missing app actions.
+
+The new history keeps nudge attempts and outcomes, model/provider actions, and reported jobs and base rewards. Job details include model, earning ID, tokens, and exact earnings to six decimal places. Open **Diagnostics → Action History** to browse or search. History is stored locally for up to 30 days and 5,000 records; earlier app actions cannot be reconstructed.
+
+For Apple Silicon Macs running macOS 14 or newer.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/Bloomy/releases/download/v1.9.11/Bloomy-1.9.11-mac-arm64.zip" length="8639855" type="application/octet-stream" sparkle:edSignature="1gstbn65sUK86lrHFVeKiiEPBWiiKKR4gqEjuLL8+1gmzthMe2rUe3fHanN52jXozPF2a/u9KkC8Sxh5UvoHBg=="/>
+        </item>
+        <item>
             <title>1.9.10</title>
             <pubDate>Tue, 29 Sep 2026 18:21:09 -0700</pubDate>
             <sparkle:version>135</sparkle:version>
