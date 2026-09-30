@@ -3,6 +3,25 @@
     <channel>
         <title>Bloomy</title>
         <item>
+            <title>1.9.12</title>
+            <pubDate>Wed, 30 Sep 2026 10:40:54 -0700</pubDate>
+            <sparkle:version>137</sparkle:version>
+            <sparkle:shortVersionString>1.9.12</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Bloomy v1.9.12
+
+The Models page now uses compact cards that match the menu-bar popup. Each card puts model status and network demand first, with active and queued request counts. Measured speed and history-based earnings remain easy to scan; forecasts and detailed assumptions are available in Manage or Details.
+
+Demand refreshes automatically while the dashboard is open. The page shows when the reading was updated and includes a refresh button. Failed or expired readings are marked stale, with retained counts clearly identified as last known.
+
+Enabled and Available groups remain collapsible, and model selection, startup loading, download, and management controls are preserved.
+
+For Apple Silicon Macs running macOS 14 or newer.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/Bloomy/releases/download/v1.9.12/Bloomy-1.9.12-mac-arm64.zip" length="8620962" type="application/octet-stream" sparkle:edSignature="wmhtyV8Pi09FuMaedK87Hap42xlp1bYdMkTDFHtXTypT04PUbpt4wOQTW1STSlOBCH8At9D/cfM6fVL5iYmYAw=="/>
+        </item>
+        <item>
             <title>1.9.11</title>
             <pubDate>Tue, 29 Sep 2026 18:36:37 -0700</pubDate>
             <sparkle:version>136</sparkle:version>
