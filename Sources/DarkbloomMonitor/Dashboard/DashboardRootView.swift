@@ -20,6 +20,11 @@ enum DashboardDestination: String, CaseIterable, Identifiable {
     }
 }
 
+enum DashboardSidebarSelection: Hashable {
+    case destination(DashboardDestination)
+    case settings(SettingsPage)
+}
+
 @MainActor
 final class DashboardNavigation: ObservableObject {
     private let defaults: UserDefaults
@@ -29,6 +34,36 @@ final class DashboardNavigation: ObservableObject {
     @Published var settingsPage: SettingsPage {
         didSet { defaults.set(settingsPage.rawValue, forKey: "dashboard.settingsPage") }
     }
+    var sidebarSelection: DashboardSidebarSelection {
+        get {
+            selected == .settings ? .settings(settingsPage) : .destination(selected)
+        }
+        set {
+            switch newValue {
+            case .destination(let destination):
+                selected = destination
+            case .settings(let page):
+                settingsPage = page
+                selected = .settings
+            }
+        }
+    }
+
+    func revealSelectedSection() {
+        let key: String
+        switch selected {
+        case .overview, .activity, .opportunity:
+            key = "sidebar.monitor.expanded"
+        case .chat, .models, .hosting:
+            key = "sidebar.workspace.expanded"
+        case .health, .history:
+            key = "sidebar.diagnostics.expanded"
+        case .settings:
+            key = "sidebar.settings.expanded"
+        }
+        defaults.set(true, forKey: key)
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         settingsPage = defaults.string(forKey: "dashboard.settingsPage").flatMap(SettingsPage.init(rawValue:)) ?? .appearance
@@ -51,7 +86,7 @@ struct DashboardRootView: View {
 
     var body: some View {
         NavigationSplitView {
-            List {
+            List(selection: $navigation.sidebarSelection) {
                 DisclosureGroup("Monitor", isExpanded: $monitorExpanded) {
                     destinationRows([.overview, .activity, .opportunity])
                 }
@@ -63,14 +98,10 @@ struct DashboardRootView: View {
                 }
                 DisclosureGroup("Settings", isExpanded: $settingsExpanded) {
                     ForEach(SettingsPage.allCases) { page in
-                        sidebarRow(
-                            title: page.rawValue,
-                            symbol: page.symbol,
-                            selected: navigation.selected == .settings && navigation.settingsPage == page
-                        ) {
-                            navigation.settingsPage = page
-                            navigation.selected = .settings
-                        }
+                        Label(page.sidebarTitle, systemImage: page.symbol)
+                            .help(page.rawValue)
+                            .accessibilityLabel(page.rawValue)
+                            .tag(DashboardSidebarSelection.settings(page))
                     }
                 }
             }
@@ -150,36 +181,9 @@ struct DashboardRootView: View {
 
     private func destinationRows(_ destinations: [DashboardDestination]) -> some View {
         ForEach(destinations) { destination in
-            sidebarRow(
-                title: destination.rawValue,
-                symbol: destination.symbol,
-                selected: navigation.selected == destination
-            ) {
-                navigation.selected = destination
-            }
+            Label(destination.rawValue, systemImage: destination.symbol)
+                .accessibilityLabel(destination.rawValue)
+                .tag(DashboardSidebarSelection.destination(destination))
         }
     }
-
-    private func sidebarRow(
-        title: String,
-        symbol: String,
-        selected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(
-                    selected ? Color.accentColor.opacity(0.18) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 7)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
-        .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
-    }
-
 }

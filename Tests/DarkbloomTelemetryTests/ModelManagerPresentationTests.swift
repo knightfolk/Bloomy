@@ -22,13 +22,38 @@ struct ModelManagerPresentationTests {
         #expect(ModelManagerPresentation.filtered([value], search: "no-match").isEmpty)
     }
 
-    @Test("running models lead the local comparison")
-    func modelOrder() {
-        let unloaded = item(isDownloaded: true)
-        let active = item(isDownloaded: true, liveState: .active)
-        let loaded = item(isDownloaded: true, liveState: .loadedIdle)
-        #expect(ModelManagerPresentation.filtered([unloaded, loaded, active], search: "").map(\.liveState)
-            == [.active, .loadedIdle, .unloaded])
+    @Test("distinct model cards keep display-name and identity order across activity changes")
+    func modelOrderIgnoresActivity() {
+        func model(_ id: String, name: String, state: InventoryLiveState) -> ModelInventoryItem {
+            ModelInventoryItem(catalogID: id, localID: id, displayName: name,
+                modelType: "text", capabilities: [], sizeGB: 1, minimumRAMGB: 1,
+                isDownloaded: true, isEnabled: false, isPreloaded: false,
+                liveState: state, issue: nil)
+        }
+        let states: [InventoryLiveState] = [.active, .loadedIdle, .unloaded]
+        for first in states {
+            for second in states {
+                for third in states {
+                    let models = [
+                        model("vendor/z", name: "Zulu", state: first),
+                        model("vendor/b", name: "Alpha", state: second),
+                        model("vendor/c", name: "Bravo", state: third),
+                        model("vendor/a", name: "Alpha", state: third),
+                    ]
+                    for input in [models, Array(models.reversed())] {
+                        let sorted = ModelManagerPresentation.filtered(input, search: "")
+                        #expect(sorted.map(\.catalogID) == ["vendor/a", "vendor/b", "vendor/c", "vendor/z"])
+                        // Ordering is stable while the displayed state still
+                        // receives the latest inventory observation.
+                        #expect(sorted.map(\.liveState) == [third, second, third, first])
+                    }
+                    #expect(ModelManagerPresentation.filtered(models, search: "alpha").map(\.catalogID)
+                        == ["vendor/a", "vendor/b"])
+                    #expect(ModelManagerPresentation.filtered(models, search: "vendor/z").map(\.catalogID)
+                        == ["vendor/z"])
+                }
+            }
+        }
     }
 
     @Test("model cards group vendor colors and report only evidence-backed fit")

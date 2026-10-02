@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Read-only host utilization and provider-reported GPU resource context.
 struct ProviderResourcesView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var store: MonitorStore
     @StateObject private var cpuUsage = SystemCPUUsageStore()
     /// The dashboard shares the app-lifecycle GPU sampler with the menu-bar
@@ -86,7 +87,7 @@ struct ProviderResourcesView: View {
                         .stroke(reading.isStale ? Color.secondary : Color.purple,
                                 style: StrokeStyle(lineWidth: 6, lineCap: .round))
                         .rotationEffect(.degrees(-90))
-                        .animation(.easeOut(duration: 0.35), value: percentage)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.35), value: percentage)
                     VStack(spacing: -2) {
                         Text(percentage.formatted(.number.precision(.fractionLength(0))))
                             .font(.system(.headline, design: .rounded, weight: .bold))

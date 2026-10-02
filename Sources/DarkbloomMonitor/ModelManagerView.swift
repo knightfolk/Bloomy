@@ -117,10 +117,6 @@ enum ModelManagerPresentation {
     static func filtered(_ items: [ModelInventoryItem], search: String) -> [ModelInventoryItem] {
         return items.filter { search.isEmpty || $0.displayName.localizedCaseInsensitiveContains(search)
             || $0.catalogID.localizedCaseInsensitiveContains(search) }.sorted {
-                func rank(_ item: ModelInventoryItem) -> Int {
-                    switch item.liveState { case .active: 0; case .loadedIdle: 1; case .unloaded: 2 }
-                }
-                if rank($0) != rank($1) { return rank($0) < rank($1) }
                 let names = $0.displayName.localizedStandardCompare($1.displayName)
                 return names == .orderedSame ? $0.catalogID < $1.catalogID : names == .orderedAscending
             }
@@ -1846,10 +1842,12 @@ private struct ModelDetailsDisclosureStyle: DisclosureGroupStyle {
 }
 
 private struct ModelGroupDisclosureStyle: DisclosureGroupStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
                     configuration.isExpanded.toggle()
                 }
             } label: {

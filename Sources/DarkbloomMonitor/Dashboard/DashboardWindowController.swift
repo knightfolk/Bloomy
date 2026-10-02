@@ -23,7 +23,7 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
         let content = NSHostingController(rootView: DashboardRootView(
             store: store, controlStore: controlStore, hostingStore: hostingStore,
             chatStore: chatStore, openChatWindow: openChatWindow, navigation: navigation
-        ))
+        ).defaultAppStorage(defaults))
         let window = NSWindow(contentViewController: content)
         window.title = MonitorApplicationIdentity.displayName
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -42,8 +42,10 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { nil }
 
     func present(section: DashboardDestination? = nil, settingsPage: SettingsPage? = nil, activate: Bool = true) {
+        let hasExplicitRoute = section != nil || settingsPage != nil
         if let settingsPage { navigation.settingsPage = settingsPage }
         if let section { navigation.selected = section }
+        if hasExplicitRoute { navigation.revealSelectedSection() }
         if activate { showWindow(nil) } else { window?.orderBack(nil) }
         window?.deminiaturize(nil)
         constrainToVisibleScreen()

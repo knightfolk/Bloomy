@@ -359,10 +359,12 @@ enum PopupNetworkDemandPresentation {
 }
 
 private struct PopupAvailableDisclosureStyle: DisclosureGroupStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
                     configuration.isExpanded.toggle()
                 }
             } label: {

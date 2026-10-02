@@ -191,6 +191,7 @@ private actor FixtureController: ProviderControlling {
     let scenario: FixtureScenario
     var selection = ProviderModelSelection(enabled: Array(FixtureData.modelIDs.prefix(3)), preloaded: Array(FixtureData.modelIDs.prefix(2)))
     var slots = 3
+    var startupPreload: Bool? = true
     var concurrent = 4
     init(scenario: FixtureScenario) { self.scenario = scenario }
     func refresh() async throws -> ProviderControlSnapshot {
@@ -208,12 +209,15 @@ private actor FixtureController: ProviderControlling {
         return ProviderControlSnapshot(inventory: ModelInventoryBuilder.build(catalog: FixtureData.catalog,
             local: local, selection: selection, daemon: daemon, loadedModels: loadedModelIDs),
             draft: ProviderConfigDraft(sourceRevision: "synthetic", original: selection, selection: selection,
-                originalMaxModelSlots: slots, maxModelSlots: slots, originalEngineV2MaxConcurrent: concurrent, engineV2MaxConcurrent: concurrent),
+                originalMaxModelSlots: slots, maxModelSlots: slots,
+                originalStartupPreload: startupPreload, startupPreload: startupPreload,
+                originalEngineV2MaxConcurrent: concurrent, engineV2MaxConcurrent: concurrent),
             daemonState: daemon, capturedAt: now,
             sources: ProviderControlSourceStates(catalog: catalogSource, localModels: catalogSource, daemon: runtimeSource, loadedModels: runtimeSource))
     }
     func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult {
         selection = draft.selection; slots = draft.maxModelSlots ?? 3; concurrent = draft.engineV2MaxConcurrent ?? 4
+        startupPreload = draft.startupPreload
         return ProviderConfigSaveResult(draft: try await refresh().draft, restartRequired: true)
     }
     func download(_ modelID: String, onOutput: (@Sendable (ProcessOutputChunk) -> Void)?) async throws {}
@@ -303,6 +307,7 @@ private final class FixtureModel: ObservableObject {
     let defaults: UserDefaults
     let directory: URL
     let navigation: DashboardNavigation
+    lazy var popup = FixturePopoverController(model: self)
     @Published var monitor: MonitorStore
     @Published var control: ProviderControlStore
     @Published var hosting: HostingSettingsStore
@@ -310,6 +315,9 @@ private final class FixtureModel: ObservableObject {
     @Published var ready = false
     @Published var issue: String?
     @Published var scenario: FixtureScenario = .fresh
+    private var loadTask: Task<Void, Never>?
+    private var loadGeneration = 0
+    private var isTerminating = false
 
     init() {
         let suite = "dev.darkbloom.dashboard-fixture.session.\(UUID().uuidString)"
@@ -345,17 +353,42 @@ private final class FixtureModel: ObservableObject {
         return (monitor, control, hosting, chat)
     }
     func tick() async {
-        guard ready, scenario.hasCurrentRuntime || scenario == .offline else { return }
-        await monitor.accept(FixtureData.snapshot(scenario, now: Date()))
-        await control.refreshPreservingDraft()
+        guard ready, !isTerminating, scenario.hasCurrentRuntime || scenario == .offline else { return }
+        let currentScenario = scenario
+        let currentMonitor = monitor
+        let currentControl = control
+        await currentMonitor.accept(FixtureData.snapshot(currentScenario, now: Date()))
+        await currentControl.refreshPreservingDraft()
     }
     func load() async {
+        guard !isTerminating else { return }
+        let requestedScenario = scenario
+        loadGeneration += 1
+        let generation = loadGeneration
         ready = false; issue = nil
-        let stores = Self.makeStores(scenario, defaults: defaults, directory: directory)
-        monitor = stores.0; control = stores.1; hosting = stores.2; chat = stores.3
+        let previous = loadTask
+        previous?.cancel()
+        // Join previous preparation before another task can seed the same
+        // history. Only the current request may publish prepared stores.
+        let task = Task { @MainActor [weak self] in
+            await previous?.value
+            guard let self, !Task.isCancelled, generation == self.loadGeneration else { return }
+            await self.prepare(requestedScenario, generation: generation)
+        }
+        loadTask = task
+        await task.value
+        if generation == loadGeneration { loadTask = nil }
+    }
+    private func prepare(_ requestedScenario: FixtureScenario, generation: Int) async {
+        await popup.closeAndWait(resetContent: true)
+        guard !Task.isCancelled, generation == loadGeneration else { return }
+        let stores = Self.makeStores(requestedScenario, defaults: defaults, directory: directory)
+        let preparedMonitor = stores.0
+        let preparedControl = stores.1
+        var preparationIssue: String?
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let performanceURL = directory.appendingPathComponent("performance-\(scenario.id).sqlite")
+            let performanceURL = directory.appendingPathComponent("performance-\(requestedScenario.id).sqlite")
             let seedPerformance = !FileManager.default.fileExists(atPath: performanceURL.path)
             let database = try PerformanceHistoryDatabase(url: performanceURL)
             let now = Date()
@@ -379,8 +412,8 @@ private final class FixtureModel: ObservableObject {
                     tokensGenerated: Int64(counterIndex * 300), requestsServed: Int64(counterIndex / 3),
                     gpuUtilizationPercent: Double(35 + index % 45), gpuMemoryGB: 32, powerWatts: 75 + Double(index % 20), autopilotPhase: index % 90 < 8 ? "waiting_inventory" : "shadow"))
             }
-            monitor.performanceHistory = PerformanceHistoryStore(url: performanceURL)
-            let history = ActionHistoryStore(url: directory.appendingPathComponent("actions-\(scenario.id).sqlite"))
+            preparedMonitor.performanceHistory = PerformanceHistoryStore(url: performanceURL)
+            let history = ActionHistoryStore(url: directory.appendingPathComponent("actions-\(requestedScenario.id).sqlite"))
             if history.events.isEmpty {
                 for index in 0..<48 {
                     history.record(action: index % 3 == 0 ? .swap : .saveSettings, trigger: .manual,
@@ -388,18 +421,209 @@ private final class FixtureModel: ObservableObject {
                         reason: index % 9 == 0 ? .notConfirmed : .completed)
                 }
             }
-            monitor.actionHistory = history; control.actionHistory = history
-            await control.refresh(); await monitor.providerExtras?.refresh()
-            await monitor.refreshEarnings(); await monitor.refreshPublicCatalog(); await monitor.refreshPublicPricing()
-            if scenario != .offline { await monitor.refreshNetworkCapacity(); await monitor.refreshNetworkSeries() }
-            if scenario == .stale {
-                await monitor.refreshNetworkCapacity(); await monitor.refreshNetworkSeries()
-                await monitor.refreshPublicPricing()
+            preparedMonitor.actionHistory = history; preparedControl.actionHistory = history
+            await preparedControl.refresh(); await preparedMonitor.providerExtras?.refresh()
+            await preparedMonitor.refreshEarnings(); await preparedMonitor.refreshPublicCatalog(); await preparedMonitor.refreshPublicPricing()
+            if requestedScenario != .offline { await preparedMonitor.refreshNetworkCapacity(); await preparedMonitor.refreshNetworkSeries() }
+            if requestedScenario == .stale {
+                await preparedMonitor.refreshNetworkCapacity(); await preparedMonitor.refreshNetworkSeries()
+                await preparedMonitor.refreshPublicPricing()
             }
-            if scenario.hasStaleCatalog { await monitor.refreshPublicCatalog() }
-            await monitor.refreshRecommendation()
-        } catch { issue = "Synthetic history preparation failed: \(error.localizedDescription)" }
+            if requestedScenario.hasStaleCatalog { await preparedMonitor.refreshPublicCatalog() }
+            await preparedMonitor.refreshRecommendation()
+        } catch { preparationIssue = "Synthetic history preparation failed: \(error.localizedDescription)" }
+        guard !Task.isCancelled, generation == loadGeneration, !isTerminating else {
+            await preparedMonitor.stop()
+            return
+        }
+        monitor = preparedMonitor; control = preparedControl; hosting = stores.2; chat = stores.3
+        issue = preparationIssue
         ready = true
+    }
+    func stopForTermination() async {
+        isTerminating = true
+        ready = false
+        loadGeneration += 1
+        let loading = loadTask
+        loading?.cancel()
+        await loading?.value
+        loadTask = nil
+        await popup.closeAndWait(resetContent: true)
+        await monitor.stop()
+    }
+}
+
+@MainActor
+private final class FixturePopoverController: NSObject, NSPopoverDelegate {
+    private weak var model: FixtureModel?
+    private let popover = NSPopover()
+    private let visibility = PopoverVisibility()
+    private var hostedMonitor: MonitorStore?
+    private var fanExtras: ProviderExtrasStore?
+    private var fanToken: UUID?
+    private var fanCancellations: [UUID: Task<Void, Never>] = [:]
+    private var isClosing = false
+    private var closeWaiters: [CheckedContinuation<Void, Never>] = []
+
+    init(model: FixtureModel) {
+        self.model = model
+        super.init()
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 560, height: 430)
+        popover.delegate = self
+    }
+
+    func show(from button: NSView) {
+        guard let model, model.ready, !isClosing else { return }
+        if popover.isShown {
+            isClosing = true
+            popover.performClose(button)
+            return
+        }
+        if popover.contentViewController == nil {
+            hostedMonitor = model.monitor
+            let content = FixturePopoverContent(store: model.monitor, control: model.control,
+                visibility: visibility, defaults: model.defaults,
+                openSettings: { [weak self] page in self?.navigate(.settings, settingsPage: page) },
+                openDashboard: { [weak self] in self?.navigate(.overview) },
+                openModels: { [weak self] in self?.navigate(.models) },
+                openHosting: { [weak self] in self?.navigate(.hosting) })
+            popover.contentViewController = NSHostingController(rootView: content)
+            popover.contentSize = NSSize(width: 560, height: 430)
+        }
+        let control = model.control
+        Task { @MainActor [weak control] in await control?.refreshPreservingDraft() }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
+    func popoverWillShow(_ notification: Notification) {
+        if fanToken == nil {
+            fanExtras = hostedMonitor?.providerExtras
+            fanToken = fanExtras?.beginVisibleFanObservation()
+        }
+        visibility.setVisible(true)
+    }
+
+    func popoverWillClose(_ notification: Notification) {
+        isClosing = true
+        endObservation()
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        endObservation()
+        isClosing = false
+        let waiters = closeWaiters
+        closeWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
+    private func closeNativePopover() async {
+        guard popover.isShown || isClosing else { return }
+        await withCheckedContinuation { continuation in
+            // Register before requesting closure: AppKit may notify synchronously.
+            closeWaiters.append(continuation)
+            if !isClosing {
+                isClosing = true
+                popover.performClose(nil)
+            }
+        }
+    }
+
+    private func endObservation() {
+        visibility.setVisible(false)
+        guard let token = fanToken else { return }
+        fanToken = nil
+        if let cancelled = fanExtras?.endVisibleFanObservation(token) {
+            let id = UUID()
+            fanCancellations[id] = cancelled
+            // Retain every reader until its join finishes, then release it.
+            Task { @MainActor [weak self] in
+                await cancelled.value
+                self?.fanCancellations.removeValue(forKey: id)
+            }
+        }
+        fanExtras = nil
+    }
+
+    func closeAndWait(resetContent: Bool = false) async {
+        repeat {
+            await closeNativePopover()
+            endObservation()
+            let pending = fanCancellations
+            for (id, cancellation) in pending {
+                await cancellation.value
+                fanCancellations.removeValue(forKey: id)
+            }
+            // Reopening while readers are joined requires another native close.
+            // Each close awaits its delegate event, leaving AppKit free to finish.
+        } while popover.isShown || isClosing || !fanCancellations.isEmpty
+        if resetContent {
+            popover.contentViewController = nil
+            hostedMonitor = nil
+        }
+    }
+
+    private func navigate(_ destination: DashboardDestination, settingsPage: SettingsPage? = nil) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await closeAndWait()
+            guard let model else { return }
+            if let settingsPage { model.navigation.settingsPage = settingsPage }
+            model.navigation.selected = destination
+            model.navigation.revealSelectedSection()
+        }
+    }
+}
+
+private struct FixturePopoverContent: View {
+    @ObservedObject var store: MonitorStore
+    let control: ProviderControlStore
+    @ObservedObject var visibility: PopoverVisibility
+    let defaults: UserDefaults
+    @AppStorage private var appearance: String
+    let openSettings: (SettingsPage?) -> Void
+    let openDashboard: () -> Void
+    let openModels: () -> Void
+    let openHosting: () -> Void
+
+    init(store: MonitorStore, control: ProviderControlStore, visibility: PopoverVisibility,
+         defaults: UserDefaults, openSettings: @escaping (SettingsPage?) -> Void,
+         openDashboard: @escaping () -> Void, openModels: @escaping () -> Void,
+         openHosting: @escaping () -> Void) {
+        self.store = store; self.control = control; self.visibility = visibility
+        self.defaults = defaults
+        _appearance = AppStorage(wrappedValue: "light", ApplicationAppearance.defaultsKey, store: defaults)
+        self.openSettings = openSettings; self.openDashboard = openDashboard
+        self.openModels = openModels; self.openHosting = openHosting
+    }
+
+    var body: some View {
+        MonitorPopover(store: store, isVisible: visibility.isVisible,
+            ownsVisibleFanPolling: false, openSettings: openSettings,
+            openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
+            .environmentObject(control)
+            .defaultAppStorage(defaults)
+            .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+    }
+}
+
+private struct FixturePopupButton: NSViewRepresentable {
+    let controller: FixturePopoverController
+    let enabled: Bool
+    func makeCoordinator() -> Coordinator { Coordinator(controller: controller) }
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton(title: "Popup", target: context.coordinator, action: #selector(Coordinator.show(_:)))
+        button.bezelStyle = .rounded
+        button.setAccessibilityLabel("Open synthetic native popup")
+        button.setAccessibilityIdentifier("fixture.popup.open")
+        return button
+    }
+    func updateNSView(_ button: NSButton, context: Context) { button.isEnabled = enabled }
+    @MainActor
+    final class Coordinator: NSObject {
+        let controller: FixturePopoverController
+        init(controller: FixturePopoverController) { self.controller = controller }
+        @objc func show(_ sender: NSButton) { controller.show(from: sender) }
     }
 }
 
@@ -427,8 +651,8 @@ private struct FixtureReviewView: View {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("SYNTHETIC REVIEW · no provider or API calls").font(.headline)
-                        Text("CPU/GPU collectors disabled · thermal state is actual host state").font(.caption).foregroundStyle(.secondary)
+                        Text("SYNTHETIC REVIEW · no live API calls").font(.headline)
+                        Text("CPU/GPU off · Mac name and thermal are actual").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 4)
                     Picker("Scenario", selection: $model.scenario) {
@@ -436,6 +660,7 @@ private struct FixtureReviewView: View {
                     }.frame(width: 150)
                     Toggle("Dark", isOn: Binding(get: { appearance == "dark" }, set: { appearance = $0 ? "dark" : "light" })).toggleStyle(.checkbox)
                     Toggle("800 × 560", isOn: $compact).toggleStyle(.checkbox)
+                    FixturePopupButton(controller: model.popup, enabled: model.ready).frame(width: 64, height: 24)
                     Button("Reload") { Task { await model.load() } }
                 }.padding(10).background(Color.orange.opacity(0.12))
                 if let issue = model.issue { Text(issue).foregroundStyle(.red).padding(6) }
@@ -465,6 +690,8 @@ private struct FixtureReviewView: View {
 private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate {
     private let model = FixtureModel()
     private var window: NSWindow?
+    private var shutdownTask: Task<Void, Never>?
+    private var shutdownApproved = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let content = NSHostingController(rootView: FixtureReviewView(model: model))
@@ -482,6 +709,22 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate 
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if shutdownApproved { return .terminateNow }
+        guard shutdownTask == nil else { return .terminateCancel }
+        // Cancel this request so the invoking MainActor job can return. A
+        // terminateLater nested AppKit loop can prevent our cleanup job from
+        // running when Quit originated in MonitorStore's async task.
+        model.ready = false
+        shutdownTask = Task { @MainActor in
+            await model.stopForTermination()
+            shutdownApproved = true
+            shutdownTask = nil
+            sender.terminate(nil)
+        }
+        return .terminateCancel
+    }
 }
 
 @main

@@ -93,7 +93,7 @@ fresh `--output` path for each retry/rebuild and preserve failed outputs until
 their diagnostics and review provenance are no longer needed.
 
 The persistent orange banner identifies synthetic review, disabled CPU/GPU
-collectors, and the actual host thermal state. Scenario switches reconstruct the
+collectors, and the actual local Mac name/host thermal state. Scenario switches reconstruct the
 injected stores. **Fresh** supplies synthetic CLI 0.9.17 telemetry and refreshes
 the synthetic state/control evidence every five seconds, preserving model drafts.
 **Stale** retains last-known telemetry/extras and simulates failed follow-up
@@ -116,6 +116,49 @@ preserving its stale catalog/local-inventory source flags. The fixture naturally
 inherits the host's existing reduced-motion preference. SwiftUI exposes that
 environment value as read-only, so the attempted fixture override is unsupported;
 controlled Reduced Motion proof remains pending.
+
+**Popup** opens the unchanged production `MonitorPopover` in an actual transient
+`NSPopover`, configured with production's 560 × 430 content size and anchored to
+the fixture button. Its Available disclosure uses the same isolated preference
+suite, and its theme/control environment use the existing fixture dependencies.
+The native delegate owns one visible-fan observation token; SwiftUI child fan
+polling is disabled to avoid a duplicate subscription. Closing releases the
+token; reload/scenario replacement and app termination additionally await the
+cancelled polling task before replacing stores or exiting. Dashboard, Settings,
+Models, and Hosting actions close the popup then route into the existing fixture
+window. Keep the synthetic banner visible behind popup proof captures. This
+proves native popup behavior, not placement beneath the production menu-bar item.
+
+Rapid popup toggles retain every cancelled reader until it has been joined;
+cleanup awaits AppKit's native close-completion event before draining outstanding
+readers or dropping hosted content. A close waiter is registered before closure
+is requested, and reopening is blocked while the native close is in progress.
+If reopened while readers are being joined, cleanup awaits that close too.
+Scenario loading owns one serialized
+preparation task, captures the requested scenario/generation, cancels and joins
+the previous preparation, and publishes completed stores only for the current
+request. Rapid scenario changes cannot start two history seeders or let an older
+request mark newer work ready. Termination also cancels and joins pending loading.
+The fixture cancels the first native Quit request, starts one owned cleanup task,
+then retries termination after cleanup has completed. Repeated Quit requests
+reuse that task. This avoids a nested AppKit termination wait blocking cleanup
+on the main actor when Quit originated in the popup's asynchronous action.
+Native clean-quit behavior must be verified against the newly built fixture;
+the previous fixture's hanging Quit is not proof of production behavior.
+
+Popup model actions use the in-memory provider actor; fan mutations remain
+unsupported/rejected; Nudge uses in-memory credentials with actions disabled.
+The actor initially enables startup preload for its two saved preload models and
+retains selection, slots, startup preload, and concurrency on save/readback, so
+the Auto sheet can confirm a saved single-model startup plan without serving.
+Its CLI update store uses the existing staged inert dependency. No additional
+production substitutions are needed. One presentation limitation remains:
+the production finance panel directly reads `UserDefaults.standard` for a
+read-only electricity-enabled check. In this separate bundle that is the fixture
+application domain, not the session suite, so its electricity settings-link
+visibility may differ from the synthetic session toggle. It performs no write
+and does not start power acquisition. Production credential-oriented text still
+describes Keychain, but fixture Save/Remove operations remain memory-only.
 
 Each process uses a unique `dev.darkbloom.dashboard-fixture.session.*` defaults
 suite, a unique temporary `BloomyDashboardFixture-*` directory, 360 synthetic

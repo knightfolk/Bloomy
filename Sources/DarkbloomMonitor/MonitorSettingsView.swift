@@ -24,7 +24,9 @@ struct MonitorSettingsView: View {
                 NavigationSplitView {
                     List(selection: $standaloneSelection) {
                         ForEach(SettingsPage.allCases) { page in
-                            Label(page.rawValue, systemImage: page.symbol)
+                            Label(page.sidebarTitle, systemImage: page.symbol)
+                                .help(page.rawValue)
+                                .accessibilityLabel(page.rawValue)
                                 .tag(page)
                         }
                     }

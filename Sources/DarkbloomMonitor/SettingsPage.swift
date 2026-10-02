@@ -11,6 +11,13 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     case support = "Support"
 
     var id: String { rawValue }
+    var sidebarTitle: String {
+        switch self {
+        case .companion: "Companion"
+        default: rawValue
+        }
+    }
+
     var symbol: String {
         switch self {
         case .appearance: "paintpalette"

@@ -76,6 +76,73 @@ struct DashboardWindowTests {
         #expect(DashboardNavigation(defaults: defaults).settingsPage == .appearance)
     }
 
+    @Test("sidebar selection routes destinations and restores the independent Settings page")
+    func sidebarSelectionRoutesAndPersistsSettingsPage() throws {
+        let suite = "DashboardSidebarSelection-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let navigation = DashboardNavigation(defaults: defaults)
+        navigation.sidebarSelection = .settings(.electricity)
+        #expect(navigation.selected == .settings)
+        #expect(navigation.settingsPage == .electricity)
+        #expect(defaults.string(forKey: "dashboard.settingsPage") == SettingsPage.electricity.rawValue)
+
+        navigation.sidebarSelection = .destination(.models)
+        #expect(navigation.selected == .models)
+        #expect(navigation.settingsPage == .electricity)
+        #expect(defaults.string(forKey: "dashboard.selectedSection") == DashboardDestination.models.rawValue)
+        #expect(defaults.string(forKey: "dashboard.settingsPage") == SettingsPage.electricity.rawValue)
+
+        let restored = DashboardNavigation(defaults: defaults)
+        #expect(restored.selected == .models)
+        #expect(restored.settingsPage == .electricity)
+        #expect(restored.sidebarSelection == .destination(.models))
+
+        // Existing toolbar and context-menu routes update the list's selection.
+        navigation.selected = .settings
+        #expect(navigation.sidebarSelection == .settings(.electricity))
+        navigation.settingsPage = .fans
+        #expect(navigation.sidebarSelection == .settings(.fans))
+    }
+
+    @Test("explicit routes reveal their sidebar group while generic reopen preserves collapse")
+    func explicitRoutesRevealSidebarGroups() throws {
+        let suite = "DashboardSidebarReveal-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MonitorStore(service: TelemetryService(source: DashboardUnusedSource()), initial: .unavailable(now: Date()))
+        let controller = DashboardWindowController(
+            store: store,
+            controlStore: nil,
+            frameAutosaveName: nil,
+            defaults: defaults
+        )
+        defer { controller.close() }
+
+        defaults.set(false, forKey: "sidebar.workspace.expanded")
+        controller.present(section: .models, activate: false)
+        #expect(defaults.bool(forKey: "sidebar.workspace.expanded"))
+
+        defaults.set(false, forKey: "sidebar.workspace.expanded")
+        controller.present(section: .models, activate: false)
+        #expect(defaults.bool(forKey: "sidebar.workspace.expanded"))
+
+        defaults.set(false, forKey: "sidebar.settings.expanded")
+        controller.present(section: .settings, settingsPage: .electricity, activate: false)
+        #expect(defaults.bool(forKey: "sidebar.settings.expanded"))
+        #expect(defaults.string(forKey: "dashboard.settingsPage") == SettingsPage.electricity.rawValue)
+
+        defaults.set(false, forKey: "sidebar.settings.expanded")
+        controller.present(section: .settings, settingsPage: .fans, activate: false)
+        #expect(defaults.bool(forKey: "sidebar.settings.expanded"))
+        #expect(defaults.string(forKey: "dashboard.settingsPage") == SettingsPage.fans.rawValue)
+
+        defaults.set(false, forKey: "sidebar.settings.expanded")
+        controller.present(activate: false)
+        #expect(!defaults.bool(forKey: "sidebar.settings.expanded"))
+    }
+
     @Test("unified Settings renders at minimum dashboard size", arguments: ["light", "dark"])
     func settingsMinimumSize(appearance: String) async throws {
         let suite = "DashboardSettingsRender-\(UUID().uuidString)"
