@@ -111,6 +111,51 @@ loaded-model, and extras sources stay unavailable. The synthetic Bonsai catalog 
 the actual `ternary-bonsai-2-27b` ID so model alias presentation is exercised.
 The banner controls switch Light/Dark and window content sizes 800 × 560 and
 1280 × 900. Appearance settings share the same isolated preference suite.
+
+For a bounded AppKit keyboard-focus diagnosis, enable the banner's **Focus trace**
+checkbox, or launch the fixture executable with `--focus-diagnostics`.
+The checkbox defaults off without the flag; its tooltip shows the exact file
+path. Trace records stay in the session's task-owned temporary directory as
+`BloomyDashboardFixture-*/focus-diagnostics.jsonl`, with one JSON record per line.
+When disabled the diagnostic writes nothing. It captures one ready-view sample
+after first enabling, then immediate before/after samples
+for the first **24** Tab, Space, or arrow key-down events delivered to the fixture
+window. Turning the checkbox off/on does not reset the per-process event budget.
+Only a sample event ordinal is stored; key codes, modifiers, typed characters,
+control labels/values, accessibility contents, credentials, and user data are
+omitted. Record the controlled action sequence separately to match ordinals to
+the tested keys. The diagnostic consumes no events, moves no focus,
+and changes no key-view or OS keyboard settings. It has no timer or observer.
+
+Each sample includes the native first and initial responders, the existing
+Full Keyboard Access and automatic key-view-loop recalculation states, and up to
+384 native views with class, parent,
+window-relative geometry, hidden/enabled state, `acceptsFirstResponder`,
+`canBecomeKeyView`, and `nextKeyView`/`nextValidKeyView` edges. Native table/outline
+views also report row count and selected row indexes. View IDs are local to one
+sample; compare class, geometry, and ancestry across samples. The raw and valid
+key-view loops start at the current native first-responder view (falling back to
+initial responder/content) and stop at a cycle, nil, or 64 views. Truncation is
+explicit. SwiftUI can manage focus inside a single native hosting view, so a
+native loop alone does not establish SwiftUI's internal focus order. The
+after sample is synchronous with `sendEvent`; a deferred SwiftUI change may
+first appear in the next before sample. Diagnostic sampling adds work to key
+handling and is evidence about focus membership, not interaction performance.
+
+To diagnose a skipped sidebar, preserve the same manifest, scenario, appearance,
+window size, and initial selection. The diagnostic checkbox is an additional
+banner focus stop. Traverse from the banner controls using Tab
+until the first detail control receives focus, then click a sidebar row and use
+Down/Up and Space. Compare the responder and native list geometry in those
+samples. If the list is absent from the native tree, inspect the SwiftUI hosting
+boundary; if present but ineligible or skipped by valid edges, inspect those
+native eligibility/loop differences. If eligible and reachable in the native
+loop while Tab still skips it, investigate SwiftUI's internal focus traversal.
+Do not treat this instrumentation as a production fix or repeat already-failed
+`.focusSection()`/`.focusable()` trials without new causal evidence. Rebuild the
+fixture after changes and disable tracing for normal review proof. Quit the
+fixture before removing its trace together with other task-owned session data.
+
 The Stale catalog scenario also renews runtime evidence every five seconds while
 preserving its stale catalog/local-inventory source flags. The fixture naturally
 inherits the host's existing reduced-motion preference. SwiftUI exposes that

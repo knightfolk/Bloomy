@@ -8,6 +8,132 @@ import Testing
 @Suite("Performance metrics presentation", .serialized)
 @MainActor
 struct PerformanceMetricsViewTests {
+    @Test("successful refreshes invalidate analysis when only a middle observation changes")
+    func successfulReadGeneration() async throws {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let samples = [
+            metricSample(at: end.addingTimeInterval(-60), counter: 0),
+            metricSample(at: end.addingTimeInterval(-30), counter: 900),
+            metricSample(at: end, counter: 1_800),
+        ]
+        let first = try await PerformanceMetricsRead.empty.refreshing(endingAt: end) { samples }
+        var replacement = samples
+        replacement[1] = metricSample(at: samples[1].observedAt, quality: .stale, counter: 900, id: samples[1].id)
+        let second = try await first.refreshing(endingAt: end) { replacement }
+        let firstQuery = metricsQuery(read: first)
+        let secondQuery = metricsQuery(read: second)
+        #expect(firstQuery.count == secondQuery.count)
+        #expect(firstQuery.lastID == secondQuery.lastID)
+        #expect(firstQuery != secondQuery)
+        #expect(first.token?.generation == 1)
+        #expect(second.token?.generation == 2)
+        let before = try #require(await PerformanceMetricsAnalysis.make(samples: first.samples, range: firstQuery.range, model: nil))
+        let after = try #require(await PerformanceMetricsAnalysis.make(samples: second.samples, range: secondQuery.range, model: nil))
+        #expect(before.summary.coveredSeconds == 60)
+        #expect(after.summary.coveredSeconds == 0)
+        #expect(before.ratePoints.count == 3)
+        #expect(after.ratePoints.count == 2)
+        let unchanged = try await second.refreshing(endingAt: end) { replacement }
+        #expect(unchanged.token?.generation == 3)
+        #expect(metricsQuery(read: unchanged) != secondQuery)
+    }
+
+    @Test("failed and cancelled refreshes retain the preceding successful read")
+    func unsuccessfulReadPreservesGeneration() async throws {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let samples = [metricSample(at: end)]
+        var read = try await PerformanceMetricsRead.empty.refreshing(endingAt: end) { samples }
+        let token = read.token
+        do {
+            read = try await read.refreshing(endingAt: end.addingTimeInterval(30)) {
+                throw MetricsReadFailure.synthetic
+            }
+            Issue.record("A failed read must not produce a successful result")
+        } catch MetricsReadFailure.synthetic {} catch { Issue.record("Unexpected failure: \(error)") }
+        let task = Task {
+            try await read.refreshing(endingAt: end.addingTimeInterval(60)) { [] }
+        }
+        task.cancel()
+        do {
+            read = try await task.value
+            Issue.record("A cancelled read must not produce a successful result")
+        } catch is CancellationError {} catch { Issue.record("Unexpected failure: \(error)") }
+        #expect(read.token == token)
+        #expect(read.samples == samples)
+    }
+
+    @Test("freshness label time does not move the successful read's analysis window")
+    func labelClockDoesNotInvalidateAnalysis() {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let samples = [metricSample(at: end)]
+        let token = PerformanceMetricsReadToken(generation: 1, endingAt: end)
+        let initial = PerformanceMetricsContent(samples: samples, recordingStartedAt: nil, now: end, readToken: token)
+        let later = PerformanceMetricsContent(samples: samples, recordingStartedAt: nil, now: end.addingTimeInterval(120), readToken: token)
+        #expect(initial.analysisQuery == later.analysisQuery)
+        #expect(later.analysisQuery.range.end == end)
+        #expect(later.now.timeIntervalSince(samples[0].observedAt) > 90)
+        var synthetic = PerformanceMetricsContent(samples: samples, recordingStartedAt: nil, now: end)
+        let syntheticQuery = synthetic.analysisQuery
+        synthetic.now = end.addingTimeInterval(120)
+        #expect(synthetic.analysisQuery == syntheticQuery)
+        #expect(synthetic.analysisQuery.range.end == end)
+    }
+
+    @Test("period, model, visibility and successful reads independently key analysis")
+    func analysisQueryChanges() {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let read = PerformanceMetricsRead(samples: [metricSample(at: end)], token: PerformanceMetricsReadToken(generation: 1, endingAt: end))
+        let query = metricsQuery(read: read)
+        let week = metricsQuery(read: read, period: .last7Days)
+        #expect(week != query)
+        #expect(week.range.duration == 7 * 86_400)
+        #expect(metricsQuery(read: read, model: "google/gemma-4-26b") != query)
+        let hidden = metricsQuery(read: read, isVisible: false)
+        #expect(hidden != query)
+        #expect(metricsQuery(read: read, isVisible: true) != hidden)
+        #expect(hidden.range == query.range)
+    }
+
+    @Test("value-driven content includes newer input observations without following label time")
+    func newerValueDrivenObservation() async throws {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let first = metricSample(at: end, counter: 0)
+        let newer = metricSample(at: end.addingTimeInterval(30), counter: 900)
+        let initial = PerformanceMetricsContent(samples: [first], recordingStartedAt: nil, now: end)
+        var updated = PerformanceMetricsContent(samples: [first, newer], recordingStartedAt: nil, now: end)
+        let updatedQuery = updated.analysisQuery
+        #expect(updatedQuery != initial.analysisQuery)
+        #expect(updatedQuery.range.end == newer.observedAt)
+        updated.now = end.addingTimeInterval(120)
+        #expect(updated.analysisQuery == updatedQuery)
+        let result = try #require(await PerformanceMetricsAnalysis.make(
+            samples: updated.samples, range: updatedQuery.range, model: nil
+        ))
+        #expect(result.sampleCount == 2)
+        #expect(result.latest?.id == newer.id)
+        #expect(result.summary.coveredSeconds == 30)
+        #expect(result.ratePoints.last?.id == newer.id)
+    }
+
+    @Test("rolling read windows clip observations and retain visit boundary evidence")
+    func rollingReadWindow() async throws {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let start = end.addingTimeInterval(-86_400)
+        let samples = [-30.0, 30, 60].map { metricSample(at: start.addingTimeInterval($0)) }
+            + [-30.0, 0, 30].map { metricSample(at: end.addingTimeInterval($0)) }
+        let read = try await PerformanceMetricsRead.empty.refreshing(endingAt: end) { samples }
+        let query = metricsQuery(read: read)
+        let result = try #require(await PerformanceMetricsAnalysis.make(samples: read.samples, range: query.range, model: nil))
+        #expect(result.sampleCount == 4)
+        #expect(result.summary.coveredSeconds == 60)
+        #expect(result.ratePoints.allSatisfy { query.range.contains($0.date) })
+        #expect(result.latest?.observedAt == end)
+        #expect(result.visits.first?.observedStart == start)
+        #expect(result.visits.first?.isStartTruncated == true)
+        #expect(result.visits.last?.observedEnd == end)
+        #expect(result.visits.last?.isEndTruncated == true)
+    }
+
     @Test("coalesced display reads retain every immediate counter observation and stop on cancellation")
     func displayCadencePreservesRecording() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -211,6 +337,18 @@ struct PerformanceMetricsViewTests {
     }
 }
 
+private enum MetricsReadFailure: Error { case synthetic }
+
+private func metricsQuery(
+    read: PerformanceMetricsRead, period: PerformanceMetricsPeriod = .last24Hours,
+    model: String? = nil, isVisible: Bool = true
+) -> PerformanceMetricsQuery {
+    PerformanceMetricsQuery(
+        period: period, model: model, count: read.samples.count, lastID: read.samples.last?.id,
+        readToken: read.token!, isVisible: isVisible
+    )
+}
+
 private final class MetricsCancellationChecks: @unchecked Sendable {
     private let lock = NSLock()
     private var value = 0
@@ -222,10 +360,11 @@ private final class MetricsCancellationChecks: @unchecked Sendable {
 
 private func metricSample(
     at date: Date, model: String = "google/gemma-4-26b", quality: PerformanceSampleQuality = .current,
-    active: Bool = true, counter: Int64 = 0, session: String = "42:1799999990", phase: String? = nil
+    active: Bool = true, counter: Int64 = 0, session: String = "42:1799999990", phase: String? = nil,
+    id: UUID = UUID()
 ) -> PerformanceSample {
     PerformanceSample(
-        observedAt: date, sourceCapturedAt: date, quality: quality, providerSession: session,
+        id: id, observedAt: date, sourceCapturedAt: date, quality: quality, providerSession: session,
         model: model, residentModels: [model], advertisedModels: [model], inferenceActive: active,
         activeRequests: active ? 1 : 0, tokensPerSecond: 30, tokensGenerated: counter,
         requestsServed: counter / 900, gpuUtilizationPercent: 64, gpuMemoryGB: 21, autopilotPhase: phase

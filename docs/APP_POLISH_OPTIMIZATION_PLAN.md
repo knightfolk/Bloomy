@@ -13,6 +13,7 @@ Changes prepared for 1.9.15:
 - Electricity history appends individual intervals to SQLite. The original JSON is retained as a migration backup; corruption and write errors remain visible, and restart/write gaps cannot become fabricated measurements.
 - Performance-history indices match chronological ordering. Retention avoids walking the entire capped history when it is below the cap.
 - Aggregate Metrics display reads are coalesced to 30 seconds while visible; reopening, period changes and manual Refresh are immediate. Recording of switches and request-counter changes stays immediate. Continuous visit analysis releases duplicate array ownership before appending.
+- Metrics analysis follows successful read generations and their window endpoints. Explicit Refresh reanalyzes changed middle rows even when the count/newest ID are unchanged; the minute freshness clock updates labels without repeating analysis. Component timings and installed-app observation are in `docs/METRICS_REFRESH_OPTIMIZATION_20261002.md`.
 - Settings, menu shortcuts, and contextual settings links share the existing dashboard window. Native application menus retain Edit/Window responder behavior.
 - Native View and Help menus provide full-screen responder behavior and open the existing Support settings page.
 - Model capacity display can read saved limits independently of live CLI inventory. This is read-only evidence and cannot authorize configuration or provider actions.
@@ -23,7 +24,7 @@ Changes prepared for 1.9.15:
 - New Chat route descriptions wrap fully. Companion availability and Support report copy use plain language, with precise exclusions and the existing review-before-save gate retained.
 - Model Manager cards keep display-name/ID order when serving or residency changes; badges still show the latest state. Enabled/Available sections and downloaded-first Available ordering remain.
 - The dashboard sidebar uses native list selection for keyboard navigation. Settings keeps its independently saved page, and the concise Companion sidebar title retains the full hover/accessibility name.
-- Explicit dashboard routes reopen their selected sidebar group. Native popup review covers Auto plan save/readback, Nudge setup, Cooling refresh, disclosures, navigation and clean fixture shutdown; exact evidence and remaining keyboard/motion limits are in `docs/NATIVE_NAVIGATION_POPUP_REVIEW_20261002.md`.
+- Explicit dashboard routes reopen their selected sidebar group. Native popup review covers Auto plan save/readback, Nudge setup, Cooling refresh, disclosures, navigation and clean fixture shutdown. A fresh native focus trace verifies the Overview Tab-to-sidebar/Down-to-Activity path; broader keyboard, VoiceOver and motion checks remain. Exact evidence and the correction to the earlier partial Tab test are in `docs/NATIVE_NAVIGATION_POPUP_REVIEW_20261002.md`.
 - Custom model-section disclosures and the dashboard GPU ring honor the system Reduce Motion preference. Controlled native motion proof remains separate from source and build verification.
 - Darkbloom 0.9.17 `waiting_inventory` is recognized in local metrics and presented as a model-inventory refresh state.
 

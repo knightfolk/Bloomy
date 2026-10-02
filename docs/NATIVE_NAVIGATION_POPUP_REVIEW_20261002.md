@@ -13,9 +13,10 @@ no provider, account API, credentials, or CPU/GPU collector was started.
 
 With Overview shown, clicking its sidebar row selected the destination but left
 the Scenario picker as the keyboard responder. Down then opened that picker.
-Tab traversal from Scenario passed through Dark, compact size and Reload, then
-reached the Overview disclosure while skipping the sidebar. This established
-the keyboard gap rather than inferring it from the painted selection style.
+The initial Tab check from Scenario stopped when it reached the Overview
+disclosure. That partial traversal did not establish that the sidebar was
+unreachable; the full traversal correction is recorded below. The click/Down
+result established the selection/responder mismatch in the preceding fixture.
 The baseline also showed the truncated `iPhone Compa…` sidebar title.
 
 ## Changes under review
@@ -100,13 +101,39 @@ close callback, and retains the complete saved startup plan. Earlier forced
 stops and diagnostic samples are retained as `fixture07-quit-sample.txt` and
 `fixture08-close-sample.txt`; neither was a production-app failure.
 
-## Remaining evidence
+## Follow-up keyboard proof
 
-Forward Tab from the fixture's Scenario controls still skipped the sidebar
-before clicking it. The actual host reports Full Keyboard Access enabled. A
-separate `focusSection()` trial in build 10 and `focusable()` trial in build 11
-did not change that path. Both were removed. Do not infer full keyboard
-reachability from the successful arrow-key checks.
+Build 13 adds a bounded, opt-in native focus trace to the synthetic host. It
+records responder classes, geometry and table selection around the first 24
+Tab/Space/arrow events, without logging text, key contents or control values.
+The ordinary native events are delivered unchanged; it adds no focus behavior
+to production. Its log budget is 49 records per process and cannot be reset by
+toggling the diagnostic.
+
+In a fresh second build-13 session, root enabled the trace and used only Tab
+to traverse from the fixture Scenario control. The sixth Tab reached the
+Overview disclosure; the seventh reached the native SwiftUI sidebar outline.
+The accessibility snapshot reported no focused element at that step, while
+the native trace identified the outline as the first responder. Repeating
+that keyboard path and pressing Down selected Activity and opened Earnings,
+without a preceding sidebar mouse click. Full Keyboard Access was enabled.
+The earlier conclusion that forward Tab skipped the sidebar was incorrect:
+the partial test stopped one Tab early and accessibility output omitted the
+outline's focus state. The removed `focusSection()` and `focusable()` trials
+are not needed for this demonstrated path.
+
+The exact build-13 sources, executable and linked telemetry library matched
+their manifest. Its executable SHA256 is
+`41907211e7b810600e3d4752af0c6b86c684147278e22f3412b9b7ccec9f1ca4`.
+The bounded traces are retained in `/tmp/bloomy-efficiency-20261001/` as
+`native13-focus-diagnostics.jsonl` and `native13b-focus-diagnostics.jsonl`.
+The second trace has 37 records, including the Tab-to-outline and Down-to-
+Activity evidence. Quit from the popup exited both sessions cleanly.
+
+This establishes the tested native Tab/arrow path in the Overview fixture.
+It does not establish every route's keyboard or VoiceOver behavior.
+
+## Remaining evidence
 
 Controlled Reduce Motion proof, nonempty popup Available cards, VoiceOver, the full
 light/dark and narrow/wide state matrix, native menu-bar popup placement, live

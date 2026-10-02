@@ -37,7 +37,7 @@ struct PerformanceMetricsView: View {
 private struct RecordedPerformanceMetricsView: View {
     @ObservedObject var history: PerformanceHistoryStore
     let isVisible: Bool
-    @State private var samples: [PerformanceSample] = []
+    @State private var read = PerformanceMetricsRead.empty
     @State private var loading = false
     @State private var readError: String?
     @State private var period = PerformanceMetricsPeriod.last24Hours
@@ -46,12 +46,13 @@ private struct RecordedPerformanceMetricsView: View {
     var body: some View {
         TimelineView(MetricsTimelineSchedule(isVisible: isVisible)) { context in
             PerformanceMetricsContent(
-                samples: samples,
+                samples: read.samples,
                 recordingStartedAt: history.recordingStartedAt,
                 storageError: history.storageError ?? readError,
                 loading: loading,
                 isVisible: isVisible,
-                now: max(context.date, samples.last?.observedAt ?? context.date),
+                now: max(context.date, read.samples.last?.observedAt ?? context.date),
+                readToken: read.token,
                 onRefresh: { refreshID += 1 },
                 onPeriodChange: { period = $0 }
             )
@@ -61,13 +62,14 @@ private struct RecordedPerformanceMetricsView: View {
             // Capture stays immediate; aggregate display work is coalesced.
             // Period changes, reopening, and explicit refresh start a new task.
             await MetricsRefreshLoop.run(interval: .seconds(30)) {
-                loading = samples.isEmpty
+                loading = read.samples.isEmpty
                 do {
                     // Retain every model so summaries cannot bridge intervening
                     // nonmatching observations or uncertain boundaries.
-                    let result = try await history.samples(in: period.range(endingAt: Date()))
-                    guard !Task.isCancelled else { return }
-                    samples = result
+                    let endingAt = Date()
+                    read = try await read.refreshing(endingAt: endingAt) {
+                        try await history.samples(in: period.range(endingAt: endingAt))
+                    }
                     readError = nil
                 } catch {
                     guard !Task.isCancelled else { return }
@@ -104,16 +106,19 @@ struct PerformanceMetricsContent: View {
     var loading = false
     var isVisible = true
     var now = Date()
+    var readToken: PerformanceMetricsReadToken?
     var onRefresh: (() -> Void)? = nil
     var onPeriodChange: (PerformanceMetricsPeriod) -> Void = { _ in }
     @State private var period = PerformanceMetricsPeriod.last24Hours
     @State private var model: String?
     @State private var showsRecordingDetails = false
     @State private var presentation = PerformanceMetricsSnapshot.empty
+    @State private var initialAnalysisEndingAt: Date
 
     init(
         samples: [PerformanceSample], recordingStartedAt: Date?, storageError: String? = nil,
-        loading: Bool = false, isVisible: Bool = true, now: Date = Date(), onRefresh: (() -> Void)? = nil,
+        loading: Bool = false, isVisible: Bool = true, now: Date = Date(),
+        readToken: PerformanceMetricsReadToken? = nil, onRefresh: (() -> Void)? = nil,
         onPeriodChange: @escaping (PerformanceMetricsPeriod) -> Void = { _ in }
     ) {
         self.samples = samples
@@ -122,11 +127,23 @@ struct PerformanceMetricsContent: View {
         self.loading = loading
         self.isVisible = isVisible
         self.now = now
+        self.readToken = readToken
+        _initialAnalysisEndingAt = State(initialValue: now)
         self.onRefresh = onRefresh
         self.onPeriodChange = onPeriodChange
     }
 
-    private var range: DateInterval { period.range(endingAt: now) }
+    var analysisQuery: PerformanceMetricsQuery {
+        // Value-driven callers have no read generation. New observations may
+        // advance their window, while freshness-label time alone must not.
+        let inputEndingAt = max(initialAnalysisEndingAt, samples.last?.observedAt ?? initialAnalysisEndingAt)
+        return PerformanceMetricsQuery(
+            period: period, model: model, count: samples.count, lastID: samples.last?.id,
+            readToken: readToken ?? PerformanceMetricsReadToken(generation: 0, endingAt: inputEndingAt),
+            isVisible: isVisible
+        )
+    }
+    private var range: DateInterval { analysisQuery.range }
     private var summary: PerformanceSummary { presentation.summary }
     private var models: [String] { presentation.models }
     private var ratePoints: [PerformanceRatePoint] { presentation.ratePoints }
@@ -161,7 +178,7 @@ struct PerformanceMetricsContent: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .scrollIndicators(.automatic)
         .onChange(of: period) { _, value in onPeriodChange(value) }
-        .task(id: PerformanceMetricsQuery(period: period, model: model, count: samples.count, lastID: samples.last?.id, now: isVisible ? now : .distantPast, isVisible: isVisible)) {
+        .task(id: analysisQuery) {
             guard isVisible else { return }
             let input = samples
             let interval = range
@@ -472,13 +489,38 @@ enum PerformanceMetricsPresentation {
     }
 }
 
-private struct PerformanceMetricsQuery: Hashable {
+/// Rows and their successful-read identity publish together. Failed or cancelled
+/// reads leave the preceding result intact, including its analysis interval.
+struct PerformanceMetricsRead: Sendable {
+    let samples: [PerformanceSample]
+    let token: PerformanceMetricsReadToken?
+
+    static let empty = PerformanceMetricsRead(samples: [], token: nil)
+
+    @MainActor
+    func refreshing(endingAt: Date, load: () async throws -> [PerformanceSample]) async throws -> Self {
+        let samples = try await load()
+        try Task.checkCancellation()
+        return Self(samples: samples, token: PerformanceMetricsReadToken(
+            generation: (token?.generation ?? 0) + 1, endingAt: endingAt
+        ))
+    }
+}
+
+struct PerformanceMetricsReadToken: Hashable, Sendable {
+    let generation: Int
+    let endingAt: Date
+}
+
+struct PerformanceMetricsQuery: Hashable {
     let period: PerformanceMetricsPeriod
     let model: String?
     let count: Int
     let lastID: UUID?
-    let now: Date
+    let readToken: PerformanceMetricsReadToken
     let isVisible: Bool
+
+    var range: DateInterval { period.range(endingAt: readToken.endingAt) }
 }
 
 private struct PerformanceHistoryQuery: Hashable {

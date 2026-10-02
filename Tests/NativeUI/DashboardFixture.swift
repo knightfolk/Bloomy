@@ -306,6 +306,7 @@ private struct FixtureBalance: ConsumerBalanceFetching {
 private final class FixtureModel: ObservableObject {
     let defaults: UserDefaults
     let directory: URL
+    let focusDiagnostics: FixtureFocusDiagnostics
     let navigation: DashboardNavigation
     lazy var popup = FixturePopoverController(model: self)
     @Published var monitor: MonitorStore
@@ -315,6 +316,7 @@ private final class FixtureModel: ObservableObject {
     @Published var ready = false
     @Published var issue: String?
     @Published var scenario: FixtureScenario = .fresh
+    @Published var focusTracing: Bool
     private var loadTask: Task<Void, Never>?
     private var loadGeneration = 0
     private var isTerminating = false
@@ -324,6 +326,8 @@ private final class FixtureModel: ObservableObject {
         defaults = UserDefaults(suiteName: suite)!
         defaults.set("light", forKey: ApplicationAppearance.defaultsKey)
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("BloomyDashboardFixture-\(UUID().uuidString)", isDirectory: true)
+        focusDiagnostics = FixtureFocusDiagnostics(directory: directory)
+        focusTracing = focusDiagnostics.isEnabled
         navigation = DashboardNavigation(defaults: defaults)
         let stores = Self.makeStores(.fresh, defaults: defaults, directory: directory)
         monitor = stores.0; control = stores.1; hosting = stores.2; chat = stores.3
@@ -627,14 +631,143 @@ private struct FixturePopupButton: NSViewRepresentable {
     }
 }
 
+// Read-only, opt-in AppKit evidence. No key events are consumed or synthesized,
+// no focus/key-view policy is changed, and no control text/value is recorded.
+@MainActor
+private final class FixtureFocusDiagnostics {
+    var isEnabled = CommandLine.arguments.contains("--focus-diagnostics")
+    let outputURL: URL
+    private var capturedReady = false
+    private var navigationKeys = 0
+    private let maximumNavigationKeys = 24
+    private let maximumViews = 384
+    private let maximumLoopLength = 64
+
+    init(directory: URL) {
+        outputURL = directory.appendingPathComponent("focus-diagnostics.jsonl")
+    }
+
+    func captureReady(_ window: NSWindow) {
+        guard isEnabled, !capturedReady else { return }
+        capturedReady = true
+        capture(window, phase: "ready")
+    }
+
+    func begin(_ event: NSEvent, window: NSWindow) -> Int? {
+        guard isEnabled, capturedReady, event.type == .keyDown,
+              [48, 49, 123, 124, 125, 126].contains(Int(event.keyCode)),
+              navigationKeys < maximumNavigationKeys else { return nil }
+        navigationKeys += 1
+        capture(window, phase: "before", eventNumber: navigationKeys)
+        return navigationKeys
+    }
+
+    func end(window: NSWindow, eventNumber: Int) {
+        capture(window, phase: "after", eventNumber: eventNumber)
+    }
+
+    private func capture(_ window: NSWindow, phase: String, eventNumber: Int? = nil) {
+        var views: [NSView] = []
+        var treeTruncated = false
+        func visit(_ view: NSView, depth: Int) {
+            guard views.count < maximumViews, depth < 32 else { treeTruncated = true; return }
+            views.append(view)
+            for child in view.subviews { visit(child, depth: depth + 1) }
+        }
+        if let content = window.contentView { visit(content, depth: 0) }
+        let ids = Dictionary(uniqueKeysWithValues: views.enumerated().map { (ObjectIdentifier($0.element), $0.offset) })
+        func reference(_ responder: NSResponder?) -> [String: Any] {
+            guard let responder else { return ["kind": "nil"] }
+            var result: [String: Any] = ["class": String(String(describing: type(of: responder)).prefix(160))]
+            if let id = ids[ObjectIdentifier(responder)] { result["id"] = id }
+            return result
+        }
+        func loop(_ start: NSView?, validOnly: Bool) -> [String: Any] {
+            var visited = Set<ObjectIdentifier>()
+            var sequence: [[String: Any]] = []
+            var current = start
+            while let view = current, sequence.count < maximumLoopLength {
+                guard visited.insert(ObjectIdentifier(view)).inserted else {
+                    return ["views": sequence, "end": "cycle", "returnsTo": reference(view)]
+                }
+                sequence.append(reference(view))
+                current = validOnly ? view.nextValidKeyView : view.nextKeyView
+            }
+            return ["views": sequence, "end": current == nil ? "nil" : "limit"]
+        }
+        let nodes: [[String: Any]] = views.enumerated().map { id, view in
+            let rect = view.convert(view.bounds, to: nil)
+            var node: [String: Any] = [
+                "id": id, "class": String(String(describing: type(of: view)).prefix(160)),
+                "parent": reference(view.superview),
+                "windowRect": [rect.origin.x, rect.origin.y, rect.size.width, rect.size.height],
+                "acceptsFirstResponder": view.acceptsFirstResponder,
+                "canBecomeKeyView": view.canBecomeKeyView,
+                "hidden": view.isHiddenOrHasHiddenAncestor,
+                "nextKeyView": reference(view.nextKeyView),
+                "nextValidKeyView": reference(view.nextValidKeyView)
+            ]
+            if let control = view as? NSControl { node["enabled"] = control.isEnabled }
+            if let table = view as? NSTableView {
+                node["tableRows"] = table.numberOfRows
+                node["selectedRows"] = Array(table.selectedRowIndexes)
+            }
+            return node
+        }
+        let start = (window.firstResponder as? NSView) ?? window.initialFirstResponder ?? window.contentView
+        var record: [String: Any] = [
+            "schema": 1, "phase": phase,
+            "fullKeyboardAccess": NSApplication.shared.isFullKeyboardAccessEnabled,
+            "autorecalculatesKeyViewLoop": window.autorecalculatesKeyViewLoop,
+            "isKeyWindow": window.isKeyWindow,
+            "firstResponder": reference(window.firstResponder),
+            "initialFirstResponder": reference(window.initialFirstResponder),
+            "treeTruncated": treeTruncated, "nodes": nodes,
+            "nextKeyLoop": loop(start, validOnly: false),
+            "nextValidKeyLoop": loop(start, validOnly: true)
+        ]
+        if let eventNumber { record["eventNumber"] = eventNumber }
+        guard var data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) else { return }
+        data.append(0x0A)
+        do {
+            if !FileManager.default.fileExists(atPath: outputURL.path) {
+                try data.write(to: outputURL, options: .atomic)
+            } else {
+                let file = try FileHandle(forWritingTo: outputURL)
+                defer { try? file.close() }
+                try file.seekToEnd()
+                try file.write(contentsOf: data)
+            }
+        } catch {
+            FileHandle.standardError.write(Data("Fixture focus diagnostic write failed.\n".utf8))
+        }
+    }
+}
+
+@MainActor
+private final class FixtureWindow: NSWindow {
+    var focusDiagnostics: FixtureFocusDiagnostics?
+    override func sendEvent(_ event: NSEvent) {
+        let eventNumber = focusDiagnostics?.begin(event, window: self)
+        super.sendEvent(event)
+        if let eventNumber { focusDiagnostics?.end(window: self, eventNumber: eventNumber) }
+    }
+}
+
 private struct FixtureWindowCapture: NSViewRepresentable {
     let size: CGSize
+    let ready: Bool
+    let traceEnabled: Bool
     func makeNSView(context: Context) -> NSView { NSView() }
     func updateNSView(_ view: NSView, context: Context) {
         DispatchQueue.main.async {
             guard let window = view.window else { return }
             window.setContentSize(size)
             window.title = "Bloomy Dashboard — Synthetic Review"
+            if let diagnostics = (window as? FixtureWindow)?.focusDiagnostics {
+                diagnostics.isEnabled = traceEnabled
+                if ready { diagnostics.captureReady(window) }
+            }
         }
     }
 }
@@ -662,6 +795,8 @@ private struct FixtureReviewView: View {
                     Toggle("800 × 560", isOn: $compact).toggleStyle(.checkbox)
                     FixturePopupButton(controller: model.popup, enabled: model.ready).frame(width: 64, height: 24)
                     Button("Reload") { Task { await model.load() } }
+                    Toggle("Focus trace", isOn: $model.focusTracing).toggleStyle(.checkbox)
+                        .help("Bounded native focus diagnostic: \(model.focusDiagnostics.outputURL.path)")
                 }.padding(10).background(Color.orange.opacity(0.12))
                 if let issue = model.issue { Text(issue).foregroundStyle(.red).padding(6) }
                 DashboardRootView(store: model.monitor, controlStore: model.control, hostingStore: model.hosting,
@@ -671,7 +806,7 @@ private struct FixtureReviewView: View {
             .defaultAppStorage(model.defaults)
             .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
             .frame(minWidth: 800, minHeight: 560)
-            .background(FixtureWindowCapture(size: compact ? CGSize(width: 800, height: 560) : CGSize(width: 1280, height: 900)))
+            .background(FixtureWindowCapture(size: compact ? CGSize(width: 800, height: 560) : CGSize(width: 1280, height: 900), ready: model.ready, traceEnabled: model.focusTracing))
             .task {
                 await model.load()
                 while !Task.isCancelled {
@@ -695,7 +830,8 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let content = NSHostingController(rootView: FixtureReviewView(model: model))
-        let window = NSWindow(contentViewController: content)
+        let window = FixtureWindow(contentViewController: content)
+        window.focusDiagnostics = model.focusDiagnostics
         window.title = "Bloomy Dashboard — Synthetic Review"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.collectionBehavior.insert(.fullScreenPrimary)
