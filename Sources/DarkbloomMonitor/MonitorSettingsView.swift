@@ -17,6 +17,7 @@ struct MonitorSettingsView: View {
     @State private var isPreparingSupportPacket = false
     @State private var supportPacketPrepareFailed = false
     @State private var supportPacketPrepared = false
+    @State private var supportPacketAlertHistoryAvailable: Bool?
 
     init(
         extrasStore: ProviderExtrasStore? = nil,
@@ -174,8 +175,8 @@ struct MonitorSettingsView: View {
                 Text("The support report could not be prepared. Try again after status refreshes.")
                     .font(.callout)
                     .foregroundStyle(.orange)
-            } else if supportPacketPrepared, monitorStore?.alertHistoryAvailable == false {
-                Text("Local alert history is unavailable. Saved alerts aren’t included in this report.")
+            } else if supportPacketPrepared, supportPacketAlertHistoryAvailable == false {
+                Text("Local alert history was unavailable when this report was prepared. Saved alerts aren’t included.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -186,11 +187,13 @@ struct MonitorSettingsView: View {
         guard let monitorStore else { return }
         supportPacketPrepareFailed = false
         supportPacketPrepared = false
+        supportPacketAlertHistoryAvailable = nil
         isPreparingSupportPacket = true
         Task { @MainActor in
             defer { isPreparingSupportPacket = false }
             do {
                 let snapshot = try await monitorStore.makeSupportPacketPreview()
+                supportPacketAlertHistoryAvailable = snapshot.alertHistoryAvailable
                 supportPacketPreview = SupportPacketPreviewPresentation(snapshot: snapshot)
                 supportPacketPrepared = true
             } catch {
@@ -210,6 +213,35 @@ enum MenuBarIdleAlertSelection {
                 storedMinutes.wrappedValue = minutes
             }
         )
+    }
+}
+
+/// Recording requires a known price, including an explicitly entered zero.
+/// Keep this aligned with EnergyRecorder rather than treating enabled as ready.
+enum ElectricitySettingsRecordingState: Equatable {
+    case disabled, waitingForPrice, invalidPrice, ready
+
+    init(enabled: Bool, price: String) {
+        if !enabled { self = .disabled }
+        else if ElectricityCost.rate(price) != nil { self = .ready }
+        else if price.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { self = .waitingForPrice }
+        else { self = .invalidPrice }
+    }
+
+    var status: String {
+        switch self {
+        case .disabled: "Off · Not recording"
+        case .waitingForPrice, .invalidPrice: "On · Waiting for a valid price"
+        case .ready: "On · Records available readings locally"
+        }
+    }
+
+    var validation: String? {
+        switch self {
+        case .waitingForPrice: "Enter a price to begin recording, such as 0.15."
+        case .invalidPrice: "Enter a non-negative dollar amount, such as 0.15."
+        case .disabled, .ready: nil
+        }
     }
 }
 
@@ -238,22 +270,26 @@ private struct GeneralSettingsView: View {
                 }
             }
             if page == .electricity {
+                let recording = ElectricitySettingsRecordingState(enabled: electricityEnabled, price: electricityRate)
                 Section("Electricity") {
                     Toggle(isOn: $electricityEnabled) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Estimate electricity use")
-                            Text(electricityEnabled ? "On · Records available readings locally" : "Off · Not recording")
+                            Text(recording.status)
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                     }
                     .accessibilityLabel("Estimate electricity use")
                     .accessibilityIdentifier("settings.electricity.enabled")
-                    TextField("Price (USD / kWh)", text: $electricityRate)
+                    TextField("Price (USD / kWh)", text: $electricityRate, prompt: Text("0.15"))
                         .accessibilityIdentifier("settings.electricity.rate")
+                        .help("Your price in dollars per kilowatt-hour. Zero is valid; a blank price is unknown.")
                         .disabled(!electricityEnabled)
-                    if !electricityRate.isEmpty && ElectricityCost.rate(electricityRate) == nil {
-                        Text("Enter a non-negative dollar amount, such as 0.15.")
-                            .foregroundStyle(.red)
+                    if let validation = recording.validation {
+                        Text(validation)
+                            .font(.callout)
+                            .foregroundStyle(recording == .invalidPrice ? Color.red : Color.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     DisclosureGroup("About electricity estimates") {
                         Text("Enter dollars, not cents. Estimates cover the whole Mac’s DC adapter input, not wall power or Darkbloom alone. Readings are stored locally every 10 seconds. Unplugged or missing readings leave gaps; net earnings require matching coverage.")

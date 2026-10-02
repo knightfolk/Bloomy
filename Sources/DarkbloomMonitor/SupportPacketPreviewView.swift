@@ -48,6 +48,12 @@ struct SupportPacketPreviewView: View {
             Text("Includes provider status, recognized model identifiers, activity counts, alerts, and recommendations, with observation times and sources. Logs, account IDs, credentials, balances, file paths, and connection addresses are excluded. Previewing creates no file; review the report before saving or sharing.")
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
+            if snapshot.alertHistoryAvailable == false {
+                Text("Local alert history was unavailable when this report was prepared. Saved alerts aren’t included.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ScrollView {
                 Text(verbatim: snapshot.previewText)
                     .font(.system(.caption, design: .monospaced))

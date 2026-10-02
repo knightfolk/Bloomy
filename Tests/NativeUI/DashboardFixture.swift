@@ -378,11 +378,13 @@ struct FixtureNetworkCache: NetworkCacheFetching {
 
 /// Count only inert cache reads so native disclosure/visibility review does
 /// not infer task suspension from appearance alone. No new polling clock.
-private actor FixtureNetworkCacheProbe {
+actor FixtureNetworkCacheProbe {
     static let shared = FixtureNetworkCacheProbe()
     private var outputURL: URL?
     private var reads = 0
     private var lastReadAt: Date?
+
+    func readCount() -> Int { reads }
 
     func configure(directory: URL) throws {
         let url = directory.appendingPathComponent("network-cache-read-proof.json")
@@ -557,6 +559,9 @@ private final class FixtureModel: ObservableObject {
     @Published var popupHeightBudget: FixturePopupHeightBudget = .screen
     @Published private(set) var nativeProofStatus = "Native proof"
     private var nativeProofTask: Task<Void, Never>?
+    @Published private(set) var cacheProofStatus = "Cache visibility proof"
+    private var cacheProofTask: Task<Void, Never>?
+    var proofRunning: Bool { nativeProofTask != nil || cacheProofTask != nil }
     @Published private(set) var chatVerificationTest: FixtureChatVerification?
     private var chatVerificationClient: FixtureChatVerificationClient?
     private var loadTask: Task<Void, Never>?
@@ -689,7 +694,7 @@ private final class FixtureModel: ObservableObject {
         chatVerificationTest = verification
     }
     func load() async {
-        guard !isTerminating else { return }
+        guard !isTerminating, cacheProofTask == nil else { return }
         let requestedScenario = scenario
         loadGeneration += 1
         let generation = loadGeneration
@@ -781,7 +786,7 @@ private final class FixtureModel: ObservableObject {
         ready = true
     }
     func runNativeProof() {
-        guard nativeProofTask == nil, ready, !isTerminating else { return }
+        guard !proofRunning, ready, !isTerminating else { return }
         nativeProofStatus = "Proof running…"
         nativeProofTask = Task { @MainActor in
             let motion = await MenuBarMotionProof.run(outputDirectory: self.directory)
@@ -802,6 +807,17 @@ private final class FixtureModel: ObservableObject {
         }
     }
 
+    func runCacheVisibilityProof() {
+        guard !proofRunning, loadTask == nil, ready, !isTerminating,
+              navigation.selected == .overview else { return }
+        cacheProofStatus = "Cache proof running…"
+        cacheProofTask = Task { @MainActor in
+            let passed = await NetworkCacheVisibilityProof.run(outputDirectory: self.directory)
+            self.cacheProofStatus = passed ? "Cache proof passed" : "Cache proof failed"
+            self.cacheProofTask = nil
+        }
+    }
+
     func stopForTermination() async {
         isTerminating = true
         setDashboardVisible(false)
@@ -815,6 +831,10 @@ private final class FixtureModel: ObservableObject {
         proof?.cancel()
         await proof?.value
         nativeProofTask = nil
+        let cacheProof = cacheProofTask
+        cacheProof?.cancel()
+        await cacheProof?.value
+        cacheProofTask = nil
         await popup.closeAndWait(resetContent: true)
         retireChatWindow()
         chat.cancelSend()
@@ -1444,10 +1464,12 @@ private struct FixtureChatVerificationControls: View {
 
 private struct FixtureReviewView: View {
     @ObservedObject var model: FixtureModel
+    @ObservedObject private var navigation: DashboardNavigation
     @AppStorage private var appearance: String
     @State private var compact = false
     init(model: FixtureModel) {
         self.model = model
+        self.navigation = model.navigation
         _appearance = AppStorage(wrappedValue: "light", ApplicationAppearance.defaultsKey, store: model.defaults)
     }
     var body: some View {
@@ -1460,11 +1482,11 @@ private struct FixtureReviewView: View {
                     Spacer(minLength: 4)
                     Picker("Scenario", selection: $model.scenario) {
                         ForEach(FixtureScenario.allCases) { Text($0.rawValue).tag($0) }
-                    }.frame(width: 150)
+                    }.frame(width: 150).disabled(model.proofRunning)
                     Toggle("Dark", isOn: Binding(get: { appearance == "dark" }, set: { appearance = $0 ? "dark" : "light" })).toggleStyle(.checkbox)
                     Toggle("800 × 560", isOn: $compact).toggleStyle(.checkbox)
                     FixturePopupButton(show: { model.presentMenuBarPopup?() }, enabled: model.ready).frame(width: 64, height: 24)
-                    Button("Reload") { Task { await model.load() } }
+                    Button("Reload") { Task { await model.load() } }.disabled(model.proofRunning)
                     Toggle("Focus trace", isOn: $model.focusTracing).toggleStyle(.checkbox)
                         .help("Bounded native focus diagnostic: \(model.focusDiagnostics.outputURL.path)")
                 }.padding(10).background(Color.orange.opacity(0.12))
@@ -1480,6 +1502,9 @@ private struct FixtureReviewView: View {
                     .frame(width: 210)
                     .help("Synthetic popup height budget only; the Mac's screen and preferences stay unchanged.")
                     Menu("Data checks") {
+                        Button(model.cacheProofStatus) { model.runCacheVisibilityProof() }
+                            .disabled(model.proofRunning || !model.ready || navigation.selected != .overview)
+                        Divider()
                         Button(model.limitedActivityModels ? "Restore all Earnings models" : "Report only Qwen in Earnings") {
                             Task { await model.limitActivityModels(!model.limitedActivityModels) }
                         }
@@ -1493,9 +1518,10 @@ private struct FixtureReviewView: View {
                         }
                     }
                     .help("Changes only in-memory synthetic read results. Use Earnings Refresh after changing its model list.")
+                    .disabled(!model.ready || model.proofRunning)
                     Spacer(minLength: 0)
                     Button(model.nativeProofStatus) { model.runNativeProof() }
-                        .disabled(!model.ready || model.nativeProofStatus == "Proof running…")
+                        .disabled(!model.ready || model.proofRunning)
                         .help("Run finite synthetic native checks; results: \(model.directory.path)")
                 }
                 .padding(.horizontal, 10).padding(.vertical, 4)
@@ -1506,6 +1532,7 @@ private struct FixtureReviewView: View {
                     navigation: model.navigation, settingsDraft: model.settingsDraft,
                     chatDraft: model.chatDraft, hostingDraft: model.hostingDraft, updateProtection: model.updateProtection)
                     .environment(\.modelManagerSheetMaximumHeight, model.modelSheetHeightLimit)
+                    .disabled(model.proofRunning)
                     .saturation(model.grayscale ? 0 : 1)
                     .overlay { if !model.ready { ProgressView("Preparing synthetic sources…").padding().background(.regularMaterial) } }
             }

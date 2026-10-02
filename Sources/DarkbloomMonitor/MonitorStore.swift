@@ -339,11 +339,14 @@ final class MonitorStore: ObservableObject {
 
     func makeSupportPacketPreview() async throws -> SupportPacketSnapshot {
         var recentAlerts: [AlertRecord] = []
+        let reportAlertHistoryAvailable: Bool
         if let alertHistoryRecorder, await restoreAlertStateIfNeeded() {
             recentAlerts = try await alertHistoryRecorder.recentHistory(limit: 500)
+            reportAlertHistoryAvailable = true
             alertHistory = recentAlerts
             alertHistoryAvailable = true
         } else {
+            reportAlertHistoryAvailable = false
             alertHistoryAvailable = false
         }
 
@@ -359,7 +362,8 @@ final class MonitorStore: ObservableObject {
             allowlistedModelIDs: modelAllowlist,
             recommendation: recommendationDecision,
             recommendationHistory: recommendationHistory,
-            createdAt: now()
+            createdAt: now(),
+            alertHistoryAvailable: reportAlertHistoryAvailable
         )
     }
 

@@ -7,8 +7,12 @@ struct LogsQuery {
     var text = ""
 
     func apply(_ events: [LogEvent]) -> [LogEvent] {
+        events.filter(matcher())
+    }
+
+    fileprivate func matcher() -> (LogEvent) -> Bool {
         let search = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return events.filter { event in
+        return { event in
             (severity == nil || event.severity == severity)
                 && (source == nil || event.source == source)
                 && (search.isEmpty || event.message.localizedCaseInsensitiveContains(search)
@@ -25,25 +29,27 @@ struct LogsView: View {
     @State private var exportFailed = false
 
     var body: some View {
-        GeometryReader { geometry in
+        let presentation = LogsPresentation.make(events: feed.value?.events ?? [], query: query,
+            selectedID: selectedID, sourceCapturedAt: sourceCapturedAt)
+        return GeometryReader { geometry in
             ScrollView {
-                content(tableHeight: max(180, geometry.size.height * 0.6))
+                content(tableHeight: max(180, geometry.size.height * 0.6), presentation: presentation)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(item: $exportPreview) { snapshot in
             LogExportPreviewView(snapshot: snapshot)
         }
-        .onChange(of: rows.map(\.id)) { _, _ in
-            selectedID = LogTableRow.retainedSelection(selectedID, in: rows)
+        .onChange(of: presentation.rowIDs) { _, _ in
+            selectedID = presentation.retainedSelection(selectedID)
         }
     }
 
-    private func content(tableHeight: CGFloat) -> some View {
+    private func content(tableHeight: CGFloat, presentation: LogsPresentation) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Recent logs").font(.title2.bold())
-            toolbar
-            sourceStatus
+            toolbar(hasRows: !presentation.rows.isEmpty)
+            sourceStatus(timestamp: presentation.sourceTimestamp)
             if exportFailed {
                 Label("Could not prepare an export from this snapshot.", systemImage: "exclamationmark.triangle")
                     .font(.callout).foregroundStyle(.orange)
@@ -51,15 +57,15 @@ struct LogsView: View {
             if let message = feed.eventEmptyMessage {
                 Text(message).foregroundStyle(.secondary)
             } else {
-                if rows.isEmpty {
+                if presentation.rows.isEmpty {
                     Text("No events match these filters.").foregroundStyle(.secondary)
                 } else {
-                    Table(rows, selection: $selectedID) {
+                    Table(presentation.rows, selection: $selectedID) {
                         TableColumn("Local time") { row in
-                            Text(Self.compactTimestamp(row.event.timestamp))
+                            Text(row.compactTimestamp)
                                 .monospacedDigit()
                                 .lineLimit(1)
-                                .help(TelemetryFormatting.timestamp(row.event.timestamp))
+                                .help(row.fullTimestamp)
                         }
                         .width(100)
                         TableColumn("Severity") { row in
@@ -83,7 +89,7 @@ struct LogsView: View {
                     // can scroll to event details in a compact dashboard.
                     .frame(height: tableHeight)
                     .accessibilityLabel("Recent log events")
-                    if let event = selectedEvent {
+                    if let event = presentation.selectedEvent {
                         eventDetails(event)
                     } else {
                         Text("Select an event to see its full details.")
@@ -97,24 +103,20 @@ struct LogsView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    private static func compactTimestamp(_ date: Date?) -> String {
-        guard let date else { return "Unknown" }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MM/dd HH:mm"
-        return formatter.string(from: date)
+    private var sourceCapturedAt: Date? {
+        switch feed {
+        case .available(_, let date), .stale(_, let date, _): date
+        case .unavailable: nil
+        }
     }
 
-    private var rows: [LogTableRow] {
-        LogTableRow.make(events: feed.value?.events ?? [], query: query)
-    }
-
-    private var toolbar: some View {
+    private func toolbar(hasRows: Bool) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 searchField.frame(minWidth: 180)
                 severityPicker
                 sourcePicker
-                exportButton
+                exportButton(hasRows: hasRows)
             }
             VStack(alignment: .leading, spacing: 8) {
                 searchField
@@ -122,7 +124,7 @@ struct LogsView: View {
                     severityPicker
                     sourcePicker
                     Spacer(minLength: 0)
-                    exportButton
+                    exportButton(hasRows: hasRows)
                 }
             }
         }
@@ -157,28 +159,23 @@ struct LogsView: View {
         .frame(width: 110)
     }
 
-    private var exportButton: some View {
+    private func exportButton(hasRows: Bool) -> some View {
         Button {
             prepareExport()
         } label: {
             Label("Preview export", systemImage: "square.and.arrow.up")
         }
-        .disabled(rows.isEmpty)
-    }
-
-    private var selectedEvent: LogEvent? {
-        guard let selectedID else { return nil }
-        return rows.first(where: { $0.id == selectedID })?.event
+        .disabled(!hasRows)
     }
 
     @ViewBuilder
-    private var sourceStatus: some View {
+    private func sourceStatus(timestamp: String?) -> some View {
         switch feed {
-        case .available(_, let capturedAt):
-            Label("Events captured \(TelemetryFormatting.timestamp(capturedAt))", systemImage: "checkmark.circle")
+        case .available:
+            Label("Events captured \(timestamp ?? "Unavailable — Timestamp unavailable")", systemImage: "checkmark.circle")
                 .foregroundStyle(.secondary)
-        case .stale(_, let capturedAt, let reason):
-            Label("Stale events from \(TelemetryFormatting.timestamp(capturedAt)) · \(reason)",
+        case .stale(_, _, let reason):
+            Label("Stale events from \(timestamp ?? "Unavailable — Timestamp unavailable") · \(reason)",
                   systemImage: "clock.fill")
                 .foregroundStyle(.orange)
         case .unavailable(let reason):
@@ -230,12 +227,13 @@ struct LogTableRow: Identifiable {
 
     static func make(events: [LogEvent], query: LogsQuery) -> [LogTableRow] {
         var occurrences: [EventKey: Int] = [:]
+        let matches = query.matcher()
         return events.compactMap { event in
             let key = EventKey(event)
             let occurrence = occurrences[key, default: 0]
             occurrences[key] = occurrence + 1
             // Assign before filtering so a filter cannot renumber matching rows.
-            guard !query.apply([event]).isEmpty else { return nil }
+            guard matches(event) else { return nil }
             return LogTableRow(id: ID(event: key, occurrence: occurrence), event: event)
         }
     }

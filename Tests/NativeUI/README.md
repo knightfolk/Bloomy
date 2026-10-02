@@ -471,6 +471,16 @@ The inert client writes `network-cache-read-proof.json` in the fixture's unique
 temporary directory. It starts at zero and records only the count and timestamp
 of fake reads. Use it to verify Infrastructure disclosure, route, and window
 visibility behavior; no additional polling clock or live request is introduced.
+From Overview, Data checks → Cache visibility proof runs five finite native
+checks in one task-owned window. It verifies initial reading, 65 seconds without
+reads after actual minimization, immediate restoration, 65 seconds without
+reads after removing the child view, and immediate reinsertion. Expect about
+132 seconds. The dashboard/data controls stay disabled during the proof to
+prevent competing cache readers. Incremental and terminal evidence is written
+to `network-cache-visibility-proof.json`; the proof closes its window and
+dismantles its child on success, failure, or cancellation. Quit joins that
+cleanup. This checks the real staged NetworkCacheView with inert data, not
+occlusion, actual VoiceOver, or the live provider.
 All destination view bodies stay unchanged. The production app entry point is
 excluded; Sparkle is linked for its unchanged settings view, but never started,
 and the fixture plist has no update-feed configuration. These substitutions are

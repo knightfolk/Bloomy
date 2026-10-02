@@ -17,6 +17,10 @@ public struct SupportPacketSnapshot: Sendable {
     public let data: Data
     public let alertCount: Int
     public let omittedAlertCount: Int
+    /// Availability captured while preparing this report, independent of later
+    /// live history changes. Presentation metadata only; not exported in JSON.
+    /// Nil means the builder did not report history availability.
+    public let alertHistoryAvailable: Bool?
 
     public var previewText: String { String(decoding: data, as: UTF8.self) }
 
@@ -26,7 +30,8 @@ public struct SupportPacketSnapshot: Sendable {
         allowlistedModelIDs: Set<String>,
         recommendation: RecommendationDecision? = nil,
         recommendationHistory: [RecommendationDecision] = [],
-        createdAt: Date
+        createdAt: Date,
+        alertHistoryAvailable: Bool? = nil
     ) throws -> Self {
         guard Self.isExportableDate(snapshot.capturedAt),
               Self.isExportableDate(createdAt),
@@ -134,7 +139,8 @@ public struct SupportPacketSnapshot: Sendable {
         return Self(
             data: data,
             alertCount: low,
-            omittedAlertCount: inputOmittedCount + alertCandidates.count - low
+            omittedAlertCount: inputOmittedCount + alertCandidates.count - low,
+            alertHistoryAvailable: alertHistoryAvailable
         )
     }
 
