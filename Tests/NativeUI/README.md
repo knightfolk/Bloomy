@@ -98,7 +98,7 @@ same owned window and visibility without reconstructing the stores or starting
 collectors. Generic dashboard presentation preserves the selected page; explicit
 Settings, Models, and Hosting routes still select their requested page.
 These fixture menus contain only editing, native-window, and Quit
-commands; production update/provider handlers are not installed. Use the menu
+commands plus a synthetic inventory-removal command; production update/provider handlers are not installed. Use the menu
 minimize/restore route for Metrics lifecycle review, with tracing disabled for
 normal timing proof.
 
@@ -158,6 +158,29 @@ URL-copy action when preserving that clipboard is part of a review.
 These are inert presentation scenarios, not changes to a running provider.
 The banner controls switch Light/Dark and window content sizes 800 × 560 and
 1280 × 900. Appearance settings share the same isolated preference suite.
+The fixture applies that appearance to its own `NSApplication`, matching the
+production appearance policy without changing macOS or the running production
+app. Chat's production pop-out controller is connected to a separate owned
+460 × 520 window, with its own draft and no frame-autosave key. Its title includes
+Synthetic Review. The Chat verification menu can echo the user's synthetic text
+or hold a cancellation-aware reply for 30 seconds to check speaker names, shared
+send state, Cancel, and route replacement. No inference or socket is involved.
+Another choice supplies two synthetic vendor IDs with the same short model name
+to check canonical selection identity in the native menu and response provenance.
+Replacing a fixture Chat store closes its owned pop-out and cancels the prior
+inert send before publishing the replacement; it cannot leave two review stores
+serving different conversations in visible windows.
+The Data checks menu can reduce the synthetic Earnings report to Qwen (use the
+actual Earnings Refresh afterward), constrain the model sheet to 360 points, or
+remove Gemma from synthetic inventory. Window > Remove Gemma from inventory
+(synthetic), also Control-Option-Command-R, permits that last change while the
+Manage sheet is open. It only changes in-memory fixture records and preserves
+staged provider drafts. Scenario replacement restores its initial fake records.
+Network expiry review reconstructs the inert stores with one capacity capture
+100 seconds in the past and pauses synthetic source ticks. The normal 120-second
+network freshness rule and production visible clock must show its remaining
+20 seconds of current evidence expiring without an unrelated publication. Ending
+this review reconstructs ordinary synthetic stores; it does not alter OS time.
 The isolated suite starts with an unsupported idle-alert value of 99. Menu Bar
 must display the policy's effective five-minute choice without silently
 rewriting the saved value; an explicit choice still updates the isolated suite.

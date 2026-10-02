@@ -43,6 +43,7 @@ Changes prepared for 1.9.15:
 - Popup sizing now respects its actual screen and anchor, with body scrolling or a native whole-popup fallback at very small heights. Native checks cover 80/240/360-point budgets, actual-screen expansion, dark/grayscale, Auto/Nudge/Cooling and retained fan edits. CPU sampling balances its host-port ownership: 512 real reads produce zero reference growth versus 512 extra references before. Paid Chat prompts use plain language with all gates retained. Final 1,267 tests, release compile and bounded native evidence are in `docs/POPUP_SCREEN_CPU_REVIEW_20261002.md`; broader accessibility, production and distribution gates remain open.
 - Cooling preserves each measured fan/temperature field and qualifies retained or unverified evidence visibly and accessibly. Request cards qualify past reports in their spoken value/help and keep missing data unavailable. GPU sampling rejects cancelled queued reads and ticks. The regressions and bounded native review are recorded in `docs/RESOURCE_FRESHNESS_GPU_REVIEW_20261002.md`; this remains part of the ongoing review rather than completion of every screen/state.
 - Hosting distinguishes selected/applied settings, timestamps explicit discovery reads, ties copy feedback to the exact command, and aligns its mode cards. Saved idle-alert and startup-model choices have valid truthful presentation without implicit preference rewrites; preserving control refresh follows clean external changes and retains late edits. Native 47–49, independent review and 1,306 passing tests are recorded in `docs/SETTINGS_HOSTING_MODELS_REVIEW_20261002.md`; broader accessibility, production and distribution proof remains open.
+- Chat names speakers while preserving selectable messages and canonical model identity; New Chat requires explicit cancellation during a send. Earnings retains selected filters without inventing results. Opportunity qualifies each retained network value and aligns expanded cards. Metrics uses finite nonnegative render-time freshness without moving its analysis window. Model sheets fit their host screen, retain missing-model drafts, and reject late callbacks whose alias now identifies another model. Bounded native and regression evidence is recorded in `docs/CHAT_ACTIVITY_MODELS_NATIVE_REVIEW_20261002.md`; the wider native and distribution matrices remain open.
 
 ## Evidence and limits
 
@@ -76,6 +77,13 @@ Native 53, the 1,324-test pass, and release-build evidence are recorded in
 `docs/PROVIDER_FAN_CLI_SETTINGS_REVIEW_20261002.md`. The live provider's separate
 managed-launch cache failure remains unresolved after the authorized scoped
 permission reset; this checkpoint does not complete the full review matrix.
+
+The subsequent Chat/Activity/Opportunity/Models review is recorded in
+`docs/CHAT_ACTIVITY_MODELS_NATIVE_REVIEW_20261002.md`. Native failures in rejected
+accessibility candidates were corrected before accepting the checkpoint. The
+sanitized, unsent provider diagnostic is in
+`docs/PROVIDER_CACHE_STARTUP_DIAGNOSTIC_20261002.md`; matched model selectors and
+successful shell scanning do not establish managed-launch cache access.
 
 Review the popup, Overview, Activity (Earnings and Metrics), Opportunity, Models, Hosting, Chat, Action History, Health & Logs, and every Settings page. The iPhone Companion page is a setup surface; it must not imply a shipped companion capability that is absent.
 

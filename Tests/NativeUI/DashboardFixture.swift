@@ -98,8 +98,11 @@ private struct FixtureTelemetrySource: TelemetrySource {
 }
 private enum FixtureError: Error { case offline }
 
-private struct FixtureEarnings: AccountEarningsFetching {
+private actor FixtureEarnings: AccountEarningsFetching {
     let scenario: FixtureScenario
+    private var limitedModels = false
+    init(scenario: FixtureScenario) { self.scenario = scenario }
+    func setLimitedModels(_ value: Bool) { limitedModels = value }
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
         case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation:
@@ -135,15 +138,21 @@ private struct FixtureEarnings: AccountEarningsFetching {
                 rewardMicroUSD: 20_000, jobs: Int64(5 + index % 5), promptTokens: 2_000, completionTokens: 5_000), coverage: .recorded)
         }
     }
-    func activityModels(in range: DateInterval) async throws -> [String] { scenario.hasCurrentRuntime ? Array(FixtureData.modelIDs.prefix(3)) : [] }
+    func activityModels(in range: DateInterval) async throws -> [String] {
+        scenario.hasCurrentRuntime ? Array(FixtureData.modelIDs.prefix(limitedModels ? 1 : 3)) : []
+    }
     func modelActivity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar, model: String?) async throws -> [ActivityBucket]? {
-        try await activity(in: range, unit: unit, calendar: calendar)
+        if limitedModels, let model, model != FixtureData.modelIDs.first { return [] }
+        return try await activity(in: range, unit: unit, calendar: calendar)
     }
 }
 private actor FixtureCapacity: NetworkCapacityFetching {
     let scenario: FixtureScenario
+    let fixedCapture: Date?
     var attempts = 0
-    init(scenario: FixtureScenario) { self.scenario = scenario }
+    init(scenario: FixtureScenario, fixedCapture: Date? = nil) {
+        self.scenario = scenario; self.fixedCapture = fixedCapture
+    }
     func fetch(at capturedAt: Date) async throws -> NetworkCapacitySnapshot {
         attempts += 1
         if scenario == .offline || (scenario == .stale && attempts > 1) { throw FixtureError.offline }
@@ -154,7 +163,7 @@ private actor FixtureCapacity: NetworkCapacityFetching {
              "aggregate_tps": 420, "estimated_ttft_ms": 180, "token_budget_remaining": 8_000,
              "token_budget_total": 16_000] as [String: Any]
         }
-        return try NetworkCapacityParser.parse(JSONSerialization.data(withJSONObject: ["models": models]), capturedAt: capturedAt)
+        return try NetworkCapacityParser.parse(JSONSerialization.data(withJSONObject: ["models": models]), capturedAt: fixedCapture ?? capturedAt)
     }
 }
 private actor FixtureCatalog: PublicCatalogFetching {
@@ -200,6 +209,7 @@ private actor FixtureSeries: NetworkSeriesFetching {
 }
 private actor FixtureController: ProviderControlling {
     let scenario: FixtureScenario
+    private var removedModels = Set<String>()
     var selection = ProviderModelSelection(enabled: Array(FixtureData.modelIDs.prefix(3)), preloaded: Array(FixtureData.modelIDs.prefix(2)))
     var slots = 3
     var startupPreload: Bool? = true
@@ -214,21 +224,28 @@ private actor FixtureController: ProviderControlling {
             slots = 1
         }
     }
+    func removeGemmaFromInventory() {
+        let removed = FixtureData.modelIDs[1]
+        removedModels.insert(removed)
+        selection.enabled.removeAll { $0 == removed }
+        selection.preloaded.removeAll { $0 == removed }
+    }
     func refresh() async throws -> ProviderControlSnapshot {
         let now = Date()
         // Match ProviderControlService: expired runtime evidence is omitted
         // before building inventory, never retained as current residency.
         let daemon = scenario.hasCurrentRuntime ? FixtureData.snapshot(scenario, now: now).state.value : nil
-        let loadedModelIDs = scenario.hasCurrentRuntime ? Array(FixtureData.modelIDs.prefix(2)) : []
+        let loadedModelIDs = scenario.hasCurrentRuntime ? Array(FixtureData.modelIDs.prefix(2)).filter { !removedModels.contains($0) } : []
         // Bonsai and Qwen 3 8B are downloaded but neither selected nor resident.
         // Keep the three advertised models and two saved preload models intact.
-        let local = FixtureData.catalog.map { LocalModel(id: $0.id, modelType: "text", sizeBytes: Int64($0.sizeGB * 1e9), estimatedMemoryGB: nil) }
+        let catalog = FixtureData.catalog.filter { !removedModels.contains($0.id) }
+        let local = catalog.map { LocalModel(id: $0.id, modelType: "text", sizeBytes: Int64($0.sizeGB * 1e9), estimatedMemoryGB: nil) }
         let runtimeSource: ProviderControlSourceState = scenario.hasCurrentRuntime
             ? .fresh(evidenceAt: now) : scenario == .stale
             ? .stale("Synthetic runtime source stale") : .unavailable("Synthetic source offline")
         let catalogSource: ProviderControlSourceState = scenario.hasStaleCatalog
             ? .stale("Synthetic catalog/local inventory retained") : runtimeSource
-        return ProviderControlSnapshot(inventory: ModelInventoryBuilder.build(catalog: FixtureData.catalog,
+        return ProviderControlSnapshot(inventory: ModelInventoryBuilder.build(catalog: catalog,
             local: local, selection: selection, daemon: daemon, loadedModels: loadedModelIDs),
             draft: ProviderConfigDraft(sourceRevision: "synthetic", original: selection, selection: selection,
                 originalMaxModelSlots: slots, maxModelSlots: slots,
@@ -417,6 +434,9 @@ private enum FixtureChatVerification: String, CaseIterable, Identifiable, Sendab
     case expired = "Verification already expired"
     case failed = "Verification fails"
     case empty = "Empty model list"
+    case matchingText = "Same text from both speakers"
+    case heldReply = "Held reply for 30 seconds"
+    case collidingModels = "Two models with the same short name"
     var id: String { rawValue }
 }
 
@@ -436,11 +456,13 @@ private actor FixtureChatVerificationClient: LocalChatRouteClient {
     }
     func models(now: Date) async throws -> ChatModelListSnapshot {
         reads += 1
+        let modelIDs = verification == .collidingModels
+            ? ["vendor-one/qwen3.8-27b", "vendor-two/qwen3.8-27b"] : FixtureData.modelIDs
         if verification == .failed { throw FixtureError.offline }
         if verification == .empty { return ChatModelListSnapshot(modelIDs: [], capturedAt: now) }
         if reads == 1 {
             switch verification {
-            case .fresh: break
+            case .fresh, .matchingText, .heldReply, .collidingModels: break
             case .expiring:
                 return ChatModelListSnapshot(modelIDs: FixtureData.modelIDs,
                     capturedAt: now.addingTimeInterval(-110))
@@ -450,10 +472,14 @@ private actor FixtureChatVerificationClient: LocalChatRouteClient {
             case .failed, .empty: break
             }
         }
-        return ChatModelListSnapshot(modelIDs: FixtureData.modelIDs, capturedAt: now)
+        return ChatModelListSnapshot(modelIDs: modelIDs, capturedAt: now)
     }
     func complete(model: String, messages: [ChatMessagePayload]) async throws -> ChatCompletionOutcome {
-        ChatCompletionOutcome(content: "Synthetic reply — no model was called. This review conversation lives only in fixture memory.",
+        let mode = verification
+        if mode == .heldReply { try await Task.sleep(for: .seconds(30)) }
+        let reply = mode == .matchingText ? messages.last?.content ?? "Same synthetic text"
+            : "Synthetic reply — no model was called. This review conversation lives only in fixture memory."
+        return ChatCompletionOutcome(content: reply,
             model: model, finishReason: "stop", promptTokens: 12, completionTokens: 22)
     }
 }
@@ -485,6 +511,13 @@ private final class FixtureModel: ObservableObject {
     @Published var cliUpdateRead: FixtureCLIUpdateRead = .current
     @Published var fanReadback: FixtureFanReadback = .held
     private var extrasClient: FixtureExtras
+    private var controllerClient: FixtureController
+    private var earningsClient: FixtureEarnings
+    @Published var limitedActivityModels = false
+    @Published var modelSheetHeightLimit: CGFloat?
+    @Published var networkExpiryReview = false
+    private var chatWindow: ChatWindowController?
+    private weak var chatWindowStore: ChatStore?
     @Published var focusTracing: Bool
     @Published var staticActivity = false
     @Published var grayscale = false
@@ -511,18 +544,21 @@ private final class FixtureModel: ObservableObject {
         navigation = DashboardNavigation(defaults: defaults)
         let stores = Self.makeStores(.fresh, defaults: defaults, directory: directory)
         monitor = stores.0; control = stores.1; hosting = stores.2; chat = stores.3; extrasClient = stores.4
+        controllerClient = stores.5; earningsClient = stores.6
         hostingDraft = HostingSettingsDraftState(options: stores.2.options)
     }
-    private static func makeStores(_ scenario: FixtureScenario, defaults: UserDefaults, directory: URL) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore, FixtureExtras) {
+    private static func makeStores(_ scenario: FixtureScenario, defaults: UserDefaults, directory: URL,
+        capacityCapturedAt: Date? = nil) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore, FixtureExtras, FixtureController, FixtureEarnings) {
         let tokens = FixtureTokens()
         let controller = FixtureController(scenario: scenario)
         let control = ProviderControlStore(controller: controller, homeDirectory: directory, hostingOptions: { .default })
         let extrasClient = FixtureExtras(scenario: scenario)
         let extras = ProviderExtrasStore(client: extrasClient)
+        let earningsClient = FixtureEarnings(scenario: scenario)
         let monitor = MonitorStore(service: TelemetryService(source: FixtureTelemetrySource(scenario: scenario)),
             initial: FixtureData.snapshot(scenario, now: Date()), providerExtras: extras,
-            earningsClient: FixtureEarnings(scenario: scenario),
-            networkCapacityClient: FixtureCapacity(scenario: scenario), publicCatalogClient: FixtureCatalog(scenario: scenario),
+            earningsClient: earningsClient,
+            networkCapacityClient: FixtureCapacity(scenario: scenario, fixedCapture: capacityCapturedAt), publicCatalogClient: FixtureCatalog(scenario: scenario),
             publicPricingClient: FixturePricing(scenario: scenario), networkSeriesClient: FixtureSeries(scenario: scenario),
             energyPreferences: defaults, energyRecorder: EnergyRecorder(file: directory.appendingPathComponent("energy.json"), readPower: { _ in nil }),
             gpuUsage: SystemGPUUsageStore(read: { nil }), menuAttentionPreferences: defaults)
@@ -540,7 +576,38 @@ private final class FixtureModel: ObservableObject {
         monitor.attachRecommendationInventory { control.snapshot }
         monitor.setDashboardVisible(true)
         hosting.refreshEnvironment()
-        return (monitor, control, hosting, chat, extrasClient)
+        return (monitor, control, hosting, chat, extrasClient, controller, earningsClient)
+    }
+    func limitActivityModels(_ value: Bool) async {
+        limitedActivityModels = value
+        await earningsClient.setLimitedModels(value)
+    }
+    func removeGemmaFromInventory() async {
+        guard ready, !isTerminating else { return }
+        await controllerClient.removeGemmaFromInventory()
+        await control.refreshPreservingDraft()
+    }
+    func setNetworkExpiryReview(_ enabled: Bool) async {
+        networkExpiryReview = enabled
+        await load()
+    }
+    func openChatWindow() {
+        guard ready, !isTerminating else { return }
+        if chatWindowStore !== chat {
+            chatWindow?.close()
+            chatWindow = ChatWindowController(store: chat, frameAutosaveName: nil,
+                defaults: defaults, updateProtection: updateProtection)
+            chatWindowStore = chat
+            chatWindow?.window?.title = "Bloomy Chat — Synthetic Review"
+            chatWindow?.window?.setContentSize(NSSize(width: 460, height: 520))
+        }
+        chatWindow?.present()
+    }
+    private func retireChatWindow() {
+        chatWindowStore?.cancelSend()
+        chatWindow?.close()
+        chatWindow = nil
+        chatWindowStore = nil
     }
     func setFanReadback(_ value: FixtureFanReadback) async {
         guard ready, !isTerminating, scenario == .fanConfirmation else { return }
@@ -552,7 +619,7 @@ private final class FixtureModel: ObservableObject {
         }
     }
     func tick() async {
-        guard ready, !isTerminating, scenario != .frozenSettings,
+        guard ready, !isTerminating, !networkExpiryReview, scenario != .frozenSettings,
               scenario.hasCurrentRuntime || scenario == .offline else { return }
         let currentScenario = scenario
         let currentMonitor = monitor
@@ -573,6 +640,8 @@ private final class FixtureModel: ObservableObject {
         // Explicit menu action starts a genuinely new, empty local chat.
         // Nothing migrates from the previous conversation or credential store.
         replacement.startConversation(route: .local)
+        retireChatWindow()
+        chat.cancelSend()
         chat = replacement
         chatVerificationClient = client
         chatVerificationTest = verification
@@ -608,7 +677,8 @@ private final class FixtureModel: ObservableObject {
     private func prepare(_ requestedScenario: FixtureScenario, generation: Int) async {
         await popup.closeAndWait(resetContent: true)
         guard !Task.isCancelled, generation == loadGeneration else { return }
-        let stores = Self.makeStores(requestedScenario, defaults: defaults, directory: directory)
+        let stores = Self.makeStores(requestedScenario, defaults: defaults, directory: directory,
+            capacityCapturedAt: networkExpiryReview ? Date().addingTimeInterval(-100) : nil)
         let preparedMonitor = stores.0
         let preparedControl = stores.1
         var preparationIssue: String?
@@ -665,7 +735,11 @@ private final class FixtureModel: ObservableObject {
         // Window events can arrive while synthetic sources are preparing.
         // Publish the replacement with the latest native visibility state.
         preparedMonitor.setDashboardVisible(dashboardVisible)
+        retireChatWindow()
+        chat.cancelSend()
         monitor = preparedMonitor; control = preparedControl; hosting = stores.2; chat = stores.3; extrasClient = stores.4
+        controllerClient = stores.5; earningsClient = stores.6
+        limitedActivityModels = false
         fanReadback = .held
         chatVerificationTest = nil
         chatVerificationClient = nil
@@ -708,6 +782,8 @@ private final class FixtureModel: ObservableObject {
         await proof?.value
         nativeProofTask = nil
         await popup.closeAndWait(resetContent: true)
+        retireChatWindow()
+        chat.cancelSend()
         await monitor.stop()
     }
 }
@@ -1369,6 +1445,20 @@ private struct FixtureReviewView: View {
                     }
                     .frame(width: 210)
                     .help("Synthetic popup height budget only; the Mac's screen and preferences stay unchanged.")
+                    Menu("Data checks") {
+                        Button(model.limitedActivityModels ? "Restore all Earnings models" : "Report only Qwen in Earnings") {
+                            Task { await model.limitActivityModels(!model.limitedActivityModels) }
+                        }
+                        Button("Remove Gemma from model inventory") {
+                            Task { await model.removeGemmaFromInventory() }
+                        }
+                        Button("Limit model sheet to 360 pt") { model.modelSheetHeightLimit = 360 }
+                        Button("Use screen height for model sheet") { model.modelSheetHeightLimit = nil }
+                        Button(model.networkExpiryReview ? "End network expiry review" : "Network expiry in 20 seconds") {
+                            Task { await model.setNetworkExpiryReview(!model.networkExpiryReview) }
+                        }
+                    }
+                    .help("Changes only in-memory synthetic read results. Use Earnings Refresh after changing its model list.")
                     Spacer(minLength: 0)
                     Button(model.nativeProofStatus) { model.runNativeProof() }
                         .disabled(!model.ready || model.nativeProofStatus == "Proof running…")
@@ -1378,8 +1468,10 @@ private struct FixtureReviewView: View {
                 .background(Color.orange.opacity(0.08))
                 if let issue = model.issue { Text(issue).foregroundStyle(.red).padding(6) }
                 DashboardRootView(store: model.monitor, controlStore: model.control, hostingStore: model.hosting,
-                    chatStore: model.chat, navigation: model.navigation, settingsDraft: model.settingsDraft,
+                    chatStore: model.chat, openChatWindow: { model.openChatWindow() },
+                    navigation: model.navigation, settingsDraft: model.settingsDraft,
                     chatDraft: model.chatDraft, hostingDraft: model.hostingDraft, updateProtection: model.updateProtection)
+                    .environment(\.modelManagerSheetMaximumHeight, model.modelSheetHeightLimit)
                     .saturation(model.grayscale ? 0 : 1)
                     .overlay { if !model.ready { ProgressView("Preparing synthetic sources…").padding().background(.regularMaterial) } }
             }
@@ -1388,6 +1480,7 @@ private struct FixtureReviewView: View {
             .frame(minWidth: 800, minHeight: 560)
             .background(FixtureWindowCapture(size: compact ? CGSize(width: 800, height: 560) : CGSize(width: 1280, height: 900), ready: model.ready, traceEnabled: model.focusTracing))
             .task {
+                ApplicationAppearance.applyStored(from: model.defaults)
                 await model.load()
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(5)) } catch { return }
@@ -1395,6 +1488,7 @@ private struct FixtureReviewView: View {
                 }
             }
             .onChange(of: model.scenario) { _, _ in Task { await model.load() } }
+            .onChange(of: appearance) { _, value in ApplicationAppearance.apply(AppAppearanceMode(storedValue: value)) }
     }
 }
 
@@ -1468,12 +1562,19 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
         windowMenu.addItem(.separator())
         add("Show Dashboard", action: #selector(showDashboard), key: "d",
             modifiers: [.command, .shift], target: self, to: windowMenu)
+        windowMenu.addItem(.separator())
+        add("Remove Gemma from inventory (synthetic)", action: #selector(removeReviewGemma),
+            key: "r", modifiers: [.command, .option, .control], target: self, to: windowMenu)
         application.mainMenu = mainMenu
         application.windowsMenu = windowMenu
     }
 
     @objc private func showDashboard() {
         presentDashboard()
+    }
+
+    @objc private func removeReviewGemma() {
+        Task { await model.removeGemmaFromInventory() }
     }
 
     private func presentDashboard(section: DashboardDestination? = nil, settingsPage: SettingsPage? = nil) {

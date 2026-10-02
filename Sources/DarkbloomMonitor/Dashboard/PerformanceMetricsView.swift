@@ -21,6 +21,21 @@ enum PerformanceMetricsPeriod: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum MetricsRecordingFreshness {
+    static func isCurrent(_ sample: PerformanceSample?, at now: Date, timelineDate: Date? = nil) -> Bool {
+        guard let sample, sample.quality == .current,
+              now.timeIntervalSinceReferenceDate.isFinite,
+              timelineDate.map({ $0.timeIntervalSinceReferenceDate.isFinite }) ?? true else { return false }
+        let age = now.timeIntervalSince(sample.observedAt)
+        return age.isFinite && (0...90).contains(age)
+    }
+
+    static func status(_ sample: PerformanceSample?, storageError: String?, at now: Date, timelineDate: Date? = nil) -> String {
+        if storageError != nil { return "Recording needs attention" }
+        return isCurrent(sample, at: now, timelineDate: timelineDate) ? "Recording locally" : "Waiting for fresh measurements"
+    }
+}
+
 struct PerformanceMetricsView: View {
     let history: PerformanceHistoryStore?
     var isVisible = true
@@ -51,7 +66,10 @@ private struct RecordedPerformanceMetricsView: View {
                 storageError: history.storageError ?? readError,
                 loading: loading,
                 isVisible: isVisible,
-                now: max(context.date, read.samples.last?.observedAt ?? context.date),
+                // Reads can arrive between minute ticks. Judge their age against
+                // render time; keep the tick as an explicit expiry dependency.
+                now: Date(),
+                timelineDate: context.date,
                 readToken: read.token,
                 onRefresh: { refreshID += 1 },
                 onPeriodChange: { period = $0 }
@@ -106,6 +124,7 @@ struct PerformanceMetricsContent: View {
     var loading = false
     var isVisible = true
     var now = Date()
+    var timelineDate: Date?
     var readToken: PerformanceMetricsReadToken?
     var onRefresh: (() -> Void)? = nil
     var onPeriodChange: (PerformanceMetricsPeriod) -> Void = { _ in }
@@ -117,7 +136,7 @@ struct PerformanceMetricsContent: View {
 
     init(
         samples: [PerformanceSample], recordingStartedAt: Date?, storageError: String? = nil,
-        loading: Bool = false, isVisible: Bool = true, now: Date = Date(),
+        loading: Bool = false, isVisible: Bool = true, now: Date = Date(), timelineDate: Date? = nil,
         readToken: PerformanceMetricsReadToken? = nil, onRefresh: (() -> Void)? = nil,
         onPeriodChange: @escaping (PerformanceMetricsPeriod) -> Void = { _ in }
     ) {
@@ -127,6 +146,7 @@ struct PerformanceMetricsContent: View {
         self.loading = loading
         self.isVisible = isVisible
         self.now = now
+        self.timelineDate = timelineDate
         self.readToken = readToken
         _initialAnalysisEndingAt = State(initialValue: now)
         self.onRefresh = onRefresh
@@ -228,15 +248,14 @@ struct PerformanceMetricsContent: View {
 
     private var recordingHealth: some View {
         let last = presentation.latest
-        let isCurrent = storageError == nil && last?.quality == .current
-            && last.map { now.timeIntervalSince($0.observedAt) <= 90 } == true
+        let isCurrent = storageError == nil && MetricsRecordingFreshness.isCurrent(last, at: now, timelineDate: timelineDate)
         return HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Image(systemName: storageError != nil ? "exclamationmark.triangle" : isCurrent ? "record.circle" : "clock")
                         .foregroundStyle(storageError != nil ? Color.orange : isCurrent ? Color.green : Color.secondary)
                         .accessibilityHidden(true)
-                    Text(storageError != nil ? "Recording needs attention" : isCurrent ? "Recording locally" : "Waiting for fresh measurements")
+                    Text(MetricsRecordingFreshness.status(last, storageError: storageError, at: now, timelineDate: timelineDate))
                         .font(.callout.weight(.medium))
                     Spacer(minLength: 0)
                     Text("\(presentation.sampleCount.formatted()) samples")
@@ -377,8 +396,8 @@ struct PerformanceMetricsContent: View {
                 Text("\(presentation.staleCount) stale · \(presentation.unavailableCount) unavailable observations. Unobserved time is unknown; it is not recorded as idle or zero.")
                 Text("Saved locally while Bloomy is open. The display refreshes every 30 seconds, or when you tap Refresh. Up to 30 days / 100,000 samples are retained. Counters use increasing readings within the same provider session; resets and gaps are excluded.")
                 Text("GPU use and power describe the whole Mac and include other apps. Model filtering does not isolate a model’s hardware consumption. GPU memory is reported by the provider.")
-                if let latest = presentation.latestForModel, latest.quality == .current,
-                   now.timeIntervalSince(latest.observedAt) <= 90 {
+                if let latest = presentation.latestForModel,
+                   MetricsRecordingFreshness.isCurrent(latest, at: now, timelineDate: timelineDate) {
                     let memory = latest.gpuMemoryGB.map { "\(number($0)) GB" } ?? "Unknown"
                     let power = latest.powerWatts.map { "\(number($0)) W" } ?? "Unknown"
                     Text("Latest provider GPU memory: \(memory) · whole-Mac power: \(power).")

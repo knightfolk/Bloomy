@@ -8,6 +8,19 @@ enum ActivityTab: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+enum ActivityFilterPresentation {
+    /// A retained filter remains reachable even when this period has no work for it.
+    static func models(available: [String], selected: String?) -> [String] {
+        guard let selected, !available.contains(selected) else { return available }
+        return available + [selected]
+    }
+
+    static func allModelsLabel(metric: ActivityChartMetric, showsBaseRewards: Bool) -> String {
+        guard metric == .earnings else { return "Show all model results" }
+        return showsBaseRewards ? "Show all models and base rewards" : "Show all models; base rewards remain hidden"
+    }
+}
+
 struct ActivityView: View {
     @ObservedObject var store: MonitorStore
     @State private var tab = ActivityTab.earnings
@@ -188,11 +201,11 @@ struct ActivityView: View {
                         title: "All models",
                         color: .secondary,
                         isSelected: model == nil,
-                        accessibilityLabel: chartMetric == .earnings
-                            ? "Show all models and base rewards"
-                            : "Show all model results"
+                        accessibilityLabel: ActivityFilterPresentation.allModelsLabel(
+                            metric: chartMetric, showsBaseRewards: showsBaseRewards
+                        )
                     ) { model = nil }
-                    ForEach(models, id: \.self) { name in
+                    ForEach(ActivityFilterPresentation.models(available: models, selected: model), id: \.self) { name in
                         modelFilterChip(
                             title: ModelDisplayName.short(name),
                             color: modelColor(name),

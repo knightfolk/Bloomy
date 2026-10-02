@@ -1,6 +1,49 @@
 import DarkbloomTelemetry
 import SwiftUI
 
+enum ChatNewConversationPolicy {
+    static let inFlightExplanation = "Cancel the current send before starting a new chat."
+
+    @MainActor
+    static func start(route: ChatRoute, using store: ChatStore) -> Bool {
+        guard !store.isSending else { return false }
+        store.startConversation(route: route)
+        return true
+    }
+}
+
+struct ChatModelPresentation: Equatable {
+    let id: String
+    let displayName: String
+
+    init(id: String) {
+        self.id = id
+        displayName = ModelDisplayName.short(id)
+    }
+
+    var accessibilityLabel: String {
+        displayName == id ? id : "\(displayName), model ID \(id)"
+    }
+}
+
+struct ChatEntryPresentation: Equatable {
+    let speaker: String
+    let messageAccessibilityLabel: String
+    let phaseAccessibilityLabel: String?
+
+    init(entry: ChatEntry) {
+        speaker = entry.author == .user ? "You" : "Assistant"
+        messageAccessibilityLabel = "\(speaker): \(entry.text)"
+        switch entry.phase {
+        case .complete: phaseAccessibilityLabel = nil
+        case .sending: phaseAccessibilityLabel = "\(speaker): Waiting for the destination."
+        case .failed(let message): phaseAccessibilityLabel = "\(speaker): \(message)"
+        case .cancelled:
+            phaseAccessibilityLabel = "\(speaker): Cancelled — the request may already have been delivered on this route."
+        }
+    }
+}
+
 /// The built-in Chat destination. One `ChatStore` instance is shared by this
 /// view in the dashboard tab and the pop-out chat window, so both show the
 /// same in-memory conversation.
@@ -84,11 +127,13 @@ struct ChatView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 460)
             Button {
-                showsNewChatDialog = true
+                showNewChatDialog()
             } label: {
                 Label("New Chat…", systemImage: "plus.bubble")
             }
             .controlSize(.large)
+            .disabled(store.isSending)
+            .help(store.isSending ? ChatNewConversationPolicy.inFlightExplanation : "Start a new chat with an explicit destination")
             consumerKeyLink
             Spacer()
         }
@@ -108,17 +153,24 @@ struct ChatView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    showsNewChatDialog = true
+                    showNewChatDialog()
                 } label: {
                     Label("New Chat…", systemImage: "plus.bubble")
                 }
-                .help("Start a new chat. The destination of the current chat cannot be changed.")
+                .disabled(store.isSending)
+                .help(store.isSending ? ChatNewConversationPolicy.inFlightExplanation
+                    : "Start a new chat. The destination of the current chat cannot be changed.")
                 if let openPopOut {
                     Button(action: openPopOut) {
                         Label("Open in Window", systemImage: "macwindow.on.rectangle")
                     }
                     .help("Open this chat in a separate resizable window")
                 }
+            }
+            if store.isSending {
+                Text(ChatNewConversationPolicy.inFlightExplanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             switch route {
             case .local:
@@ -205,12 +257,16 @@ struct ChatView: View {
     private var pricingLine: some View {
         if let modelID = store.selectedModelID {
             if let summary = store.pricingSummary(for: modelID) {
-                Text("\(modelID): \(summary)")
+                Text("\(ModelDisplayName.short(modelID)): \(summary)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .help(modelID)
+                    .accessibilityLabel("\(modelID): \(summary)")
             } else {
                 HStack(spacing: 4) {
-                    Text("\(modelID): no verified price — a send would be stopped until pricing lists this model")
+                    Text("\(ModelDisplayName.short(modelID)): no verified price — a send would be stopped until pricing lists this model")
+                        .help(modelID)
+                        .accessibilityLabel("\(modelID): no verified price — a send would be stopped until pricing lists this model")
                     Button {
                         Task { await store.refreshPricing() }
                     } label: {
@@ -395,12 +451,17 @@ struct ChatView: View {
                 set: { store.selectModel($0) }
             )) {
                 ForEach(models, id: \.self) { model in
-                    Text(model).tag(model)
+                    let presentation = ChatModelPresentation(id: model)
+                    Text(presentation.displayName)
+                        .tag(model)
+                        .help(model)
+                        .accessibilityLabel(presentation.accessibilityLabel)
                 }
             }
             .pickerStyle(.menu)
             .disabled(store.isSending)
-            .help("Only models verified on this chat's route are offered")
+            .help(store.selectedModelID ?? models[0])
+            .accessibilityValue(store.selectedModelID ?? models[0])
         }
     }
 
@@ -441,6 +502,11 @@ struct ChatView: View {
         updateProtection?.endEditing(owner: keyEditorOwner)
     }
 
+    private func showNewChatDialog() {
+        guard !store.isSending else { return }
+        showsNewChatDialog = true
+    }
+
     private func separatorColor() -> NSColor { .separatorColor }
 }
 
@@ -449,10 +515,21 @@ private struct ChatEntryRow: View {
     let entry: ChatEntry
 
     var body: some View {
+        let presentation = ChatEntryPresentation(entry: entry)
         VStack(alignment: entry.author == .user ? .trailing : .leading, spacing: 4) {
+            if !entry.text.isEmpty || presentation.phaseAccessibilityLabel != nil {
+                Text(presentation.speaker)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    // Empty response rows already name the speaker in their
+                    // status; the visible caption need not repeat that name.
+                    .accessibilityHidden(entry.text.isEmpty)
+            }
             HStack {
                 if entry.author == .user { Spacer(minLength: 40) }
                 Text(entry.text)
+                    .accessibilityLabel(presentation.messageAccessibilityLabel)
+                    .accessibilityHidden(entry.text.isEmpty)
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -467,6 +544,7 @@ private struct ChatEntryRow: View {
                             ProgressView()
                                 .controlSize(.small)
                                 .offset(x: -6, y: -6)
+                                .accessibilityHidden(true)
                         }
                     }
                 if entry.author == .assistant { Spacer(minLength: 40) }
@@ -476,15 +554,18 @@ private struct ChatEntryRow: View {
                 provenanceLine
             case .sending:
                 Text("Waiting for the destination…")
+                    .accessibilityLabel(presentation.phaseAccessibilityLabel ?? "")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             case .failed(let message):
                 Label(message, systemImage: "xmark.octagon")
+                    .accessibilityLabel(presentation.phaseAccessibilityLabel ?? "")
                     .font(.caption)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
             case .cancelled:
                 Label("Cancelled — the request may already have been delivered on this route.", systemImage: "stop.circle")
+                    .accessibilityLabel(presentation.phaseAccessibilityLabel ?? "")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -494,6 +575,7 @@ private struct ChatEntryRow: View {
     @ViewBuilder
     private var provenanceLine: some View {
         if entry.author == .assistant, let provenance = entry.provenance {
+            let model = ChatModelPresentation(id: provenance.modelID)
             HStack(spacing: 6) {
                 Label(provenance.route.provenanceLabel, systemImage: provenance.route == .local ? "house.fill" : "network")
                     .font(.caption2.bold())
@@ -502,9 +584,11 @@ private struct ChatEntryRow: View {
                     .background(
                         Capsule().fill(provenance.route == .local ? Color.green.opacity(0.15) : Color.orange.opacity(0.2))
                     )
-                Text(provenance.modelID)
+                Text(model.displayName)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .help(provenance.modelID)
+                    .accessibilityLabel(model.accessibilityLabel)
                 Text(provenance.completedAt.formatted(date: .omitted, time: .shortened))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -532,14 +616,18 @@ private struct ChatNewConversationDialog: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+            if store.isSending {
+                Text(ChatNewConversationPolicy.inFlightExplanation)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
 
             routeCard(
                 route: .local,
                 title: "Local endpoint — this Mac",
                 detail: "Sends to your own hosting endpoint. Default choice. The local inference engine is shared with fleet serving work."
             ) {
-                dismiss()
-                store.startConversation(route: .local)
+                startNewConversation(route: .local)
             }
 
             if !confirmsNetwork {
@@ -558,10 +646,11 @@ private struct ChatNewConversationDialog: View {
                         .font(.callout)
                     HStack {
                         Button("Use paid network") {
-                            dismiss()
-                            store.startConversation(route: .network)
+                            startNewConversation(route: .network)
                         }
                         .controlSize(.large)
+                        .disabled(store.isSending)
+                        .help(store.isSending ? ChatNewConversationPolicy.inFlightExplanation : "Start a paid network chat")
                         Button("Back") { confirmsNetwork = false }
                         Spacer()
                     }
@@ -578,7 +667,10 @@ private struct ChatNewConversationDialog: View {
     }
 
     private func routeCard(route: ChatRoute, title: String, detail: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            guard !store.isSending else { return }
+            action()
+        } label: {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: route == .local ? "house.fill" : "network")
                     .font(.title3)
@@ -603,6 +695,13 @@ private struct ChatNewConversationDialog: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(store.isSending)
+        .help(store.isSending ? ChatNewConversationPolicy.inFlightExplanation : detail)
+    }
+
+    private func startNewConversation(route: ChatRoute) {
+        guard ChatNewConversationPolicy.start(route: route, using: store) else { return }
+        dismiss()
     }
 }
 

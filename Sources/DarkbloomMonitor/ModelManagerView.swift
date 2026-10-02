@@ -1,6 +1,120 @@
+import AppKit
 import DarkbloomTelemetry
 import Foundation
 import SwiftUI
+
+enum ModelManagerSheetHeightPolicy {
+    static let width: CGFloat = 620
+    static let preferredHeight: CGFloat = 740
+    static let unknownScreenHeight: CGFloat = 560
+
+    static func screenBudget(visibleHeight: CGFloat?, windowChromeHeight: CGFloat) -> CGFloat? {
+        guard let visibleHeight, visibleHeight.isFinite, visibleHeight > 0,
+              windowChromeHeight.isFinite else { return nil }
+        return max(1, floor(visibleHeight - max(0, windowChromeHeight) - 20))
+    }
+
+    static func height(screenBudget: CGFloat?, hostMaximum: CGFloat?) -> CGFloat {
+        let screen = screenBudget.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? unknownScreenHeight
+        let host = hostMaximum.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? preferredHeight
+        return min(preferredHeight, screen, host)
+    }
+}
+
+private struct ModelManagerSheetMaximumHeightKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+
+extension EnvironmentValues {
+    /// A host may further constrain its model sheet without changing screen settings.
+    var modelManagerSheetMaximumHeight: CGFloat? {
+        get { self[ModelManagerSheetMaximumHeightKey.self] }
+        set { self[ModelManagerSheetMaximumHeightKey.self] = newValue }
+    }
+}
+
+enum ModelManagerSheetPresentation: Equatable {
+    case current(ModelInventoryItem)
+    case unavailable
+
+    static func make(catalogID: String, inventory: ModelInventory?) -> Self {
+        let matches = inventory.map { ($0.myCatalog + $0.available).filter { $0.catalogID == catalogID } } ?? []
+        guard matches.count == 1, let item = matches.first else { return .unavailable }
+        return .current(item)
+    }
+
+    /// A captured selector must still identify this current downloaded record.
+    @discardableResult
+    static func editDownloaded(catalogID: String, selector: String, inventory: ModelInventory?, edit: () -> Void) -> Bool {
+        guard case .current(let item) = make(catalogID: catalogID, inventory: inventory),
+              item.isDownloaded, item.issue == nil, let inventory else { return false }
+        // Match ProviderControlStore's resolution: exact IDs take precedence
+        // over aliases, and an alias must identify exactly one downloaded model.
+        let exact = inventory.myCatalog.filter { $0.catalogID == selector }
+        let matches = exact.isEmpty ? inventory.myCatalog.filter {
+            $0.enabledSelector == selector || $0.preloadSelector == selector
+        } : exact
+        guard matches.count == 1, matches.first?.catalogID == catalogID else { return false }
+        edit()
+        return true
+    }
+}
+
+private struct ModelManagerSheetScreenReader: NSViewRepresentable {
+    var changed: (CGFloat?) -> Void
+
+    func makeNSView(context: Context) -> ModelManagerSheetScreenView {
+        ModelManagerSheetScreenView(changed: changed)
+    }
+    func updateNSView(_ view: ModelManagerSheetScreenView, context: Context) { view.changed = changed }
+    static func dismantleNSView(_ view: ModelManagerSheetScreenView, coordinator: ()) { view.invalidate() }
+}
+
+@MainActor
+private final class ModelManagerSheetScreenView: NSView {
+    var changed: (CGFloat?) -> Void
+    private var queued = false
+    private var invalidated = false
+
+    init(changed: @escaping (CGFloat?) -> Void) {
+        self.changed = changed
+        super.init(frame: .zero)
+        NotificationCenter.default.addObserver(self, selector: #selector(screenChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
+    }
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("Use init(changed:)") }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeScreenNotification, object: nil)
+        if let window {
+            NotificationCenter.default.addObserver(self, selector: #selector(screenChanged),
+                name: NSWindow.didChangeScreenNotification, object: window)
+        }
+        screenChanged()
+    }
+
+    @objc private func screenChanged() {
+        guard !invalidated, !queued else { return }
+        queued = true
+        // Publish outside AppKit/SwiftUI layout, coalescing lifecycle notifications.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.invalidated else { return }
+            self.queued = false
+            let chrome = self.window.map { $0.frame.height - $0.contentRect(forFrameRect: $0.frame).height } ?? 0
+            self.changed(ModelManagerSheetHeightPolicy.screenBudget(
+                visibleHeight: self.window?.screen?.visibleFrame.height, windowChromeHeight: chrome))
+        }
+    }
+
+    func invalidate() {
+        invalidated = true
+        NotificationCenter.default.removeObserver(self)
+        changed = { _ in }
+    }
+    deinit { NotificationCenter.default.removeObserver(self) }
+}
 
 struct ModelActionPresentation: Equatable {
     let accessibilityLabel: String
@@ -586,6 +700,8 @@ struct ModelManagerView: View {
     var isVisible = true
     var providerStatus: SourceAvailability<StatusSnapshot> = .unavailable(reason: "Provider status unavailable")
     var providerDaemonState: SourceAvailability<DaemonState> = .unavailable(reason: "Provider activity unavailable")
+    @Environment(\.modelManagerSheetMaximumHeight) private var modelSheetMaximumHeight
+    @State private var modelSheetScreenBudget: CGFloat?
     @State private var presentationCache = ModelManagerPresentationCache()
     @State private var freshnessRevision: UInt64 = 0
     @State private var deletion: ModelDeletionConfirmation?
@@ -606,6 +722,9 @@ struct ModelManagerView: View {
             Divider()
             ModelManagerFooter(store: store)
         }
+        .background(ModelManagerSheetScreenReader { height in
+            if modelSheetScreenBudget != height { modelSheetScreenBudget = height }
+        }.frame(width: 0, height: 0).accessibilityHidden(true))
         .task(id: ModelDemandFreshnessTaskInput(capturedAt: telemetry.networkCapacity?.capturedAt,
             sourceAvailable: telemetry.networkSourceAvailable, isVisible: isVisible)) {
             freshnessRevision &+= 1
@@ -640,18 +759,38 @@ struct ModelManagerView: View {
             )
         }
         .sheet(item: $inspectedModel) { item in
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text("Model settings & forecast").font(.title2.bold())
-                    Spacer()
-                    Button("Done") { inspectedModel = nil }.keyboardShortcut(.cancelAction)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        Text("Model settings & forecast").font(.title2.bold())
+                        Spacer()
+                        Button("Done") { inspectedModel = nil }.keyboardShortcut(.cancelAction)
+                            .accessibilityIdentifier("models.manage.done")
+                    }
+                    switch ModelManagerSheetPresentation.make(catalogID: item.catalogID, inventory: store.snapshot?.inventory) {
+                    case .current(let current):
+                        modelCard(current, at: Date(), presentation: currentPresentation(at: Date()), expanded: true)
+                    case .unavailable:
+                        ContentUnavailableView("Model unavailable", systemImage: "cpu",
+                            description: Text("This model cannot be matched to one current catalog entry. Refresh model controls to check again. Your staged edits are retained."))
+                            .accessibilityIdentifier("models.manage.unavailable")
+                        Button("Refresh model controls") { Task { await store.refreshPreservingDraft() } }
+                            .disabled(store.operation != .idle)
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Done") { inspectedModel = nil }
+                            .accessibilityIdentifier("models.manage.footerDone")
+                    }
                 }
-                ScrollView {
-                    let current = store.snapshot?.inventory.myCatalog.first { $0.catalogID == item.catalogID }
-                        ?? store.snapshot?.inventory.available.first { $0.catalogID == item.catalogID } ?? item
-                    modelCard(current, at: Date(), presentation: currentPresentation(at: Date()), expanded: true)
-                }
-            }.padding(24).frame(width: 620, height: 740)
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityIdentifier("models.manage.scroll")
+            .frame(width: ModelManagerSheetHeightPolicy.width,
+                height: ModelManagerSheetHeightPolicy.height(screenBudget: modelSheetScreenBudget,
+                    hostMaximum: modelSheetMaximumHeight))
         }
         .onAppear(perform: restoreWhatIfRuntime)
         .onChange(of: whatIfRunPercent) { _, runtime in
@@ -880,7 +1019,30 @@ struct ModelManagerView: View {
     }
 
     private func setWhatIfRunPercent(_ value: Int, for item: ModelInventoryItem) {
+        guard case .current = ModelManagerSheetPresentation.make(catalogID: item.catalogID,
+            inventory: store.snapshot?.inventory) else { return }
         whatIfRunPercent[item.catalogID] = min(100, max(0, value))
+    }
+
+    private func setEnabled(_ enabled: Bool, selector: String, catalogID: String) {
+        ModelManagerSheetPresentation.editDownloaded(catalogID: catalogID, selector: selector, inventory: store.snapshot?.inventory) {
+            store.setEnabled(enabled, modelID: selector)
+        }
+    }
+
+    private func setPreloaded(_ preloaded: Bool, selector: String, catalogID: String) {
+        ModelManagerSheetPresentation.editDownloaded(catalogID: catalogID, selector: selector, inventory: store.snapshot?.inventory) {
+            store.setPreloaded(preloaded, modelID: selector)
+        }
+    }
+
+    private func requestDelete(_ item: ModelInventoryItem) {
+        guard case .current(let current) = ModelManagerSheetPresentation.make(catalogID: item.catalogID,
+            inventory: store.snapshot?.inventory), current.isDownloaded,
+              let localID = current.localID, localID == item.localID else { return }
+        inspectedModel = nil
+        deletion = ModelDeletionConfirmation(localID: localID,
+            displayName: current.displayName, sizeGB: current.sizeGB)
     }
 
     @ViewBuilder
@@ -912,14 +1074,9 @@ struct ModelManagerView: View {
                     DownloadedModelRow(item: item, draft: store.draft,
                         operation: store.operation, sources: snapshot.sources,
                         currentTime: date, sanitize: store.sanitizedDiagnostic,
-                        setEnabled: { store.setEnabled($0, modelID: $1) },
-                        setPreloaded: { store.setPreloaded($0, modelID: $1) },
-                        requestDelete: { item in
-                            guard let localID = item.localID else { return }
-                            inspectedModel = nil
-                            deletion = ModelDeletionConfirmation(localID: localID,
-                                displayName: item.displayName, sizeGB: item.sizeGB)
-                        })
+                        setEnabled: { setEnabled($0, selector: $1, catalogID: item.catalogID) },
+                        setPreloaded: { setPreloaded($0, selector: $1, catalogID: item.catalogID) },
+                        requestDelete: requestDelete)
                 } else {
                     AvailableModelRow(item: item, store: store)
                 }
@@ -956,14 +1113,9 @@ struct ModelManagerView: View {
                 DownloadedModelRow(item: item, draft: store.draft,
                     operation: store.operation, sources: snapshot.sources,
                     currentTime: date, sanitize: store.sanitizedDiagnostic,
-                    setEnabled: { store.setEnabled($0, modelID: $1) },
-                    setPreloaded: { store.setPreloaded($0, modelID: $1) },
-                    requestDelete: { item in
-                        guard let localID = item.localID else { return }
-                        inspectedModel = nil
-                        deletion = ModelDeletionConfirmation(localID: localID,
-                            displayName: item.displayName, sizeGB: item.sizeGB)
-                    }, compact: true)
+                    setEnabled: { setEnabled($0, selector: $1, catalogID: item.catalogID) },
+                    setPreloaded: { setPreloaded($0, selector: $1, catalogID: item.catalogID) },
+                    requestDelete: requestDelete, compact: true)
                 Spacer(minLength: 8)
                 Button(ModelManagerPresentation.compactEntryActionLabel(for: item)) { inspectedModel = item }
                     .accessibilityLabel(ModelManagerPresentation.compactEntryAccessibilityLabel(for: item))

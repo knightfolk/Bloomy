@@ -75,6 +75,24 @@ enum OpportunityPresentation {
     }
 }
 
+enum OpportunityCardFreshness {
+    static func status(_ text: String, isCurrent: Bool) -> String {
+        isCurrent ? text : "Last reported: \(text). Current network status is unknown."
+    }
+
+    static func metricLabel(_ title: String, value: String, modelID: String, isCurrent: Bool) -> String {
+        let metric = title == "Network tok/s" ? "throughput in tokens per second" : title.lowercased()
+        return status("Network \(metric) for \(modelID): \(value)", isCurrent: isCurrent)
+    }
+
+    static func metricHelp(isCurrent: Bool, throughput: Bool = false) -> String {
+        let scope = throughput
+            ? "Aggregate network throughput across providers, not the speed of this Mac."
+            : "Network activity across providers, not activity on this Mac."
+        return isCurrent ? scope : "Last reported value; the current value is unknown. " + scope
+    }
+}
+
 struct OpportunityView: View {
     @ObservedObject var store: MonitorStore
     let controlStore: ProviderControlStore?
@@ -188,7 +206,7 @@ private struct OpportunityModelListView: View {
                                             systemImage: "magnifyingglass", description: Text("Try a different search or refresh the network."))
                                     } else {
                                         LazyVGrid(
-                                            columns: Array(repeating: GridItem(.flexible(), spacing: 12),
+                                            columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top),
                                                            count: geometry.size.width >= 500 ? 2 : 1),
                                             alignment: .leading,
                                             spacing: 12
@@ -403,6 +421,9 @@ struct OpportunityModelCard: View {
                     .font(.caption.weight(.semibold)).foregroundStyle(tint)
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(tint.opacity(0.10), in: Capsule())
+                    .accessibilityLabel(OpportunityCardFreshness.status(
+                        OpportunityPresentation.demand(model), isCurrent: networkIsCurrent
+                    ))
                 if !networkIsCurrent {
                     Text("Last known").font(.caption).foregroundStyle(.secondary)
                 }
@@ -415,7 +436,7 @@ struct OpportunityModelCard: View {
                 metric("Loaded", model.warmProviders)
                 metric("Network tok/s", model.aggregateTokensPerSecond)
             }
-            DisclosureGroup("Details") {
+            DisclosureGroup {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(model.id).font(.callout).textSelection(.enabled)
                     if let metadata {
@@ -429,9 +450,15 @@ struct OpportunityModelCard: View {
                     if let local {
                         Text("Last catalog check: \(local.isDownloaded ? "downloaded" : "not downloaded") · \(local.isEnabled ? "enabled" : "not enabled")")
                     }
-                    Text("\(model.routableProviders) routable providers · \(model.canAccept && model.ready ? "accepting requests" : "not accepting requests")")
+                    Text(OpportunityCardFreshness.status(
+                        "\(model.routableProviders) routable providers · \(model.canAccept && model.ready ? "accepting requests" : "not accepting requests")",
+                        isCurrent: networkIsCurrent
+                    ))
                     if let pressure = model.demandPerWarmProvider {
-                        Text("\(pressure.formatted(.number.precision(.fractionLength(2)))) active or waiting requests per loaded provider")
+                        Text(OpportunityCardFreshness.status(
+                            "\(pressure.formatted(.number.precision(.fractionLength(2)))) active or waiting requests per loaded provider",
+                            isCurrent: networkIsCurrent
+                        ))
                     }
                     if let price {
                         Text("Customer price per million tokens\(priceIsCurrent ? "" : " · last known")")
@@ -441,7 +468,11 @@ struct OpportunityModelCard: View {
                     }
                     Text("RAM minimum is one check, not a guarantee that this model can run alongside your current models.")
                 }.font(.callout).foregroundStyle(.secondary).padding(.top, 8)
-            }.font(.callout).foregroundStyle(.secondary)
+            } label: {
+                Text("Details").accessibilityLabel("Details for model \(model.id)")
+            }
+                .font(.callout).foregroundStyle(.secondary)
+                .accessibilityIdentifier("opportunity.\(model.id).details")
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -470,7 +501,11 @@ struct OpportunityModelCard: View {
             Text(title).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(OpportunityCardFreshness.metricLabel(
+            title, value: value.formatted(.number), modelID: model.id, isCurrent: networkIsCurrent
+        ))
+        .help(OpportunityCardFreshness.metricHelp(isCurrent: networkIsCurrent))
     }
 
     private func metric(_ title: String, _ value: Double) -> some View {
@@ -480,7 +515,11 @@ struct OpportunityModelCard: View {
             Text(title).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .help("Aggregate network throughput across providers, not the speed of this Mac")
-        .accessibilityElement(children: .combine)
+        .help(OpportunityCardFreshness.metricHelp(isCurrent: networkIsCurrent, throughput: true))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(OpportunityCardFreshness.metricLabel(
+            title, value: value.formatted(.number.precision(.fractionLength(0...1))),
+            modelID: model.id, isCurrent: networkIsCurrent
+        ))
     }
 }
