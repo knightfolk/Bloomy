@@ -64,6 +64,9 @@ final class PerformanceHistoryStore: ObservableObject {
                 || previous.advertisedModels != sample.advertisedModels
                 || previous.autopilotPhase != sample.autopilotPhase
                 || previous.inferenceActive != sample.inferenceActive
+                || (sample.quality == .current && previous.quality == .current
+                    && (previous.requestsServed != sample.requestsServed
+                        || previous.tokensGenerated != sample.tokensGenerated))
         } ?? true
         // A failing disk gets one retry every 30 seconds, not a retry per tick.
         if let elapsed, elapsed >= 0, elapsed < 30,

@@ -4,7 +4,7 @@ import SwiftUI
 
 @MainActor
 final class StatusItemController: NSObject {
-    static let itemWidth: CGFloat = 104
+    static let itemWidth: CGFloat = 80
 
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
@@ -117,7 +117,6 @@ private final class PassthroughHostingView<Content: View>: NSHostingView<Content
 private struct StatusItemRootView: View {
     @ObservedObject var store: MonitorStore
     @ObservedObject private var gpuUsage: SystemGPUUsageStore
-    @AppStorage("menuBarDisplayMode") private var displayModeRaw = MenuBarDisplayMode.automatic.rawValue
 
     init(store: MonitorStore) {
         self.store = store
@@ -125,20 +124,62 @@ private struct StatusItemRootView: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            MenuBarLabel(
-                presentation: store.menuPresentation(mode: displayMode),
-                uptime: store.observedUptime,
-                family: ModelFamilyIcon.select(snapshot: store.snapshot, now: Date()),
-                ring: store.menuGPURing(),
-                attention: store.menuAttention
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
+        if let extras = store.providerExtras {
+            ProviderExtrasStatusItemView(store: store, extras: extras)
+        } else {
+            MenuBarStatusContent(store: store, fanStatus: nil)
         }
     }
+}
 
-    private var displayMode: MenuBarDisplayMode {
-        MenuBarDisplayMode(rawValue: displayModeRaw) ?? .automatic
+/// Fan measurements publish independently of daemon/GPU telemetry. The store's
+/// existing lifecycle polls the read-only extras client every 30 seconds.
+private struct ProviderExtrasStatusItemView: View {
+    let store: MonitorStore
+    @ObservedObject var extras: ProviderExtrasStore
+
+    var body: some View {
+        MenuBarStatusContent(store: store, fanStatus: extras.snapshot?.fanStatus)
+    }
+}
+
+private struct MenuBarStatusContent: View {
+    @ObservedObject var store: MonitorStore
+    @ObservedObject private var gpuUsage: SystemGPUUsageStore
+    let fanStatus: SourceAvailability<ProviderFanStatus>?
+    @State private var freshnessCheckedAt = Date()
+
+    init(store: MonitorStore, fanStatus: SourceAvailability<ProviderFanStatus>?) {
+        self.store = store
+        self.gpuUsage = store.gpuUsage
+        self.fanStatus = fanStatus
+    }
+
+    var body: some View {
+        let now = max(Date(), freshnessCheckedAt)
+        let gpu = store.gpuUsage.reading(at: now)
+        let values = MenuBarIndicators.make(
+            snapshot: store.snapshot,
+            utilization: gpu.percentage,
+            sampledAt: store.gpuUsage.lastGoodSampledAt,
+            utilizationIsCurrent: !gpu.isStale,
+            fanStatus: fanStatus,
+            now: now
+        )
+        MenuBarLabel(
+            presentation: store.menuPresentation(mode: .statusOnly),
+            uptime: store.observedUptime,
+            family: MenuBarIndicators.modelFamily(snapshot: store.snapshot, now: now),
+            attention: store.menuAttention,
+            indicators: values
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: values.nextFreshnessChange) {
+            guard let deadline = values.nextFreshnessChange else { return }
+            do { try await Task.sleep(for: .seconds(max(0.01, deadline.timeIntervalSinceNow))) }
+            catch { return }
+            freshnessCheckedAt = Date()
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 import AppKit
 import DarkbloomTelemetry
+import QuartzCore
 import SwiftUI
 
 enum DarkbloomLogoAsset {
@@ -126,53 +127,72 @@ struct MenuBarGPURingView: View {
     }
 }
 
+/// Three stable, native-size indicators. Numeric details live in the tooltip
+/// and accessibility label, leaving the menu-bar geometry unchanged.
 struct MenuBarLabel: View {
+    static let width: CGFloat = 72
+    static let height: CGFloat = 18
+
     let presentation: MenuBarPresentation
     let uptime: ObservedUptimeValue
     var family: ModelFamilyIcon = .darkbloom
+    // Retained so existing callers can migrate independently.
     var ring: MenuBarGPURing? = nil
     var attention: MenuBarAttention? = nil
+    var indicators: MenuBarIndicators? = nil
 
     var body: some View {
-        HStack(spacing: 8) {
-            logo
-                .frame(width: 16, height: 18)
-
-            if let attention {
-                HStack(spacing: 3) {
-                    Image(systemName: "exclamationmark.circle.fill")
-                    Text(attention.shortText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                }
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(.orange)
-                .frame(width: MenuBarMetric.width, height: MenuBarMetric.height, alignment: .leading)
-            } else {
-                MenuBarMetric(text: presentation.metricText)
+        HStack(spacing: 9) {
+            modelIndicator
+            MenuBarValueRing(reading: values.gpu, tint: .neutral) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.primary)
+            }
+            MenuBarValueRing(reading: values.fanSpeed, tint: values.temperatureTint) {
+                Image(systemName: "thermometer.medium")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(thermalColor)
+                    .opacity(values.temperature.freshness == .stale ? 0.45 : 1)
             }
         }
+        .frame(width: Self.width, height: Self.height)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
         .help(helpText)
     }
 
-    @ViewBuilder
-    private var logo: some View {
-        if let ring {
-            MenuBarGPURingView(ring: ring, family: logoFamily, statusNSColor: statusNSColor)
-        } else {
+    private var modelIndicator: some View {
+        ZStack {
+            Circle().stroke(thermalColor.opacity(values.temperature.freshness == .current ? 0.55 : 0.2), lineWidth: 1)
+                .padding(0.75)
+            MenuBarActivityArc(isActive: values.modelIsActive, tint: thermalNSColor)
             DarkbloomLogo(
-                image: DarkbloomLogoAsset.menuBarImage(tint: statusNSColor, family: logoFamily),
-                tint: statusColor
+                image: DarkbloomLogoAsset.menuBarImage(tint: statusNSColor, family: family),
+                tint: Color(nsColor: statusNSColor)
             )
+            .frame(width: 11, height: 11)
+            if attention != nil {
+                Text("!")
+                    .font(.system(size: 6, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color(nsColor: .labelColor))
+                    .frame(width: 7, height: 7)
+                    .background(Circle().fill(Color(nsColor: .systemOrange)))
+                    .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 0.7))
+                    .offset(x: 6, y: -5)
+            }
         }
+        .frame(width: 18, height: 18)
+        .accessibilityHidden(true)
     }
 
-    private var logoFamily: ModelFamilyIcon { attention == nil ? family : .darkbloom }
-
-    private var statusColor: Color {
-        Color(nsColor: statusNSColor)
+    private var values: MenuBarIndicators {
+        if let indicators { return indicators }
+        return MenuBarIndicators(
+            gpu: ring.map { .init(value: $0.utilization, freshness: $0.lastSampledAt == nil ? .current : .stale,
+                                  sampledAt: $0.lastSampledAt) } ?? .unavailable,
+            temperature: ring?.temperatureCelsius.map { .init(value: $0, freshness: .current) } ?? .unavailable
+        )
     }
 
     private var statusNSColor: NSColor {
@@ -185,30 +205,125 @@ struct MenuBarLabel: View {
         }
     }
 
+    private var thermalColor: Color { MenuBarValueRing<EmptyView>.color(for: values.temperatureTint) }
+
+    private var thermalNSColor: NSColor {
+        switch values.temperatureTint {
+        case .green: .systemGreen
+        case .yellow: .systemYellow
+        case .red: .systemRed
+        case .neutral: .secondaryLabelColor
+        }
+    }
+
     private var accessibilityText: String {
-        var text = "\(presentation.accessibilityLabel) \(uptime.accessibilityDescription)"
-        if let attention {
-            text += " Attention: \(attention.title). \(attention.detail)"
-        }
-        if let detail = ring?.accessibilityDetail {
-            text += " \(detail)"
-        }
+        var text = "\(presentation.accessibilityLabel) \(uptime.accessibilityDescription) \(values.accessibilityDetail)"
+        if let attention { text += " Attention: \(attention.title). \(attention.detail)" }
         return text
     }
 
     private var helpText: String {
-        var text: String
-        if let reason = presentation.metricUnavailableReason {
-            text = "\(presentation.health.reason) · \(reason) · \(uptime.accessibilityDescription)"
-        } else {
-            text = "\(presentation.health.reason) · \(uptime.accessibilityDescription)"
-        }
-        if let detail = ring?.accessibilityDetail {
-            text += " · \(detail)"
-        }
-        if let attention {
-            text = "\(attention.title): \(attention.detail) · \(text)"
-        }
+        var text = "\(presentation.health.reason) · \(uptime.accessibilityDescription) · \(values.accessibilityDetail)"
+        if let attention { text = "\(attention.title): \(attention.detail) · \(text)" }
         return text
+    }
+}
+
+private struct MenuBarValueRing<Content: View>: View {
+    let reading: MenuBarIndicators.Reading
+    let tint: MenuBarGPURing.Tint
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.primary.opacity(0.2), style: StrokeStyle(
+                lineWidth: 1, dash: reading.freshness == .unavailable ? [1.5, 2] : []))
+                .padding(0.75)
+            if reading.value != nil {
+                Circle().trim(from: 0, to: reading.progress)
+                    .stroke(reading.freshness == .stale ? Color.secondary.opacity(0.4) : Self.color(for: tint),
+                            style: StrokeStyle(lineWidth: 1.25, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .padding(0.75)
+            }
+            content()
+        }
+        .frame(width: 18, height: 18)
+        .accessibilityHidden(true)
+    }
+
+    static func color(for tint: MenuBarGPURing.Tint) -> Color {
+        switch tint {
+        case .green: Color(nsColor: .systemGreen)
+        case .yellow: Color(nsColor: .systemYellow)
+        case .red: Color(nsColor: .systemRed)
+        case .neutral: Color.primary.opacity(0.75)
+        }
+    }
+}
+
+/// Core Animation rotates only the small active arc. Idle labels have no
+/// display timer, and Reduced Motion leaves a stationary activity arc.
+struct MenuBarActivityArc: NSViewRepresentable {
+    let isActive: Bool
+    let tint: NSColor
+
+    func makeNSView(context: Context) -> ActivityArcView { ActivityArcView() }
+    func updateNSView(_ nsView: ActivityArcView, context: Context) { nsView.configure(active: isActive, tint: tint) }
+
+    final class ActivityArcView: NSView {
+        private let arc = CAShapeLayer()
+        private var active = false
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+            arc.fillColor = nil
+            arc.lineWidth = 1.4
+            arc.lineCap = .round
+            layer?.addSublayer(arc)
+            NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(motionPreferenceChanged),
+                name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+
+        override func layout() {
+            super.layout()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            arc.frame = bounds
+            arc.path = CGPath(ellipseIn: bounds.insetBy(dx: 0.8, dy: 0.8), transform: nil)
+            arc.strokeStart = 0.08
+            arc.strokeEnd = 0.34
+            CATransaction.commit()
+        }
+
+        func configure(active: Bool, tint: NSColor) {
+            self.active = active
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            arc.strokeColor = tint.cgColor
+            arc.isHidden = !active
+            CATransaction.commit()
+            synchronizeAnimation()
+        }
+
+        @objc private func motionPreferenceChanged() { synchronizeAnimation() }
+
+        private func synchronizeAnimation() {
+            guard active, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+                arc.removeAnimation(forKey: "inferenceRotation")
+                return
+            }
+            guard arc.animation(forKey: "inferenceRotation") == nil else { return }
+            let animation = CABasicAnimation(keyPath: "transform.rotation.z")
+            animation.fromValue = 0
+            animation.toValue = -Double.pi * 2
+            animation.duration = 1.4
+            animation.repeatCount = .infinity
+            arc.add(animation, forKey: "inferenceRotation")
+        }
     }
 }

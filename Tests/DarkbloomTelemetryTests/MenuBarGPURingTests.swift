@@ -305,7 +305,7 @@ struct MenuBarGPURingTests {
                 ring: ring
             ))
             let size = host.sizeThatFits(in: proposed)
-            #expect(size == NSSize(width: 96, height: 18))
+            #expect(size == NSSize(width: 72, height: 18))
         }
     }
 
@@ -329,12 +329,12 @@ struct MenuBarGPURingTests {
             family: .qwen,
             attention: alert
         ))
-        #expect(host.sizeThatFits(in: NSSize(width: 500, height: 100)) == NSSize(width: 96, height: 18))
+        #expect(host.sizeThatFits(in: NSSize(width: 500, height: 100)) == NSSize(width: 72, height: 18))
 
         guard ProcessInfo.processInfo.environment["DARKBLOOM_RENDER_EVIDENCE"] == "1" else { return }
         let window = NSWindow(contentViewController: host)
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 96, height: 18))
+        window.setContentSize(NSSize(width: 72, height: 18))
         window.orderBack(nil)
         defer { window.close() }
         host.view.layoutSubtreeIfNeeded()
@@ -360,7 +360,7 @@ struct MenuBarGPURingTests {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let controller = StatusItemController(store: store, defaults: defaults)
-        #expect(controller.statusItemLength == 104)
+        #expect(controller.statusItemLength == 80)
         controller.invalidate()
     }
 

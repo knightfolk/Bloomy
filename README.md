@@ -58,7 +58,7 @@ explicit, off-by-default setting with its own evidence and timing checks.
 ## Source highlights
 
 - Bloomy character icon and tintable menu-bar mark
-- Menu-bar activity status with clearly labeled model-average throughput
+- Three menu-bar circles for the loaded model, GPU usage, and cooling; the temperature-colored model ring spins during work
 - A compact popup with equal-sized model cards, collapsible available models, and stable live readings
 - Swap locally, then send a network nudge while keeping the advertised selection
 - Manual Nudge with guided Keychain setup and a clear completed state
@@ -73,7 +73,7 @@ explicit, off-by-default setting with its own evidence and timing checks.
 - Activity charts with readable per-model company color families, clickable
   model filters, bar/line/area styles, and stacked or side-by-side bars
 - Separate Activity Metrics with bounded private recording, consistent controls,
-  measured coverage and model transitions
+  measured coverage, model transitions, and timed visits switched away without observed work
 - Estimated per-model profit per earning-hour, with whole-Mac electricity
   shared evenly among models that earned in that fully measured hour
 - Completed jobs today and the prior seven-day daily average when enough local
@@ -91,7 +91,7 @@ explicit, off-by-default setting with its own evidence and timing checks.
 - Independent daily-runtime what-if sliders with estimates from observed data;
   they do not schedule or change provider runtime. Earnings inputs are account-level
   and assume this Mac produced the recorded work for that model
-- A whole-Mac GPU utilization ring in the menu bar, with fresh temperature coloring
+- Separate whole-Mac GPU utilization and measured fan-speed rings, with fresh temperature coloring
 - Concurrency selections from 1–24 and resident-model limits staged together with model selections
 - Clear saved-state labels for idle-memory, beta, and electricity settings
 - Starting/Restarting progress that blocks repeated clicks until fresh telemetry arrives
@@ -128,15 +128,11 @@ explicit, off-by-default setting with its own evidence and timing checks.
   pickers, per-response route provenance, and a fail-closed paid gate
   (consumer API key, fresh balance above zero, verified pricing, 402
   honored as the network's final decision with no retry)
-- Qwen, OpenAI/GPT-OSS and Google/Gemma menu-bar icons during observed activity
+- Model-family menu-bar icons remain visible for the loaded slot between requests
 - Opt-in estimated adapter power, a saved USD/kWh electricity rate, and earnings
   after electricity for matching measurement periods
 
-During inference, the status item shows the model's daily rate labeled `avg`, or
-`Working` when no average exists. These are not realtime measurements. The popup
-also labels this working/average fallback. Earnings remain the idle fallback.
-Unavailable values are omitted or shown with a compact
-neutral state; the monitor does not manufacture values from unrelated counters.
+The menu bar uses three fixed-size circles. The model ring spins during fresh inference and uses the existing green/yellow/red temperature colors. The GPU ring shows whole-Mac utilization; the thermometer ring shows the highest measured fan speed as a percentage of its reported maximum RPM. Hover for numeric readings, freshness and attention details. Missing readings remain neutral, retained readings fade, and Reduce Motion uses a static activity arc. The popup retains earnings and explicitly labeled model-average throughput.
 
 ## Screenshots
 

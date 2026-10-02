@@ -8,8 +8,6 @@ struct MonitorSettingsView: View {
     /// The dashboard supplies its sidebar selection. The standalone Settings
     /// scene uses the same pages with its own native sidebar.
     var selection: SettingsPage? = nil
-    @AppStorage("menuBarDisplayMode") private var displayModeRaw =
-        MenuBarDisplayMode.automatic.rawValue
     @AppStorage(ApplicationAppearance.defaultsKey) private var appearanceModeRaw =
         AppAppearanceMode.system.rawValue
     @State private var standaloneSelection: SettingsPage = .appearance
@@ -71,7 +69,6 @@ struct MonitorSettingsView: View {
             case .appearance, .menuBar, .electricity:
                 GeneralSettingsView(
                     page: page,
-                    displayModeRaw: $displayModeRaw,
                     appearanceModeRaw: $appearanceModeRaw
                 )
             case .updates:
@@ -176,7 +173,6 @@ struct MonitorSettingsView: View {
 
 private struct GeneralSettingsView: View {
     let page: SettingsPage
-    @Binding var displayModeRaw: String
     @Binding var appearanceModeRaw: String
     @AppStorage("electricity.usdPerKWh") private var electricityRate = ""
     @AppStorage("electricity.enabled") private var electricityEnabled = false
@@ -227,12 +223,10 @@ private struct GeneralSettingsView: View {
             }
             if page == .menuBar {
                 Section("Menu bar · Applies immediately") {
-                    Picker("Displayed metric", selection: displayModeBinding) {
-                        ForEach(MenuBarDisplayMode.allCases) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.menu)
+                    Label("Model · GPU · Cooling", systemImage: "circle.grid.3x1")
+                    Text("The model ring spins during work. The GPU ring shows whole-Mac usage. The cooling ring shows the highest fan speed percentage of its reported maximum RPM, colored by GPU temperature. Hover for readings and details.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     Picker("Idle alert", selection: $idleAlertMinutes) {
                         Text("Off").tag(0)
@@ -241,24 +235,17 @@ private struct GeneralSettingsView: View {
                         }
                     }
                     .accessibilityIdentifier("settings.menuBar.idleAlert")
-                    Text("Bloomy shows its mascot and ! when a warm provider stays idle. The alert clears when work resumes. This reminder does not send a nudge or change automatic nudge timing.")
+                    Text("A ! appears on the model indicator when a warm provider stays idle. The alert clears when work resumes. This reminder does not send a nudge or change automatic nudge timing.")
                         .font(.callout).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text("Automatic shows Working or today's model average during activity, and today's earnings while idle. An asterisk marks partial-day earnings coverage.")
+                    Text("Unavailable readings use a neutral ring. Motion follows your Mac’s Reduce Motion setting. Earnings and model averages remain available in the popup.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
-    }
-
-    private var displayModeBinding: Binding<MenuBarDisplayMode> {
-        Binding(
-            get: { MenuBarDisplayMode(rawValue: displayModeRaw) ?? .automatic },
-            set: { displayModeRaw = $0.rawValue }
-        )
     }
 
     private var appearanceModeBinding: Binding<AppAppearanceMode> {

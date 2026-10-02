@@ -355,12 +355,12 @@ struct MonitorPopoverLayoutTests {
             earnings: .day(microUSD: 2_640_000, complete: false), mode: .earnings)
         let host = NSHostingController(rootView: MenuBarLabel(presentation: presentation,
             uptime: .available(percent: 100, observedSeconds: 600)))
-        #expect(host.sizeThatFits(in: NSSize(width: 500, height: 100)) == NSSize(width: 96, height: 18))
+        #expect(host.sizeThatFits(in: NSSize(width: 500, height: 100)) == NSSize(width: 72, height: 18))
         #expect(presentation.metricText == "$2.64/d*")
         guard ProcessInfo.processInfo.environment["DARKBLOOM_RENDER_EVIDENCE"] == "1" else { return }
         let window = NSWindow(contentViewController: host)
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 96, height: 18))
+        window.setContentSize(NSSize(width: 72, height: 18))
         window.orderBack(nil)
         defer { window.close() }
         try await Task.sleep(for: .milliseconds(200))
@@ -388,7 +388,7 @@ struct MonitorPopoverLayoutTests {
 
         let size = hostingController.sizeThatFits(in: NSSize(width: 500, height: 100))
 
-        #expect(size.width == 96)
+        #expect(size.width == 72)
         #expect(size.height == 18)
     }
 
@@ -404,7 +404,7 @@ struct MonitorPopoverLayoutTests {
         )
         let controller = StatusItemController(store: store, defaults: defaults)
 
-        #expect(controller.statusItemLength == 104)
+        #expect(controller.statusItemLength == 80)
         #expect(controller.dashboardWindowController == nil)
         controller.showDashboard(activate: false)
         let firstWindow = controller.dashboardWindowController?.window

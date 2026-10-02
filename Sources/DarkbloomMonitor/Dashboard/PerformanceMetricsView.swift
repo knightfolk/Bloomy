@@ -122,6 +122,7 @@ struct PerformanceMetricsContent: View {
                     .frame(minHeight: 160)
                 } else {
                     summaryGrid
+                    ModelVisitSection(visits: presentation.visits, withoutWorkVisits: presentation.withoutWorkVisits, summary: presentation.visitSummary)
                     speedChart
                     modelTimeline
                 }
@@ -281,7 +282,7 @@ struct PerformanceMetricsContent: View {
     private var modelTimeline: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Model transitions", systemImage: "arrow.triangle.swap").font(.headline)
+                Label("Provider model history", systemImage: "arrow.triangle.swap").font(.headline)
                 Spacer(minLength: 0)
                 if presentation.transitionCount > 8 {
                     Text("Latest 8 of \(presentation.transitionCount)").font(.caption).foregroundStyle(.secondary)
@@ -300,7 +301,7 @@ struct PerformanceMetricsContent: View {
                     }
                 }
             }
-            Text("Observed selections, including unknown intervals. A selection does not prove a request ran.")
+            Text("Provider reports may name the most recently used model. Loaded-model visits are tracked above.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -320,6 +321,7 @@ struct PerformanceMetricsContent: View {
                     let power = latest.powerWatts.map { "\(number($0)) W" } ?? "Unknown"
                     Text("Latest provider GPU memory: \(memory) · whole-Mac power: \(power).")
                 }
+                Text("Visit times follow observed residency. Switches entirely between readings can be missed, so shared counter work attribution is approximate.")
                 Text("Only measurement fields are stored. Prompts, responses, credentials, and raw logs are excluded. Latency and time to first token are unavailable.")
             }
             .padding(.top, 6)
@@ -358,6 +360,25 @@ struct PerformanceModelTransition: Identifiable, Sendable {
 }
 
 enum PerformanceMetricsPresentation {
+    /// A sole loaded slot establishes resident identity even when the daemon's
+    /// last-used label still names a previous model. Activity/rate for that old
+    /// label cannot be reassigned. A globally idle provider is known idle.
+    static func residentMeasurements(_ samples: [PerformanceSample]) -> [PerformanceSample] {
+        samples.map { sample in
+            guard Set(sample.residentModels).count == 1,
+                  let resident = sample.residentModels.first, resident != sample.model else { return sample }
+            return PerformanceSample(
+                id: sample.id, observedAt: sample.observedAt, sourceCapturedAt: sample.sourceCapturedAt,
+                quality: sample.quality, providerSession: sample.providerSession, model: resident,
+                residentModels: sample.residentModels, advertisedModels: sample.advertisedModels,
+                inferenceActive: sample.inferenceActive == false ? false : nil,
+                tokensPerSecond: nil, tokensGenerated: sample.tokensGenerated, requestsServed: sample.requestsServed,
+                gpuUtilizationPercent: sample.gpuUtilizationPercent, gpuMemoryGB: sample.gpuMemoryGB,
+                powerWatts: sample.powerWatts, autopilotPhase: sample.autopilotPhase
+            )
+        }
+    }
+
     static func ratePoints(samples: [PerformanceSample], model: String? = nil) -> [PerformanceRatePoint] {
         var result: [PerformanceRatePoint] = []
         var previous: PerformanceSample?
@@ -439,7 +460,7 @@ private struct PerformanceHistoryQuery: Hashable {
     let refreshID: Int
 }
 
-private struct PerformanceMetricsSnapshot: Sendable {
+struct PerformanceMetricsSnapshot: Sendable {
     let summary: PerformanceSummary
     let sampleCount: Int
     let staleCount: Int
@@ -451,24 +472,32 @@ private struct PerformanceMetricsSnapshot: Sendable {
     let chartWasReduced: Bool
     let transitions: [PerformanceModelTransition]
     let transitionCount: Int
+    let visits: [ModelVisit]
+    let withoutWorkVisits: [ModelVisit]
+    let visitSummary: ModelVisitSummary
 
     static let empty = PerformanceMetricsSnapshot(samples: [], range: DateInterval(start: .distantPast, end: .distantFuture), model: nil)
 
     init(samples: [PerformanceSample], range: DateInterval, model: String?) {
         let inPeriod = samples.filter { $0.observedAt >= range.start && $0.observedAt <= range.end }
-        let visible = inPeriod.filter { model == nil || $0.model == model }
-        summary = PerformanceSummary(samples: inPeriod, model: model)
+        let residentMeasurements = PerformanceMetricsPresentation.residentMeasurements(inPeriod)
+        let visible = residentMeasurements.filter { model == nil || $0.model == model }
+        summary = PerformanceSummary(samples: residentMeasurements, model: model)
         sampleCount = inPeriod.count
         staleCount = inPeriod.filter { $0.quality == .stale }.count
         unavailableCount = inPeriod.filter { $0.quality == .unavailable }.count
-        models = Array(Set(inPeriod.compactMap(\.model))).sorted()
+        models = Array(Set(inPeriod.flatMap { ($0.model.map { [$0] } ?? []) + $0.residentModels })).sorted()
         latest = inPeriod.last
         latestForModel = visible.last
-        let points = PerformanceMetricsPresentation.ratePoints(samples: inPeriod, model: model)
+        let points = PerformanceMetricsPresentation.ratePoints(samples: residentMeasurements, model: model)
         chartWasReduced = points.count > 600
         ratePoints = PerformanceMetricsPresentation.reducedRatePoints(points)
         let changes = PerformanceMetricsPresentation.transitions(samples: inPeriod)
         transitionCount = changes.count
         transitions = Array(changes.suffix(100))
+        let analyzedVisits = ModelVisitHistory(samples: samples, period: range, maximumVisits: 100_000).visits.filter { model == nil || $0.model == model }
+        visitSummary = ModelVisitSummary(visits: analyzedVisits)
+        visits = Array(analyzedVisits.suffix(500))
+        withoutWorkVisits = Array(analyzedVisits.filter { $0.outcome == .noObservedWork }.suffix(500))
     }
 }

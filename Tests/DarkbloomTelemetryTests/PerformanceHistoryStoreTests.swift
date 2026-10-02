@@ -6,6 +6,23 @@ import Testing
 @Suite("Performance recording integration", .serialized)
 @MainActor
 struct PerformanceHistoryStoreTests {
+    @Test("completed work between idle polls is recorded immediately")
+    func recordsShortWork() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("performance-short-work-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date()
+        let store = PerformanceHistoryStore(url: root.appendingPathComponent("metrics.sqlite3"))
+        for (offset, count) in [(0.0, Int64(4)), (1, 4), (2, 5)] {
+            let date = now.addingTimeInterval(offset)
+            await store.observe(.init(observedAt: date, sourceCapturedAt: date,
+                quality: .current, providerSession: "1:100", model: "gemma",
+                residentModels: ["gemma"], inferenceActive: false,
+                tokensGenerated: count * 100, requestsServed: count))
+        }
+        let samples = try await store.samples(in: .init(start: now, end: now.addingTimeInterval(5)))
+        #expect(samples.map(\.requestsServed) == [4, 5])
+    }
+
     @Test("periodic cadence records state boundaries and survives reopening")
     func cadenceAndReopen() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("performance-store-\(UUID())")

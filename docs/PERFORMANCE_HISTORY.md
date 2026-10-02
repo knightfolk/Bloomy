@@ -37,3 +37,11 @@ otherwise configure the provider.
 
 Existing Health & Logs and Action History retain their roles for diagnostics,
 nudge attempts, model operations, recorded jobs and rewards.
+
+## Loaded-model visits
+
+Metrics analyzes uninterrupted visits using the single resident model, rather than treating the daemon’s most-recently-used model as the loaded slot. Each completed visit reports its observed duration and work evidence. All-visits and Without-work filters show the latest 500 matching visits; counts and duration totals use the full selected history. A return to the same model is a separate visit.
+
+No observed work requires a fully bounded visit, fresh inactive readings, unchanged counters and single-model residency. Provider restarts, stale or missing data, counter resets, clipped periods and ambiguous cross-switch counter increases stay uncertain. Positive counters between the same sole resident can detect brief completed work between idle polls. These observed intervals are approximate, and cannot prove the network sent no requests.
+
+Positive shared counters can be attributed only to the same sole resident observed at both ends. Switches away and back entirely between readings cannot be ruled out. Model-filtered coverage follows sole residency; work or speed labeled for a previous model is not reassigned.
