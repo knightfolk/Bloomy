@@ -133,7 +133,7 @@ struct ChatView: View {
                 modelVerificationLine
                 balanceLine
                 pricingLine
-                Text("Balance is advisory; the network can still reject a send (402).")
+                Text("Balance is advisory; the network can still decline a request.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -239,7 +239,7 @@ struct ChatView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("• Inference runs on the Darkbloom network; this Mac is not used.")
                 Text("• Every request is paid from your key's balance at the listed price.")
-                Text("• Balance checked per send; 402 is final.")
+                Text("• Balance is checked before each send. The network makes the final payment decision.")
             }
             .font(.callout)
             HStack {
@@ -554,7 +554,7 @@ private struct ChatNewConversationDialog: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Confirm the paid network route", systemImage: "exclamationmark.triangle.fill")
                         .font(.headline)
-                    Text("• This Mac is not used for inference.\n• Every request is paid at the model's listed price from your balance.\n• A positive balance does not guarantee acceptance; the network's decision (including HTTP 402) is final.")
+                    Text("• This Mac is not used for inference.\n• Every request is paid at the model's listed price from your balance.\n• A positive balance does not guarantee acceptance. The network makes the final payment decision.")
                         .font(.callout)
                     HStack {
                         Button("Use paid network") {

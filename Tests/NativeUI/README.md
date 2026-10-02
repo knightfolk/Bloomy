@@ -158,8 +158,21 @@ menu-bar anchor, rather than from a button near the dashboard's upper edge.
 It uses the production fitting controller to set the popup's preferred size
 before presentation and respond to later disclosure changes. Opening from a
 real menu-bar anchor alone does not prove correct sizing: inspect the bounded
-`popup-geometry.jsonl` records and the rendered header/body together. The current
-screen-fit proof does not establish fit on every smaller display.
+`popup-geometry.jsonl` records and the rendered header/body together. Enable
+**Focus trace** to record geometry (at most six records per popup controller).
+**Popup height** selects the actual screen budget or synthetic 360-, 240-, and
+80-point budgets. It does not change the Mac's display or preferences. Check
+Available expansion/collapse and scroll to the last footer control; a bounded
+fitting size alone does not prove reachability. Extremely short budgets must
+permit scrolling the whole popup, including its header and Cooling/Auto/Nudge
+controls. Quit and relaunch the owned fixture for a new bounded trace once
+its record limit is reached. The synthetic budget checks do not establish fit
+on every physical display or screen-transition behavior.
+The outer layer uses a native scroll view with an explicitly measured SwiftUI
+document; its overlay scrollbar preserves the model-card width. At ordinary
+budgets only the model body scrolls. At very small budgets check both nested
+areas and return to the header. Reopen Auto/Nudge/Cooling and verify a fan draft
+survives Refresh and sheet reopening; the test host must remain inert throughout.
 The production status item is untouched. Quit joins the fixture's popup and
 reader cleanup, then removes only its own item.
 

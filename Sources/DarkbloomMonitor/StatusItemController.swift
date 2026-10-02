@@ -121,7 +121,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             await controlStore?.refreshPreservingDraft()
         }
         (popover.contentViewController as? FittingPopoverHostingController<PopoverRootView>)?
-            .prepareForPresentation()
+            .prepareForPresentation(anchorView: button)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 

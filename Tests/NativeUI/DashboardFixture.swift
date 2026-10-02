@@ -316,6 +316,22 @@ private struct FixtureChat: LocalChatRouteClient, NetworkChatRouteClient {
     }
 }
 
+private enum FixturePopupHeightBudget: String, CaseIterable, Identifiable {
+    case screen = "Screen"
+    case compact = "360 pt"
+    case short = "240 pt"
+    case tiny = "80 pt"
+    var id: String { rawValue }
+    var maximumHeight: CGFloat? {
+        switch self {
+        case .screen: nil
+        case .compact: 360
+        case .short: 240
+        case .tiny: 80
+        }
+    }
+}
+
 private enum FixtureChatVerification: String, CaseIterable, Identifiable, Sendable {
     case fresh = "Fresh verification"
     case expiring = "Verification expires in 10 s"
@@ -390,6 +406,7 @@ private final class FixtureModel: ObservableObject {
     @Published var focusTracing: Bool
     @Published var staticActivity = false
     @Published var grayscale = false
+    @Published var popupHeightBudget: FixturePopupHeightBudget = .screen
     @Published private(set) var nativeProofStatus = "Native proof"
     private var nativeProofTask: Task<Void, Never>?
     @Published private(set) var chatVerificationTest: FixtureChatVerification?
@@ -641,7 +658,7 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
         let control = model.control
         Task { @MainActor [weak control] in await control?.refreshPreservingDraft() }
         (popover.contentViewController as? FittingPopoverHostingController<FixturePopoverContent>)?
-            .prepareForPresentation()
+            .prepareForPresentation(anchorView: button, maximumContentHeight: model.popupHeightBudget.maximumHeight)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
@@ -671,6 +688,7 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
         let contentScreenRect = window.convertToScreen(view.convert(view.bounds, to: nil))
         let values: [String: Any] = [
             "schema": 1, "phase": phase,
+            "reviewHeightBudget": model.popupHeightBudget.rawValue,
             "popoverContentSize": NSStringFromSize(popover.contentSize),
             "hostingFrame": NSStringFromRect(view.frame),
             "hostingBounds": NSStringFromRect(view.bounds),
@@ -1224,8 +1242,11 @@ private struct FixtureReviewView: View {
                 HStack(spacing: 14) {
                     Toggle("Static menu-bar activity", isOn: $model.staticActivity).toggleStyle(.checkbox)
                     Toggle("Grayscale", isOn: $model.grayscale).toggleStyle(.checkbox)
-                    Text("Review overrides only · Mac preferences stay unchanged")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Picker("Popup height", selection: $model.popupHeightBudget) {
+                        ForEach(FixturePopupHeightBudget.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .frame(width: 210)
+                    .help("Synthetic popup height budget only; the Mac's screen and preferences stay unchanged.")
                     Spacer(minLength: 0)
                     Button(model.nativeProofStatus) { model.runNativeProof() }
                         .disabled(!model.ready || model.nativeProofStatus == "Proof running…")

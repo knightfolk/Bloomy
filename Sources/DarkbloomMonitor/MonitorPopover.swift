@@ -407,12 +407,50 @@ struct PopoverTimelineSchedule: TimelineSchedule {
     }
 }
 
+/// Measure the fixed chrome before allocating the independent body viewport.
+/// Extremely short budgets retain the full body so the outer scroll viewport
+/// can expose every control instead of leaving a zero-height inner scroller.
+struct PopupContentLayout: Layout {
+    static let spacing: CGFloat = 12
+    static let minimumUsefulBodyHeight: CGFloat = 80
+    let bodyHeight: CGFloat
+    let maximumHeight: CGFloat?
+
+    static func fittedBodyHeight(requested: CGFloat, chromeHeight: CGFloat, maximumHeight: CGFloat?) -> CGFloat {
+        let requested = requested.isFinite ? max(0, requested) : 0
+        guard let maximumHeight, maximumHeight.isFinite else { return requested }
+        let chrome = chromeHeight.isFinite ? max(0, ceil(chromeHeight)) : 0
+        let available = max(0, floor(maximumHeight - chrome - spacing))
+        return available < minimumUsefulBodyHeight ? requested : min(requested, available)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        let width = proposal.width ?? 528
+        let chrome = subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil))
+        let body = Self.fittedBodyHeight(requested: bodyHeight, chromeHeight: chrome.height, maximumHeight: maximumHeight)
+        return CGSize(width: width, height: ceil(chrome.height) + Self.spacing + body)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let chrome = subviews[0].sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+        let height = ceil(chrome.height)
+        let body = Self.fittedBodyHeight(requested: bodyHeight, chromeHeight: height, maximumHeight: maximumHeight)
+        subviews[0].place(at: bounds.origin, anchor: .topLeading,
+                          proposal: ProposedViewSize(width: bounds.width, height: height))
+        subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + height + Self.spacing), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: bounds.width, height: body))
+    }
+}
+
 struct MonitorPopover: View {
     private static let popupWidth: CGFloat = 560
     private static let modelCardWidth: CGFloat = (popupWidth - 32 - 2 - 16) / 3
     @ObservedObject var cliUpdates = CLIUpdateStatusStore.shared
     @ObservedObject var store: MonitorStore
     @EnvironmentObject private var controlStore: ProviderControlStore
+    @Environment(\.popupContentHeightBudget) private var contentHeightBudget
     let isVisible: Bool
     let ownsVisibleFanPolling: Bool
     let openSettings: (SettingsPage?) -> Void
@@ -457,73 +495,85 @@ struct MonitorPopover: View {
         }
     }
 
+    private var popupPadding: CGFloat {
+        guard let contentHeightBudget else { return 16 }
+        return min(16, max(0, contentHeightBudget / 4))
+    }
+
     private func content(currentTime: Date) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
-            providerHeader(currentTime: currentTime)
-            HStack(spacing: 14) {
-                CompactGPUGauge(usage: store.gpuUsage, now: currentTime)
-                Divider().frame(height: 38)
-                if let extras = store.providerExtras {
-                    PopupFanSummary(store: extras, now: currentTime, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling) { showsFans = true }
-                } else {
-                    Label("Fan readings unavailable", systemImage: "fan")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .padding(12)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-            HStack(spacing: 10) {
-                PopupAutoModeControl(store: controlStore, openModels: openModels, updateProtection: updateProtection)
-                if let nudge = store.inactivityNudge {
-                    PopupNudgeControl(store: nudge, updateProtection: updateProtection)
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                }
-                Spacer()
-            }
-            if case .available(.updateAvailable(_, let latest), let checkedAt) = cliUpdates.status,
-               currentTime.timeIntervalSince(checkedAt) < 6 * 60 * 60 {
-                Button("CLI \(latest) available") { openSettings(.updates) }.font(.caption)
-            }
-            if let error = controlStore.errorMessage {
-                Label(error, systemImage: "exclamationmark.circle")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let swap = controlStore.swapStatus {
-                ModelSwapFeedback(status: swap, nudgeStatus: controlStore.swapNudgeStatus, openHosting: openHosting)
-            }
-            if let warmup = controlStore.switchWarmupStatus {
-                SwitchWarmupFeedback(status: warmup)
-            }
-            if let attention = store.menuAttention {
-                Label(attention.detail, systemImage: "exclamationmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("popover.attention")
-            }
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    compactModels(currentTime: currentTime)
-                    financePanel(currentTime: currentTime)
-                    compactJobs
-                    if case .available(let capacity, _) = store.networkCapacity,
-                       capacity.isDraining, capacity.isFresh(at: currentTime) {
-                        Label("Network maintenance", systemImage: "wrench.and.screwdriver")
-                            .font(.caption).foregroundStyle(.orange)
+        PopupScrollingViewport(width: Self.popupWidth - popupPadding * 2,
+                               maximumHeight: contentHeightBudget.map { max(0, $0 - popupPadding * 2) }) {
+            PopupContentLayout(
+                bodyHeight: popupBodyHeight(currentTime: currentTime),
+                maximumHeight: contentHeightBudget.map { max(0, $0 - popupPadding * 2) }
+            ) {
+                VStack(alignment: .leading, spacing: 12) {
+                    header
+                    providerHeader(currentTime: currentTime)
+                    HStack(spacing: 14) {
+                        CompactGPUGauge(usage: store.gpuUsage, now: currentTime)
+                        Divider().frame(height: 38)
+                        if let extras = store.providerExtras {
+                            PopupFanSummary(store: extras, now: currentTime, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling) { showsFans = true }
+                        } else {
+                            Label("Fan readings unavailable", systemImage: "fan")
+                                .font(.caption).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
-                }.padding(.trailing, 2)
+                    .padding(12)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+                    HStack(spacing: 10) {
+                        PopupAutoModeControl(store: controlStore, openModels: openModels, updateProtection: updateProtection)
+                        if let nudge = store.inactivityNudge {
+                            PopupNudgeControl(store: nudge, updateProtection: updateProtection)
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                        Spacer()
+                    }
+                    Divider()
+                }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if case .available(.updateAvailable(_, let latest), let checkedAt) = cliUpdates.status,
+                           currentTime.timeIntervalSince(checkedAt) < 6 * 60 * 60 {
+                            Button("CLI \(latest) available") { openSettings(.updates) }.font(.caption)
+                        }
+                        if let error = controlStore.errorMessage {
+                            Label(error, systemImage: "exclamationmark.circle")
+                                .font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let swap = controlStore.swapStatus {
+                            ModelSwapFeedback(status: swap, nudgeStatus: controlStore.swapNudgeStatus, openHosting: openHosting)
+                        }
+                        if let warmup = controlStore.switchWarmupStatus {
+                            SwitchWarmupFeedback(status: warmup)
+                        }
+                        if let attention = store.menuAttention {
+                            Label(attention.detail, systemImage: "exclamationmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("popover.attention")
+                        }
+                        compactModels(currentTime: currentTime)
+                        financePanel(currentTime: currentTime)
+                        compactJobs
+                        if case .available(let capacity, _) = store.networkCapacity,
+                           capacity.isDraining, capacity.isFresh(at: currentTime) {
+                            Label("Network maintenance", systemImage: "wrench.and.screwdriver")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                    }.padding(.trailing, 2)
+                }
             }
-            .frame(height: popupBodyHeight(currentTime: currentTime))
         }
         .tint(isOffline(at: currentTime) ? .gray : .accentColor)
         .compositingGroup()
         .saturation(isOffline(at: currentTime) ? 0 : 1)
-        .padding(16)
+        .padding(popupPadding)
         .frame(width: Self.popupWidth, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showsFans) {

@@ -73,9 +73,14 @@ enum MacHostCPUSampler {
         var count = mach_msg_type_number_t(
             MemoryLayout<host_cpu_load_info_data_t>.stride / MemoryLayout<integer_t>.stride
         )
+        // mach_host_self acquires a send right, even for an existing port.
+        // Balance every read, including failure, as in the memory sampler.
+        // Authority: https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/ipc_host.c#L151-L174
+        let host = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, host) }
         let result = withUnsafeMutablePointer(to: &info) { pointer in
             pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &count)
+                host_statistics(host, HOST_CPU_LOAD_INFO, $0, &count)
             }
         }
         guard result == KERN_SUCCESS else { return nil }

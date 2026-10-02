@@ -427,12 +427,96 @@ struct MonitorPopoverLayoutTests {
         #expect(popover.contentSize == NSSize(width: 560, height: 605))
         #expect(host.sizingOptions == .preferredContentSize)
 
-        host.rootView = Color.clear.frame(width: 560, height: 781.25)
+        host.content = Color.clear.frame(width: 560, height: 781.25)
         host.prepareForPresentation()
         #expect(popover.contentSize == NSSize(width: 560, height: 782))
-        host.rootView = Color.clear.frame(width: 560, height: 605)
+        host.content = Color.clear.frame(width: 560, height: 605)
         host.prepareForPresentation()
         #expect(popover.contentSize == NSSize(width: 560, height: 605))
+    }
+
+    @Test("popup screen budget respects the actual anchor and excludes placement space")
+    func popupScreenBudget() {
+        let screen = NSRect(x: -1_000, y: 50, width: 1_000, height: 600)
+        let menuAnchor = NSRect(x: -100, y: 650, width: 80, height: 24)
+        #expect(PopupPresentationBudget.maximumContentHeight(visibleFrame: screen, anchorFrame: menuAnchor) == 580)
+        let middleAnchor = NSRect(x: -100, y: 330, width: 80, height: 24)
+        #expect(PopupPresentationBudget.maximumContentHeight(visibleFrame: screen, anchorFrame: middleAnchor) == 276)
+        #expect(PopupPresentationBudget.maximumContentHeight(visibleFrame: screen, anchorFrame: nil) == 580)
+        #expect(PopupPresentationBudget.maximumContentHeight(visibleFrame: nil, anchorFrame: menuAnchor) == nil)
+        #expect(PopupPresentationBudget.maximumContentHeight(visibleFrame: .zero, anchorFrame: menuAnchor) == nil)
+        #expect(PopupPresentationBudget.maximumContentHeight(
+            visibleFrame: NSRect(x: 0, y: 0, width: 560, height: 40), anchorFrame: nil) == 20)
+        #expect(PopupPresentationBudget.maximumContentHeight(
+            visibleFrame: NSRect(x: 0, y: 0, width: 560, height: CGFloat.infinity), anchorFrame: nil) == nil)
+    }
+
+    @Test("popup body yields to chrome and retains a useful scroller for the tiny-screen fallback")
+    func popupBodyBudget() {
+        #expect(PopupContentLayout.fittedBodyHeight(requested: 470, chromeHeight: 226, maximumHeight: nil) == 470)
+        #expect(PopupContentLayout.fittedBodyHeight(requested: 470, chromeHeight: 226, maximumHeight: 800) == 470)
+        #expect(PopupContentLayout.fittedBodyHeight(requested: 470, chromeHeight: 226, maximumHeight: 500) == 262)
+        #expect(PopupContentLayout.fittedBodyHeight(requested: 366, chromeHeight: 226, maximumHeight: 500) == 262)
+        // The outer viewport scrolls everything at this size; the nested body
+        // remains usable when it comes into view, rather than collapsing to 0.
+        #expect(PopupContentLayout.fittedBodyHeight(requested: 470, chromeHeight: 226, maximumHeight: 200) == 470)
+        #expect(PopupContentLayout.fittedBodyHeight(requested: .nan, chromeHeight: 226, maximumHeight: 500) == 0)
+        #expect(PopupContentLayout.fittedBodyHeight(requested: 366, chromeHeight: 226, maximumHeight: .infinity) == 366)
+    }
+
+    @Test("the real popup fits small viewports with collapsed and expanded content", arguments: [20.0, 80.0, 360.0, 580.0, 1_400.0])
+    func popupFitsScreenBudget(height: Double) async throws {
+        let suite = "Darkbloom.PopupHeight.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let now = Date()
+        let modelIDs = ["model-a", "model-b", "model-c", "model-d", "model-e", "model-f"]
+        let store = MonitorStore(service: TelemetryService(
+            source: AutoModeTelemetrySource(now: now, modelIDs: Array(modelIDs.prefix(3)), warmCount: 1), now: { now }),
+            initial: .unavailable(now: now), now: { now })
+        await store.refreshTelemetryImmediately()
+        let controlStore = ProviderControlStore(controller: InertSettingsController(sources: .unknown, savedIDs: modelIDs, slots: 1))
+        await controlStore.refresh()
+        let popover = NSPopover()
+        let host = FittingPopoverHostingController(rootView: MonitorPopover(store: store, isVisible: false)
+            .environmentObject(controlStore).defaultAppStorage(defaults).id(false), popover: popover)
+        popover.contentViewController = host
+        var collapsedHeight: CGFloat?
+        for expanded in [false, true, false] {
+            defaults.set(expanded, forKey: "popover.availableExpanded")
+            host.content = MonitorPopover(store: store, isVisible: false)
+                .environmentObject(controlStore).defaultAppStorage(defaults).id(expanded)
+            host.prepareForPresentation(maximumContentHeight: height)
+            let fitted = host.sizeThatFits(in: NSSize(width: 560, height: 0))
+            #expect(fitted.width == 560)
+            #expect(fitted.height > 0)
+            #expect(fitted.height <= height)
+            #expect(popover.contentSize.width == 560)
+            #expect(popover.contentSize.height <= height)
+            if height == 80 {
+                host.view.frame = NSRect(origin: .zero, size: fitted)
+                host.view.layoutSubtreeIfNeeded()
+                await Task.yield()
+                host.view.layoutSubtreeIfNeeded()
+                let scrollViews = nativeScrollViews(in: host.view)
+                let outer = try #require(scrollViews.first(where: { $0.accessibilityIdentifier() == "popover.outerScroll" }))
+                let document = try #require(outer.documentView)
+                #expect(document.frame.height > outer.contentView.bounds.height)
+                #expect(outer.hasVerticalScroller)
+                #expect(outer.scrollerStyle == .overlay)
+                #expect(outer.contentView.bounds.width == 528)
+                #expect(document.frame.width == outer.contentView.bounds.width)
+                let original = outer.documentVisibleRect.origin
+                let destination = original.y > 0 ? 0 : min(80, document.frame.height - outer.contentView.bounds.height)
+                outer.contentView.scroll(to: NSPoint(x: original.x, y: destination))
+                outer.reflectScrolledClipView(outer.contentView)
+                #expect(outer.documentVisibleRect.origin.y != original.y)
+            }
+            if height == 1_400 {
+                if expanded { #expect(fitted.height > (collapsedHeight ?? 0)) }
+                else { collapsedHeight = fitted.height }
+            }
+        }
     }
 
     @Test("fresh and stale model settings fit without horizontal growth")
@@ -663,6 +747,12 @@ private func sampledMarkColor(in image: NSImage) -> NSColor? {
     NSGraphicsContext.restoreGraphicsState()
 
     return bitmap.colorAt(x: width / 10, y: height / 2)?.usingColorSpace(.deviceRGB)
+}
+
+@MainActor
+private func nativeScrollViews(in view: NSView) -> [NSScrollView] {
+    ((view as? NSScrollView).map { [$0] } ?? [])
+        + view.subviews.flatMap { nativeScrollViews(in: $0) }
 }
 
 private struct UnusedTelemetrySource: TelemetrySource {
