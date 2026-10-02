@@ -153,6 +153,7 @@ struct HealthView: View {
                 .textSelection(.enabled)
         }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(presentation.text)")
     }
 
     private func freshness<Value>(_ source: SourceAvailability<Value>) -> (text: String, symbol: String, color: Color)

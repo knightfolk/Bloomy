@@ -334,7 +334,8 @@ private struct ProviderAdvancedSettingsHost: View {
             case .updates:
                 ProviderAutoUpdateSettingsView(
                     store: extras,
-                    performMutation: performMutation
+                    performMutation: performMutation,
+                    isVisible: isVisible
                 )
             case .fans:
                 ProviderFanControlSettingsView(

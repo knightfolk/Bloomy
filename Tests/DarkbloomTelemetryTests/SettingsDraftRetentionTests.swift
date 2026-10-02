@@ -7,6 +7,76 @@ import Testing
 @Suite("Settings draft retention", .serialized)
 @MainActor
 struct SettingsDraftRetentionTests {
+    @Test("retained idle and fan edits independently block the production update guard until saved", arguments: [false, true])
+    func retainedSettingsBlockAppUpdate(fan: Bool) async throws {
+        let fixture = try SettingsUpdateGuardFixture()
+        defer { fixture.close() }
+        await fixture.extras.refresh()
+        fixture.status.showSettings(page: .provider, activate: false)
+        let dashboard = try #require(fixture.status.dashboardWindowController)
+        let draft = dashboard.settingsDraft
+        #expect(fixture.delegate.canRelaunchForAppUpdate())
+
+        if fan { draft.selectFanPreset(.cooling) }
+        else { draft.editIdle("90") }
+        #expect(dashboard.hasUnsavedSettingsEdits)
+        #expect(fixture.status.hasUnsavedSettingsEdits)
+        #expect(!fixture.delegate.canRelaunchForAppUpdate())
+
+        if fan {
+            let revision = draft.fanRevision
+            try await fixture.extras.configureFan(policy: FanPreset.cooling.policy)
+            draft.didSaveFan(revision: revision, source: fixture.extras.snapshot?.fanStatus)
+        } else {
+            let revision = draft.idleRevision
+            try await fixture.extras.saveIdle(minutes: 90)
+            draft.didSaveIdle(revision: revision, source: fixture.extras.snapshot?.idlePolicy)
+        }
+        #expect(!dashboard.hasUnsavedSettingsEdits)
+        #expect(!fixture.status.hasUnsavedSettingsEdits)
+        #expect(fixture.delegate.canRelaunchForAppUpdate())
+        #expect(await fixture.client.mutationCount == 1)
+        await fixture.monitor.stop()
+    }
+
+    @Test("route changes and closing then reopening retain settings and update protection")
+    func retainedSettingsGuardSurvivesWindowRoutes() async throws {
+        let fixture = try SettingsUpdateGuardFixture()
+        defer { fixture.close() }
+        await fixture.extras.refresh()
+        fixture.status.showSettings(page: .provider, activate: false)
+        let dashboard = try #require(fixture.status.dashboardWindowController)
+        let window = try #require(dashboard.window)
+        let draft = dashboard.settingsDraft
+        draft.editIdle("-")
+        draft.selectFanPreset(.cooling)
+        fixture.status.showDashboard(section: .overview, activate: false)
+        #expect(dashboard.navigation.selected == .overview)
+        #expect(!fixture.delegate.canRelaunchForAppUpdate())
+        dashboard.close()
+        #expect(!window.isVisible)
+        #expect(!fixture.delegate.canRelaunchForAppUpdate())
+
+        fixture.status.showSettings(page: .provider, activate: false)
+        let reopened = try #require(fixture.status.dashboardWindowController)
+        #expect(reopened === dashboard)
+        #expect(reopened.settingsDraft === draft)
+        #expect(reopened.window === window)
+        let content = try #require(window.contentView)
+        try await settle(content)
+        #expect(try idleField(in: content).stringValue == "-")
+        #expect(draft.fanPreset == .cooling)
+        #expect(!fixture.delegate.canRelaunchForAppUpdate())
+
+        // Saving one page must not clear the other retained page's protection.
+        draft.didSaveIdle(revision: draft.idleRevision, source: idleSource(30))
+        #expect(!draft.idleDirty)
+        #expect(draft.fanDirty)
+        #expect(!fixture.delegate.canRelaunchForAppUpdate())
+        #expect(await fixture.client.mutationCount == 0)
+        await fixture.monitor.stop()
+    }
+
     @Test("idle text survives complete removal and return, including partial invalid edits", arguments: ["3045", "", "-", "10x", "10081"])
     func idleRemovalAndReturn(text: String) async throws {
         let client = SettingsDraftFixtureClient()
@@ -204,6 +274,7 @@ private actor SettingsDraftFixtureClient: ProviderExtrasProviding {
             fanStatus: .available(value: settingsDraftFanStatus(policy: fanPolicy), capturedAt: now))
     }
     func saveIdle(minutes: Int) async throws { mutationCount += 1; self.minutes = minutes }
+    func configureFan(policy: ProviderFanPolicy) async throws { mutationCount += 1; fanPolicy = policy }
     func setBeta(id: String, enabled: Bool) async throws { mutationCount += 1 }
 }
 
@@ -216,3 +287,41 @@ private struct SettingsDraftInertController: ProviderControlling {
     func execute(_ action: ProviderLifecycleAction, enabledModels: [String]) async throws { throw SettingsDraftUnexpectedMutation() }
 }
 private struct SettingsDraftUnexpectedMutation: Error {}
+
+@MainActor
+private struct SettingsUpdateGuardFixture {
+    let namespace = "SettingsUpdateGuard-\(UUID().uuidString)"
+    let defaults: UserDefaults
+    let client: SettingsDraftFixtureClient
+    let extras: ProviderExtrasStore
+    let monitor: MonitorStore
+    let status: StatusItemController
+    let delegate: DarkbloomMonitorAppDelegate
+
+    init() throws {
+        defaults = try #require(UserDefaults(suiteName: namespace))
+        client = SettingsDraftFixtureClient()
+        extras = ProviderExtrasStore(client: client)
+        monitor = MonitorStore(
+            service: TelemetryService(source: SettingsDraftUnusedTelemetrySource()),
+            initial: .unavailable(now: Date()), providerExtras: extras,
+            energyPreferences: defaults, menuAttentionPreferences: defaults
+        )
+        let control = ProviderControlStore(controller: SettingsDraftInertController())
+        status = StatusItemController(store: monitor, controlStore: control, defaults: defaults)
+        delegate = DarkbloomMonitorAppDelegate(instanceGuard: SingleInstanceGuard(), statusItemController: status)
+        delegate.attachStores(monitor: monitor, control: control)
+    }
+
+    func close() {
+        status.invalidate()
+        defaults.removePersistentDomain(forName: namespace)
+    }
+}
+
+private struct SettingsDraftUnusedTelemetrySource: TelemetrySource {
+    func readDaemonState() async throws -> DaemonState { throw SettingsDraftUnexpectedMutation() }
+    func readLoadedModels() async throws -> LoadedModelsState { throw SettingsDraftUnexpectedMutation() }
+    func readStatus() async throws -> StatusSnapshot { throw SettingsDraftUnexpectedMutation() }
+    func readLegacyEvents(limit: Int) async throws -> [LogEvent] { throw SettingsDraftUnexpectedMutation() }
+}

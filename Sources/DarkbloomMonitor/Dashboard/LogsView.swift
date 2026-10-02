@@ -25,6 +25,21 @@ struct LogsView: View {
     @State private var exportFailed = false
 
     var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                content(tableHeight: max(180, geometry.size.height * 0.6))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .sheet(item: $exportPreview) { snapshot in
+            LogExportPreviewView(snapshot: snapshot)
+        }
+        .onChange(of: rows.map(\.id)) { _, _ in
+            selectedID = LogTableRow.retainedSelection(selectedID, in: rows)
+        }
+    }
+
+    private func content(tableHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Recent logs").font(.title2.bold())
             toolbar
@@ -64,7 +79,9 @@ struct LogsView: View {
                                 .help(row.event.message)
                         }
                     }
-                    .frame(minHeight: 180)
+                    // Bound the table's own scrolling region so the outer page
+                    // can scroll to event details in a compact dashboard.
+                    .frame(height: tableHeight)
                     .accessibilityLabel("Recent log events")
                     if let event = selectedEvent {
                         eventDetails(event)
@@ -77,13 +94,7 @@ struct LogsView: View {
             Text("Export preview withholds known sensitive fields and omits oversized events. Review it before sharing.")
                 .font(.callout).foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .sheet(item: $exportPreview) { snapshot in
-            LogExportPreviewView(snapshot: snapshot)
-        }
-        .onChange(of: rows.map(\.id)) { _, _ in
-            selectedID = LogTableRow.retainedSelection(selectedID, in: rows)
-        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private static func compactTimestamp(_ date: Date?) -> String {

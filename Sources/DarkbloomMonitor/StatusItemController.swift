@@ -31,6 +31,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     var statusItemLength: CGFloat { statusItem.length }
     var popoverContentSize: NSSize { popover.contentSize }
+    var hasUnsavedSettingsEdits: Bool { dashboardWindowController?.hasUnsavedSettingsEdits == true }
 
     init(
         store: MonitorStore,

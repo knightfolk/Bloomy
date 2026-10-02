@@ -6,12 +6,14 @@ import SwiftUI
 
 enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case fresh = "Fresh", stale = "Stale", staleCatalog = "Stale catalog", offline = "Offline"
+    case expiredSettings = "Expired settings", expiredHelper = "Expired helper", unavailableSettings = "Unavailable settings"
     var id: String { rawValue }
-    var hasCurrentRuntime: Bool { self == .fresh || self == .staleCatalog }
+    var hasCurrentRuntime: Bool { self != .stale && self != .offline }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
     func availability<T: Equatable & Sendable>(_ value: T, at date: Date) -> SourceAvailability<T> {
         switch self {
-        case .fresh, .staleCatalog: .available(value: value, capturedAt: date)
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings:
+            .available(value: value, capturedAt: date)
         case .stale: .stale(value: value, capturedAt: date, reason: "Synthetic source stopped refreshing")
         case .offline: .unavailable(reason: "Synthetic source offline")
         }
@@ -93,7 +95,8 @@ private struct FixtureEarnings: AccountEarningsFetching {
     let scenario: FixtureScenario
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
-        case .fresh, .staleCatalog: .observed(microUSD: 6_420_000, observedSeconds: 10_800)
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings:
+            .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline: .unavailable(reason: "Synthetic account source offline")
         }
@@ -235,14 +238,25 @@ private actor FixtureExtras: ProviderExtrasProviding {
     var autoUpdate = true
     init(scenario: FixtureScenario) { self.scenario = scenario }
     func refresh() async -> ProviderExtrasSnapshot {
-        let date = scenario == .stale ? Date().addingTimeInterval(-900) : Date()
+        let now = Date()
+        let date = scenario == .stale ? now.addingTimeInterval(-900)
+            : scenario == .expiredSettings ? now.addingTimeInterval(-90) : now
+        if scenario == .unavailableSettings {
+            return ProviderExtrasSnapshot(capturedAt: now,
+                idlePolicy: .unavailable(reason: "Synthetic first read failed"),
+                betaFeatures: .unavailable(reason: "Synthetic first read failed"),
+                fanStatus: .unavailable(reason: "Synthetic first read failed"),
+                autoUpdateStatus: .unavailable(reason: "Synthetic first read failed"))
+        }
+        let helperDate = scenario == .expiredHelper ? now.addingTimeInterval(-90) : date
         let fans = [ProviderFanReading(index: 0, actualRPM: 2_200, targetRPM: 2_200, minimumRPM: 1_200, maximumRPM: 5_200, mode: "automatic")]
         let fan = ProviderFanStatus(capability: ProviderFanStatus.controlCapability, installed: true, loaded: true,
             helper: ProviderFanHelperStatus(enabled: true, providerActive: true, mode: "automatic", chip: "Synthetic",
                 gpuTemperatureCelsius: 54, triggerTemperatureCelsius: 65, releaseTemperatureCelsius: 55,
-                speedPercent: 42, fans: fans, updatedAt: date),
+                speedPercent: 80, fans: fans, updatedAt: helperDate),
             diagnostic: ProviderFanDiagnostic(chip: "Synthetic", supported: true,
-                gpuTemperatures: [ProviderFanTemperature(key: "Synthetic GPU", celsius: 54)], fans: fans),
+                gpuTemperatures: scenario == .expiredHelper ? [] : [ProviderFanTemperature(key: "Synthetic GPU", celsius: 54)],
+                fans: scenario == .expiredHelper ? [] : fans),
             helperErrorPresent: false, diagnosticErrorPresent: false)
         return ProviderExtrasSnapshot(capturedAt: date,
             idlePolicy: scenario.availability(ProviderIdlePolicy(idleTimeoutMinutes: minutes, policy: "idle_timeout", summary: "Free after \(minutes) minutes idle", pinned: false), at: date),

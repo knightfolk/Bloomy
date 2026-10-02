@@ -11,6 +11,32 @@ typealias ProviderExtrasMutationExecutor = @MainActor @Sendable (
     _ operation: @escaping @Sendable () async throws -> Void
 ) async -> Bool
 
+/// Successful reads also expire. A finite schedule wakes visible settings only
+/// when evidence becomes usable or expires, rather than on a recurring timer.
+enum ProviderSettingsFreshnessPolicy {
+    static func isFresh<Value>(_ source: SourceAvailability<Value>?, at date: Date) -> Bool where Value: Equatable & Sendable {
+        guard case .available(_, let capturedAt) = source else { return false }
+        let age = date.timeIntervalSince(capturedAt)
+        return age.isFinite && age >= 0 && age <= ProviderExtrasSnapshot.maximumSourceAge
+    }
+
+    static func transitions<Value>(for source: SourceAvailability<Value>?, at date: Date) -> [Date] where Value: Equatable & Sendable {
+        guard case .available(_, let capturedAt) = source else { return [] }
+        return transitions(capturedAt: capturedAt, maximumAge: ProviderExtrasSnapshot.maximumSourceAge, at: date)
+    }
+
+    static func transitions(capturedAt: Date, maximumAge: TimeInterval, at date: Date) -> [Date] {
+        guard capturedAt.timeIntervalSince1970.isFinite, date.timeIntervalSince1970.isFinite else { return [] }
+        return [capturedAt, capturedAt.addingTimeInterval(maximumAge + 0.001)].filter { $0 > date }
+    }
+}
+
+enum ProviderSettingsEvidenceError: Error, Equatable, Sendable {
+    case refreshRequired
+
+    var userMessage: String { "Refresh before changing this setting." }
+}
+
 @MainActor
 final class ProviderExtrasStore: ObservableObject {
     @Published private(set) var snapshot: ProviderExtrasSnapshot?
@@ -32,6 +58,15 @@ final class ProviderExtrasStore: ObservableObject {
     private var refreshIncludesStatic = false
 
     var visibleFanSubscriberCount: Int { visibleFanSubscribers.count }
+    var currentDate: Date { now() }
+
+    var autoUpdateEvidenceIsFresh: Bool {
+        ProviderSettingsFreshnessPolicy.isFresh(snapshot?.autoUpdateStatus, at: now())
+    }
+
+    var fanEvidenceIsFresh: Bool {
+        ProviderSettingsFreshnessPolicy.isFresh(snapshot?.fanStatus, at: now())
+    }
 
     /// Production initializer. It resolves only the approved Darkbloom CLI
     /// candidates from the shared source policy and performs read-only polling
@@ -262,32 +297,44 @@ final class ProviderExtrasStore: ObservableObject {
     }
 
     func setAutoUpdate(enabled: Bool) async throws {
+        try requireFreshEvidence(snapshot?.autoUpdateStatus)
         try await performMutation {
             try await self.client.setAutoUpdate(enabled: enabled)
         }
     }
 
     func enableFan(policy: ProviderFanPolicy) async throws {
+        try requireFreshEvidence(snapshot?.fanStatus)
         try await performMutation {
             try await self.client.enableFan(policy: policy)
         }
     }
 
     func configureFan(policy: ProviderFanPolicy) async throws {
+        try requireFreshEvidence(snapshot?.fanStatus)
         try await performMutation {
             try await self.client.configureFan(policy: policy)
         }
     }
 
     func disableFan() async throws {
+        try requireFreshEvidence(snapshot?.fanStatus)
         try await performMutation {
             try await self.client.disableFan()
         }
     }
 
     func uninstallFan() async throws {
+        try requireFreshEvidence(snapshot?.fanStatus)
         try await performMutation {
             try await self.client.uninstallFan()
+        }
+    }
+
+    private func requireFreshEvidence<Value>(_ source: SourceAvailability<Value>?) throws where Value: Equatable & Sendable {
+        guard ProviderSettingsFreshnessPolicy.isFresh(source, at: now()) else {
+            errorMessage = ProviderSettingsEvidenceError.refreshRequired.userMessage
+            throw ProviderSettingsEvidenceError.refreshRequired
         }
     }
 

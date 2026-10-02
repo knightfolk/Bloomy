@@ -133,6 +133,13 @@ same capture time. Both stopped-source observations renew every five seconds;
 they establish a known stopped state without serving evidence. Account, network,
 loaded-model, and extras sources stay unavailable. The synthetic Bonsai catalog uses
 the actual `ternary-bonsai-2-27b` ID so model alias presentation is exercised.
+**Expired settings** keeps runtime telemetry current while successful extras
+reads are backdated by 90 seconds, beyond the 45-second editing window.
+**Expired helper** keeps the CLI capture current but backdates the helper journal
+by 90 seconds and omits diagnostic readings, exposing the last-known fallback.
+**Unavailable settings** supplies first-read failures with no prior good extras
+data; it does not imply an unsupported CLI. All three scenarios use inert clients
+and their Refresh actions preserve the selected condition.
 The banner controls switch Light/Dark and window content sizes 800 × 560 and
 1280 × 900. Appearance settings share the same isolated preference suite.
 

@@ -4,61 +4,71 @@ import SwiftUI
 struct ProviderAutoUpdateSettingsView: View {
     @ObservedObject var store: ProviderExtrasStore
     let performMutation: ProviderExtrasMutationExecutor
+    var isVisible = true
 
     @State private var saveInFlight = false
     @State private var feedback: String?
 
     var body: some View {
         Section("Provider · Automatic CLI updates") {
-            switch store.snapshot?.autoUpdateStatus {
-            case .available(let status, _):
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Install signed provider updates automatically")
-                            .font(.body.weight(.medium))
-                        Text("The provider checks for signed CLI releases after it starts. This does not update Bloomy.")
-                            .font(.callout)
+            TimelineView(VisibilityTimelineSchedule(
+                base: .explicit(ProviderSettingsFreshnessPolicy.transitions(for: store.snapshot?.autoUpdateStatus, at: store.currentDate)),
+                isVisible: isVisible
+            )) { _ in
+                VStack(alignment: .leading, spacing: 8) {
+                    switch store.snapshot?.autoUpdateStatus {
+                    case .available(let status, _) where store.autoUpdateEvidenceIsFresh:
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Install signed provider updates automatically")
+                                    .font(.body.weight(.medium))
+                                Text("The provider checks for signed CLI releases after it starts. This does not update Bloomy.")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 8)
+                            VStack(alignment: .trailing, spacing: 8) {
+                                SettingsStateBadge(status.enabled ? "Enabled" : "Disabled")
+                                Button(saveInFlight ? "Saving…" : (status.enabled ? "Disable" : "Enable")) {
+                                    setEnabled(!status.enabled)
+                                }
+                                .disabled(saveInFlight || store.mutationInFlight)
+                                .accessibilityLabel(saveInFlight ? "Saving automatic provider updates" : (status.enabled ? "Disable automatic provider updates" : "Enable automatic provider updates"))
+                                .accessibilityIdentifier("settings.provider.autoupdate")
+                            }
+                        }
+                    case .available(let status, _), .stale(let status, _, _):
+                        HStack {
+                            Text("Automatic provider updates")
+                            Spacer()
+                            SettingsStateBadge(status.enabled ? "Last known: Enabled" : "Last known: Disabled")
+                        }
+                        Text("Refresh before changing automatic updates.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    case .unavailable, nil:
+                        Text("Automatic-update status is unavailable. Refresh to try again.")
+                            .foregroundStyle(.secondary)
+                    }
+                    if let feedback {
+                        Text(feedback)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    Spacer(minLength: 8)
-                    VStack(alignment: .trailing, spacing: 8) {
-                        SettingsStateBadge(status.enabled ? "Enabled" : "Disabled")
-                        Button(saveInFlight ? "Saving…" : (status.enabled ? "Disable" : "Enable")) {
-                            setEnabled(!status.enabled)
-                        }
-                        .disabled(saveInFlight || store.mutationInFlight)
-                        .accessibilityLabel(saveInFlight ? "Saving automatic provider updates" : (status.enabled ? "Disable automatic provider updates" : "Enable automatic provider updates"))
-                        .accessibilityIdentifier("settings.provider.autoupdate")
-                    }
                 }
-            case .stale(let status, _, _):
-                HStack {
-                    Text("Automatic provider updates")
-                    Spacer()
-                    SettingsStateBadge(status.enabled ? "Last known: Enabled" : "Last known: Disabled")
-                }
-                Text("Refresh before changing automatic updates.")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            case .unavailable:
-                Text("Automatic-update controls require a newer Darkbloom CLI.")
-                    .foregroundStyle(.secondary)
-            case nil:
-                Text("Automatic-update status is unavailable.")
-                    .foregroundStyle(.secondary)
-            }
-            if let feedback {
-                Text(feedback)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
     private func setEnabled(_ enabled: Bool) {
         guard !saveInFlight, !store.mutationInFlight else { return }
+        guard store.autoUpdateEvidenceIsFresh else {
+            feedback = ProviderSettingsEvidenceError.refreshRequired.userMessage
+            return
+        }
         saveInFlight = true
         Task { @MainActor in
             let succeeded = await performMutation("automatic provider updates") {
@@ -105,34 +115,39 @@ struct ProviderFanControlSettingsView: View {
 
     var body: some View {
         Section(compactPresentation ? "" : "Provider · Fan control") {
-            HStack {
-                Text("Fan readings").font(.subheadline.weight(.semibold))
-                Spacer()
-                Button("Refresh readings", systemImage: "arrow.clockwise") {
-                    Task {
-                        manuallyRefreshing = true
-                        await store.refreshFan()
-                        manuallyRefreshing = false
+            TimelineView(VisibilityTimelineSchedule(base: .explicit(freshnessTransitions), isVisible: isVisible)) { _ in
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Fan readings").font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Button("Refresh readings", systemImage: "arrow.clockwise") {
+                            Task {
+                                manuallyRefreshing = true
+                                await store.refreshFan()
+                                manuallyRefreshing = false
+                            }
+                        }
+                        .disabled(manuallyRefreshing || mutationInFlight || store.mutationInFlight)
+                        .accessibilityIdentifier("settings.provider.fan.refresh")
+                        .accessibilityValue(manuallyRefreshing ? "Refreshing" : "Ready")
+                    }
+                    switch store.snapshot?.fanStatus {
+                    case .available(let status, let checkedAt):
+                        fanContent(status: status, fresh: store.fanEvidenceIsFresh, checkedAt: checkedAt)
+                    case .stale(let status, let checkedAt, _):
+                        fanContent(status: status, fresh: false, checkedAt: checkedAt)
+                    case .unavailable, nil:
+                        Text("Fan diagnostics are unavailable. Refresh to try again.")
+                            .foregroundStyle(.secondary)
+                    }
+                    if let feedback {
+                        Text(feedback)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .disabled(manuallyRefreshing || mutationInFlight || store.mutationInFlight)
-                .accessibilityIdentifier("settings.provider.fan.refresh")
-                .accessibilityValue(manuallyRefreshing ? "Refreshing" : "Ready")
-            }
-            switch store.snapshot?.fanStatus {
-            case .available(let status, let checkedAt):
-                fanContent(status: status, fresh: true, checkedAt: checkedAt)
-            case .stale(let status, let checkedAt, _):
-                fanContent(status: status, fresh: false, checkedAt: checkedAt)
-            case .unavailable, nil:
-                Text("Fan diagnostics are unavailable. Refresh after updating the Darkbloom CLI.")
-                    .foregroundStyle(.secondary)
-            }
-            if let feedback {
-                Text(feedback)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .onAppear { syncDraft() }
@@ -153,6 +168,17 @@ struct ProviderFanControlSettingsView: View {
         }
     }
 
+    private var freshnessTransitions: [Date] {
+        let source = store.snapshot?.fanStatus
+        let now = store.currentDate
+        var dates = ProviderSettingsFreshnessPolicy.transitions(for: source, at: now)
+        if case .available(let status, _) = source, let helper = status.helper {
+            dates += ProviderSettingsFreshnessPolicy.transitions(capturedAt: helper.updatedAt,
+                maximumAge: ProviderFanStatus.maximumHelperAge, at: now)
+        }
+        return Array(Set(dates)).sorted()
+    }
+
     @ViewBuilder
     private func fanContent(status: ProviderFanStatus, fresh: Bool, checkedAt: Date) -> some View {
         HStack(alignment: .top, spacing: 12) {
@@ -164,7 +190,7 @@ struct ProviderFanControlSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            SettingsStateBadge(stateLabel(status))
+            SettingsStateBadge(stateLabel(status, fresh: fresh))
         }
 
         readings(status: status, fresh: fresh, checkedAt: checkedAt)
@@ -183,7 +209,7 @@ struct ProviderFanControlSettingsView: View {
                     get: { toggleIsOn },
                     set: { requestedOn in
                         if requestedOn { stagePolicy(.enable) }
-                        else { pendingAction = .disable }
+                        else { stage(.disable) }
                     }
                 ))
                 .disabled(!fresh || !status.supportsOfficialControl || mutationInFlight || store.mutationInFlight)
@@ -212,13 +238,13 @@ struct ProviderFanControlSettingsView: View {
                     HStack(spacing: 10) {
                         if status.loaded {
                             Button("Disable…", role: .destructive) {
-                                pendingAction = .disable
+                                stage(.disable)
                             }
                             .disabled(mutationInFlight || store.mutationInFlight)
                         }
                         if status.installed {
                             Button("Uninstall Helper…", role: .destructive) {
-                                pendingAction = .uninstall
+                                stage(.uninstall)
                             }
                             .disabled(mutationInFlight || store.mutationInFlight)
                         }
@@ -237,14 +263,28 @@ struct ProviderFanControlSettingsView: View {
 
     @ViewBuilder
     private func readings(status: ProviderFanStatus, fresh: Bool, checkedAt: Date) -> some View {
-        let temperature = status.displayedTemperatureCelsius
-        let fans = status.displayedFans
+        let helperIsFresh = status.helperIsFresh(at: store.currentDate)
+        let readingStatus = Self.readingStatus(status, at: store.currentDate)
+        let readingsAreFresh = fresh && (helperIsFresh
+            || !status.diagnostic.fans.isEmpty || !status.diagnostic.gpuTemperatures.isEmpty)
+        let temperature = readingStatus.displayedTemperatureCelsius
+        let fans = readingStatus.displayedFans
         VStack(alignment: .leading, spacing: 8) {
-            Text(fresh ? "Latest readings" : "Last known readings")
+            Text(readingsAreFresh ? "Latest readings" : "Last known readings")
                 .font(.callout.weight(.semibold))
-            Text("Checked \(checkedAt.formatted(date: .omitted, time: .standard))")
+            Text("CLI checked \(checkedAt.formatted(date: .omitted, time: .standard))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if !readingsAreFresh, let helper = readingStatus.helper {
+                Text("Helper sample \(helper.updatedAt.formatted(date: .omitted, time: .standard))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if fresh && !helperIsFresh {
+                    Text("Helper readings did not refresh. Refresh to try again.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
             HStack(alignment: .top, spacing: 24) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("GPU temperature").font(.caption).foregroundStyle(.secondary)
@@ -278,12 +318,23 @@ struct ProviderFanControlSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if let helper = status.helper {
-                Text(helper.mode == "error" ? "Fan helper needs attention" : (helper.providerActive ? "Provider active" : "Waiting for provider activity"))
+            if let helper = readingStatus.helper {
+                let posture = helper.mode == "error" ? "Fan helper needs attention" : (helper.providerActive ? "Provider active" : "Waiting for provider activity")
+                Text(fresh && helperIsFresh ? posture : "Last known: \(posture)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Fresh CLI diagnostics take precedence over an expired helper journal.
+    /// With no diagnostic sample, retain the helper values as last known.
+    static func readingStatus(_ status: ProviderFanStatus, at date: Date) -> ProviderFanStatus {
+        if !status.helperIsFresh(at: date),
+           !status.diagnostic.fans.isEmpty || !status.diagnostic.gpuTemperatures.isEmpty {
+            return status.withoutHelper()
+        }
+        return status
     }
 
     static func toggleState(_ status: ProviderFanStatus) -> Bool? {
@@ -393,15 +444,31 @@ struct ProviderFanControlSettingsView: View {
     }
 
     private func stagePolicy(_ kind: FanAction.Kind) {
+        guard store.fanEvidenceIsFresh else {
+            feedback = ProviderSettingsEvidenceError.refreshRequired.userMessage
+            return
+        }
         guard let policy else {
             feedback = ProviderExtrasMutationError.invalidFanPolicy.userMessage
             return
         }
-        pendingAction = kind == .enable ? .enable(policy) : .configure(policy)
+        stage(kind == .enable ? .enable(policy) : .configure(policy))
+    }
+
+    private func stage(_ action: FanAction) {
+        guard store.fanEvidenceIsFresh else {
+            feedback = ProviderSettingsEvidenceError.refreshRequired.userMessage
+            return
+        }
+        pendingAction = action
     }
 
     private func run(_ action: FanAction) {
         guard !mutationInFlight, !store.mutationInFlight else { return }
+        guard store.fanEvidenceIsFresh else {
+            feedback = ProviderSettingsEvidenceError.refreshRequired.userMessage
+            return
+        }
         let revision = draft.fanRevision
         mutationInFlight = true
         Task { @MainActor in
@@ -428,14 +495,19 @@ struct ProviderFanControlSettingsView: View {
         }
     }
 
-    private func stateLabel(_ status: ProviderFanStatus) -> String {
-        guard status.installed else { return "Not installed" }
-        guard status.loaded else { return "Disabled" }
-        guard let helper = status.helper else { return "Status unavailable" }
-        if helper.mode == "error" { return "Needs attention" }
-        if !helper.enabled { return "Disabled" }
-        if helper.providerActive { return "Enabled · Provider active" }
-        return "Enabled · Waiting"
+    private func stateLabel(_ status: ProviderFanStatus, fresh: Bool) -> String {
+        let label: String
+        let usesHelperState = status.installed && status.loaded && status.helper != nil
+        if !status.installed { label = "Not installed" }
+        else if !status.loaded { label = "Disabled" }
+        else if let helper = status.helper {
+            if helper.mode == "error" { label = "Needs attention" }
+            else if !helper.enabled { label = "Disabled" }
+            else if helper.providerActive { label = "Enabled · Provider active" }
+            else { label = "Enabled · Waiting" }
+        } else { label = "Status unavailable" }
+        let lastKnown = !fresh || (usesHelperState && !status.helperIsFresh(at: store.currentDate))
+        return lastKnown ? "Last known: \(label)" : label
     }
 }
 

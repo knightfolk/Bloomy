@@ -8,6 +8,8 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
     private let unconstrainedContentMaxSize: NSSize
     private var isTransitioningFullScreen = false
     let navigation: DashboardNavigation
+    let settingsDraft = ProviderSettingsDraftState()
+    var hasUnsavedSettingsEdits: Bool { settingsDraft.hasChanges }
     init(
         store: MonitorStore,
         controlStore: ProviderControlStore?,
@@ -22,7 +24,8 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
         navigation = DashboardNavigation(defaults: defaults)
         let content = NSHostingController(rootView: DashboardRootView(
             store: store, controlStore: controlStore, hostingStore: hostingStore,
-            chatStore: chatStore, openChatWindow: openChatWindow, navigation: navigation
+            chatStore: chatStore, openChatWindow: openChatWindow, navigation: navigation,
+            settingsDraft: settingsDraft
         ).defaultAppStorage(defaults))
         let window = NSWindow(contentViewController: content)
         window.title = MonitorApplicationIdentity.displayName

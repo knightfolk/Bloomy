@@ -79,12 +79,30 @@ struct DashboardRootView: View {
     var openChatWindow: (() -> Void)? = nil
     @ObservedObject var navigation: DashboardNavigation
     @StateObject private var chatDraft = ChatDraftState()
-    @StateObject private var settingsDraft = ProviderSettingsDraftState()
+    @StateObject private var settingsDraft: ProviderSettingsDraftState
     @AppStorage("sidebar.monitor.expanded") private var monitorExpanded = true
     @AppStorage("sidebar.workspace.expanded") private var workspaceExpanded = true
     @AppStorage("sidebar.diagnostics.expanded") private var diagnosticsExpanded = true
     @AppStorage("sidebar.settings.expanded") private var settingsExpanded = true
     private var selectedRaw: String { navigation.selected.rawValue }
+
+    init(
+        store: MonitorStore,
+        controlStore: ProviderControlStore?,
+        hostingStore: HostingSettingsStore? = nil,
+        chatStore: ChatStore? = nil,
+        openChatWindow: (() -> Void)? = nil,
+        navigation: DashboardNavigation,
+        settingsDraft: ProviderSettingsDraftState? = nil
+    ) {
+        self.store = store
+        self.controlStore = controlStore
+        self.hostingStore = hostingStore
+        self.chatStore = chatStore
+        self.openChatWindow = openChatWindow
+        self.navigation = navigation
+        _settingsDraft = StateObject(wrappedValue: settingsDraft ?? ProviderSettingsDraftState())
+    }
 
     var body: some View {
         NavigationSplitView {

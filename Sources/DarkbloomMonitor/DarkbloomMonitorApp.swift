@@ -154,6 +154,13 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         controlStore = control
     }
 
+    func canRelaunchForAppUpdate() -> Bool {
+        guard statusItemController?.hasUnsavedSettingsEdits != true else { return false }
+        guard let control = controlStore else { return true }
+        return control.operation == .idle && control.draft?.hasChanges != true
+            && control.pendingConfirmation == nil
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard DarkbloomMonitorStartupGate.acquireOrTerminate(
             instanceGuard: instanceGuard,
@@ -335,10 +342,8 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             hostingStore: hostingSettingsStore,
             chatStore: chatStore
         )
-        ControlAppUpdater.shared.canRelaunch = { [weak providerControlStore] in
-            guard let control = providerControlStore else { return true }
-            return control.operation == .idle && control.draft?.hasChanges != true
-                && control.pendingConfirmation == nil
+        ControlAppUpdater.shared.canRelaunch = { [weak self] in
+            self?.canRelaunchForAppUpdate() ?? true
         }
         ControlAppUpdater.shared.start()
         CLIUpdateStatusStore.shared.start()

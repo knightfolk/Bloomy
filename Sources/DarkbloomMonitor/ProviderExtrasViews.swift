@@ -108,6 +108,8 @@ final class ProviderSettingsDraftState: ObservableObject {
     private(set) var idleRevision: UInt64 = 0
     private(set) var fanRevision: UInt64 = 0
 
+    var hasChanges: Bool { idleDirty || fanDirty }
+
     func editIdle(_ text: String) {
         idleMinutesText = text
         idleDirty = true
