@@ -29,9 +29,15 @@ public struct MenuBarAttentionPolicy: Sendable {
 
     public init() {}
 
+    /// Shared by the alert policy and its settings control. Reading an unknown
+    /// preference supplies the default without changing the persisted value.
+    public static func effectiveIdleMinutes(for minutes: Int) -> Int {
+        supportedMinutes.contains(minutes) ? minutes : defaultIdleMinutes
+    }
+
     /// Zero disables the prompt; unknown persisted values use the default.
     public static func threshold(for minutes: Int) -> TimeInterval? {
-        let selected = supportedMinutes.contains(minutes) ? minutes : defaultIdleMinutes
+        let selected = effectiveIdleMinutes(for: minutes)
         return selected == 0 ? nil : TimeInterval(selected * 60)
     }
 

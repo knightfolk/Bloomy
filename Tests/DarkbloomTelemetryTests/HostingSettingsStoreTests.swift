@@ -22,7 +22,9 @@ struct HostingSettingsStoreTests {
         tokenFile: any LocalEndpointTokenManaging = HostingTokenFileFake(),
         controller: HostingSpyController = HostingSpyController(),
         endpointClient: (any LocalEndpointFetching)? = nil,
-        copyToken: @escaping (String) -> Bool = { _ in false }
+        copyToken: @escaping (String) -> Bool = { _ in false },
+        copyCommand: @escaping (String) -> Bool = { _ in false },
+        now: @escaping () -> Date = Date.init
     ) throws -> (HostingSettingsStore, HostingSpyController) {
         let controlStore = ProviderControlStore(
             controller: controller,
@@ -35,11 +37,91 @@ struct HostingSettingsStoreTests {
             cliVersionProvider: { cliVersion },
             defaults: defaults,
             lanScanner: { lanAddresses },
-            copyToken: copyToken
+            copyToken: copyToken,
+            copyCommand: copyCommand,
+            now: now
         )
         store.attachControlStore(controlStore)
         store.refreshEnvironment()
         return (store, controller)
+    }
+
+    @Test("discovery timestamp belongs only to the latest completed read and clears with invalidation")
+    func discoveryCheckedAt() async throws {
+        let record = LocalEndpointRecord(baseURL: "http://127.0.0.1:8000/v1", apiKey: "",
+            host: "127.0.0.1", port: 8000, processID: 4242)
+        let endpoint = DelayedEndpointFake(first: .live(record), next: .none("fixture"))
+        let stamp = Date(timeIntervalSince1970: 1_800_000_000)
+        var clockReads = 0
+        let (store, _) = try makeStore(defaults: makeDefaults(), endpointClient: endpoint, now: {
+            clockReads += 1
+            return stamp
+        })
+        store.setMode(.standalone)
+        let old = Task { await store.fetchEndpointDetails() }
+        await endpoint.waitForFirstFetch()
+        #expect(store.endpointDetailsCheckedAt == nil)
+        await store.fetchEndpointDetails()
+        #expect(store.endpointDetails == .none("fixture"))
+        #expect(store.endpointDetailsCheckedAt == stamp)
+        await endpoint.completeFirstFetch()
+        await old.value
+        #expect(store.endpointDetails == .none("fixture"))
+        #expect(store.endpointDetailsCheckedAt == stamp)
+        #expect(clockReads == 1)
+        store.refreshEnvironment()
+        #expect(store.endpointDetailsCheckedAt == stamp)
+        store.setMode(.unified)
+        #expect(store.endpointDetails == nil)
+        #expect(store.endpointDetailsCheckedAt == nil)
+    }
+
+    @Test("a live discovery receives an absolute check time and apply invalidates both")
+    func liveCheckedAtClearsAfterApply() async throws {
+        let record = LocalEndpointRecord(baseURL: "http://127.0.0.1:8000/v1", apiKey: "",
+            host: "127.0.0.1", port: 8000, processID: 4242)
+        let stamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let (store, _) = try makeStore(defaults: makeDefaults(), endpointAvailability: .live(record), now: { stamp })
+        store.setMode(.unified)
+        await store.fetchEndpointDetails()
+        #expect(store.endpointDetailsCheckedAt == stamp)
+        await store.requestApply()
+        #expect(store.endpointDetails == nil)
+        #expect(store.endpointDetailsCheckedAt == nil)
+    }
+
+    @Test("copied feedback follows the actual Terminal command and reports copy failure")
+    func commandCopyIdentityAndFailure() throws {
+        var copied: [String] = []
+        var succeeds = true
+        let (store, _) = try makeStore(defaults: makeDefaults(), copyCommand: { command in
+            copied.append(command)
+            return succeeds
+        })
+        store.setMode(.standalone)
+        let first = try #require(store.standaloneStartCommand)
+        #expect(store.copyStandaloneCommandToPasteboard())
+        #expect(store.hasCopiedCurrentStandaloneCommand)
+        #expect(copied == [first])
+        #expect(store.setPortText("8123"))
+        #expect(!store.hasCopiedCurrentStandaloneCommand)
+        #expect(store.copyStandaloneCommandToPasteboard())
+        #expect(store.hasCopiedCurrentStandaloneCommand)
+        store.setBindAddress("192.168.1.20")
+        #expect(!store.hasCopiedCurrentStandaloneCommand)
+        #expect(store.copyStandaloneCommandToPasteboard())
+        store.setRequiresAuthentication(false)
+        #expect(!store.hasCopiedCurrentStandaloneCommand)
+        succeeds = false
+        #expect(!store.copyStandaloneCommandToPasteboard())
+        #expect(!store.hasCopiedCurrentStandaloneCommand)
+        #expect(store.copiedStandaloneCommand == nil)
+        #expect(store.errorMessage == "Could not copy the Terminal command. Try again.")
+        store.setMode(.off)
+        let copyCount = copied.count
+        #expect(!store.copyStandaloneCommandToPasteboard())
+        #expect(copied.count == copyCount)
+        #expect(store.errorMessage != nil)
     }
 
     @Test("fresh defaults are off, loopback, and unconfirmed")
@@ -500,7 +582,7 @@ struct HostingSettingsStoreTests {
     func unauthenticatedWarningMatchesMode() throws {
         let (store, _) = try makeStore(defaults: makeDefaults())
         store.setRequiresAuthentication(false)
-        #expect(store.unauthenticatedAccessWarning.contains("No local endpoint is active"))
+        #expect(store.unauthenticatedAccessWarning.contains("Fleet only is selected. Apply changes to turn off the local endpoint."))
 
         store.setMode(.unified)
         #expect(store.unauthenticatedAccessWarning.contains("second confirmation before the provider is restarted"))

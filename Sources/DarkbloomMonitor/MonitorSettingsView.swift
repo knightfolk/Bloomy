@@ -200,6 +200,19 @@ struct MonitorSettingsView: View {
     }
 }
 
+@MainActor
+enum MenuBarIdleAlertSelection {
+    static func binding(to storedMinutes: Binding<Int>) -> Binding<Int> {
+        Binding(
+            get: { MenuBarAttentionPolicy.effectiveIdleMinutes(for: storedMinutes.wrappedValue) },
+            set: { minutes in
+                guard MenuBarAttentionPolicy.supportedMinutes.contains(minutes) else { return }
+                storedMinutes.wrappedValue = minutes
+            }
+        )
+    }
+}
+
 private struct GeneralSettingsView: View {
     let page: SettingsPage
     @Binding var appearanceModeRaw: String
@@ -257,7 +270,7 @@ private struct GeneralSettingsView: View {
                         .font(.callout).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Picker("Idle alert", selection: $idleAlertMinutes) {
+                    Picker("Idle alert", selection: MenuBarIdleAlertSelection.binding(to: $idleAlertMinutes)) {
                         Text("Off").tag(0)
                         ForEach(MenuBarAttentionPolicy.supportedMinutes.filter { $0 > 0 }, id: \.self) { minutes in
                             Text("After \(minutes) minutes").tag(minutes)

@@ -147,9 +147,21 @@ without RPM and a measured fan 2 RPM, exercising per-fan retention and freshness
 providerActive=true, exercising precedence of the disabled state.
 **Unavailable runtime** has no daemon observation or authoritative stopped
 status; it must show unknown activity rather than a stopped zero or Last report.
+**Aliased startup** uses one slot, the catalog's unique `gpt` enabled family
+alias and the independent exact `gpt-oss-20b` preload selector. It exercises the
+startup picker without rewriting saved aliases merely to display them.
+**Reported local endpoint** selects Local only and makes an explicit discovery
+check return a fake loopback record on port 8123 with no bearer token. No socket,
+provider or endpoint is started. Terminal-command copying is injected as an inert
+successful result; it does not overwrite the user's clipboard. Do not use the
+URL-copy action when preserving that clipboard is part of a review.
 These are inert presentation scenarios, not changes to a running provider.
 The banner controls switch Light/Dark and window content sizes 800 × 560 and
 1280 × 900. Appearance settings share the same isolated preference suite.
+The isolated suite starts with an unsupported idle-alert value of 99. Menu Bar
+must display the policy's effective five-minute choice without silently
+rewriting the saved value; an explicit choice still updates the isolated suite.
+Binding tests verify raw-value preservation independently of native display.
 **Static menu-bar activity** asks the review label to retain a stationary active
 arc. The native arc also honors the Mac's own Reduce Motion preference; this
 control cannot force animation against that preference. SwiftUI's system

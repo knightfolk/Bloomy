@@ -342,12 +342,88 @@ struct ProviderControlStoreTests {
         let store = ProviderControlStore(controller: controller)
         await store.refresh()
         store.setEnabled(true, modelID: "second-model")
+        store.setMaxModelSlots(3)
         let staged = try #require(store.draft)
+        let replacement = externallyChangedControls()
+        await controller.replaceSnapshot(replacement)
 
         await store.refreshPreservingDraft()
 
         #expect(store.draft == staged)
         #expect(store.draft?.hasChanges == true)
+        #expect(store.snapshot == replacement)
+        #expect(store.savedCapacity.value?.maxModelSlots == 2)
+        #expect(await controller.saveCount == 0)
+    }
+
+    @Test("preserving refresh follows external saved selection and limits when the draft is clean")
+    func preservingRefreshUpdatesCleanDraft() async throws {
+        let controller = FakeProviderController.fixture()
+        let store = ProviderControlStore(controller: controller, now: { providerControlTestNow })
+        await store.refresh()
+        #expect(store.draft?.hasChanges == false)
+        let replacement = externallyChangedControls()
+        await controller.replaceSnapshot(replacement)
+
+        await store.refreshPreservingDraft()
+
+        #expect(store.snapshot == replacement)
+        #expect(store.draft == replacement.draft)
+        #expect(store.savedCapacity.value?.maxModelSlots == 2)
+        #expect(store.draft?.hasChanges == false)
+        #expect(!store.canSave)
+        #expect(await controller.saveCount == 0)
+    }
+
+    @Test("preserving refresh keeps the latest edits made during its suspended read", arguments: [false, true])
+    func preservingRefreshKeepsLateEdits(initiallyDirty: Bool) async {
+        let gate = TelemetryRefreshGate()
+        let controller = FakeProviderController.fixture(reconciliationRefreshGate: gate)
+        let store = ProviderControlStore(controller: controller, now: { providerControlTestNow })
+        await store.refresh()
+        if initiallyDirty { store.setMaxModelSlots(2) }
+        let replacement = externallyChangedControls()
+        await controller.replaceSnapshot(replacement)
+        await controller.gateSubsequentRefreshes()
+        let refresh = Task { await store.refreshPreservingDraft() }
+        guard await gate.waitUntilStarted() else {
+            refresh.cancel()
+            await gate.release()
+            await refresh.value
+            Issue.record("The inert control read did not reach its suspension gate")
+            return
+        }
+
+        #expect(store.operation == .refreshing)
+        store.setEnabled(true, modelID: "second-model")
+        store.setMaxModelSlots(3)
+        let latestDraft = store.draft
+        #expect(latestDraft?.hasChanges == true)
+        await gate.release()
+        await refresh.value
+
+        #expect(store.operation == .idle)
+        #expect(store.snapshot == replacement)
+        #expect(store.draft == latestDraft)
+        #expect(store.draft?.maxModelSlots == 3)
+        #expect(store.draft?.selection.enabled == ["saved-model", "second-model"])
+        #expect(await controller.saveCount == 0)
+    }
+
+    @Test("plain refresh continues to replace a dirty draft with saved controls")
+    func plainRefreshReplacesDirtyDraft() async {
+        let controller = FakeProviderController.fixture()
+        let store = ProviderControlStore(controller: controller, now: { providerControlTestNow })
+        await store.refresh()
+        store.setMaxModelSlots(3)
+        let replacement = externallyChangedControls()
+        await controller.replaceSnapshot(replacement)
+
+        await store.refresh()
+
+        #expect(store.draft == replacement.draft)
+        #expect(store.draft?.hasChanges == false)
+        #expect(await controller.saveCount == 0)
     }
 
     @Test("Opportunity exposes a catalog retry without discarding staged settings")
@@ -2588,6 +2664,8 @@ private actor FakeProviderController: ProviderControlling, ProviderSavedCapacity
 
     func replaceSnapshot(_ snapshot: ProviderControlSnapshot) { currentSnapshot = snapshot }
 
+    func gateSubsequentRefreshes() { shouldGateRefresh = true }
+
     func failRefresh(with failure: Failure) {
         refreshFailure = failure
     }
@@ -2712,11 +2790,21 @@ private actor FakeProviderController: ProviderControlling, ProviderSavedCapacity
     }
 }
 
+private func externallyChangedControls() -> ProviderControlSnapshot {
+    let selection = ProviderModelSelection(enabled: ["second-model"], preloaded: ["second-model"])
+    return fixtureSnapshot(draft: ProviderConfigDraft(
+        sourceRevision: "external-revision", original: selection, selection: selection,
+        originalMaxModelSlots: 2, maxModelSlots: 2,
+        originalStartupPreload: true, startupPreload: true,
+        originalEngineV2MaxConcurrent: 4, engineV2MaxConcurrent: 4))
+}
+
 private func fixtureSnapshot(
     sources: ProviderControlSourceStates = freshProviderSources(),
-    downloadedAvailable: Bool = false
+    downloadedAvailable: Bool = false,
+    draft replacementDraft: ProviderConfigDraft? = nil
 ) -> ProviderControlSnapshot {
-    let draft = ProviderConfigDraft(
+    let draft = replacementDraft ?? ProviderConfigDraft(
         sourceRevision: "fixture-revision",
         original: ProviderModelSelection(enabled: ["saved-model"], preloaded: []),
         selection: ProviderModelSelection(enabled: ["saved-model"], preloaded: []),

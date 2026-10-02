@@ -8,6 +8,57 @@ struct ModelActionPresentation: Equatable {
     let isEnabled: Bool
 }
 
+/// The picker uses enabled selectors as its tags, but a saved preload can
+/// independently use another alias for that same catalog model.
+struct ModelStartupPickerPresentation: Equatable {
+    struct Option: Identifiable, Equatable {
+        let selector: String
+        let catalogID: String
+        var id: String { catalogID }
+    }
+
+    let selectedTag: String?
+    let options: [Option]
+    private let preloadCount: Int
+
+    static func make(selection: ProviderModelSelection, inventory: ModelInventory?) -> Self {
+        let items = inventory.map { $0.myCatalog + $0.available } ?? []
+        func identity(_ selector: String) -> String? {
+            let exact = items.filter { $0.catalogID == selector }
+            if exact.count == 1 { return exact[0].catalogID }
+            guard exact.isEmpty else { return nil }
+            let aliases = items.filter { $0.enabledSelector == selector || $0.preloadSelector == selector }
+            return aliases.count == 1 ? aliases[0].catalogID : nil
+        }
+        // Use the first enabled spelling for each uniquely resolved model.
+        // Mounting never normalizes or removes raw selectors in the draft.
+        var seen = Set<String>()
+        let options = selection.enabled.compactMap { selector -> Option? in
+            guard let catalogID = identity(selector), seen.insert(catalogID).inserted else { return nil }
+            return Option(selector: selector, catalogID: catalogID)
+        }
+        guard selection.preloaded.count == 1 else {
+            return Self(selectedTag: "", options: options, preloadCount: selection.preloaded.count)
+        }
+        let preferred = identity(selection.preloaded[0])
+        return Self(selectedTag: options.first { $0.catalogID == preferred }?.selector,
+            options: options, preloadCount: 1)
+    }
+
+    @MainActor
+    func select(_ selector: String, using stage: @MainActor (String?) -> Void) {
+        if selector.isEmpty {
+            // An explicit clear remains reachable even for unresolved evidence.
+            if preloadCount > 0 { stage(nil) }
+            return
+        }
+        guard let selectedTag, options.contains(where: { $0.selector == selector }) else { return }
+        // Preserve both the raw alias and the draft baseline on a no-op pick.
+        guard preloadCount > 1 || selector != selectedTag else { return }
+        stage(selector)
+    }
+}
+
 struct ModelOpportunitySignal: Equatable {
     let modelID: String
     let tokensPerSecond: Double?
@@ -972,16 +1023,34 @@ struct ModelManagerView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Start with", systemImage: "play.circle")
                             .font(.headline)
-                        Picker("Start with", selection: Binding(
-                            get: { draft.selection.preloaded.count == 1 ? draft.selection.preloaded[0] : "" },
-                            set: { store.setPreferredStartupModel($0.isEmpty ? nil : $0) }
-                        )) {
-                            Text("No preference").tag("")
-                            ForEach(draft.selection.enabled, id: \.self) { selector in
-                                Text(ModelDisplayName.short(selector)).tag(selector)
+                        let startup = ModelStartupPickerPresentation.make(selection: draft.selection,
+                            inventory: store.snapshot?.inventory)
+                        if let selected = startup.selectedTag {
+                            Picker("Start with", selection: Binding(
+                                get: { selected },
+                                set: { startup.select($0, using: store.setPreferredStartupModel) }
+                            )) {
+                                Text("No preference").tag("")
+                                ForEach(startup.options) { option in
+                                    Text(ModelDisplayName.short(option.catalogID)).tag(option.selector)
+                                        .help(option.catalogID == option.selector ? option.catalogID
+                                              : "\(option.catalogID) (\(option.selector))")
+                                }
                             }
+                            .labelsHidden()
+                        } else {
+                            Text("Startup preference unavailable · refresh model controls")
+                                .font(.callout).foregroundStyle(.secondary)
                         }
-                        .labelsHidden()
+
+                        if !draft.selection.preloaded.isEmpty,
+                           startup.selectedTag == nil || draft.selection.preloaded.count > 1 {
+                            Button("Clear preference") {
+                                startup.select("", using: store.setPreferredStartupModel)
+                            }
+                            .accessibilityLabel("Clear startup model preference")
+                        }
+
                         Text("This model loads first after restart. Incoming requests can load other enabled models into the same slot.")
                             .font(.callout).foregroundStyle(.secondary)
                         if draft.selection.preloaded.count > 1 {

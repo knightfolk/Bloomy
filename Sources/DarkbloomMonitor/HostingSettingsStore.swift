@@ -24,7 +24,9 @@ final class HostingSettingsStore: ObservableObject {
     @Published private(set) var pendingExposureConfirmation: HostingOptions?
     @Published private(set) var errorMessage: String?
     @Published private(set) var endpointDetails: LocalEndpointAvailability?
+    @Published private(set) var endpointDetailsCheckedAt: Date?
     @Published private(set) var isFetchingEndpointDetails = false
+    @Published private(set) var copiedStandaloneCommand: String?
     @Published private(set) var localTokenStatusMessage: String?
     @Published private(set) var localTokenNeedsRestart = false
 
@@ -35,6 +37,8 @@ final class HostingSettingsStore: ObservableObject {
     private let cliVersionProvider: () -> String?
     private let lanScanner: @Sendable () -> [String]
     private let copyToken: (String) -> Bool
+    private let copyCommand: (String) -> Bool
+    private let now: () -> Date
     private var localTokenRevision: UInt64 = 0
     private var endpointDetailsGeneration: UInt64 = 0
 
@@ -48,7 +52,12 @@ final class HostingSettingsStore: ObservableObject {
         copyToken: @escaping (String) -> Bool = { token in
             NSPasteboard.general.clearContents()
             return NSPasteboard.general.setString(token, forType: .string)
-        }
+        },
+        copyCommand: @escaping (String) -> Bool = { command in
+            NSPasteboard.general.clearContents()
+            return NSPasteboard.general.setString(command, forType: .string)
+        },
+        now: @escaping () -> Date = Date.init
     ) {
         self.controlStore = controlStore
         self.endpointClient = endpointClient
@@ -57,6 +66,8 @@ final class HostingSettingsStore: ObservableObject {
         self.defaults = defaults
         self.lanScanner = lanScanner
         self.copyToken = copyToken
+        self.copyCommand = copyCommand
+        self.now = now
         options = Self.loadOptions(from: defaults)
     }
 
@@ -187,12 +198,15 @@ final class HostingSettingsStore: ObservableObject {
         let availability = await endpointClient.fetch()
         guard generation == endpointDetailsGeneration else { return nil }
         endpointDetails = availability
+        let checkedAt = now()
+        endpointDetailsCheckedAt = checkedAt.timeIntervalSince1970.isFinite ? checkedAt : nil
         return availability
     }
 
     private func invalidateEndpointDetails() {
         endpointDetailsGeneration &+= 1
         endpointDetails = nil
+        endpointDetailsCheckedAt = nil
         isFetchingEndpointDetails = false
     }
 
@@ -261,6 +275,28 @@ final class HostingSettingsStore: ObservableObject {
         return parts.joined(separator: " ")
     }
 
+    var hasCopiedCurrentStandaloneCommand: Bool {
+        guard let copiedStandaloneCommand else { return false }
+        return copiedStandaloneCommand == standaloneStartCommand
+    }
+
+    @discardableResult
+    func copyStandaloneCommandToPasteboard() -> Bool {
+        errorMessage = nil
+        guard cliSupportsHosting, let command = standaloneStartCommand else {
+            copiedStandaloneCommand = nil
+            errorMessage = "Choose supported, valid hosting settings before copying the Terminal command."
+            return false
+        }
+        guard copyCommand(command) else {
+            copiedStandaloneCommand = nil
+            errorMessage = "Could not copy the Terminal command. Try again."
+            return false
+        }
+        copiedStandaloneCommand = command
+        return true
+    }
+
     var exposureConfirmationTitle: String {
         guard let pendingExposureConfirmation else { return "Confirm local endpoint access" }
         if !pendingExposureConfirmation.requiresAuthentication {
@@ -291,7 +327,7 @@ final class HostingSettingsStore: ObservableObject {
     var unauthenticatedAccessWarning: String {
         switch options.mode {
         case .off:
-            return "No local endpoint is active. If you enable local hosting later, the app will ask for confirmation before applying this setting."
+            return "Fleet only is selected. Apply changes to turn off the local endpoint. If you enable local hosting later, the app will ask for confirmation before applying this setting."
         case .unified:
             return "No API key will be required. This is unsafe on shared, public, or untrusted networks. Applying requires a second confirmation before the provider is restarted."
         case .standalone:

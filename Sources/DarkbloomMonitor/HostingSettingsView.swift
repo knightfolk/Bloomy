@@ -11,7 +11,6 @@ struct HostingSettingsView: View {
     private let updateProtection: AppUpdateEditorProtection?
     @State private var tokenEditorOwner = UUID()
     @State private var customAddressError: String?
-    @State private var copiedCommand = false
     @State private var bearerTokenText = ""
 
     init(
@@ -154,15 +153,15 @@ struct HostingSettingsView: View {
         let tint: Color
         switch store.options.mode {
         case .off:
-            title = "Fleet only"
+            title = "Selected: Fleet only"
             symbol = "network"
             tint = .secondary
         case .unified:
-            title = "Fleet + local"
-            symbol = "checkmark.circle.fill"
-            tint = .green
+            title = "Selected: Fleet + local"
+            symbol = "arrow.triangle.branch"
+            tint = .accentColor
         case .standalone:
-            title = "Local only"
+            title = "Selected: Local only"
             symbol = "desktopcomputer"
             tint = .orange
         }
@@ -173,6 +172,7 @@ struct HostingSettingsView: View {
             .padding(.vertical, 8)
             .background(tint.opacity(0.12), in: Capsule())
             .accessibilityIdentifier("hosting.currentMode")
+            .help("Selected hosting mode. Apply settings before assuming the running provider has changed.")
     }
 
     private var servingModeCard: some View {
@@ -180,7 +180,7 @@ struct HostingSettingsView: View {
             title: "How this Mac serves",
             subtitle: "Choose a mode; Apply uses the installed Darkbloom CLI with the matching start options."
         ) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 205), spacing: 12)], spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 205), spacing: 12, alignment: .top)], spacing: 12) {
                 modeCard(
                     .off,
                     title: "Fleet only",
@@ -246,7 +246,7 @@ struct HostingSettingsView: View {
                 }
             }
             .padding(15)
-            .frame(maxWidth: .infinity, minHeight: 150, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 150, maxHeight: .infinity, alignment: .topLeading)
             .background(
                 selected ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor),
                 in: RoundedRectangle(cornerRadius: 14)
@@ -380,7 +380,7 @@ struct HostingSettingsView: View {
 
                     if store.options.bindScope == .allInterfaces {
                         HostingNotice(
-                            title: "Listens on every interface",
+                            title: "Selected: every network interface",
                             message: "0.0.0.0 can include Wi-Fi, Ethernet, and other reachable networks. Keep API-key authentication on unless you have a specific trusted, isolated setup.",
                             style: .warning,
                             symbol: "exclamationmark.shield.fill"
@@ -394,7 +394,7 @@ struct HostingSettingsView: View {
                             symbol: "exclamationmark.triangle.fill"
                         )
                     } else {
-                        Label("Loopback keeps the endpoint private to this Mac.", systemImage: "lock.fill")
+                        Label("Selected loopback keeps the endpoint private to this Mac when applied.", systemImage: "lock.fill")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -422,7 +422,7 @@ struct HostingSettingsView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     HostingNotice(
-                        title: "Anyone who can reach this endpoint can use it",
+                        title: "Selected: no API-key authentication",
                         message: store.unauthenticatedAccessWarning,
                         style: .danger,
                         symbol: "lock.slash"
@@ -488,7 +488,7 @@ struct HostingSettingsView: View {
         ) {
             switch store.options.mode {
             case .off:
-                Label("The local endpoint is off in Fleet only mode.", systemImage: "pause.circle")
+                Label("Selected: Fleet only. Apply to turn off the local endpoint.", systemImage: "pause.circle")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             case .unified:
@@ -541,7 +541,7 @@ struct HostingSettingsView: View {
             }
 
             if !store.options.requiresAuthentication {
-                Label("API-key authentication is disabled for this endpoint.", systemImage: "lock.slash")
+                Label("Selected settings disable API-key authentication after Apply.", systemImage: "lock.slash")
                     .font(.callout)
                     .foregroundStyle(.orange)
             }
@@ -551,7 +551,7 @@ struct HostingSettingsView: View {
     @ViewBuilder
     private var standaloneConnectionDetails: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Direct mode is read from the live CLI discovery record.", systemImage: "info.circle")
+            Label("The last check records CLI discovery; it does not continuously monitor the endpoint.", systemImage: "info.circle")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Button(store.isFetchingEndpointDetails ? "Checking…" : "Check for a running local-only endpoint") {
@@ -560,24 +560,31 @@ struct HostingSettingsView: View {
             .disabled(store.isFetchingEndpointDetails)
             .accessibilityIdentifier("hosting.details.refresh")
 
+            if let checkedAt = store.endpointDetailsCheckedAt {
+                Text("Last checked: \(checkedAt.formatted(date: .abbreviated, time: .standard))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("hosting.details.checkedAt")
+            }
+
             switch store.endpointDetails {
             case .some(.none):
-                Text("No running local-only endpoint is advertised right now.")
+                Text("Last check: no local-only endpoint was advertised.")
                     .foregroundStyle(.secondary)
             case .some(.live(let record)):
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Base URL · \(record.baseURL)")
-                    Text("Listening at \(record.host):\(record.port)")
+                    Text("Last checked base URL · \(record.baseURL)")
+                    Text("Reported listener: \(record.host):\(String(record.port))")
                         .foregroundStyle(.secondary)
                     if !record.hasBearerToken {
-                        Text("API-key authentication is disabled on this endpoint.")
+                        Text("Last check: API-key authentication was disabled.")
                             .foregroundStyle(.orange)
                     }
                 }
                 .font(.callout)
                 .textSelection(.enabled)
             case nil:
-                Text("Choose Local only to view and copy its Terminal command.")
+                Text("Check for a running local-only endpoint to view its reported connection details.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -600,10 +607,8 @@ struct HostingSettingsView: View {
                                 .textSelection(.enabled)
                                 .lineLimit(2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Button(copiedCommand ? "Copied" : "Copy Terminal command") {
-                                NSPasteboard.general.clearContents()
-                                _ = NSPasteboard.general.setString(command, forType: .string)
-                                copiedCommand = true
+                            Button(store.hasCopiedCurrentStandaloneCommand ? "Copied" : "Copy Terminal command") {
+                                store.copyStandaloneCommandToPasteboard()
                             }
                             .buttonStyle(.borderedProminent)
                             .disabled(!standaloneCommandMatchesDraft)

@@ -8,12 +8,13 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case fresh = "Fresh", stale = "Stale", staleCatalog = "Stale catalog", offline = "Offline"
     case expiredSettings = "Expired settings", expiredHelper = "Expired helper", unavailableSettings = "Unavailable settings"
     case partialCooling = "Partial cooling", disabledHelper = "Disabled helper", unavailableRuntime = "Unavailable runtime"
+    case aliasStartup = "Aliased startup", liveHosting = "Reported local endpoint"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
     func availability<T: Equatable & Sendable>(_ value: T, at date: Date) -> SourceAvailability<T> {
         switch self {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting:
             .available(value: value, capturedAt: date)
         case .stale: .stale(value: value, capturedAt: date, reason: "Synthetic source stopped refreshing")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic source unavailable")
@@ -99,7 +100,7 @@ private struct FixtureEarnings: AccountEarningsFetching {
     let scenario: FixtureScenario
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -201,7 +202,16 @@ private actor FixtureController: ProviderControlling {
     var slots = 3
     var startupPreload: Bool? = true
     var concurrent = 4
-    init(scenario: FixtureScenario) { self.scenario = scenario }
+    init(scenario: FixtureScenario) {
+        self.scenario = scenario
+        if scenario == .aliasStartup {
+            // Use the catalog's actual unique family alias independently of
+            // the exact preload selector.
+            selection = ProviderModelSelection(enabled: [FixtureData.modelIDs[0], FixtureData.modelIDs[1], "gpt"],
+                preloaded: ["gpt-oss-20b"])
+            slots = 1
+        }
+    }
     func refresh() async throws -> ProviderControlSnapshot {
         let now = Date()
         // Match ProviderControlService: expired runtime evidence is omitted
@@ -296,7 +306,14 @@ struct FixtureNetworkCache: NetworkCacheFetching {
     }
 }
 private struct FixtureEndpoint: LocalEndpointFetching {
-    func fetch() async -> LocalEndpointAvailability { .none("Synthetic endpoint; no real server") }
+    var reportsEndpoint = false
+    func fetch() async -> LocalEndpointAvailability {
+        if reportsEndpoint {
+            return .live(LocalEndpointRecord(baseURL: "http://127.0.0.1:8123/v1", apiKey: "",
+                host: "127.0.0.1", port: 8123, processID: 4242, version: "Synthetic fixture", updatedAt: Date()))
+        }
+        return .none("Synthetic endpoint; no real server")
+    }
 }
 private final class FixtureTokens: ConsumerKeyManaging, LocalEndpointTokenManaging, @unchecked Sendable {
     private let lock = NSLock()
@@ -430,6 +447,9 @@ private final class FixtureModel: ObservableObject {
         let suite = "dev.darkbloom.dashboard-fixture.session.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suite)!
         defaults.set("light", forKey: ApplicationAppearance.defaultsKey)
+        // Deliberately unsupported review-only value: the picker must display
+        // the policy's effective five-minute fallback until an explicit choice.
+        defaults.set(99, forKey: MenuBarAttentionPolicy.defaultsKey)
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("BloomyDashboardFixture-\(UUID().uuidString)", isDirectory: true)
         focusDiagnostics = FixtureFocusDiagnostics(directory: directory)
         focusTracing = focusDiagnostics.isEnabled
@@ -453,9 +473,12 @@ private final class FixtureModel: ObservableObject {
         monitor.inactivityNudge = InactivityNudgeStore(keyStore: tokens, defaults: defaults,
             evidence: { _ in .unavailable }, canAct: { false }, send: { _, _ in nil })
         monitor.profitSwitch = ProfitSwitchStore(control: control, defaults: defaults, installedMemoryGB: 64, availableMemoryGB: { 24 })
-        let hosting = HostingSettingsStore(controlStore: control, endpointClient: FixtureEndpoint(), tokenFile: tokens,
+        if scenario == .liveHosting {
+            defaults.set(HostingEndpointMode.standalone.rawValue, forKey: HostingSettingsStore.modeKey)
+        }
+        let hosting = HostingSettingsStore(controlStore: control, endpointClient: FixtureEndpoint(reportsEndpoint: scenario == .liveHosting), tokenFile: tokens,
             cliVersionProvider: { scenario == .offline ? nil : "0.9.17" }, defaults: defaults,
-            lanScanner: { ["192.168.50.20"] }, copyToken: { _ in true })
+            lanScanner: { ["192.168.50.20"] }, copyToken: { _ in true }, copyCommand: { _ in true })
         let chat = ChatStore(localClient: FixtureChat(scenario: scenario), networkClient: FixtureChat(scenario: scenario),
             balanceClient: FixtureBalance(), pricingClient: FixturePricing(scenario: scenario), keyStore: tokens)
         monitor.attachRecommendationInventory { control.snapshot }

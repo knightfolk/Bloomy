@@ -547,17 +547,17 @@ final class ProviderControlStore: ObservableObject {
     }
 
     func refresh() async {
-        await refresh(preserving: nil)
+        await refresh(preservingEdits: false)
     }
 
     /// Refresh authoritative controls without discarding a staged draft. This
     /// is used by read-only surfaces that need fresh safety evidence while a
     /// user may still be editing settings.
     func refreshPreservingDraft() async {
-        await refresh(preserving: draft)
+        await refresh(preservingEdits: true)
     }
 
-    private func refresh(preserving stagedDraft: ProviderConfigDraft?) async {
+    private func refresh(preservingEdits: Bool) async {
         guard let generation = begin(.refreshing) else { return }
         let controller = self.controller
         let task = Task { @MainActor [weak self] in
@@ -568,6 +568,9 @@ final class ProviderControlStore: ObservableObject {
                 }
                 let refreshed = try await controller.refresh()
                 try Task.checkCancellation()
+                // Read the latest draft after the suspended read so edits made
+                // during refresh survive. Clean drafts follow saved changes.
+                let stagedDraft = preservingEdits && draft?.hasChanges == true ? draft : nil
                 accept(refreshed, preserving: stagedDraft)
             } catch is CancellationError {
                 // Cancellation is an intentional state transition, not a user-facing failure.
