@@ -45,3 +45,5 @@ Metrics analyzes uninterrupted visits using the single resident model, rather th
 No observed work requires a fully bounded visit, fresh inactive readings, unchanged counters and single-model residency. Provider restarts, stale or missing data, counter resets, clipped periods and ambiguous cross-switch counter increases stay uncertain. Positive counters between the same sole resident can detect brief completed work between idle polls. These observed intervals are approximate, and cannot prove the network sent no requests.
 
 Positive shared counters can be attributed only to the same sole resident observed at both ends. Switches away and back entirely between readings cannot be ruled out. Model-filtered coverage follows sole residency; work or speed labeled for a previous model is not reassigned.
+
+A fresh idle reading with no current or resident model and complete counters confirms an unloaded slot. It closes a visit and can bound the next load; it does not bridge the empty/loading time. Stale, incomplete or retained-last-used readings remain uncertain. Completed unused visits include switches and observed unloads.

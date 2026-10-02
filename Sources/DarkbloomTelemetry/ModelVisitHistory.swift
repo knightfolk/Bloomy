@@ -87,8 +87,13 @@ public struct ModelVisitHistory: Equatable, Sendable {
                     builders.append(visit)
                     current = eligible ? VisitBuilder(sample, reason: interruption, truncated: true) : nil
                 } else if !eligible {
-                    let reason: ModelVisitBoundary = sample.model == nil ? .staleOrMissing : .residencyChanged
-                    visit.finish(at: prior.observedAt, reason: reason, truncated: true)
+                    if Self.confirmedEmptySlot(sample) {
+                        visit.addEmptySlotBoundary(prior, sample)
+                        visit.finish(at: sample.observedAt, reason: .residencyChanged, truncated: false)
+                    } else {
+                        let reason: ModelVisitBoundary = sample.model == nil ? .staleOrMissing : .residencyChanged
+                        visit.finish(at: prior.observedAt, reason: reason, truncated: true)
+                    }
                     builders.append(visit)
                     current = nil
                 } else if Self.selectedModel(prior) != Self.selectedModel(sample) {
@@ -108,7 +113,13 @@ public struct ModelVisitHistory: Equatable, Sendable {
                     current = visit
                 }
             } else if eligible {
-                current = VisitBuilder(sample, reason: previous == nil ? .historyBoundary : .staleOrMissing, truncated: true)
+                if let prior = previous, Self.confirmedEmptySlot(prior), Self.interruption(prior, sample) == nil {
+                    var next = VisitBuilder(sample, reason: .residencyChanged, truncated: false)
+                    if Self.counterEvidence(prior, sample) != .zero { next.uncertain = true }
+                    current = next
+                } else {
+                    current = VisitBuilder(sample, reason: previous == nil ? .historyBoundary : .staleOrMissing, truncated: true)
+                }
             }
             previous = sample
         }
@@ -140,8 +151,17 @@ public struct ModelVisitHistory: Equatable, Sendable {
         Set(sample.residentModels).count == 1
     }
 
+    /// An explicitly empty, fresh, idle slot is an observed unload boundary.
+    /// Retained MRU labels and incomplete/stale readings cannot establish it.
+    private static func confirmedEmptySlot(_ sample: PerformanceSample) -> Bool {
+        fresh(sample) && sample.model == nil && sample.residentModels.isEmpty
+            && sample.inferenceActive == false && (sample.activeRequests ?? 0) == 0
+            && (sample.tokensPerSecond ?? 0) == 0
+            && sample.requestsServed != nil && sample.tokensGenerated != nil
+    }
+
     private static func interruption(_ prior: PerformanceSample, _ sample: PerformanceSample) -> ModelVisitBoundary? {
-        guard fresh(prior), fresh(sample), sample.model != nil || selectedModel(sample) != nil else { return .staleOrMissing }
+        guard fresh(prior), fresh(sample), sample.model != nil || selectedModel(sample) != nil || confirmedEmptySlot(sample) else { return .staleOrMissing }
         guard prior.providerSession == sample.providerSession else { return .providerRestart }
         let duration = sample.observedAt.timeIntervalSince(prior.observedAt)
         guard duration > 0 else { return .staleOrMissing }
@@ -235,6 +255,14 @@ public struct ModelVisitHistory: Equatable, Sendable {
         mutating func addSwitchInterval(_ prior: PerformanceSample, _ sample: PerformanceSample, counters: CounterEvidence) {
             intervals.append(Interval(start: prior.observedAt, end: sample.observedAt, idle: false))
             if counters != .zero || !ModelVisitHistory.singleResident(prior) || !ModelVisitHistory.singleResident(sample) {
+                uncertain = true
+            }
+        }
+
+        mutating func addEmptySlotBoundary(_ prior: PerformanceSample, _ sample: PerformanceSample) {
+            intervals.append(Interval(start: prior.observedAt, end: sample.observedAt, idle: false))
+            if ModelVisitHistory.counterEvidence(prior, sample) != .zero
+                || !ModelVisitHistory.singleResident(prior) || !ModelVisitHistory.knownInactive(prior) {
                 uncertain = true
             }
         }

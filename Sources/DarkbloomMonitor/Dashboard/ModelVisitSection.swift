@@ -29,7 +29,7 @@ struct ModelVisitSection: View {
             }
             HStack(spacing: 8) {
                 Image(systemName: "arrow.triangle.swap").foregroundStyle(.orange)
-                Text("\(summary.completedNoObservedWorkCount) switched without observed work")
+                Text("\(summary.completedNoObservedWorkCount) visits without observed work")
                     .font(.callout.weight(.medium))
                 Spacer(minLength: 0)
                 Text(Self.duration(summary.completedNoObservedWorkSeconds))

@@ -6,6 +6,26 @@ import Testing
 struct ModelVisitHistoryTests {
     private let base = Date(timeIntervalSince1970: 2_000_000_000)
 
+    @Test("fresh empty slots bound unused visits across normal unload and reload")
+    func confirmedEmptySlotBoundaries() throws {
+        let rows = [sample(0, residents: [], modelMissing: true), sample(30, "b"),
+            sample(60, "b"), sample(90, residents: [], modelMissing: true), sample(120, "c")]
+        let visit = try #require(ModelVisitHistory(samples: rows).completedNoObservedWorkVisits.first)
+        #expect(visit.model == "b")
+        #expect(visit.durationSeconds == 60)
+        #expect(visit.startReason == .residencyChanged)
+        #expect(visit.endReason == .residencyChanged)
+    }
+
+    @Test("stale or incomplete empty slots cannot bound unused visits")
+    func uncertainEmptySlots() {
+        for empty in [sample(0, residents: [], quality: .stale, modelMissing: true),
+                      sample(0, residents: [], tokens: nil, modelMissing: true)] {
+            let rows = [empty, sample(30, "b"), sample(60, "b"), sample(90, residents: [], modelMissing: true)]
+            #expect(ModelVisitHistory(samples: rows).completedNoObservedWorkVisits.isEmpty)
+        }
+    }
+
     @Test("missing either counter cannot prove absence of work")
     func partialCounterCoverage() {
         for missingRequests in [true, false] {
