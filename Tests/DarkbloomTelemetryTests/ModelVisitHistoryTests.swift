@@ -100,7 +100,7 @@ struct ModelVisitHistoryTests {
             (sample(60, requests: 0, tokens: 0), .counterReset),
             (sample(60, quality: .stale), .staleOrMissing),
             (sample(60, capture: nil), .staleOrMissing),
-            (sample(60, residents: [], modelMissing: true), .staleOrMissing)
+            (sample(60, residents: [], tokens: nil, modelMissing: true), .staleOrMissing)
         ]
         for (interruption, boundary) in cases {
             let history = ModelVisitHistory(samples: [sample(0, requests: 3, tokens: 30), sample(30, requests: 3, tokens: 30), interruption])
