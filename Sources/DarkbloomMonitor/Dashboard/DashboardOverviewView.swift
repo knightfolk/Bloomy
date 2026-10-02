@@ -6,7 +6,7 @@ struct DashboardOverviewView: View {
     let controlStore: ProviderControlStore?
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
+        TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 1), isVisible: store.dashboardVisible)) { _ in
             overviewContent
         }
     }
@@ -83,7 +83,7 @@ private struct DashboardModelSummary: View {
     let controlStore: ProviderControlStore?
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
+        TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 1), isVisible: store.dashboardVisible)) { _ in
             let now = Date()
             VStack(alignment: .leading, spacing: 12) {
                 Text("Models").font(.title3.bold())

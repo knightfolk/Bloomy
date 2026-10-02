@@ -6,7 +6,7 @@ struct ProviderSelectionView: View {
     @ObservedObject var controlStore: ProviderControlStore
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 2)) { _ in
+        TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 2), isVisible: store.dashboardVisible)) { _ in
             let now = Date()
             VStack(alignment: .leading, spacing: 10) {
                 Text("Selections").font(.headline)

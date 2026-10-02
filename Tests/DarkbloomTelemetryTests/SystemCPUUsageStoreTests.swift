@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import DarkbloomMonitor
 @testable import DarkbloomTelemetry
@@ -25,6 +26,21 @@ struct SystemCPUUsageStoreTests {
     @Test("macOS host sampler reads real cumulative CPU counters")
     func readsHostCounters() {
         #expect(MacHostCPUSampler.read() != nil)
+    }
+
+    @Test("stopping before the sampler task begins prevents its initial read")
+    func cancelledQueuedStartDoesNotRead() async throws {
+        var reads = 0
+        let store = SystemCPUUsageStore(interval: .milliseconds(25), read: {
+            reads += 1
+            return SystemCPUTimes(user: 1, system: 0, nice: 0, idle: 1)
+        })
+        store.start()
+        store.stop()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(reads == 0)
+        #expect(store.percentage == nil)
+        #expect(store.sampledAt == nil)
     }
 }
 

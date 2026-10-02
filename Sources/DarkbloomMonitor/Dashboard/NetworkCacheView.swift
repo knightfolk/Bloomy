@@ -44,7 +44,7 @@ struct NetworkCacheView: View {
     let isVisible: Bool
     @StateObject private var store = NetworkCacheStore()
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 10)) { _ in
+        TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 10), isVisible: isVisible)) { _ in
             let now = Date()
             VStack(alignment: .leading, spacing: 8) {
                 Label("Network cache health", systemImage: "externaldrive.connected.to.line.below").font(.headline)

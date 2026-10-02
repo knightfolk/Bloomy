@@ -301,6 +301,53 @@ private struct FixtureChat: LocalChatRouteClient, NetworkChatRouteClient {
             finishReason: "stop", promptTokens: 12, completionTokens: 22)
     }
 }
+
+private enum FixtureChatVerification: String, CaseIterable, Identifiable, Sendable {
+    case fresh = "Fresh verification"
+    case expiring = "Verification expires in 10 s"
+    case expired = "Verification already expired"
+    case failed = "Verification fails"
+    case empty = "Empty model list"
+    var id: String { rawValue }
+}
+
+// A new test chat gets a new client/snapshot. Backdating an existing store's
+// read would correctly lose to its newer accepted sample. Only the first read
+// aged read is controlled: the production Refresh button recovers with a current
+// list. Failure/empty modes remain explicit until Next verification read changes
+// them, so a repeated failure cannot look like a successful refresh.
+// There is no fixture expiry timer or repeated chat-state publication.
+private actor FixtureChatVerificationClient: LocalChatRouteClient {
+    private var verification: FixtureChatVerification
+    private var reads = 0
+    init(_ verification: FixtureChatVerification) { self.verification = verification }
+    func setVerification(_ value: FixtureChatVerification) {
+        verification = value
+        reads = 0
+    }
+    func models(now: Date) async throws -> ChatModelListSnapshot {
+        reads += 1
+        if verification == .failed { throw FixtureError.offline }
+        if verification == .empty { return ChatModelListSnapshot(modelIDs: [], capturedAt: now) }
+        if reads == 1 {
+            switch verification {
+            case .fresh: break
+            case .expiring:
+                return ChatModelListSnapshot(modelIDs: FixtureData.modelIDs,
+                    capturedAt: now.addingTimeInterval(-110))
+            case .expired:
+                return ChatModelListSnapshot(modelIDs: FixtureData.modelIDs,
+                    capturedAt: now.addingTimeInterval(-121))
+            case .failed, .empty: break
+            }
+        }
+        return ChatModelListSnapshot(modelIDs: FixtureData.modelIDs, capturedAt: now)
+    }
+    func complete(model: String, messages: [ChatMessagePayload]) async throws -> ChatCompletionOutcome {
+        ChatCompletionOutcome(content: "Synthetic reply — no model was called. This review conversation lives only in fixture memory.",
+            model: model, finishReason: "stop", promptTokens: 12, completionTokens: 22)
+    }
+}
 private struct FixtureBalance: ConsumerBalanceFetching {
     func fetch(now: Date) async throws -> ConsumerBalanceSnapshot { ConsumerBalanceSnapshot(balanceMicroUSD: 2_400_000, capturedAt: now) }
 }
@@ -320,6 +367,8 @@ private final class FixtureModel: ObservableObject {
     @Published var issue: String?
     @Published var scenario: FixtureScenario = .fresh
     @Published var focusTracing: Bool
+    @Published private(set) var chatVerificationTest: FixtureChatVerification?
+    private var chatVerificationClient: FixtureChatVerificationClient?
     private var loadTask: Task<Void, Never>?
     private var loadGeneration = 0
     private var isTerminating = false
@@ -371,6 +420,28 @@ private final class FixtureModel: ObservableObject {
     func setDashboardVisible(_ visible: Bool) {
         dashboardVisible = visible
         monitor.setDashboardVisible(visible)
+    }
+    func startVerificationChat(_ verification: FixtureChatVerification) {
+        guard ready, !isTerminating, scenario.hasCurrentRuntime, !chat.isSending else { return }
+        let client = FixtureChatVerificationClient(verification)
+        let replacement = ChatStore(localClient: client,
+            networkClient: FixtureChat(scenario: scenario), balanceClient: FixtureBalance(),
+            pricingClient: FixturePricing(scenario: scenario), keyStore: FixtureTokens())
+        // Explicit menu action starts a genuinely new, empty local chat.
+        // Nothing migrates from the previous conversation or credential store.
+        replacement.startConversation(route: .local)
+        chat = replacement
+        chatVerificationClient = client
+        chatVerificationTest = verification
+        navigation.selected = .chat
+        navigation.revealSelectedSection()
+    }
+    func setNextVerificationRead(_ verification: FixtureChatVerification) async {
+        guard ready, !isTerminating, let client = chatVerificationClient, !chat.isSending else { return }
+        let generation = loadGeneration
+        await client.setVerification(verification)
+        guard generation == loadGeneration, !isTerminating else { return }
+        chatVerificationTest = verification
     }
     func load() async {
         guard !isTerminating else { return }
@@ -452,6 +523,8 @@ private final class FixtureModel: ObservableObject {
         // Publish the replacement with the latest native visibility state.
         preparedMonitor.setDashboardVisible(dashboardVisible)
         monitor = preparedMonitor; control = preparedControl; hosting = stores.2; chat = stores.3
+        chatVerificationTest = nil
+        chatVerificationClient = nil
         issue = preparationIssue
         ready = true
     }
@@ -784,6 +857,35 @@ private struct FixtureWindowCapture: NSViewRepresentable {
     }
 }
 
+private struct FixtureChatVerificationControls: View {
+    @ObservedObject var model: FixtureModel
+    @ObservedObject var chat: ChatStore
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Menu("New synthetic local chat") {
+                ForEach(FixtureChatVerification.allCases) { verification in
+                    Button(verification.rawValue) { model.startVerificationChat(verification) }
+                }
+            }
+            .disabled(!model.ready || !model.scenario.hasCurrentRuntime || chat.isSending)
+            .help("Starts a new empty local chat with a controlled first model read; no real endpoint, key, or inference.")
+            Menu("Next verification read") {
+                ForEach(FixtureChatVerification.allCases) { verification in
+                    Button(verification.rawValue) { Task { await model.setNextVerificationRead(verification) } }
+                }
+            }
+            .disabled(model.chatVerificationTest == nil || chat.isSending || chat.isRefreshingModels)
+            .help("Changes only the fake model-read response. Use Chat's production Refresh button to read it; the conversation and draft stay unchanged.")
+            Text(model.chatVerificationTest?.rawValue ?? "Chat tests create a new empty conversation")
+                .font(.caption).foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(Color.orange.opacity(0.08))
+    }
+}
+
 private struct FixtureReviewView: View {
     @ObservedObject var model: FixtureModel
     @AppStorage private var appearance: String
@@ -810,6 +912,9 @@ private struct FixtureReviewView: View {
                     Toggle("Focus trace", isOn: $model.focusTracing).toggleStyle(.checkbox)
                         .help("Bounded native focus diagnostic: \(model.focusDiagnostics.outputURL.path)")
                 }.padding(10).background(Color.orange.opacity(0.12))
+                // Observe the child store directly so a completed model read
+                // re-enables test controls without an unrelated fixture update.
+                FixtureChatVerificationControls(model: model, chat: model.chat)
                 if let issue = model.issue { Text(issue).foregroundStyle(.red).padding(6) }
                 DashboardRootView(store: model.monitor, controlStore: model.control, hostingStore: model.hosting,
                     chatStore: model.chat, navigation: model.navigation)

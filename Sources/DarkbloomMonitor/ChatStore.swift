@@ -64,6 +64,10 @@ struct ChatConversation: Identifiable, Equatable, Sendable {
     var entries: [ChatEntry] = []
 }
 
+enum ChatModelVerificationState: Equatable {
+    case unverified, refreshing, fresh(Int), empty, expired, failed(String)
+}
+
 /// Shared in-memory conversation state for the dashboard chat tab and the
 /// pop-out chat window (one instance, two windows). Nothing here persists
 /// prompts, transcripts, or credentials: the transcript lives only in this
@@ -124,6 +128,17 @@ final class ChatStore: ObservableObject {
     private var networkCredentialGeneration = 0
     private var keyStatusTask: Task<Void, Never>?
     private var keyStatusGeneration = 0
+    private var modelRefreshGeneration = 0
+    /// A failed verification invalidates that route's cached list until an
+    /// accepted successful read. New conversations cannot resurrect it.
+    private var modelFailures: [ChatRoute: String] = [:]
+    private var visibleChatSurfaces: Set<UUID> = []
+    private var modelExpiryTask: Task<Void, Never>?
+    private var modelExpiryGeneration = 0
+    /// A deadline changes presentation only; it never starts a verification.
+    @Published private(set) var modelVerificationRevision = 0
+    var hasScheduledModelExpiry: Bool { modelExpiryTask != nil }
+
 
     init(
         localClient: LocalChatRouteClient,
@@ -154,7 +169,8 @@ final class ChatStore: ObservableObject {
         sendTask = nil
         isSending = false
         notice = nil
-        modelsNotice = nil
+        invalidateModelRefresh()
+        modelsNotice = modelFailures[route]
         conversation = ChatConversation(
             id: UUID(),
             route: route,
@@ -163,10 +179,13 @@ final class ChatStore: ObservableObject {
             paidRouteAcknowledged: false,
             entries: []
         )
+        scheduleModelExpiry()
+        let conversationID = conversation?.id
         Task { [weak self] in
-            await self?.refreshModels()
-            if route == .network {
-                await self?.refreshNetworkReadiness()
+            guard let self, self.conversation?.id == conversationID else { return }
+            await self.refreshModels()
+            if route == .network, self.conversation?.id == conversationID {
+                await self.refreshNetworkReadiness()
             }
         }
     }
@@ -199,40 +218,110 @@ final class ChatStore: ObservableObject {
     var selectedModelID: String? { conversation?.modelID }
 
     func refreshModels() async {
-        guard let route = conversation?.route else { return }
-        // A refresh belongs to the conversation and credential generation
-        // that started it; a new chat or key change mid-flight keeps its own
-        // notice and selection clean.
-        let conversationID = conversation?.id
+        guard let conversation else { return }
+        let route = conversation.route
+        let conversationID = conversation.id
         let credentialGeneration = networkCredentialGeneration
+        modelRefreshGeneration += 1
+        let ticket = modelRefreshGeneration
+        // A retry must not resurrect a cached list invalidated by a failed
+        // read before that retry has actually succeeded.
         isRefreshingModels = true
-        defer { isRefreshingModels = false }
+        defer {
+            if ticket == modelRefreshGeneration {
+                isRefreshingModels = false
+                scheduleModelExpiry()
+            }
+        }
         do {
             let snapshot = try await client(for: route).models(now: now())
-            // An older overlapping response cannot replace a newer accepted
-            // sample, and cannot re-select models for a newer conversation.
+            guard ticket == modelRefreshGeneration,
+                  self.conversation?.id == conversationID,
+                  route != .network || credentialGeneration == networkCredentialGeneration
+            else { return }
             let existing = modelsSnapshot(for: route)
-            let isCurrentSample = existing.map { snapshot.capturedAt >= $0.capturedAt } ?? true
-            let belongsToCurrentCredential = route != .network || credentialGeneration == networkCredentialGeneration
-            if isCurrentSample && belongsToCurrentCredential {
+            let decisionTime = now()
+            let isCurrentSample = existing.map {
+                snapshot.capturedAt >= $0.capturedAt
+                    || (!isFresh($0, at: decisionTime) && isFresh(snapshot, at: decisionTime))
+            } ?? true
+            if isCurrentSample {
                 switch route {
                 case .local: localModels = snapshot
                 case .network: networkModels = snapshot
                 }
-            }
-            if conversation?.id == conversationID {
-                modelsNotice = nil
-            }
-            if isCurrentSample && belongsToCurrentCredential {
                 reconcileModelSelection(with: snapshot, route: route, conversationID: conversationID)
+                modelFailures[route] = nil
             }
+            modelsNotice = modelFailures[route]
         } catch {
-            // Keep the previous snapshot as stale; the freshness gate below
-            // still fails closed for sending.
-            if conversation?.id == conversationID {
-                modelsNotice = Self.fixedMessage(for: error, route: route)
-                    ?? "Model verification failed. Refresh to try again."
-            }
+            guard ticket == modelRefreshGeneration,
+                  self.conversation?.id == conversationID,
+                  route != .network || credentialGeneration == networkCredentialGeneration
+            else { return }
+            let failure = Self.fixedMessage(for: error, route: route)
+                ?? "Model verification failed. Refresh to try again."
+            modelFailures[route] = failure
+            modelsNotice = failure
+        }
+    }
+
+    private func invalidateModelRefresh() {
+        modelRefreshGeneration += 1
+        isRefreshingModels = false
+    }
+
+    var modelVerificationState: ChatModelVerificationState {
+        if isRefreshingModels { return .refreshing }
+        if let modelsNotice { return .failed(modelsNotice) }
+        guard let conversation, let snapshot = modelsSnapshot(for: conversation.route) else { return .unverified }
+        guard modelsAreFresh else { return .expired }
+        return snapshot.modelIDs.isEmpty ? .empty : .fresh(snapshot.modelIDs.count)
+    }
+
+    /// Views register only while mounted and their owning window is visible.
+    /// Both windows share a single deadline, and removing one does not stop
+    /// the other. Restoring a surface immediately recomputes all send gates.
+    func setChatSurfaceVisible(_ visible: Bool, id: UUID) {
+        let changed: Bool
+        if visible { changed = visibleChatSurfaces.insert(id).inserted }
+        else { changed = visibleChatSurfaces.remove(id) != nil }
+        guard changed else { return }
+        modelVerificationRevision += 1
+        scheduleModelExpiry()
+    }
+
+    /// The freshness gate is inclusive at 120 seconds. Wake just after its
+    /// boundary, rather than spinning at exactly the last valid instant.
+    var nextModelVerificationTransition: Date? { nextModelVerificationTransition(at: now()) }
+
+    private func nextModelVerificationTransition(at date: Date) -> Date? {
+        guard let conversation, modelFailures[conversation.route] == nil,
+              let snapshot = modelsSnapshot(for: conversation.route) else { return nil }
+        let age = date.timeIntervalSince(snapshot.capturedAt)
+        guard age.isFinite else { return nil }
+        if age < -5 { return snapshot.capturedAt.addingTimeInterval(-5 + 0.001) }
+        guard age <= Self.modelsFreshnessWindow else { return nil }
+        return snapshot.capturedAt.addingTimeInterval(Self.modelsFreshnessWindow + 0.001)
+    }
+
+    private func scheduleModelExpiry() {
+        modelExpiryGeneration += 1
+        modelExpiryTask?.cancel()
+        modelExpiryTask = nil
+        let date = now()
+        guard !visibleChatSurfaces.isEmpty, let deadline = nextModelVerificationTransition(at: date) else { return }
+        let generation = modelExpiryGeneration
+        let delay = max(0.001, deadline.timeIntervalSince(date))
+        modelExpiryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) }
+            catch { return }
+            guard !Task.isCancelled, let self, self.modelExpiryGeneration == generation else { return }
+            self.modelExpiryTask = nil
+            self.modelVerificationRevision += 1
+            // Re-evaluate after a clock adjustment; an unchanged fresh clock
+            // can have a later remaining deadline, never a busy-loop timer.
+            self.scheduleModelExpiry()
         }
     }
 
@@ -254,10 +343,14 @@ final class ChatStore: ObservableObject {
     /// A send requires a recently verified model list on the conversation's
     /// own route.
     var modelsAreFresh: Bool {
-        guard let conversation,
+        guard let conversation, modelFailures[conversation.route] == nil,
               let snapshot = modelsSnapshot(for: conversation.route)
         else { return false }
-        let age = now().timeIntervalSince(snapshot.capturedAt)
+        return isFresh(snapshot, at: now())
+    }
+
+    private func isFresh(_ snapshot: ChatModelListSnapshot, at date: Date) -> Bool {
+        let age = date.timeIntervalSince(snapshot.capturedAt)
         return age.isFinite && age >= -5 && age <= Self.modelsFreshnessWindow
     }
 
@@ -379,6 +472,12 @@ final class ChatStore: ObservableObject {
     private func invalidateNetworkReadiness() {
         networkCredentialGeneration += 1
         networkModels = nil
+        modelFailures[.network] = nil
+        if conversation?.route == .network {
+            invalidateModelRefresh()
+            modelsNotice = nil
+        }
+        scheduleModelExpiry()
         balance = nil
         balanceCheckFailed = false
         if var updated = conversation, updated.route == .network {

@@ -90,7 +90,7 @@ struct OpportunityView: View {
             if showsHistory {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        NetworkHistoryView(source: store.networkSeries)
+                        NetworkHistoryView(source: store.networkSeries, isVisible: store.dashboardVisible)
                         DisclosureGroup("Network infrastructure") {
                             NetworkCacheView(isVisible: store.dashboardVisible)
                                 .padding(.top, 8)
@@ -113,7 +113,7 @@ private struct OpportunityModelListView: View {
     @State private var refreshing = false
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 10)) { _ in
+        TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 10), isVisible: store.dashboardVisible)) { _ in
             let now = Date()
             VStack(alignment: .leading, spacing: 14) {
                 DisclosureGroup {

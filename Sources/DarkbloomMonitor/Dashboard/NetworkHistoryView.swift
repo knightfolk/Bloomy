@@ -16,10 +16,11 @@ private enum NetworkHistoryMetric: String, CaseIterable, Identifiable {
 
 struct NetworkHistoryView: View {
     let source: SourceAvailability<NetworkSeriesSnapshot>
+    var isVisible = true
     @State private var metric = NetworkHistoryMetric.requests
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 10)) { _ in
+        TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 10), isVisible: isVisible)) { _ in
             let now = Date()
             VStack(alignment: .leading, spacing: 12) {
                 Text("The last 24 hours").font(.title2.bold())

@@ -114,7 +114,8 @@ struct DashboardRootView: View {
                 DashboardOverviewView(store: store, controlStore: controlStore)
             } else if navigation.selected == .chat {
                 if let chatStore {
-                    ChatView(store: chatStore, openPopOut: openChatWindow, draft: chatDraft)
+                    ChatView(store: chatStore, openPopOut: openChatWindow, draft: chatDraft, isVisible: store.dashboardVisible)
+                        .id(ObjectIdentifier(chatStore))
                 } else {
                     ContentUnavailableView(
                         "Chat unavailable",

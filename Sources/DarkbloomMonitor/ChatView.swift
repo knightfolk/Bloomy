@@ -7,6 +7,8 @@ import SwiftUI
 struct ChatView: View {
     @ObservedObject var store: ChatStore
     var openPopOut: (() -> Void)? = nil
+    var isVisible: Bool
+    @State private var visibilityID = UUID()
 
     @StateObject private var draft: ChatDraftState
     @State private var showsNewChatDialog = false
@@ -14,9 +16,10 @@ struct ChatView: View {
     @State private var keyDraft = ""
     @State private var keyError: String?
 
-    init(store: ChatStore, openPopOut: (() -> Void)? = nil, draft: ChatDraftState? = nil) {
+    init(store: ChatStore, openPopOut: (() -> Void)? = nil, draft: ChatDraftState? = nil, isVisible: Bool = true) {
         self.store = store
         self.openPopOut = openPopOut
+        self.isVisible = isVisible
         // The dashboard injects its retained draft. Standalone windows own
         // their own state, so their unsent messages never overwrite it.
         _draft = StateObject(wrappedValue: draft ?? ChatDraftState())
@@ -47,6 +50,11 @@ struct ChatView: View {
             // Chat may have been unmounted while another window started a
             // new conversation. Reconcile before allowing this draft back.
             draft.reconcile(with: store.conversation?.id)
+        }
+        .onDisappear { store.setChatSurfaceVisible(false, id: visibilityID) }
+        .task(id: isVisible) {
+            guard !Task.isCancelled else { return }
+            store.setChatSurfaceVisible(isVisible, id: visibilityID)
         }
         .onChange(of: store.conversation?.id) { _, _ in
             draft.clear()
@@ -115,6 +123,7 @@ struct ChatView: View {
                 Text("Network inference. This Mac is not used. Paid credits apply.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                modelVerificationLine
                 balanceLine
                 pricingLine
                 Text("Balance is advisory; the network can still reject a send (402).")
@@ -132,21 +141,30 @@ struct ChatView: View {
 
     @ViewBuilder
     private var modelVerificationLine: some View {
-        if store.modelsAreFresh {
-            Text("Endpoint verified — \(store.verifiedModelIDs.count) models available.")
+        let local = store.conversation?.route == .local
+        switch store.modelVerificationState {
+        case .fresh(let count):
+            Text("\(local ? "Endpoint" : "Network model list") verified — \(count) models available.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-        } else if let notice = store.modelsNotice {
-            HStack(spacing: 4) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                // The notice itself carries the start-hosting/new-chat
-                // guidance; only the disabled-send fact is restated here.
-                Text("Local endpoint unavailable: \(notice) Sending stays disabled — nothing is re-routed automatically.")
-            }
-            .font(.caption)
-            .foregroundStyle(.red)
-        } else {
-            Text("Verifying the local endpoint model list…")
+        case .refreshing:
+            Text("Verifying the \(local ? "local endpoint" : "network") model list…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .failed(let notice):
+            Label("\(notice) Sending is disabled.", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+        case .expired:
+            Label("Model verification expired. Refresh the model list to enable sending.", systemImage: "clock.badge.exclamationmark")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .unverified:
+            Text("Model list not verified. Refresh to enable sending.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .empty:
+            Text("Model list verified — no models available. Refresh after a model becomes available.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -301,6 +319,7 @@ struct ChatView: View {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
                 }
+                .accessibilityLabel("Refresh model list")
                 .help("Re-verify the model list on this chat's route")
                 if conversation.route == .network {
                     consumerKeyLink

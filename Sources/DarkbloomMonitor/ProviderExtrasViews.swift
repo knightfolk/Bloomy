@@ -4,9 +4,10 @@ import SwiftUI
 /// Compact read-only temperature and fan readings from the official CLI.
 struct ProviderThermalView: View {
     @ObservedObject var store: ProviderExtrasStore
+    var isVisible = true
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 5)) { _ in
+        TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 5), isVisible: isVisible)) { _ in
             let now = Date()
             Group {
                 switch store.snapshot?.fanStatus {

@@ -1,6 +1,17 @@
 import AppKit
 import SwiftUI
 
+@MainActor
+private final class ChatWindowVisibility: ObservableObject {
+    @Published var isVisible = false
+}
+
+private struct VisibleWindowChat: View {
+    let store: ChatStore
+    @ObservedObject var visibility: ChatWindowVisibility
+    var body: some View { ChatView(store: store, isVisible: visibility.isVisible) }
+}
+
 /// Retained, resizable pop-out chat window. It hosts the same `ChatStore` as
 /// the dashboard's Chat tab, so both windows show the identical in-memory
 /// conversation and either can send on it.
@@ -9,6 +20,7 @@ final class ChatWindowController: NSWindowController, NSWindowDelegate {
     private let store: ChatStore
     private let frameAutosaveName: String?
     private var isTransitioningFullScreen = false
+    private let visibility = ChatWindowVisibility()
 
     init(
         store: ChatStore,
@@ -17,7 +29,7 @@ final class ChatWindowController: NSWindowController, NSWindowDelegate {
     ) {
         self.store = store
         self.frameAutosaveName = frameAutosaveName
-        let content = NSHostingController(rootView: ChatView(store: store))
+        let content = NSHostingController(rootView: VisibleWindowChat(store: store, visibility: visibility))
         let window = NSWindow(contentViewController: content)
         window.title = "\(MonitorApplicationIdentity.displayName) — Chat"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -37,6 +49,8 @@ final class ChatWindowController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { nil }
 
     func present(activate: Bool = true) {
+        if window?.isMiniaturized == true { window?.deminiaturize(nil) }
+        visibility.isVisible = true
         if activate {
             showWindow(nil)
             NSApplication.shared.activate()
@@ -46,6 +60,10 @@ final class ChatWindowController: NSWindowController, NSWindowDelegate {
         }
         constrainToVisibleScreen()
     }
+
+    func windowWillClose(_ notification: Notification) { visibility.isVisible = false }
+    func windowDidMiniaturize(_ notification: Notification) { visibility.isVisible = false }
+    func windowDidDeminiaturize(_ notification: Notification) { visibility.isVisible = true }
 
     func windowDidChangeScreen(_ notification: Notification) {
         constrainToVisibleScreen()

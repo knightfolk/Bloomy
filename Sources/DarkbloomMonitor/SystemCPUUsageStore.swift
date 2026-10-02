@@ -26,7 +26,7 @@ final class SystemCPUUsageStore: ObservableObject {
     func start() {
         guard samplingTask == nil else { return }
         samplingTask = Task { [weak self] in
-            guard let self else { return }
+            guard !Task.isCancelled, let self else { return }
             self.refresh()
             while !Task.isCancelled {
                 do {
@@ -34,6 +34,7 @@ final class SystemCPUUsageStore: ObservableObject {
                 } catch {
                     return
                 }
+                guard !Task.isCancelled else { return }
                 self.refresh()
             }
         }

@@ -20,7 +20,7 @@ struct HealthView: View {
             if showsLogs {
                 LogsView(feed: store.snapshot.eventFeed)
             } else {
-                TimelineView(.periodic(from: .now, by: 5)) { _ in
+                TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 5), isVisible: store.dashboardVisible)) { _ in
                     let now = Date()
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
@@ -43,7 +43,9 @@ struct HealthView: View {
                             }
                             DisclosureGroup(isExpanded: $showsThermal) {
                                 VStack(alignment: .leading, spacing: 10) {
-                                    if let extras = store.providerExtras { ProviderThermalView(store: extras) }
+                                    if let extras = store.providerExtras {
+                                        ProviderThermalView(store: extras, isVisible: store.dashboardVisible && showsThermal)
+                                    }
                                     Text("macOS reports thermal state independently of provider health.")
                                         .font(.callout).foregroundStyle(.secondary)
                                 }

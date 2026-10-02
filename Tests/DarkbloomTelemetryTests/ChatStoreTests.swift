@@ -43,6 +43,220 @@ struct ChatStoreTests {
         Issue.record("Timed out waiting for condition")
     }
 
+    @Test("verification status agrees with inclusive expiry, clock skew, empty lists and failures")
+    func verificationPresentationBoundaries() async {
+        let local = FakeChatRouteClient()
+        let store = await makeStore(local: local)
+        store.startConversation(route: .local)
+        await waitUntil { store.selectedModelID != nil }
+        let captured = clock.date
+        for (age, fresh) in [(-5.001, false), (-5.0, true), (0.0, true), (120.0, true), (120.001, false)] {
+            clock.date = captured.addingTimeInterval(age)
+            #expect(store.modelsAreFresh == fresh)
+            #expect(store.canSend == fresh)
+            #expect(store.modelVerificationState == (fresh ? .fresh(2) : .expired))
+            if age > 120 { #expect(store.nextModelVerificationTransition == nil) }
+            else {
+                let offset = age < -5 ? -4.999 : 120.001
+                #expect(store.nextModelVerificationTransition == captured.addingTimeInterval(offset))
+            }
+        }
+        clock.date = captured
+        local.modelsResult = .failure(ChatClientError.localEndpointUnavailable)
+        await store.refreshModels()
+        #expect(store.modelsAreFresh == false)
+        #expect(store.canSend == false)
+        #expect(store.nextModelVerificationTransition == nil)
+        if case .failed = store.modelVerificationState {} else { Issue.record("Failed read must not say verified or verifying") }
+        local.modelsResult = .success(ChatModelListSnapshot(modelIDs: [], capturedAt: clock.date))
+        await store.refreshModels()
+        #expect(store.modelVerificationState == .empty)
+        #expect(!store.canSend)
+    }
+
+    @Test("visible shared chat surfaces publish time-only expiry once without automatic model reads")
+    func visibleDeadlineAndSharedOwners() async {
+        let local = FakeChatRouteClient()
+        let store = await makeStore(local: local)
+        store.startConversation(route: .local)
+        await waitUntil { store.selectedModelID != nil }
+        clock.advance(119.95)
+        let first = UUID(), second = UUID()
+        store.setChatSurfaceVisible(true, id: first)
+        store.setChatSurfaceVisible(true, id: second)
+        #expect(store.hasScheduledModelExpiry)
+        store.setChatSurfaceVisible(false, id: first)
+        #expect(store.hasScheduledModelExpiry)
+        let revision = store.modelVerificationRevision
+        let reads = local.modelCalls
+        clock.advance(0.1)
+        await waitUntil { store.modelVerificationRevision > revision }
+        #expect(store.modelVerificationState == .expired)
+        #expect(!store.canSend)
+        #expect(!store.hasScheduledModelExpiry)
+        #expect(local.modelCalls == reads)
+        store.setChatSurfaceVisible(false, id: second)
+        #expect(!store.hasScheduledModelExpiry)
+    }
+
+    @Test("hidden chat cancels its deadline and remount immediately recomputes expiry")
+    func hiddenDeadlineAndRestore() async {
+        let local = FakeChatRouteClient()
+        let store = await makeStore(local: local)
+        store.startConversation(route: .local)
+        await waitUntil { store.selectedModelID != nil }
+        let surface = UUID()
+        store.setChatSurfaceVisible(true, id: surface)
+        #expect(store.hasScheduledModelExpiry)
+        store.setChatSurfaceVisible(false, id: surface)
+        let revision = store.modelVerificationRevision
+        clock.advance(121)
+        try? await Task.sleep(for: .milliseconds(80))
+        #expect(store.modelVerificationRevision == revision)
+        #expect(!store.hasScheduledModelExpiry)
+        store.setChatSurfaceVisible(true, id: surface)
+        #expect(store.modelVerificationRevision > revision)
+        #expect(store.modelVerificationState == .expired)
+        #expect(!store.hasScheduledModelExpiry)
+        #expect(local.modelCalls == 1)
+        local.modelsResult = .success(ChatModelListSnapshot(modelIDs: ["new-model"], capturedAt: clock.date))
+        await store.refreshModels()
+        #expect(store.modelVerificationState == .fresh(1))
+        #expect(store.canSend)
+        #expect(store.hasScheduledModelExpiry)
+        store.setChatSurfaceVisible(false, id: surface)
+    }
+
+    @Test("manual verification recovers after the wall clock moves behind a cached sample")
+    func refreshRecoversClockRollback() async {
+        let local = FakeChatRouteClient()
+        let store = await makeStore(local: local)
+        store.startConversation(route: .local)
+        await waitUntil { store.selectedModelID != nil }
+        clock.advance(-60)
+        #expect(store.modelVerificationState == .expired)
+        #expect(!store.canSend)
+        local.modelsResult = .success(ChatModelListSnapshot(modelIDs: ["verified-after-clock-change"], capturedAt: clock.date))
+        await store.refreshModels()
+        #expect(store.modelVerificationState == .fresh(1))
+        #expect(store.canSend)
+        #expect(store.localModels?.capturedAt == clock.date)
+        #expect(store.selectedModelID == "verified-after-clock-change")
+    }
+
+    @Test("new conversations cannot resurrect a failed route's cached models", arguments: [ChatRoute.local, .network], [false, true])
+    func newConversationRetainsRouteFailure(failedRoute: ChatRoute, roundTrip: Bool) async {
+        let local = FakeChatRouteClient(), network = FakeChatRouteClient()
+        let failedClient = failedRoute == .local ? local : network
+        let keys = FakeConsumerKeyStore()
+        keys.inject("dk-synthetic-consumer")
+        let store = await makeStore(local: local, network: network, keys: keys)
+        store.startConversation(route: failedRoute)
+        await waitUntil { store.selectedModelID != nil }
+        if failedRoute == .network { store.acknowledgePaidRoute() }
+        #expect(store.canSend)
+        failedClient.modelsResult = .failure(ChatClientError.localEndpointUnavailable)
+        await store.refreshModels()
+        let failure = store.modelsNotice
+        #expect(failure != nil)
+        #expect(!store.canSend)
+        // The previous successful IDs remain available for display; their
+        // age alone no longer gives permission to send after a failed read.
+        #expect(!store.verifiedModelIDs.isEmpty)
+        if roundTrip {
+            let otherRoute: ChatRoute = failedRoute == .local ? .network : .local
+            store.startConversation(route: otherRoute)
+            await waitUntil { store.selectedModelID != nil && !store.isRefreshingModels }
+            #expect(store.modelsAreFresh)
+        }
+        failedClient.suspendModels = true
+        store.startConversation(route: failedRoute)
+        if failedRoute == .network { store.acknowledgePaidRoute() }
+        // Test before the automatic verification task even starts, then
+        // while its read is suspended. Both paths must stay fail-closed.
+        #expect(store.modelsNotice == failure)
+        #expect(!store.modelsAreFresh)
+        #expect(!store.canSend)
+        await waitUntil { failedClient.pendingModelReleases == 1 }
+        #expect(store.modelVerificationState == .refreshing)
+        #expect(!store.modelsAreFresh)
+        #expect(!store.canSend)
+        failedClient.releaseModels(.success(ChatModelListSnapshot(modelIDs: ["verified-again"], capturedAt: clock.date)))
+        await waitUntil { !store.isRefreshingModels }
+        #expect(store.modelsNotice == nil)
+        #expect(store.modelVerificationState == .fresh(1))
+        #expect(store.canSend)
+    }
+
+    @Test("a failed verification remains fail-closed throughout its suspended retry")
+    func failedRetryDoesNotResurrectCachedModels() async {
+        let local = FakeChatRouteClient()
+        let store = await makeStore(local: local)
+        store.startConversation(route: .local)
+        await waitUntil { store.selectedModelID != nil }
+        local.modelsResult = .failure(ChatClientError.localEndpointUnavailable)
+        await store.refreshModels()
+        #expect(!store.canSend)
+        local.suspendModels = true
+        let retry = Task { await store.refreshModels() }
+        await waitUntil { local.pendingModelReleases == 1 }
+        #expect(store.modelVerificationState == .refreshing)
+        #expect(!store.canSend)
+        local.releaseModels(.success(ChatModelListSnapshot(modelIDs: ["verified-again"], capturedAt: clock.date)))
+        await retry.value
+        #expect(store.modelsNotice == nil)
+        #expect(store.modelVerificationState == .fresh(1))
+        #expect(store.canSend)
+    }
+
+    @Test("the latest overlapping verification owns busy state and failure, including equal timestamps")
+    func overlappingVerificationOwnership() async {
+        let local = FakeChatRouteClient()
+        local.suspendModels = true
+        let store = await makeStore(local: local)
+        store.startConversation(route: .local)
+        await waitUntil { local.pendingModelReleases == 1 }
+        let latest = Task { await store.refreshModels() }
+        await waitUntil { local.pendingModelReleases == 2 }
+        local.releaseModelsInOrder([.success(ChatModelListSnapshot(modelIDs: ["obsolete"], capturedAt: clock.date))])
+        await waitUntil { local.pendingModelReleases == 1 }
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(store.isRefreshingModels)
+        #expect(store.modelVerificationState == .refreshing)
+        #expect(store.localModels == nil)
+        local.releaseModelsInOrder([.failure(ChatClientError.localEndpointUnavailable)])
+        await latest.value
+        #expect(!store.isRefreshingModels)
+        #expect(store.modelsNotice != nil)
+        #expect(!store.canSend)
+    }
+
+    @Test("old-key verification failures cannot replace new-key status")
+    func oldKeyFailureDoesNotClaimVerification() async {
+        let network = FakeChatRouteClient()
+        network.suspendModels = true
+        let keys = FakeConsumerKeyStore()
+        keys.inject("dk-synthetic-consumer-old")
+        let store = await makeStore(network: network, keys: keys)
+        store.startConversation(route: .network)
+        await waitUntil { network.pendingModelReleases == 1 }
+        #expect(store.storeConsumerKey("dk-synthetic-consumer-new") == nil)
+        #expect(store.modelVerificationState == .unverified)
+        #expect(!store.isRefreshingModels)
+        let latest = Task { await store.refreshModels() }
+        await waitUntil { network.pendingModelReleases == 2 }
+        network.releaseModelsInOrder([.failure(ChatClientError.missingConsumerKey)])
+        await waitUntil { network.pendingModelReleases == 1 }
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(store.isRefreshingModels)
+        #expect(store.modelsNotice == nil)
+        network.releaseModelsInOrder([.success(ChatModelListSnapshot(modelIDs: ["new-key-model"], capturedAt: clock.date))])
+        await latest.value
+        #expect(store.modelVerificationState == .fresh(1))
+        #expect(store.selectedModelID == "new-key-model")
+        #expect(store.modelsNotice == nil)
+    }
+
     // MARK: Route locking and no fallback
 
     @Test("model verification expiring by time rejects the send and reports it")
@@ -52,9 +266,9 @@ struct ChatStoreTests {
         store.startConversation(route: .local)
         await waitUntil { store.selectedModelID != nil }
 
-        // The verified list goes stale purely by time: nothing is published,
-        // so the UI may still look sendable. The store must refuse the turn
-        // and tell the caller, which keeps the user's draft.
+        // With no mounted Chat surface, expiry does not run a UI deadline.
+        // The store still rejects a stale turn from any external caller and
+        // keeps the user's draft.
         clock.advance(ChatStore.modelsFreshnessWindow + 1)
         #expect(store.canSend == false)
         let accepted = store.send("must not be silently dropped")
@@ -692,6 +906,7 @@ final class FakeChatRouteClient: LocalChatRouteClient, NetworkChatRouteClient, @
     private var _completeCalls: [[ChatMessagePayload]] = []
     private var _pending: [CheckedContinuation<ChatCompletionOutcome, Error>] = []
     private var _pendingModels: [CheckedContinuation<ChatModelListSnapshot, Error>] = []
+    private var _modelCalls = 0
 
     var modelsResult: Result<ChatModelListSnapshot, Error> = .success(
         ChatModelListSnapshot(modelIDs: ["gpt-oss-20b", "gemma-4-26b-qat-4bit"], capturedAt: Date(timeIntervalSince1970: 1_800_000_000))
@@ -709,6 +924,8 @@ final class FakeChatRouteClient: LocalChatRouteClient, NetworkChatRouteClient, @
         defer { lock.unlock() }
         return work()
     }
+
+    var modelCalls: Int { sync { _modelCalls } }
 
     var completeCalls: [[ChatMessagePayload]] {
         sync { _completeCalls }
@@ -751,7 +968,17 @@ final class FakeChatRouteClient: LocalChatRouteClient, NetworkChatRouteClient, @
         pending.forEach { $0.resume(with: result) }
     }
 
+    func releaseModelsInOrder(_ results: [Result<ChatModelListSnapshot, Error>]) {
+        let pending = sync { () -> [CheckedContinuation<ChatModelListSnapshot, Error>] in
+            let copy = Array(_pendingModels.prefix(results.count))
+            _pendingModels.removeFirst(min(results.count, _pendingModels.count))
+            return copy
+        }
+        for (continuation, result) in zip(pending, results) { continuation.resume(with: result) }
+    }
+
     func models(now: Date) async throws -> ChatModelListSnapshot {
+        sync { _modelCalls += 1 }
         if suspendModels {
             return try await withCheckedThrowingContinuation { continuation in
                 sync { _pendingModels.append(continuation) }

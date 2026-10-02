@@ -313,6 +313,120 @@ struct ChatViewTests {
         #expect(draft.canSend(to: store.conversation?.id))
     }
 
+    @Test("a mounted chat publishes time-only expiry, retains its draft and recovers on explicit refresh", arguments: [ChatRoute.local, .network])
+    func mountedExpiryAndDraftRecovery(route: ChatRoute) async throws {
+        let local = FakeChatRouteClient(), network = FakeChatRouteClient()
+        let client = route == .local ? local : network
+        let keys = FakeConsumerKeyStore()
+        keys.inject("dk-synthetic-consumer")
+        let clock = ChatViewExpiryClock(Date())
+        client.modelsResult = .success(ChatModelListSnapshot(modelIDs: ["synthetic-model"], capturedAt: clock.date.addingTimeInterval(-119)))
+        let store = ChatStore(localClient: local, networkClient: network, balanceClient: FakeBalanceClient(), pricingClient: FakePricingClient(), keyStore: keys, now: { [clock] in clock.date })
+        await store.refreshKeyStatus()
+        store.startConversation(route: route)
+        try await waitForModels(store: store)
+        if route == .network { store.acknowledgePaidRoute() }
+        let draft = ChatDraftState()
+        draft.updateText("Keep this unsent message", in: store.conversation?.id)
+        let content = NSHostingController(rootView: AnyView(ChatView(store: store, draft: draft)))
+        let window = NSWindow(contentViewController: content)
+        defer { window.close() }
+        window.setContentSize(NSSize(width: 980, height: 640))
+        window.orderBack(nil)
+        try await settle(content.view)
+        let reads = client.modelCalls
+        let revision = store.modelVerificationRevision
+        clock.date = clock.date.addingTimeInterval(2)
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline, store.modelVerificationRevision == revision {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(store.modelVerificationState == .expired)
+        #expect(store.modelVerificationRevision > revision)
+        #expect(!store.canSend)
+        #expect(!store.hasScheduledModelExpiry)
+        #expect(client.modelCalls == reads)
+        #expect(try composer(in: content.view).string == "Keep this unsent message")
+        client.modelsResult = .success(ChatModelListSnapshot(modelIDs: ["synthetic-model"], capturedAt: clock.date))
+        await store.refreshModels()
+        try await settle(content.view)
+        #expect(store.modelVerificationState == .fresh(1))
+        #expect(store.canSend)
+        #expect(try composer(in: content.view).string == "Keep this unsent message")
+        content.rootView = AnyView(Text("Other page"))
+        try await settle(content.view)
+        #expect(!store.hasScheduledModelExpiry)
+    }
+
+    @Test("pop-out visibility releases only its own shared deadline ownership")
+    func popOutDeadlineVisibility() async throws {
+        let store = await makeStore()
+        store.startConversation(route: .local)
+        try await waitForModels(store: store)
+        let controller = ChatWindowController(store: store, frameAutosaveName: nil)
+        defer { controller.close() }
+        controller.present(activate: false)
+        try await waitForVisibility { store.hasScheduledModelExpiry }
+        #expect(store.hasScheduledModelExpiry)
+        let notification = Notification(name: NSWindow.didMiniaturizeNotification, object: controller.window)
+        controller.windowDidMiniaturize(notification)
+        try await waitForVisibility { !store.hasScheduledModelExpiry }
+        #expect(!store.hasScheduledModelExpiry)
+        controller.windowDidDeminiaturize(notification)
+        try await waitForVisibility { store.hasScheduledModelExpiry }
+        #expect(store.hasScheduledModelExpiry)
+        let dashboardID = UUID()
+        store.setChatSurfaceVisible(true, id: dashboardID)
+        let closeRevision = store.modelVerificationRevision
+        controller.windowWillClose(notification)
+        try await waitForVisibility { store.modelVerificationRevision > closeRevision }
+        #expect(store.hasScheduledModelExpiry)
+        store.setChatSurfaceVisible(false, id: dashboardID)
+        #expect(!store.hasScheduledModelExpiry)
+    }
+
+    @Test("replacing the dashboard Chat store releases the old deadline and registers the new conversation")
+    func dashboardStoreReplacementTransfersVisibility() async throws {
+        let first = await makeStore()
+        let second = await makeStore()
+        first.startConversation(route: .local)
+        second.startConversation(route: .local)
+        try await waitForModels(store: first)
+        try await waitForModels(store: second)
+        let suite = "ChatStoreReplacement-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let navigation = DashboardNavigation(defaults: defaults)
+        navigation.selected = .chat
+        let monitor = MonitorStore(service: TelemetryService(source: ChatViewUnusedSource()),
+                                   initial: .unavailable(now: Date()),
+                                   gpuUsage: SystemGPUUsageStore(read: { nil }))
+        monitor.setDashboardVisible(true)
+        let host = NSHostingController(rootView: DashboardRootView(store: monitor, controlStore: nil,
+            chatStore: first, navigation: navigation))
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 800, height: 560))
+        window.orderBack(nil)
+        defer { monitor.setDashboardVisible(false); window.close() }
+        try await settle(host.view)
+        #expect(first.hasScheduledModelExpiry)
+        #expect(!second.hasScheduledModelExpiry)
+        host.rootView = DashboardRootView(store: monitor, controlStore: nil,
+            chatStore: second, navigation: navigation)
+        try await settle(host.view)
+        #expect(!first.hasScheduledModelExpiry)
+        #expect(second.hasScheduledModelExpiry)
+    }
+
+    private func waitForVisibility(_ condition: @MainActor () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(20)
+        while !condition(), Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(condition(), "Chat visibility did not finish its transition")
+    }
+
     private func settle(_ view: NSView) async throws {
         try await Task.sleep(for: .milliseconds(150))
         view.layoutSubtreeIfNeeded()
@@ -362,4 +476,16 @@ struct ChatViewTests {
         capture.waitUntilExit()
         #expect(capture.terminationStatus == 0)
     }
+}
+
+private final class ChatViewExpiryClock: @unchecked Sendable {
+    var date: Date
+    init(_ date: Date) { self.date = date }
+}
+
+private struct ChatViewUnusedSource: TelemetrySource {
+    func readDaemonState() async throws -> DaemonState { throw CancellationError() }
+    func readLoadedModels() async throws -> LoadedModelsState { throw CancellationError() }
+    func readStatus() async throws -> StatusSnapshot { throw CancellationError() }
+    func readLegacyEvents(limit: Int) async throws -> [LogEvent] { throw CancellationError() }
 }

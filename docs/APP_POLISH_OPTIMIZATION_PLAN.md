@@ -31,6 +31,8 @@ Changes prepared for 1.9.15:
 - Logs retain the selected event while its immutable identity remains visible after arrivals or filtering. Identical duplicates remain individually selectable, without claiming an occurrence identity the source does not provide.
 - Freshness heartbeat ticks compare source/menu status before constructing a full snapshot. Unchanged freshness avoids rebuilding the event feed and sorting diagnostics; successful source publications remain immediate.
 - Action History keeps expanded notes and selected details reachable within compact windows. Native before/partial/final geometry, draft navigation, window restoration, 1,178 passing tests, and the final release compile are recorded in `docs/NATIVE_DRAFT_HISTORY_REVIEW_20261002.md`. These are bounded isolated checks, not completion of the full native matrix.
+- Chat publishes verification expiry through one shared deadline while a Chat surface is visible. Refresh, expired, failed, empty and verified states stay distinct; failed reads and obsolete results cannot silently restore sending. Drafts survive expiry and recovery. Exact regression and native evidence are in `docs/CHAT_EXPIRY_VISIBILITY_REVIEW_20261002.md`.
+- Hidden dashboard display clocks stop while preserving their original visible cadences and calendar alignment. The dashboard-only CPU sampler also stops when hidden, including queued cancellation; monitoring, history, alerts and automatic actions continue independently.
 
 ## Evidence and limits
 
@@ -61,7 +63,7 @@ Review the popup, Overview, Activity (Earnings and Metrics), Opportunity, Models
 
 For each route check light/dark appearance, narrow/wide windows, keyboard focus and shortcuts, accessibility names, Reduce Motion, tooltip usefulness, consistent card/pill sizing, missing/stale/offline states, retained unsaved drafts, and normal-speed updates without flashing or layout shifts. Inspect actual rendered screens; builds and fixtures alone are insufficient to claim complete visual polish.
 
-The next known Chat issue is verification-expiry presentation: after the two-minute local model check expires, the store safely rejects a stale Send, but the view can say “Verifying…” without a refresh in progress. Add timely expiry presentation and a clear refresh action before considering Chat fully reviewed.
+The two-minute Chat verification-expiry presentation and explicit Refresh path are repaired. Remaining Chat review includes the complete native route/appearance/size matrix and actual VoiceOver behavior; focused local fixture checks and both-route automated tests do not establish that broader proof.
 
 The provider and recovery watcher are deliberately stopped while Kevin uses the Mac for other work. Kevin authorizes a temporary provider start only if needed for a test; stop it again afterward. Use isolated fixtures for visual states that do not require a real provider, and do not swap or nudge merely to produce visual evidence.
 

@@ -62,6 +62,7 @@ struct ProviderResourcesViewTests {
             initial: snapshot,
             providerExtras: extras
         )
+        store.setDashboardVisible(true)
         let overviewContent = ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 ProviderResourcesView(store: store)
@@ -89,6 +90,52 @@ struct ProviderResourcesViewTests {
         try capture.run()
         capture.waitUntilExit()
         #expect(capture.terminationStatus == 0)
+    }
+
+    @Test("a retained resource panel stops CPU sampling while hidden and restarts with a new interval")
+    func samplingFollowsWindowVisibility() async throws {
+        var readCount = 0
+        let cpu = SystemCPUUsageStore(interval: .milliseconds(25), read: {
+            readCount += 1
+            return SystemCPUTimes(user: UInt64(readCount * 10), system: 0, nice: 0,
+                                  idle: UInt64(readCount * 10))
+        })
+        let store = MonitorStore(service: TelemetryService(source: ResourcePanelUnusedSource()),
+                                 initial: .unavailable(now: Date()), gpuUsage: SystemGPUUsageStore(read: { nil }))
+        let host = NSHostingController(rootView: AnyView(ProviderResourcesView(store: store, cpuUsage: cpu)))
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 570, height: 370))
+        window.orderBack(nil)
+        defer { store.setDashboardVisible(false); cpu.stop(); window.close() }
+
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(readCount == 0)
+        store.setDashboardVisible(true)
+        try await waitUntil { cpu.percentage != nil && readCount >= 2 }
+
+        store.setDashboardVisible(false)
+        try await waitUntil { cpu.percentage == nil && cpu.sampledAt == nil }
+        let hiddenCount = readCount
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(readCount == hiddenCount)
+
+        store.setDashboardVisible(true)
+        try await waitUntil { readCount >= hiddenCount + 2 && cpu.percentage != nil }
+        #expect(cpu.percentage == 50)
+        host.rootView = AnyView(EmptyView())
+        try await waitUntil { cpu.percentage == nil }
+        let removedCount = readCount
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(readCount == removedCount)
+    }
+
+    private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(10)
+        while !condition(), Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(condition())
     }
 }
 

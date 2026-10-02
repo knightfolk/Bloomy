@@ -99,25 +99,35 @@ struct ProviderExtrasPollingTests {
             client: client, visibleFanPollingInterval: .milliseconds(120), now: clock.now
         )
         await store.refresh()
+        // Hold the read, rather than racing the next periodic tick. A second
+        // subscriber and background refresh must share this in-flight work.
+        await client.blockNextFanRead()
         let first = Task { await store.observeVisibleFan() }
         defer { first.cancel() }
         try await waitForFanReads(1, client: client)
+        #expect(store.visibleFanSubscriberCount == 1)
         let second = Task { await store.observeVisibleFan() }
         defer { second.cancel() }
-        try await Task.sleep(for: .milliseconds(30))
+        try await waitForFanSubscribers(2, store: store)
         #expect(await client.fanReads == 1)
         // The background cadence uses the active visible poller, too.
         await store.refreshBackground()
         #expect(await client.fanReads == 1)
+        await client.releaseFanRead()
         try await waitForFanReads(2, client: client)
-        #expect(await client.fanReads == 2)
+        #expect(store.visibleFanSubscriberCount == 2)
         first.cancel()
         await first.value
-        try await waitForFanReads(3, client: client)
-        #expect(await client.fanReads == 3)
+        #expect(store.visibleFanSubscriberCount == 1)
+        let readsWithOneSubscriber = await client.fanReads
+        try await waitForFanReads(readsWithOneSubscriber + 1, client: client)
         second.cancel()
         await second.value
+        #expect(store.visibleFanSubscriberCount == 0)
         let finalReads = await client.fanReads
+        // Both observation tasks have joined, including the last shared
+        // poller. Waiting beyond two intervals now detects orphaned polling
+        // without requiring a specific count while the cadence is active.
         try await Task.sleep(for: .milliseconds(260))
         #expect(await client.fanReads == finalReads)
         // Explicit refresh still works with no visible subscriber.
@@ -159,6 +169,14 @@ struct ProviderExtrasPollingTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         Issue.record("Expected fan cadence did not run")
+    }
+
+    private func waitForFanSubscribers(_ count: Int, store: ProviderExtrasStore) async throws {
+        for _ in 0..<200 {
+            if store.visibleFanSubscriberCount == count { return }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        Issue.record("Expected visible fan subscribers did not join")
     }
 }
 

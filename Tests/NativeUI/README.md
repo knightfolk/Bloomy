@@ -129,6 +129,54 @@ the actual `ternary-bonsai-2-27b` ID so model alias presentation is exercised.
 The banner controls switch Light/Dark and window content sizes 800 × 560 and
 1280 × 900. Appearance settings share the same isolated preference suite.
 
+### Controlled Chat verification
+
+The second synthetic banner row contains **New synthetic local chat**. Each
+menu action explicitly replaces the fixture's chat store and opens a new empty
+local conversation; it discards the previous synthetic conversation and its
+draft. Use it before typing a draft, never during a draft-preservation check.
+All model reads and completions remain inert. The choices are:
+
+- **Fresh verification**: current model-list capture time.
+- **Verification expires in 10 s**: only the first response is backdated by
+  110 seconds. The production 120-second verification window therefore expires
+  after about ten seconds of actual elapsed time. Later reads return a fully
+  fresh list. The fixture does not publish chat ticks or run an expiry timer.
+- **Verification already expired**: first response backdated by 121 seconds;
+  later reads return a fresh list.
+- **Verification fails** and **Empty model list**: repeated reads respectively
+  throw the synthetic offline error or return a successful empty list until
+  their response mode is explicitly changed.
+
+**Next verification read** changes only that controlled client's response mode;
+it does not refresh, start a conversation, change the route, send text, or touch
+the draft. Use the production Chat **Refresh** button afterward. It is disabled
+until a controlled chat exists and during a refresh/send. Selecting a backdated
+mode in an already freshly verified store can correctly be ignored by the
+production rule rejecting older snapshots; use **New synthetic local chat** to
+test the initial aged response instead.
+
+For native expiry proof, start the ten-second chat, immediately type a short
+unsent message, and observe the verification status and Send availability
+change after the deadline without typing or clicking. Verify the exact draft
+remains visible. Click production Refresh and verify current verification and
+Send recover with the same draft. Repeat with a new aged chat while navigating
+away/back and while minimizing/restoring the owned fixture window. This checks
+visible lifecycle recovery, not provider activity or timing under real network
+latency. The separate five-second monitor/control refresh is unchanged and does
+not refresh `ChatStore` model snapshots; do not treat it as the expiry mechanism.
+
+For failure proof, start a fresh controlled chat, type an unsent message, choose
+**Next verification read > Verification fails**, then production Refresh. Check
+the failure wording and Send state; repeat Refresh to ensure an old successful
+list does not disguise the failure. Choose **Next verification read > Fresh
+verification**, then production Refresh, and verify recovery without draft loss.
+Repeat with **Empty model list**, including starting a new empty-list chat to
+verify the absence of any available selection. No consumer key is required for
+these local checks. Controlled states and this procedure provide review inputs;
+record actual native outcomes separately rather than claiming proof from the
+fixture implementation alone.
+
 For a bounded AppKit keyboard-focus diagnosis, enable the banner's **Focus trace**
 checkbox, or launch the fixture executable with `--focus-diagnostics`.
 The checkbox defaults off without the flag; its tooltip shows the exact file
