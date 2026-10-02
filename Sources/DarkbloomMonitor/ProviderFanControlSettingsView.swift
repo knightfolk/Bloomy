@@ -113,6 +113,7 @@ struct ProviderFanControlSettingsView: View {
     @State private var pendingFanRevision: UInt64?
     @State private var feedback: String?
     @State private var manuallyRefreshing = false
+    @State private var feedbackAwaitsFanConfirmation = false
 
     var body: some View {
         Section(compactPresentation ? "" : "Provider · Fan control") {
@@ -147,12 +148,20 @@ struct ProviderFanControlSettingsView: View {
                             pendingFanRevision = nil
                             draft.discardFan(from: store.snapshot?.fanStatus)
                             feedback = nil
+                            feedbackAwaitsFanConfirmation = false
                         }
                         .accessibilityIdentifier("settings.provider.fan.discard")
                         .help("Reset this unsaved edit to the latest observed policy")
                     }
+                    if draft.fanSaveAwaitingConfirmation {
+                        Text("Fan command completed. Your submitted policy is retained until fresh readings confirm it.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if let feedback {
-                        Text(feedback)
+                        Text(feedbackAwaitsFanConfirmation && !draft.fanDirty
+                             ? "Fan policy confirmed." : feedback)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -204,7 +213,9 @@ struct ProviderFanControlSettingsView: View {
             SettingsStateBadge(stateLabel(status, fresh: fresh))
         }
 
-        readings(status: status, fresh: fresh, checkedAt: checkedAt)
+        if let presentation = ProviderThermalPresentation.make(from: store.snapshot?.fanStatus, at: store.currentDate) {
+            readings(presentation, checkedAt: checkedAt)
+        }
 
         if !fresh {
             Text("These are the last known readings. Refresh before changing fan control.")
@@ -215,7 +226,7 @@ struct ProviderFanControlSettingsView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
         } else {
-            if let toggleIsOn = Self.toggleState(status) {
+            if let toggleIsOn = Self.toggleState(status, at: store.currentDate) {
                 Toggle("Use Darkbloom fan control", isOn: Binding(
                     get: { toggleIsOn },
                     set: { requestedOn in
@@ -272,70 +283,65 @@ struct ProviderFanControlSettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func readings(status: ProviderFanStatus, fresh: Bool, checkedAt: Date) -> some View {
-        let helperIsFresh = status.helperIsFresh(at: store.currentDate)
-        let readingStatus = Self.readingStatus(status, at: store.currentDate)
-        let readingsAreFresh = fresh && (helperIsFresh
-            || !status.diagnostic.fans.isEmpty || !status.diagnostic.gpuTemperatures.isEmpty)
-        let temperature = readingStatus.displayedTemperatureCelsius
-        let fans = readingStatus.displayedFans
+    private func readings(_ presentation: ProviderThermalPresentation, checkedAt: Date) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(readingsAreFresh ? "Latest readings" : "Last known readings")
+            Text(presentation.readingsAreStale ? "Readings" : "Latest readings")
                 .font(.callout.weight(.semibold))
             Text("CLI checked \(checkedAt.formatted(date: .omitted, time: .standard))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if !readingsAreFresh, let helper = readingStatus.helper {
-                Text("Helper sample \(helper.updatedAt.formatted(date: .omitted, time: .standard))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if fresh && !helperIsFresh {
-                    Text("Helper readings did not refresh. Refresh to try again.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-            }
             HStack(alignment: .top, spacing: 24) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("GPU temperature").font(.caption).foregroundStyle(.secondary)
-                    Text(temperature.map { String(format: "%.1f °C", $0) } ?? "Not reported")
-                        .font(.title3.weight(.semibold))
-                        .monospacedDigit()
-                }
-                if let fan = fans.first {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Fan speed").font(.caption).foregroundStyle(.secondary)
-                        Text(Self.rpm(fan.actualRPM))
-                            .font(.title3.weight(.semibold))
-                            .monospacedDigit()
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Target speed").font(.caption).foregroundStyle(.secondary)
-                        Text(Self.rpm(fan.targetRPM))
-                            .font(.title3.weight(.semibold))
-                            .monospacedDigit()
-                    }
+                Self.measurement("GPU temperature",
+                    value: presentation.displayedTemperatureCelsius.map { String(format: "%.1f °C", $0) } ?? "Not reported",
+                    freshness: presentation.temperatureFreshness)
+                if let fan = presentation.displayedFans.first {
+                    Self.measurement("Fan \(fan.index + 1) speed", value: Self.rpm(fan.actualRPM), freshness: fan.freshness)
+                    Self.measurement("Target speed", value: Self.rpm(fan.reading.targetRPM), freshness: fan.freshness)
                 }
             }
-            if fans.count > 1 {
-                ForEach(fans.dropFirst()) { fan in
-                    Text("Fan \(fan.index + 1): \(Self.rpm(fan.actualRPM)) · target \(Self.rpm(fan.targetRPM))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else if fans.isEmpty {
+            ForEach(presentation.displayedFans.dropFirst()) { fan in
+                Self.measurement("Fan \(fan.index + 1)",
+                    value: "\(Self.rpm(fan.actualRPM)) · target \(Self.rpm(fan.reading.targetRPM))",
+                    freshness: fan.freshness, compact: true)
+            }
+            if presentation.displayedFans.isEmpty {
                 Text("Fan speed is not reported by this Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if let helper = readingStatus.helper {
-                let posture = helper.mode == "error" ? "Fan helper needs attention" : (helper.providerActive ? "Provider active" : "Waiting for provider activity")
-                Text(fresh && helperIsFresh ? posture : "Last known: \(posture)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Text(Self.helperPostureMessage(presentation))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    static func measurementAccessibilityLabel(_ name: String, value: String,
+                                              freshness: ProviderThermalPresentation.Freshness) -> String {
+        "\(name): \(value)\(freshness.readingQualifier.map { ". \($0) reading." } ?? "")"
+    }
+
+    static func helperPostureMessage(_ presentation: ProviderThermalPresentation) -> String {
+        guard presentation.status.helper?.mode == "error", !presentation.status.helperErrorPresent else {
+            return presentation.helperPosture.message
+        }
+        if presentation.cliFreshness == .invalid || presentation.helperFreshness == .invalid {
+            return "Fan helper activity is unverified."
+        }
+        return presentation.cliFreshness == .current && presentation.helperFreshness == .current
+            ? "Fan helper needs attention." : "Last observed: fan helper needed attention."
+    }
+
+    private static func measurement(_ name: String, value: String,
+                                    freshness: ProviderThermalPresentation.Freshness, compact: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(name).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(compact ? .caption : .title3.weight(.semibold)).monospacedDigit()
+            if let qualifier = freshness.readingQualifier {
+                Text(qualifier).font(.caption2).foregroundStyle(.secondary)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(measurementAccessibilityLabel(name, value: value, freshness: freshness))
     }
 
     /// Fresh CLI diagnostics take precedence over an expired helper journal.
@@ -348,8 +354,9 @@ struct ProviderFanControlSettingsView: View {
         return status
     }
 
-    static func toggleState(_ status: ProviderFanStatus) -> Bool? {
+    static func toggleState(_ status: ProviderFanStatus, at now: Date = Date()) -> Bool? {
         guard status.loaded else { return false }
+        guard !status.helperErrorPresent, status.helperIsFresh(at: now) else { return nil }
         return status.helper?.enabled
     }
 
@@ -360,7 +367,7 @@ struct ProviderFanControlSettingsView: View {
                     .font(.body.weight(.medium))
                 Spacer()
                 if draft.fanDirty {
-                    Text("Unsaved")
+                    Text(draft.fanSaveAwaitingConfirmation ? "Awaiting confirmation" : "Unsaved")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.orange)
                 }
@@ -434,7 +441,7 @@ struct ProviderFanControlSettingsView: View {
     }
 
     private func syncDraft() {
-        draft.syncFan(from: store.snapshot?.fanStatus)
+        draft.syncFan(from: store.snapshot?.fanStatus, at: store.currentDate)
     }
 
     private func select(_ preset: FanPreset) {
@@ -484,6 +491,8 @@ struct ProviderFanControlSettingsView: View {
         let revision = pendingFanRevision ?? draft.fanRevision
         pendingFanRevision = nil
         mutationInFlight = true
+        feedbackAwaitsFanConfirmation = false
+        let completion = FanCommandCompletion()
         Task { @MainActor in
             let succeeded = await performMutation(action.operationLabel) {
                 switch action {
@@ -492,20 +501,45 @@ struct ProviderFanControlSettingsView: View {
                 case .disable: try await store.disableFan()
                 case .uninstall: try await store.uninstallFan()
                 }
+                await completion.markCompleted()
             }
             mutationInFlight = false
-            if succeeded {
+            if completion.completed {
+                let confirmed: Bool
                 switch action {
-                case .enable, .configure:
-                    draft.didSaveFan(revision: revision, source: store.snapshot?.fanStatus)
-                case .disable, .uninstall:
-                    break
+                case .enable(let policy):
+                    confirmed = ProviderSettingsDraftState.fanPolicyIsConfirmed(policy, requiresEnabled: true,
+                        source: store.snapshot?.fanStatus, at: store.currentDate)
+                    draft.didSaveFan(revision: revision, source: store.snapshot?.fanStatus,
+                        submittedPolicy: policy, requiresEnabled: true, at: store.currentDate)
+                    feedbackAwaitsFanConfirmation = draft.fanSaveAwaitingConfirmation
+                case .configure(let policy):
+                    confirmed = ProviderSettingsDraftState.fanPolicyIsConfirmed(policy,
+                        source: store.snapshot?.fanStatus, at: store.currentDate)
+                    draft.didSaveFan(revision: revision, source: store.snapshot?.fanStatus,
+                        submittedPolicy: policy, at: store.currentDate)
+                    feedbackAwaitsFanConfirmation = draft.fanSaveAwaitingConfirmation
+                case .disable:
+                    confirmed = store.fanEvidenceIsFresh && store.snapshot?.fanStatus.value?.loaded == false
+                case .uninstall:
+                    confirmed = store.fanEvidenceIsFresh && store.snapshot?.fanStatus.value?.installed == false
                 }
-                feedback = action.successMessage
+                feedback = Self.completedCommandFeedback(fanConfirmed: confirmed,
+                    providerConfirmed: succeeded, successMessage: action.successMessage)
             } else {
                 feedback = store.errorMessage ?? "Darkbloom could not change fan control."
             }
         }
+    }
+
+    static func completedCommandFeedback(fanConfirmed: Bool, providerConfirmed: Bool, successMessage: String) -> String {
+        if !fanConfirmed {
+            return "Fan command completed, but the new fan state has not been confirmed. Refresh readings to check it."
+        }
+        if !providerConfirmed {
+            return "Fan state confirmed. Provider settings confirmation is unavailable; refresh provider settings."
+        }
+        return successMessage
     }
 
     private func stateLabel(_ status: ProviderFanStatus, fresh: Bool) -> String {
@@ -513,6 +547,7 @@ struct ProviderFanControlSettingsView: View {
         let usesHelperState = status.installed && status.loaded && status.helper != nil
         if !status.installed { label = "Not installed" }
         else if !status.loaded { label = "Disabled" }
+        else if status.helperErrorPresent { label = "Status unavailable" }
         else if let helper = status.helper {
             if helper.mode == "error" { label = "Needs attention" }
             else if !helper.enabled { label = "Disabled" }
@@ -604,4 +639,11 @@ private enum FanAction: Identifiable {
         case .uninstall: "Darkbloom fan helper removed."
         }
     }
+}
+
+/// Records the write separately from the parent's subsequent control readback.
+@MainActor
+private final class FanCommandCompletion {
+    private(set) var completed = false
+    func markCompleted() { completed = true }
 }

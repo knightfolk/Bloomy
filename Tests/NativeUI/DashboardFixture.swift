@@ -9,12 +9,14 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case expiredSettings = "Expired settings", expiredHelper = "Expired helper", unavailableSettings = "Unavailable settings"
     case partialCooling = "Partial cooling", disabledHelper = "Disabled helper", unavailableRuntime = "Unavailable runtime"
     case aliasStartup = "Aliased startup", liveHosting = "Reported local endpoint"
+    case frozenSettings = "Frozen settings"
+    case fanConfirmation = "Fan confirmation"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
     func availability<T: Equatable & Sendable>(_ value: T, at date: Date) -> SourceAvailability<T> {
         switch self {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation:
             .available(value: value, capturedAt: date)
         case .stale: .stale(value: value, capturedAt: date, reason: "Synthetic source stopped refreshing")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic source unavailable")
@@ -100,7 +102,7 @@ private struct FixtureEarnings: AccountEarningsFetching {
     let scenario: FixtureScenario
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -245,15 +247,38 @@ private actor FixtureController: ProviderControlling {
     func activityRisk() async -> ProviderActivityRisk { .idle }
     func execute(_ action: ProviderLifecycleAction, enabledModels: [String]) async throws {}
 }
+private enum FixtureFanReadback: String, CaseIterable, Identifiable, Sendable {
+    case held = "Original policy", missing = "Failed readback", matching = "Confirm submission"
+    var id: String { rawValue }
+}
+
+private struct FixtureFanProof: Codable, Sendable {
+    let synthetic: Bool
+    let commandCount: Int
+    let readback: String
+    let submittedSpeedPercent: Double?
+    let submittedTemperatureCelsius: Double?
+}
+
 private actor FixtureExtras: ProviderExtrasProviding {
     let scenario: FixtureScenario
+    private let frozenAt = Date()
     var minutes = 30
     var mtp = false
     var autoUpdate = true
+    private var submittedFanPolicy: ProviderFanPolicy?
+    private var fanCommandCount = 0
+    private var fanReadback: FixtureFanReadback = .held
+    func setFanReadback(_ value: FixtureFanReadback) { fanReadback = value }
+    func fanProof() -> FixtureFanProof {
+        FixtureFanProof(synthetic: true, commandCount: fanCommandCount, readback: fanReadback.rawValue,
+            submittedSpeedPercent: submittedFanPolicy?.speedPercent,
+            submittedTemperatureCelsius: submittedFanPolicy?.triggerTemperatureCelsius)
+    }
     init(scenario: FixtureScenario) { self.scenario = scenario }
     func refresh() async -> ProviderExtrasSnapshot {
         let now = Date()
-        let date = scenario == .stale ? now.addingTimeInterval(-900)
+        let date = scenario == .frozenSettings ? frozenAt : scenario == .stale ? now.addingTimeInterval(-900)
             : scenario == .expiredSettings ? now.addingTimeInterval(-90) : now
         if scenario == .unavailableSettings {
             return ProviderExtrasSnapshot(capturedAt: now,
@@ -267,10 +292,11 @@ private actor FixtureExtras: ProviderExtrasProviding {
         let fans = (0..<(scenario == .partialCooling ? 2 : 1)).map {
             ProviderFanReading(index: $0, actualRPM: 2_200, targetRPM: 2_200, minimumRPM: 1_200, maximumRPM: 5_200, mode: "automatic")
         }
+        let observedPolicy = fanReadback == .matching ? submittedFanPolicy : nil
         let fan = ProviderFanStatus(capability: ProviderFanStatus.controlCapability, installed: true, loaded: true,
             helper: ProviderFanHelperStatus(enabled: scenario != .disabledHelper, providerActive: true, mode: "automatic", chip: "Synthetic",
-                gpuTemperatureCelsius: 54, triggerTemperatureCelsius: 65, releaseTemperatureCelsius: 55,
-                speedPercent: 80, fans: fans, updatedAt: helperDate),
+                gpuTemperatureCelsius: 54, triggerTemperatureCelsius: observedPolicy?.triggerTemperatureCelsius ?? 65, releaseTemperatureCelsius: 55,
+                speedPercent: observedPolicy?.speedPercent ?? 80, fans: fans, updatedAt: helperDate),
             diagnostic: ProviderFanDiagnostic(chip: "Synthetic", supported: true,
                 gpuTemperatures: scenario == .expiredHelper ? [] : [ProviderFanTemperature(key: "Synthetic GPU", celsius: scenario == .partialCooling ? 42 : 54)],
                 fans: scenario == .partialCooling
@@ -282,19 +308,45 @@ private actor FixtureExtras: ProviderExtrasProviding {
             idlePolicy: scenario.availability(ProviderIdlePolicy(idleTimeoutMinutes: minutes, policy: "idle_timeout", summary: "Free after \(minutes) minutes idle", pinned: false), at: date),
             betaFeatures: scenario.availability([ProviderBetaFeature(id: "mtp", title: "Multi-token prediction", state: mtp ? .on : .auto,
                 enabled: mtp ? true : nil, requiresRestart: true, summary: "Synthetic setting for eligible models.")], at: date),
-            fanStatus: scenario.availability(fan, at: date),
+            fanStatus: scenario == .fanConfirmation && fanReadback == .missing && submittedFanPolicy != nil
+                ? .unavailable(reason: "Synthetic fan readback failed") : scenario.availability(fan, at: date),
             autoUpdateStatus: scenario.availability(ProviderAutoUpdateStatus(enabled: autoUpdate), at: date))
     }
     func saveIdle(minutes: Int) async throws { self.minutes = minutes }
     func setBeta(id: String, enabled: Bool) async throws { mtp = enabled }
     func setAutoUpdate(enabled: Bool) async throws { autoUpdate = enabled }
+    func configureFan(policy: ProviderFanPolicy) async throws {
+        guard scenario == .fanConfirmation else { throw ProviderExtrasMutationError.unsupportedFanControl }
+        submittedFanPolicy = policy
+        fanCommandCount += 1
+    }
 }
 
 // The builder injects this client into CLIUpdateStatusStore.shared in a staged
 // source copy: the production update view remains unchanged.
-struct FixtureCLIUpdates: CLIUpdateProviding {
+enum FixtureCLIUpdateRead: String, CaseIterable, Identifiable, Sendable {
+    case current = "Current", staleCurrent = "Last-known current"
+    case staleUpdate = "Last-known update", staleRestart = "Last-known restart"
+    case staleQuarantine = "Last-known quarantine", failed = "Failed check"
+    var id: String { rawValue }
+}
+
+actor FixtureCLIUpdates: CLIUpdateProviding {
+    static let shared = FixtureCLIUpdates()
+    private var read: FixtureCLIUpdateRead = .current
+    private let retainedAt = Date().addingTimeInterval(-172_800)
+    func setRead(_ read: FixtureCLIUpdateRead) { self.read = read }
     func checkForUpdate() async -> SourceAvailability<CLIUpdateStatus> {
-        .available(value: .upToDate(version: "0.9.17"), capturedAt: Date())
+        let status: CLIUpdateStatus
+        switch read {
+        case .current: return .available(value: .upToDate(version: "0.9.17"), capturedAt: Date())
+        case .failed: return .unavailable(reason: "Synthetic update check failed")
+        case .staleCurrent: status = .upToDate(version: "0.9.17")
+        case .staleUpdate: status = .updateAvailable(current: "0.9.16", latest: "0.9.17")
+        case .staleRestart: status = .restartRequired(current: "0.9.16", installed: "0.9.17")
+        case .staleQuarantine: status = .quarantined(version: "0.9.17")
+        }
+        return .stale(value: status, capturedAt: retainedAt, reason: "Synthetic update check failed")
     }
 }
 // The production Infrastructure disclosure starts NetworkCacheStore polling.
@@ -430,6 +482,9 @@ private final class FixtureModel: ObservableObject {
     @Published var ready = false
     @Published var issue: String?
     @Published var scenario: FixtureScenario = .fresh
+    @Published var cliUpdateRead: FixtureCLIUpdateRead = .current
+    @Published var fanReadback: FixtureFanReadback = .held
+    private var extrasClient: FixtureExtras
     @Published var focusTracing: Bool
     @Published var staticActivity = false
     @Published var grayscale = false
@@ -455,14 +510,15 @@ private final class FixtureModel: ObservableObject {
         focusTracing = focusDiagnostics.isEnabled
         navigation = DashboardNavigation(defaults: defaults)
         let stores = Self.makeStores(.fresh, defaults: defaults, directory: directory)
-        monitor = stores.0; control = stores.1; hosting = stores.2; chat = stores.3
+        monitor = stores.0; control = stores.1; hosting = stores.2; chat = stores.3; extrasClient = stores.4
         hostingDraft = HostingSettingsDraftState(options: stores.2.options)
     }
-    private static func makeStores(_ scenario: FixtureScenario, defaults: UserDefaults, directory: URL) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore) {
+    private static func makeStores(_ scenario: FixtureScenario, defaults: UserDefaults, directory: URL) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore, FixtureExtras) {
         let tokens = FixtureTokens()
         let controller = FixtureController(scenario: scenario)
         let control = ProviderControlStore(controller: controller, homeDirectory: directory, hostingOptions: { .default })
-        let extras = ProviderExtrasStore(client: FixtureExtras(scenario: scenario))
+        let extrasClient = FixtureExtras(scenario: scenario)
+        let extras = ProviderExtrasStore(client: extrasClient)
         let monitor = MonitorStore(service: TelemetryService(source: FixtureTelemetrySource(scenario: scenario)),
             initial: FixtureData.snapshot(scenario, now: Date()), providerExtras: extras,
             earningsClient: FixtureEarnings(scenario: scenario),
@@ -484,10 +540,20 @@ private final class FixtureModel: ObservableObject {
         monitor.attachRecommendationInventory { control.snapshot }
         monitor.setDashboardVisible(true)
         hosting.refreshEnvironment()
-        return (monitor, control, hosting, chat)
+        return (monitor, control, hosting, chat, extrasClient)
+    }
+    func setFanReadback(_ value: FixtureFanReadback) async {
+        guard ready, !isTerminating, scenario == .fanConfirmation else { return }
+        fanReadback = value
+        await extrasClient.setFanReadback(value)
+        await monitor.providerExtras?.refreshFan()
+        if let data = try? JSONEncoder().encode(await extrasClient.fanProof()) {
+            try? data.write(to: directory.appendingPathComponent("fixture-fan-proof.json"), options: .atomic)
+        }
     }
     func tick() async {
-        guard ready, !isTerminating, scenario.hasCurrentRuntime || scenario == .offline else { return }
+        guard ready, !isTerminating, scenario != .frozenSettings,
+              scenario.hasCurrentRuntime || scenario == .offline else { return }
         let currentScenario = scenario
         let currentMonitor = monitor
         let currentControl = control
@@ -599,7 +665,8 @@ private final class FixtureModel: ObservableObject {
         // Window events can arrive while synthetic sources are preparing.
         // Publish the replacement with the latest native visibility state.
         preparedMonitor.setDashboardVisible(dashboardVisible)
-        monitor = preparedMonitor; control = preparedControl; hosting = stores.2; chat = stores.3
+        monitor = preparedMonitor; control = preparedControl; hosting = stores.2; chat = stores.3; extrasClient = stores.4
+        fanReadback = .held
         chatVerificationTest = nil
         chatVerificationClient = nil
         issue = preparationIssue
@@ -1237,6 +1304,28 @@ private struct FixtureChatVerificationControls: View {
             Text(model.chatVerificationTest?.rawValue ?? "Chat tests create a new empty conversation")
                 .font(.caption).foregroundStyle(.secondary)
             Spacer(minLength: 0)
+            Menu("CLI check") {
+                ForEach(FixtureCLIUpdateRead.allCases) { read in
+                    Button(read.rawValue) {
+                        model.cliUpdateRead = read
+                        Task {
+                            await FixtureCLIUpdates.shared.setRead(read)
+                            await CLIUpdateStatusStore.shared.refresh()
+                        }
+                    }
+                }
+            }
+            .accessibilityLabel("Synthetic CLI update check: \(model.cliUpdateRead.rawValue)")
+            .help("Changes only the fake update check; no network, installation or provider restart.")
+            if model.scenario == .fanConfirmation {
+                Menu("Fan readback") {
+                    ForEach(FixtureFanReadback.allCases) { value in
+                        Button(value.rawValue) { Task { await model.setFanReadback(value) } }
+                    }
+                }
+                .accessibilityLabel("Synthetic fan readback: \(model.fanReadback.rawValue)")
+                .help("Changes only fake readings for the same submitted policy. No helper or Mac fan is controlled.")
+            }
         }
         .padding(.horizontal, 10).padding(.vertical, 4)
         .background(Color.orange.opacity(0.08))

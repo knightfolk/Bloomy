@@ -7,12 +7,12 @@ that broader goal.
 
 ## Provider testing authorization (2026-10-01)
 
-For the current optimization run, Kevin stopped the provider and its recovery
-watcher to free resources for VMs and other work. Leave them stopped. Kevin
-explicitly permits a temporary provider start if necessary for a test; stop it
-again afterward and report it. Prefer inert fixtures when a test does not need
-the real provider. This does not authorize swaps, downloads, or inference just
-to produce visual evidence.
+For the current optimization run, Kevin initially stopped the provider and its
+recovery watcher to free resources for VMs and other work, then explicitly
+authorized resuming the provider. Restore its saved settings when the existing
+cache-access failure is resolved. Prefer inert fixtures when a test does not
+need the real provider. This does not authorize swaps, downloads, or inference
+just to produce visual evidence.
 
 ## Checkpoints and release gates
 
@@ -23,6 +23,11 @@ source changes, bypass a failing native check, or equate review signing with
 notarized distribution. Preserve the running production app and unsaved work
 when testing isolated review builds.
 
-A scoped production removable-drive permission reset is still awaiting human
-approval. Do not reset privacy permissions or grant new Keychain/drive access
-as a launch workaround. Keep credential material out of logs and evidence.
+On 2026-10-02 Kevin authorized resetting only Darkbloom's removable-drive
+permission. The `SystemPolicyRemovableVolumes` reset for `io.darkbloom.provider`
+succeeded. A retry with unchanged saved settings still exited while reading the
+Sol model cache; its failed service and recovery watcher were stopped. System
+Settings showed Darkbloom's removable-volume switch on. Diagnose that boundary
+before retrying. This scoped reset does not authorize other privacy resets or
+new Keychain, Full Disk, or broader drive access. Keep credentials out of logs
+and evidence.

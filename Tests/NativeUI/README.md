@@ -394,7 +394,15 @@ fixture does not start a live log reader or provider.
 Hosting token-copy actions use an inert success sink; neither the fixture nor
 its store regression tests write synthetic credentials to the user's clipboard.
 Popup model actions use the in-memory provider actor; fan mutations remain
-unsupported/rejected; Nudge uses in-memory credentials with actions disabled.
+unsupported/rejected except for Configure in the explicit **Fan confirmation**
+scenario. That action records only the submitted policy in the same fixture
+actor and returns successfully. The **Fan readback** menu selects original,
+failed, or matching readings without replacing the draft or store. Failed reads
+persist through visible fan polling until another menu choice. A fixture-owned
+`fixture-fan-proof.json` records the submitted values and command count after
+each explicit readback choice; confirmation should require only one command.
+No fan helper, administrator prompt, or real fan control is used.
+Nudge uses in-memory credentials with actions disabled.
 The actor initially enables startup preload for its two saved preload models and
 retains selection, slots, startup preload, and concurrency on save/readback, so
 the Auto sheet can confirm a saved single-model startup plan without serving.
@@ -406,6 +414,12 @@ application domain, not the session suite, so its electricity settings-link
 visibility may differ from the synthetic session toggle. It performs no write
 and does not start power acquisition. Production credential-oriented text still
 describes Keychain, but fixture Save/Remove operations remain memory-only.
+
+**Frozen settings** retains the initial idle/beta capture time and suppresses
+the fixture's periodic telemetry publication. Leave Provider settings visible
+to observe its real 45-second expiry without another read. **CLI check** selects
+current, two-day-old retained, or failed synthetic update checks in the same
+shared store. These controls perform no network calls, installation, or restart.
 
 Each process uses a unique `dev.darkbloom.dashboard-fixture.session.*` defaults
 suite, a unique temporary `BloomyDashboardFixture-*` directory, 360 synthetic

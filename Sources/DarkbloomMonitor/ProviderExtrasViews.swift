@@ -253,6 +253,8 @@ final class ProviderSettingsDraftState: ObservableObject {
     @Published private(set) var fanTriggerTemperature = ProviderFanPolicy.default.triggerTemperatureCelsius
     @Published private(set) var fanDirty = false
     @Published private(set) var fanPreset: FanPreset?
+    @Published private(set) var fanSaveAwaitingConfirmation = false
+    private var pendingFanSave: (revision: UInt64, policy: ProviderFanPolicy, requiresEnabled: Bool)?
     private(set) var idleRevision: UInt64 = 0
     private(set) var fanRevision: UInt64 = 0
 
@@ -284,6 +286,8 @@ final class ProviderSettingsDraftState: ObservableObject {
     }
 
     func editFanSpeed(_ value: Double) {
+        pendingFanSave = nil
+        fanSaveAwaitingConfirmation = false
         fanSpeedPercent = value
         fanDirty = true
         fanPreset = nil
@@ -291,6 +295,8 @@ final class ProviderSettingsDraftState: ObservableObject {
     }
 
     func editFanTemperature(_ value: Double) {
+        pendingFanSave = nil
+        fanSaveAwaitingConfirmation = false
         fanTriggerTemperature = value
         fanDirty = true
         fanPreset = nil
@@ -298,6 +304,8 @@ final class ProviderSettingsDraftState: ObservableObject {
     }
 
     func selectFanPreset(_ preset: FanPreset) {
+        pendingFanSave = nil
+        fanSaveAwaitingConfirmation = false
         fanSpeedPercent = preset.policy.speedPercent
         fanTriggerTemperature = preset.policy.triggerTemperatureCelsius
         fanPreset = preset
@@ -309,7 +317,11 @@ final class ProviderSettingsDraftState: ObservableObject {
         ProviderFanPolicy(speedPercent: fanSpeedPercent, triggerTemperatureCelsius: fanTriggerTemperature)
     }
 
-    func syncFan(from source: SourceAvailability<ProviderFanStatus>?) {
+    func syncFan(from source: SourceAvailability<ProviderFanStatus>?, at now: Date = Date()) {
+        if let pendingFanSave {
+            _ = confirmFanSave(revision: pendingFanSave.revision, policy: pendingFanSave.policy,
+                               requiresEnabled: pendingFanSave.requiresEnabled, source: source, at: now)
+        }
         guard !fanDirty else { return }
         let helper = source?.value?.helper
         let policy = helper.flatMap {
@@ -321,15 +333,48 @@ final class ProviderSettingsDraftState: ObservableObject {
     }
 
     func discardFan(from source: SourceAvailability<ProviderFanStatus>?) {
+        pendingFanSave = nil
+        fanSaveAwaitingConfirmation = false
         fanRevision &+= 1
         fanDirty = false
         syncFan(from: source)
     }
 
-    func didSaveFan(revision: UInt64, source: SourceAvailability<ProviderFanStatus>?) {
-        guard fanRevision == revision else { return }
+    /// A completed command is not proof that the submitted policy was observed.
+    /// Retain the submitted buffer until a fresh helper readback matches it.
+    @discardableResult
+    func didSaveFan(revision: UInt64, source: SourceAvailability<ProviderFanStatus>?,
+                    submittedPolicy: ProviderFanPolicy? = nil, requiresEnabled: Bool = false,
+                    at now: Date = Date()) -> Bool {
+        guard fanRevision == revision, let policy = submittedPolicy ?? fanPolicy else { return false }
+        pendingFanSave = (revision, policy, requiresEnabled)
+        fanSaveAwaitingConfirmation = true
+        fanDirty = true
+        return confirmFanSave(revision: revision, policy: policy, requiresEnabled: requiresEnabled, source: source, at: now)
+    }
+
+    private func confirmFanSave(revision: UInt64, policy: ProviderFanPolicy,
+                                requiresEnabled: Bool, source: SourceAvailability<ProviderFanStatus>?, at now: Date) -> Bool {
+        guard fanRevision == revision,
+              Self.fanPolicyIsConfirmed(policy, requiresEnabled: requiresEnabled, source: source, at: now)
+        else { return false }
+        pendingFanSave = nil
+        fanSaveAwaitingConfirmation = false
         fanDirty = false
-        syncFan(from: source)
+        return true
+    }
+
+    static func fanPolicyIsConfirmed(_ policy: ProviderFanPolicy, requiresEnabled: Bool = false,
+                                     source: SourceAvailability<ProviderFanStatus>?, at now: Date) -> Bool {
+        guard ProviderSettingsFreshnessPolicy.isFresh(source, at: now),
+              case .available(let status, _) = source,
+              status.loaded, !status.helperErrorPresent, status.helperIsFresh(at: now),
+              let helper = status.helper,
+              !requiresEnabled || helper.enabled,
+              ProviderFanPolicy(speedPercent: helper.speedPercent,
+                                triggerTemperatureCelsius: helper.triggerTemperatureCelsius) == policy
+        else { return false }
+        return true
     }
 }
 
@@ -340,6 +385,41 @@ struct ProviderAdvancedSettingsView: View {
     let performMutation: ProviderExtrasMutationExecutor
     let showsAutoUpdate: Bool
     let showsFanControls: Bool
+    let isVisible: Bool
+
+    struct EvidencePresentation {
+        let isFresh: Bool
+        let transitions: [Date]
+
+        init<Value>(source: SourceAvailability<Value>?, at now: Date) where Value: Equatable & Sendable {
+            isFresh = ProviderSettingsFreshnessPolicy.isFresh(source, at: now)
+            transitions = ProviderSettingsFreshnessPolicy.transitions(for: source, at: now)
+        }
+
+        func label(_ value: String) -> String {
+            isFresh ? value : "Last known: \(value)"
+        }
+
+        var emptyBetaFeaturesMessage: String {
+            isFresh ? "No configurable beta features are available in this build."
+                : "No configurable beta features were reported at the last check."
+        }
+
+        func canSaveIdle(text: String, isDirty: Bool, isSaving: Bool, mutationInFlight: Bool) -> Bool {
+            guard isFresh, isDirty, !isSaving, !mutationInFlight,
+                  let minutes = Int(text.trimmingCharacters(in: .whitespacesAndNewlines))
+            else { return false }
+            return ProviderIdlePolicy.isValid(minutes: minutes)
+        }
+
+        func canChangeBeta(id: String) -> Bool {
+            isFresh && ProviderExtrasClient.allowedBetaFeatureIDs.contains(id)
+        }
+
+        func schedule(isVisible: Bool) -> VisibilityTimelineSchedule<ExplicitTimelineSchedule<[Date]>> {
+            VisibilityTimelineSchedule(base: .explicit(transitions), isVisible: isVisible)
+        }
+    }
 
     @StateObject private var draft: ProviderSettingsDraftState
     @State private var idleSaveInFlight = false
@@ -351,19 +431,23 @@ struct ProviderAdvancedSettingsView: View {
         performMutation: @escaping ProviderExtrasMutationExecutor,
         showsAutoUpdate: Bool = true,
         showsFanControls: Bool = true,
+        isVisible: Bool = true,
         draft: ProviderSettingsDraftState? = nil
     ) {
         self.store = store
         self.performMutation = performMutation
         self.showsAutoUpdate = showsAutoUpdate
         self.showsFanControls = showsFanControls
+        self.isVisible = isVisible
         _draft = StateObject(wrappedValue: draft ?? ProviderSettingsDraftState())
     }
 
     var body: some View {
         Group {
             Section("Provider · Memory when idle") {
-                idleSection
+                TimelineView(idleEvidence.schedule(isVisible: isVisible)) { context in
+                    idleSection(at: context.date)
+                }
                 if draft.idleDirty {
                     Button("Discard idle edit") {
                         draft.discardIdle(from: store.snapshot?.idlePolicy)
@@ -374,7 +458,9 @@ struct ProviderAdvancedSettingsView: View {
                 }
             }
             Section("Provider · Experimental features") {
-                betaSection
+                TimelineView(betaEvidence.schedule(isVisible: isVisible)) { context in
+                    betaSection(at: context.date)
+                }
             }
             if showsAutoUpdate {
                 ProviderAutoUpdateSettingsView(store: store, performMutation: performMutation)
@@ -398,15 +484,16 @@ struct ProviderAdvancedSettingsView: View {
     }
 
     @ViewBuilder
-    private var idleSection: some View {
+    private func idleSection(at displayDate: Date) -> some View {
+        let evidence = EvidencePresentation(source: store.snapshot?.idlePolicy, at: displayDate)
         switch store.snapshot?.idlePolicy {
         case .available(let policy, _), .stale(let policy, _, _):
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Saved idle policy").font(.headline)
                     Spacer()
-                    SettingsStateBadge(policy.idleTimeoutMinutes == 0
-                        ? "No idle timeout" : "After \(policy.idleTimeoutMinutes) min")
+                    SettingsStateBadge(evidence.label(policy.idleTimeoutMinutes == 0
+                        ? "No idle timeout" : "After \(policy.idleTimeoutMinutes) min"))
                 }
                 Text("Controls timed unloading only. Models can still unload to make room for other work.")
                     .font(.callout).foregroundStyle(.secondary)
@@ -421,7 +508,9 @@ struct ProviderAdvancedSettingsView: View {
                         .monospacedDigit()
                     Text("minutes").foregroundStyle(.secondary)
                     Button(idleSaveInFlight ? "Saving…" : "Save") { saveIdle() }
-                        .disabled(!canSaveIdle)
+                        .disabled(!canSaveIdle(evidence: evidence))
+                        .accessibilityLabel(idleSaveInFlight ? "Saving idle memory policy" : "Save idle memory policy")
+                        .accessibilityIdentifier("settings.provider.idle.save")
                 }
                 Text(draft.idleDirty ? "Unsaved change · Enter 0 to disable timed unloading, or 1–10,080 minutes." : "Enter 0 to disable timed unloading, or 1–10,080 minutes.")
                     .font(.caption)
@@ -429,7 +518,7 @@ struct ProviderAdvancedSettingsView: View {
                 Text("Saved configuration · Applies on restart. The running value is not reported by the CLI.")
                     .font(.caption)
                     .foregroundStyle(.orange)
-                if case .stale = store.snapshot?.idlePolicy {
+                if !evidence.isFresh {
                     Text("Refresh before saving this setting.")
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -442,23 +531,24 @@ struct ProviderAdvancedSettingsView: View {
     }
 
     @ViewBuilder
-    private var betaSection: some View {
+    private func betaSection(at displayDate: Date) -> some View {
+        let evidence = EvidencePresentation(source: store.snapshot?.betaFeatures, at: displayDate)
         switch store.snapshot?.betaFeatures {
         case .available(let features, _), .stale(let features, _, _):
             Text("Saved choices, not proof a feature is active. Automatic depends on the model and runtime support.")
                 .font(.callout).foregroundStyle(.secondary)
             if features.isEmpty {
-                Text("No configurable beta features are available in this build.")
+                Text(evidence.emptyBetaFeaturesMessage)
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(features) { feature in
-                    betaRow(feature)
+                    betaRow(feature, evidence: evidence)
                 }
-                if case .stale = store.snapshot?.betaFeatures {
-                    Text("Refresh before changing beta settings.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
+            }
+            if !evidence.isFresh {
+                Text("Refresh before changing beta settings.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
         case .unavailable, nil:
             Text("Unable to read experimental feature settings. Refresh to try again.")
@@ -466,11 +556,10 @@ struct ProviderAdvancedSettingsView: View {
         }
     }
 
-    private func betaRow(_ feature: ProviderBetaFeature) -> some View {
+    private func betaRow(_ feature: ProviderBetaFeature, evidence: EvidencePresentation) -> some View {
         let saving = betaSaveIDs.contains(feature.id)
-        let sourceIsFresh = isFresh(store.snapshot?.betaFeatures)
-        let canChange = sourceIsFresh
-            && ProviderExtrasClient.allowedBetaFeatureIDs.contains(feature.id)
+        let sourceIsFresh = evidence.isFresh
+        let canChange = evidence.canChangeBeta(id: feature.id)
         return HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(feature.title).font(.body.weight(.medium))
@@ -510,16 +599,9 @@ struct ProviderAdvancedSettingsView: View {
         }
     }
 
-    private var canSaveIdle: Bool {
-        guard !idleSaveInFlight,
-              !store.mutationInFlight,
-              draft.idleDirty,
-              let minutes = Int(draft.idleMinutesText.trimmingCharacters(in: .whitespacesAndNewlines)),
-              ProviderIdlePolicy.isValid(minutes: minutes),
-              isFresh(store.snapshot?.idlePolicy)
-        else { return false }
-        guard case .available = store.snapshot?.idlePolicy else { return false }
-        return true
+    private func canSaveIdle(evidence: EvidencePresentation) -> Bool {
+        evidence.canSaveIdle(text: draft.idleMinutesText, isDirty: draft.idleDirty,
+            isSaving: idleSaveInFlight, mutationInFlight: store.mutationInFlight)
     }
 
     private func syncIdleDraft() {
@@ -530,17 +612,16 @@ struct ProviderAdvancedSettingsView: View {
         Binding(get: { draft.idleMinutesText }, set: { draft.editIdle($0) })
     }
 
-    private func isFresh<Value>(
-        _ source: SourceAvailability<Value>?,
-        now: Date = Date()
-    ) -> Bool where Value: Equatable & Sendable {
-        guard case .available(_, let capturedAt) = source else { return false }
-        let age = now.timeIntervalSince(capturedAt)
-        return age.isFinite && age >= 0 && age <= ProviderExtrasSnapshot.maximumSourceAge
+    private var idleEvidence: EvidencePresentation {
+        EvidencePresentation(source: store.snapshot?.idlePolicy, at: store.currentDate)
+    }
+
+    private var betaEvidence: EvidencePresentation {
+        EvidencePresentation(source: store.snapshot?.betaFeatures, at: store.currentDate)
     }
 
     private func saveIdle() {
-        guard canSaveIdle else { feedback = "Refresh before saving this setting."; return }
+        guard canSaveIdle(evidence: idleEvidence) else { feedback = "Refresh before saving this setting."; return }
         guard let minutes = Int(draft.idleMinutesText.trimmingCharacters(in: .whitespacesAndNewlines)),
               ProviderIdlePolicy.isValid(minutes: minutes)
         else {
@@ -565,7 +646,7 @@ struct ProviderAdvancedSettingsView: View {
 
     private func setBeta(_ feature: ProviderBetaFeature, enabled: Bool) {
         guard !betaSaveIDs.contains(feature.id), !store.mutationInFlight,
-              isFresh(store.snapshot?.betaFeatures),
+              betaEvidence.isFresh,
               ProviderExtrasClient.allowedBetaFeatureIDs.contains(feature.id) else { return }
         betaSaveIDs.insert(feature.id)
         Task { @MainActor in

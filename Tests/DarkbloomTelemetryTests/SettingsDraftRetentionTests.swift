@@ -164,8 +164,16 @@ struct SettingsDraftRetentionTests {
         #expect(draft.fanTriggerTemperature == 43)
         #expect(draft.fanPreset == nil)
         draft.didSaveFan(revision: draft.fanRevision, source: fanSource(.cooling))
+        #expect(draft.fanSpeedPercent == 83)
+        #expect(draft.fanTriggerTemperature == 43)
+        #expect(draft.fanDirty)
+        #expect(draft.fanSaveAwaitingConfirmation)
+        draft.editFanSpeed(FanPreset.cooling.policy.speedPercent)
+        draft.editFanTemperature(FanPreset.cooling.policy.triggerTemperatureCelsius)
+        draft.didSaveFan(revision: draft.fanRevision, source: fanSource(.cooling))
         #expect(draft.fanPolicy == FanPreset.cooling.policy)
         #expect(!draft.fanDirty)
+        #expect(!draft.fanSaveAwaitingConfirmation)
     }
 
     @Test("a late save result cannot clear edits made after its submission")

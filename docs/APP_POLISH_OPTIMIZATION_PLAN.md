@@ -69,12 +69,20 @@ A release-optimized parser benchmark with a synthetic 129,789-byte warning-heavy
 
 ## Native screen review
 
+The Provider/Fans/Updates checkpoint adds execution-time idle/beta freshness,
+real finite visible expiry, protected fan submissions until matching readback,
+per-field fan freshness, and historical CLI notices with compact wrapping.
+Native 53, the 1,324-test pass, and release-build evidence are recorded in
+`docs/PROVIDER_FAN_CLI_SETTINGS_REVIEW_20261002.md`. The live provider's separate
+managed-launch cache failure remains unresolved after the authorized scoped
+permission reset; this checkpoint does not complete the full review matrix.
+
 Review the popup, Overview, Activity (Earnings and Metrics), Opportunity, Models, Hosting, Chat, Action History, Health & Logs, and every Settings page. The iPhone Companion page is a setup surface; it must not imply a shipped companion capability that is absent.
 
 For each route check light/dark appearance, narrow/wide windows, keyboard focus and shortcuts, accessibility names, Reduce Motion, tooltip usefulness, consistent card/pill sizing, missing/stale/offline states, retained unsaved drafts, and normal-speed updates without flashing or layout shifts. Inspect actual rendered screens; builds and fixtures alone are insufficient to claim complete visual polish.
 
 The two-minute Chat verification-expiry presentation and explicit Refresh path are repaired. Remaining Chat review includes the complete native route/appearance/size matrix and actual VoiceOver behavior; focused local fixture checks and both-route automated tests do not establish that broader proof.
 
-The provider and recovery watcher are deliberately stopped while Kevin uses the Mac for other work. Kevin authorizes a temporary provider start only if needed for a test; stop it again afterward. Use isolated fixtures for visual states that do not require a real provider, and do not swap or nudge merely to produce visual evidence.
+Kevin subsequently authorized resuming the provider with its saved settings. Use isolated fixtures for visual states that do not require a real provider, and do not swap or nudge merely to produce visual evidence.
 
-The current production catalog fails at the external Sol cache boundary. A scoped production removable-drive permission reset remains pending human approval. Do not reset privacy permissions or grant Keychain access as an implicit part of a launch or release test. Release publication is held until required native behavior is verified.
+On October 2 Kevin authorized resetting only Darkbloom's removable-drive permission. The `SystemPolicyRemovableVolumes` reset for `io.darkbloom.provider` succeeded, but the saved-settings restart still exited while reading the Sol cache. Its failed service and recovery watcher were stopped; the saved configuration hash remained unchanged. System Settings showed Darkbloom's removable-volume switch on. Diagnose that boundary before another retry; this does not authorize broader privacy resets, Full Disk, or Keychain access. Release publication is held until required native behavior is verified.

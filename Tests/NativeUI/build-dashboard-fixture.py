@@ -44,7 +44,7 @@ shutil.copytree(sparkle, frameworks / "Sparkle.framework", symlinks=True, dirs_e
 substitutions = {
     "CLIUpdateNoticeView.swift": (
         "static let shared = CLIUpdateStatusStore()",
-        "static let shared = CLIUpdateStatusStore(client: FixtureCLIUpdates())"),
+        "static let shared = CLIUpdateStatusStore(client: FixtureCLIUpdates.shared)"),
     "SystemCPUUsageStore.swift": (
         "read: @escaping @MainActor () -> SystemCPUTimes? = MacHostCPUSampler.read",
         "read: @escaping @MainActor () -> SystemCPUTimes? = { nil }"),

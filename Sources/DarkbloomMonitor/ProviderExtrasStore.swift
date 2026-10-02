@@ -272,6 +272,7 @@ final class ProviderExtrasStore: ObservableObject {
     }
 
     func saveIdle(minutes: Int) async throws {
+        try requireFreshEvidence(snapshot?.idlePolicy)
         guard !mutationInFlight else {
             throw ProviderExtrasMutationError.mutationInProgress
         }
@@ -291,6 +292,7 @@ final class ProviderExtrasStore: ObservableObject {
     }
 
     func setBeta(id: String, enabled: Bool) async throws {
+        try requireFreshEvidence(snapshot?.betaFeatures)
         try await performMutation {
             try await self.client.setBeta(id: id, enabled: enabled)
         }

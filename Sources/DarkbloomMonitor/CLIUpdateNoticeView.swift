@@ -119,6 +119,53 @@ final class CLIUpdateStatusStore: ObservableObject {
     }
 }
 
+struct CLIUpdateNoticePresentation: Equatable {
+    let headline: String
+    let explanation: String
+    let guidance: String?
+    let symbol: String
+    let isStale: Bool
+
+    var detail: String { [explanation, guidance].compactMap { $0 }.joined(separator: " ") }
+
+    static func checkedAtLabel(_ date: Date) -> String {
+        "Last checked \(date.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    static func make(status: CLIUpdateStatus, isStale: Bool) -> Self {
+        switch status {
+        case .upToDate(let version):
+            return Self(
+                headline: isStale ? "Last check: Darkbloom CLI was up to date" : "Darkbloom CLI is up to date",
+                explanation: isStale ? "Version \(version) was current at that check." : "Version \(version) is current.",
+                guidance: nil, symbol: "checkmark.circle", isStale: isStale)
+        case .updateAvailable(let current, let latest):
+            return Self(
+                headline: isStale ? "Last check: Darkbloom CLI update was available" : "Darkbloom CLI update available",
+                explanation: isStale
+                    ? "Version \(latest) was available; the CLI reported \(current) at that check."
+                    : "Version \(latest) is available; the current CLI reports \(current).",
+                guidance: isStale ? nil : "Review the update in Darkbloom when ready.",
+                symbol: "arrow.down.circle", isStale: isStale)
+        case .restartRequired(let current, let installed):
+            return Self(
+                headline: isStale ? "Last check: Darkbloom CLI needed a restart" : "Darkbloom CLI restart required",
+                explanation: isStale
+                    ? "Version \(installed) was installed, while the CLI process reported \(current) at that check."
+                    : "Version \(installed) is installed, while the current CLI process is \(current).",
+                guidance: isStale ? nil : "Restart Darkbloom to activate it.",
+                symbol: "arrow.clockwise.circle", isStale: isStale)
+        case .quarantined(let version):
+            return Self(
+                headline: isStale ? "Last check: Darkbloom release was quarantined" : "Darkbloom release quarantined",
+                explanation: isStale
+                    ? "Darkbloom reported release \(version) was quarantined on this machine at that check. No change was made."
+                    : "Darkbloom reports release \(version) is quarantined on this machine. No change was made.",
+                guidance: nil, symbol: "exclamationmark.triangle", isStale: isStale)
+        }
+    }
+}
+
 /// Read-only CLI update information for inclusion as a section in a SwiftUI
 /// Form. Parent app lifecycle code should start and stop the shared store; this
 /// view starts it as a fallback when used on its own.
@@ -175,41 +222,25 @@ struct CLIUpdateNoticeView: View {
         checkedAt: Date,
         isStale: Bool
     ) -> some View {
+        let presentation = CLIUpdateNoticePresentation.make(status: value, isStale: isStale)
         VStack(alignment: .leading, spacing: 4) {
-            switch value {
-            case .upToDate(let version):
-                Label("Darkbloom CLI is up to date", systemImage: "checkmark.circle")
-                    .font(.headline)
-                Text("Version \(version) is current.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            case .updateAvailable(let current, let latest):
-                Label("Darkbloom CLI update available", systemImage: "arrow.down.circle")
-                    .font(.headline)
-                Text("Version \(latest) is available; the current CLI reports \(current). Review the update in Darkbloom when ready.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            case .restartRequired(let current, let installed):
-                Label("Darkbloom CLI restart required", systemImage: "arrow.clockwise.circle")
-                    .font(.headline)
-                Text("Version \(installed) is installed, while the current CLI process is \(current). Restart Darkbloom to activate it.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            case .quarantined(let version):
-                Label("Darkbloom release quarantined", systemImage: "exclamationmark.triangle")
-                    .font(.headline)
-                Text("Darkbloom reports release \(version) is quarantined on this machine. No change was made.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            if isStale {
+            Label(presentation.headline, systemImage: presentation.symbol)
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(presentation.detail)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if presentation.isStale {
                 Text("The latest check failed. This status may have changed.")
                     .font(.caption)
                     .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Last checked \(checkedAt.formatted(date: .omitted, time: .shortened))")
+            Text(CLIUpdateNoticePresentation.checkedAtLabel(checkedAt))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .fixedSize(horizontal: false, vertical: true)
     }

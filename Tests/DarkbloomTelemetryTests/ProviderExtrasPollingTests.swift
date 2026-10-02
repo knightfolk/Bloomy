@@ -62,9 +62,19 @@ struct ProviderExtrasPollingTests {
         await store.refreshBackground()
         #expect(await client.fullReads == 2)
         #expect(await client.fanReads == 1)
-        try await store.setBeta(id: "fixture", enabled: true)
-        #expect(await client.mutations == 1)
+        // Fan-only background reads do not renew the static setting's evidence.
+        // The last full read was at 100, so a write at 300 requires an explicit read.
+        await #expect(throws: ProviderSettingsEvidenceError.refreshRequired) {
+            try await store.setBeta(id: "mtp", enabled: true)
+        }
+        #expect(await client.mutations == 0)
+        #expect(await client.fullReads == 2)
+        await store.refresh()
         #expect(await client.fullReads == 3)
+        #expect(store.snapshot?.capturedAt == clock.now())
+        try await store.setBeta(id: "mtp", enabled: true)
+        #expect(await client.mutations == 1)
+        #expect(await client.fullReads == 4)
         await store.stop()
     }
 

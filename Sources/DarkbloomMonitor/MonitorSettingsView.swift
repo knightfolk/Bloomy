@@ -345,6 +345,7 @@ private struct ProviderAdvancedSettingsHost: View {
                     performMutation: performMutation,
                     showsAutoUpdate: false,
                     showsFanControls: false,
+                    isVisible: isVisible,
                     draft: draft
                 )
             case .updates:
