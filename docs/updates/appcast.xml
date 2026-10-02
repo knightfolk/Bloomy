@@ -3,6 +3,23 @@
     <channel>
         <title>Bloomy</title>
         <item>
+            <title>1.9.14</title>
+            <pubDate>Thu, 01 Oct 2026 19:02:16 -0700</pubDate>
+            <sparkle:version>139</sparkle:version>
+            <sparkle:shortVersionString>1.9.14</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Bloomy v1.9.14
+
+Activity → Metrics now tracks individual loaded-model visits, their observed duration, and switches that ended without observed work. Filter to **Without work** to inspect those visits and their combined observed time. Returning to a model creates a new visit. Missing readings, restarts, concurrent models and ambiguous counter changes remain uncertain. Completed request counters are recorded immediately so brief work between idle readings can still be detected.
+
+The menu bar now has three compact circular indicators: the loaded model, whole-Mac GPU usage, and cooling. The model ring spins during fresh inference and uses the existing green/yellow/red temperature colors. The GPU ring shows utilization; the thermometer’s ring shows measured fan RPM as a percentage of the fan’s reported maximum. Hover for exact values, stale readings and alerts. Reduce Motion uses a static activity arc.
+
+The fixed layout avoids shifting text, preserves the idle-alert !, and keeps missing sensor readings explicit. Menu Bar settings now explain the new indicators. Provider configuration and Autopilot enrollment are unchanged.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/Bloomy/releases/download/v1.9.14/Bloomy-1.9.14-mac-arm64.zip" length="8866140" type="application/octet-stream" sparkle:edSignature="4/Yt8Vge4rVQYx52XYpUTUgQWHgRM0NLqy9naT/1XNEtvZlZwJm0J6w8G9RtRXzgc1FahBN60Q5FTrzEWE4lCw=="/>
+        </item>
+        <item>
             <title>1.9.13</title>
             <pubDate>Thu, 01 Oct 2026 17:46:56 -0700</pubDate>
             <sparkle:version>138</sparkle:version>
