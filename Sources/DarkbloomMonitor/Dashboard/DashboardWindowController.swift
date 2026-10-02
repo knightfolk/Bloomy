@@ -4,12 +4,21 @@ import SwiftUI
 @MainActor
 final class DashboardWindowController: NSWindowController, NSWindowDelegate {
     private let store: MonitorStore
+    private let chatStore: ChatStore?
+    private let hostingStore: HostingSettingsStore?
     private let frameAutosaveName: String?
     private let unconstrainedContentMaxSize: NSSize
     private var isTransitioningFullScreen = false
     let navigation: DashboardNavigation
     let settingsDraft = ProviderSettingsDraftState()
+    let chatDraft = ChatDraftState()
+    let hostingDraft: HostingSettingsDraftState
     var hasUnsavedSettingsEdits: Bool { settingsDraft.hasChanges }
+    var hasUnsavedChatEdits: Bool { chatDraft.hasUnsentText(in: chatStore?.conversation?.id) }
+    var hasUnsavedHostingEdits: Bool {
+        guard let hostingStore else { return false }
+        return hostingDraft.hasUnsavedEdits(comparedTo: hostingStore.options)
+    }
     init(
         store: MonitorStore,
         controlStore: ProviderControlStore?,
@@ -17,15 +26,20 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
         chatStore: ChatStore? = nil,
         openChatWindow: (() -> Void)? = nil,
         frameAutosaveName: String? = "DarkbloomDashboard",
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        updateProtection: AppUpdateEditorProtection? = nil
     ) {
         self.store = store
+        self.chatStore = chatStore
+        self.hostingStore = hostingStore
+        hostingDraft = HostingSettingsDraftState(options: hostingStore?.options ?? .default)
         self.frameAutosaveName = frameAutosaveName
         navigation = DashboardNavigation(defaults: defaults)
         let content = NSHostingController(rootView: DashboardRootView(
             store: store, controlStore: controlStore, hostingStore: hostingStore,
             chatStore: chatStore, openChatWindow: openChatWindow, navigation: navigation,
-            settingsDraft: settingsDraft
+            settingsDraft: settingsDraft, chatDraft: chatDraft, hostingDraft: hostingDraft,
+            updateProtection: updateProtection
         ).defaultAppStorage(defaults))
         let window = NSWindow(contentViewController: content)
         window.title = MonitorApplicationIdentity.displayName

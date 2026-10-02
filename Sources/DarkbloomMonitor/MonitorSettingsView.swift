@@ -8,6 +8,7 @@ struct MonitorSettingsView: View {
     /// The dashboard supplies its sidebar selection. The standalone Settings
     /// scene uses the same pages with its own native sidebar.
     var selection: SettingsPage? = nil
+    private let updateProtection: AppUpdateEditorProtection?
     @AppStorage(ApplicationAppearance.defaultsKey) private var appearanceModeRaw =
         AppAppearanceMode.system.rawValue
     @StateObject private var draft: ProviderSettingsDraftState
@@ -22,12 +23,14 @@ struct MonitorSettingsView: View {
         controlStore: ProviderControlStore? = nil,
         monitorStore: MonitorStore? = nil,
         selection: SettingsPage? = nil,
-        draft: ProviderSettingsDraftState? = nil
+        draft: ProviderSettingsDraftState? = nil,
+        updateProtection: AppUpdateEditorProtection? = nil
     ) {
         self.extrasStore = extrasStore
         self.controlStore = controlStore
         self.monitorStore = monitorStore
         self.selection = selection
+        self.updateProtection = updateProtection
         _draft = StateObject(wrappedValue: draft ?? ProviderSettingsDraftState())
     }
 
@@ -106,7 +109,7 @@ struct MonitorSettingsView: View {
                     ProfitSwitchSettingsView(store: profitSwitch)
                 }
                 if page == .provider, let inactivityNudge = monitorStore?.inactivityNudge {
-                    InactivityNudgeSettingsView(store: inactivityNudge)
+                    InactivityNudgeSettingsView(store: inactivityNudge, updateProtection: updateProtection)
                 }
             case .companion:
                 Section("iPhone companion") {

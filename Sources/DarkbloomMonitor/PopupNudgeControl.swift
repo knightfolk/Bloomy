@@ -4,6 +4,7 @@ import SwiftUI
 /// request; the separate Send action checks fresh eligibility at click time.
 struct PopupNudgeControl: View {
     @ObservedObject var store: InactivityNudgeStore
+    var updateProtection: AppUpdateEditorProtection? = nil
     @State private var showsSheet = false
 
     var body: some View {
@@ -32,7 +33,7 @@ struct PopupNudgeControl: View {
                 }
                 Spacer()
             } else if !store.keyPresent {
-                ScrollView { NudgeSetupGuide(store: store).padding(.vertical, 4) }
+                ScrollView { NudgeSetupGuide(store: store, updateProtection: updateProtection).padding(.vertical, 4) }
             } else {
             Label("Setup complete · Key saved", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
@@ -69,7 +70,7 @@ struct PopupNudgeControl: View {
             Text("Automatic nudge and key settings")
                 .font(.headline)
             Form {
-                InactivityNudgeSettingsView(store: store)
+                InactivityNudgeSettingsView(store: store, updateProtection: updateProtection)
             }
             .formStyle(.grouped)
             }

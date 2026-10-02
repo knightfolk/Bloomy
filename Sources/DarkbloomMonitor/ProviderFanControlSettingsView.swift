@@ -110,6 +110,7 @@ struct ProviderFanControlSettingsView: View {
     @State private var showsAdvancedActions = false
     @State private var mutationInFlight = false
     @State private var pendingAction: FanAction?
+    @State private var pendingFanRevision: UInt64?
     @State private var feedback: String?
     @State private var manuallyRefreshing = false
 
@@ -139,6 +140,16 @@ struct ProviderFanControlSettingsView: View {
                     case .unavailable, nil:
                         Text("Fan diagnostics are unavailable. Refresh to try again.")
                             .foregroundStyle(.secondary)
+                    }
+                    if draft.fanDirty {
+                        Button("Discard fan edit") {
+                            pendingAction = nil
+                            pendingFanRevision = nil
+                            draft.discardFan(from: store.snapshot?.fanStatus)
+                            feedback = nil
+                        }
+                        .accessibilityIdentifier("settings.provider.fan.discard")
+                        .help("Reset this unsaved edit to the latest observed policy")
                     }
                     if let feedback {
                         Text(feedback)
@@ -461,6 +472,7 @@ struct ProviderFanControlSettingsView: View {
             return
         }
         pendingAction = action
+        pendingFanRevision = draft.fanRevision
     }
 
     private func run(_ action: FanAction) {
@@ -469,7 +481,8 @@ struct ProviderFanControlSettingsView: View {
             feedback = ProviderSettingsEvidenceError.refreshRequired.userMessage
             return
         }
-        let revision = draft.fanRevision
+        let revision = pendingFanRevision ?? draft.fanRevision
+        pendingFanRevision = nil
         mutationInFlight = true
         Task { @MainActor in
             let succeeded = await performMutation(action.operationLabel) {

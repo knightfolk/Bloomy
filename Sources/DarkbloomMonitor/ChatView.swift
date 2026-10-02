@@ -8,7 +8,9 @@ struct ChatView: View {
     @ObservedObject var store: ChatStore
     var openPopOut: (() -> Void)? = nil
     var isVisible: Bool
+    private let updateProtection: AppUpdateEditorProtection?
     @State private var visibilityID = UUID()
+    @State private var keyEditorOwner = UUID()
 
     @StateObject private var draft: ChatDraftState
     @State private var showsNewChatDialog = false
@@ -16,12 +18,14 @@ struct ChatView: View {
     @State private var keyDraft = ""
     @State private var keyError: String?
 
-    init(store: ChatStore, openPopOut: (() -> Void)? = nil, draft: ChatDraftState? = nil, isVisible: Bool = true) {
+    init(store: ChatStore, openPopOut: (() -> Void)? = nil, draft: ChatDraftState? = nil, isVisible: Bool = true,
+         updateProtection: AppUpdateEditorProtection? = nil) {
         self.store = store
         self.openPopOut = openPopOut
         self.isVisible = isVisible
-        // The dashboard injects its retained draft. Standalone windows own
-        // their own state, so their unsent messages never overwrite it.
+        self.updateProtection = updateProtection
+        // Each dashboard/window controller injects its retained draft.
+        // Independent composers never overwrite each other's unsent text.
         _draft = StateObject(wrappedValue: draft ?? ChatDraftState())
     }
 
@@ -51,7 +55,10 @@ struct ChatView: View {
             // new conversation. Reconcile before allowing this draft back.
             draft.reconcile(with: store.conversation?.id)
         }
-        .onDisappear { store.setChatSurfaceVisible(false, id: visibilityID) }
+        .onDisappear {
+            store.setChatSurfaceVisible(false, id: visibilityID)
+            clearConsumerKeyDraft()
+        }
         .task(id: isVisible) {
             guard !Task.isCancelled else { return }
             store.setChatSurfaceVisible(isVisible, id: visibilityID)
@@ -399,7 +406,7 @@ struct ChatView: View {
 
     private var consumerKeyLink: some View {
         Button {
-            keyDraft = ""
+            clearConsumerKeyDraft()
             keyError = nil
             showsKeyEditor = true
         } label: {
@@ -412,9 +419,26 @@ struct ChatView: View {
         }
         .foregroundStyle(store.keyPresence == .missing ? Color.orange : Color.primary)
         .help("Manage the Darkbloom consumer API key used for the paid network route. It is stored only in the macOS Keychain.")
-        .sheet(isPresented: $showsKeyEditor) {
-            ConsumerKeyEditor(store: store, draft: $keyDraft, errorMessage: $keyError)
+        .sheet(isPresented: $showsKeyEditor, onDismiss: clearConsumerKeyDraft) {
+            ConsumerKeyEditor(store: store, draft: consumerKeyDraftBinding, errorMessage: $keyError)
         }
+    }
+
+    private var consumerKeyDraftBinding: Binding<String> {
+        Binding(
+            get: { keyDraft },
+            set: { value in
+                keyDraft = value
+                // Protect on the edit callback itself: an updater check must
+                // not race a later SwiftUI onChange. Retain only the owner ID.
+                updateProtection?.setBlocked(!value.isEmpty, owner: keyEditorOwner)
+            }
+        )
+    }
+
+    private func clearConsumerKeyDraft() {
+        keyDraft = ""
+        updateProtection?.endEditing(owner: keyEditorOwner)
     }
 
     private func separatorColor() -> NSColor { .separatorColor }
@@ -669,6 +693,12 @@ final class ChatDraftState: ObservableObject {
             draftConversationID: conversationID,
             activeConversationID: activeConversationID
         )
+    }
+
+    /// Only meaningful text owned by the active conversation needs preserving.
+    /// Stale or unstamped callbacks cannot keep the updater blocked forever.
+    func hasUnsentText(in activeConversationID: UUID?) -> Bool {
+        canSend(to: activeConversationID)
     }
 
     func visibleText(in activeConversationID: UUID?) -> String {

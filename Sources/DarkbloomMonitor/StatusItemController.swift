@@ -28,10 +28,24 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private(set) var controlStore: ProviderControlStore?
     private let hostingStore: HostingSettingsStore?
     private let chatStore: ChatStore?
+    let updateProtection = AppUpdateEditorProtection()
+    let popupSettingsDraft = ProviderSettingsDraftState()
 
     var statusItemLength: CGFloat { statusItem.length }
     var popoverContentSize: NSSize { popover.contentSize }
     var hasUnsavedSettingsEdits: Bool { dashboardWindowController?.hasUnsavedSettingsEdits == true }
+    /// Read retained drafts as well as mounted editors at the updater's actual
+    /// relaunch decision. Closing a window does not discard its nonsecret input.
+    var hasBlockingUpdateWork: Bool {
+        hasUnsavedSettingsEdits
+            || dashboardWindowController?.hasUnsavedChatEdits == true
+            || dashboardWindowController?.hasUnsavedHostingEdits == true
+            || chatWindowController?.hasUnsavedChatEdits == true
+            || popupSettingsDraft.hasChanges
+            || updateProtection.hasBlockingEditors
+            || chatStore?.isSending == true
+            || hostingStore?.pendingExposureConfirmation != nil
+    }
 
     init(
         store: MonitorStore,
@@ -74,7 +88,9 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                 openSettings: { [weak self] page in self?.showSettings(page: page) },
                 openDashboard: { [weak self] in self?.showDashboard() },
                 openModels: { [weak self] in self?.showDashboard(section: .models) },
-                openHosting: { [weak self] in self?.showDashboard(section: .hosting) }
+                openHosting: { [weak self] in self?.showDashboard(section: .hosting) },
+                updateProtection: updateProtection,
+                popupSettingsDraft: popupSettingsDraft
             )
         )
     }
@@ -135,7 +151,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                 store: store, controlStore: controlStore, hostingStore: hostingStore,
                 chatStore: chatStore,
                 openChatWindow: { [weak self] in self?.showChatWindow() },
-                defaults: defaults
+                defaults: defaults,
+                updateProtection: updateProtection
             )
         }
         dashboardWindowController?.present(section: section, settingsPage: settingsPage, activate: activate)
@@ -146,7 +163,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     func showChatWindow(activate: Bool = true) {
         popover.performClose(nil)
         if chatWindowController == nil, let chatStore {
-            chatWindowController = ChatWindowController(store: chatStore)
+            chatWindowController = ChatWindowController(store: chatStore, updateProtection: updateProtection)
         }
         chatWindowController?.present(activate: activate)
     }
@@ -237,14 +254,16 @@ private struct PopoverRootView: View {
     let openDashboard: () -> Void
     let openModels: () -> Void
     let openHosting: () -> Void
+    let updateProtection: AppUpdateEditorProtection
+    let popupSettingsDraft: ProviderSettingsDraftState
 
     @ViewBuilder
     var body: some View {
         if let controlStore {
-            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
+            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting, updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft)
                 .environmentObject(controlStore)
         } else {
-            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
+            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting, updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft)
         }
     }
 }

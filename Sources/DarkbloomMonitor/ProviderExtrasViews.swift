@@ -121,6 +121,14 @@ final class ProviderSettingsDraftState: ObservableObject {
         idleMinutesText = String(policy.idleTimeoutMinutes)
     }
 
+    /// Discard resets only this edit buffer and invalidates submitted saves.
+    /// Last known evidence is useful for a local reset even when it is stale.
+    func discardIdle(from source: SourceAvailability<ProviderIdlePolicy>?) {
+        idleRevision &+= 1
+        idleDirty = false
+        idleMinutesText = source?.value.map { String($0.idleTimeoutMinutes) } ?? ""
+    }
+
     func didSaveIdle(revision: UInt64, source: SourceAvailability<ProviderIdlePolicy>?) {
         guard idleRevision == revision else { return }
         idleDirty = false
@@ -164,6 +172,12 @@ final class ProviderSettingsDraftState: ObservableObject {
         fanPreset = FanPreset.allCases.first { $0.policy == policy }
     }
 
+    func discardFan(from source: SourceAvailability<ProviderFanStatus>?) {
+        fanRevision &+= 1
+        fanDirty = false
+        syncFan(from: source)
+    }
+
     func didSaveFan(revision: UInt64, source: SourceAvailability<ProviderFanStatus>?) {
         guard fanRevision == revision else { return }
         fanDirty = false
@@ -202,6 +216,14 @@ struct ProviderAdvancedSettingsView: View {
         Group {
             Section("Provider · Memory when idle") {
                 idleSection
+                if draft.idleDirty {
+                    Button("Discard idle edit") {
+                        draft.discardIdle(from: store.snapshot?.idlePolicy)
+                        feedback = nil
+                    }
+                    .accessibilityIdentifier("settings.provider.idle.discard")
+                    .help("Reset this unsaved edit to the latest observed policy")
+                }
             }
             Section("Provider · Experimental features") {
                 betaSection

@@ -155,7 +155,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
     }
 
     func canRelaunchForAppUpdate() -> Bool {
-        guard statusItemController?.hasUnsavedSettingsEdits != true else { return false }
+        guard statusItemController?.hasBlockingUpdateWork != true else { return false }
         guard let control = controlStore else { return true }
         return control.operation == .idle && control.draft?.hasChanges != true
             && control.pendingConfirmation == nil

@@ -142,6 +142,12 @@ data; it does not imply an unsupported CLI. All three scenarios use inert client
 and their Refresh actions preserve the selected condition.
 The banner controls switch Light/Dark and window content sizes 800 × 560 and
 1280 × 900. Appearance settings share the same isolated preference suite.
+The fixture injects retained nonsecret dashboard Chat/Hosting/settings and popup
+fan drafts, plus the same boolean-only mounted-editor protection registry used
+by production. Use ordinary navigation, Refresh, sheet dismissal/reopening,
+and local Discard controls to inspect recovery. It does not install Sparkle or
+include the production app delegate; actual relaunch-guard coverage belongs to
+`AppUpdateWorkProtectionTests`. Never paste a real key into this fixture.
 
 ### Controlled Chat verification
 

@@ -4,6 +4,8 @@ import SwiftUI
 /// or opts the user into automatic nudges.
 struct NudgeSetupGuide: View {
     @ObservedObject var store: InactivityNudgeStore
+    var updateProtection: AppUpdateEditorProtection? = nil
+    @State private var editorOwner = UUID()
     @State private var keyDraft = ""
     @State private var keyError: String?
 
@@ -22,7 +24,7 @@ struct NudgeSetupGuide: View {
                 Text("Restrict the key to your own machines, then copy it. Use a consumer API key, not your provider token.")
             }
             step("3", title: "Save it securely") {
-                SecureField("Paste your nudge key", text: $keyDraft)
+                SecureField("Paste your nudge key", text: protectedKeyBinding)
                     .textFieldStyle(.roundedBorder)
                     .privacySensitive()
                     .accessibilityIdentifier("nudge.setup.key")
@@ -30,11 +32,15 @@ struct NudgeSetupGuide: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Save key and continue") {
                     keyError = store.saveKey(keyDraft)
-                    if keyError == nil { keyDraft = "" }
+                    if keyError == nil { clearKeyDraft() }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("nudge.setup.save")
+                if !keyDraft.isEmpty {
+                    Button("Discard") { clearKeyDraft() }
+                        .accessibilityIdentifier("nudge.setup.discard")
+                }
                 if let keyError {
                     Text(keyError).foregroundStyle(.red)
                         .accessibilityIdentifier("nudge.setup.error")
@@ -44,7 +50,20 @@ struct NudgeSetupGuide: View {
                 .font(.callout).foregroundStyle(.secondary)
         }
         .fixedSize(horizontal: false, vertical: true)
-        .onDisappear { keyDraft = ""; keyError = nil }
+        .onDisappear { clearKeyDraft() }
+    }
+
+    private var protectedKeyBinding: Binding<String> {
+        Binding(get: { keyDraft }, set: {
+            keyDraft = $0
+            updateProtection?.setBlocked(!$0.isEmpty, owner: editorOwner)
+        })
+    }
+
+    private func clearKeyDraft() {
+        keyDraft = ""
+        keyError = nil
+        updateProtection?.endEditing(owner: editorOwner)
     }
 
     private func step<Content: View>(

@@ -78,8 +78,10 @@ struct DashboardRootView: View {
     var chatStore: ChatStore? = nil
     var openChatWindow: (() -> Void)? = nil
     @ObservedObject var navigation: DashboardNavigation
-    @StateObject private var chatDraft = ChatDraftState()
+    private let updateProtection: AppUpdateEditorProtection?
+    @StateObject private var chatDraft: ChatDraftState
     @StateObject private var settingsDraft: ProviderSettingsDraftState
+    @StateObject private var hostingDraft: HostingSettingsDraftState
     @AppStorage("sidebar.monitor.expanded") private var monitorExpanded = true
     @AppStorage("sidebar.workspace.expanded") private var workspaceExpanded = true
     @AppStorage("sidebar.diagnostics.expanded") private var diagnosticsExpanded = true
@@ -93,7 +95,10 @@ struct DashboardRootView: View {
         chatStore: ChatStore? = nil,
         openChatWindow: (() -> Void)? = nil,
         navigation: DashboardNavigation,
-        settingsDraft: ProviderSettingsDraftState? = nil
+        settingsDraft: ProviderSettingsDraftState? = nil,
+        chatDraft: ChatDraftState? = nil,
+        hostingDraft: HostingSettingsDraftState? = nil,
+        updateProtection: AppUpdateEditorProtection? = nil
     ) {
         self.store = store
         self.controlStore = controlStore
@@ -101,7 +106,10 @@ struct DashboardRootView: View {
         self.chatStore = chatStore
         self.openChatWindow = openChatWindow
         self.navigation = navigation
+        self.updateProtection = updateProtection
         _settingsDraft = StateObject(wrappedValue: settingsDraft ?? ProviderSettingsDraftState())
+        _chatDraft = StateObject(wrappedValue: chatDraft ?? ChatDraftState())
+        _hostingDraft = StateObject(wrappedValue: hostingDraft ?? HostingSettingsDraftState(options: hostingStore?.options ?? .default))
     }
 
     var body: some View {
@@ -132,7 +140,8 @@ struct DashboardRootView: View {
                 DashboardOverviewView(store: store, controlStore: controlStore)
             } else if navigation.selected == .chat {
                 if let chatStore {
-                    ChatView(store: chatStore, openPopOut: openChatWindow, draft: chatDraft, isVisible: store.dashboardVisible)
+                    ChatView(store: chatStore, openPopOut: openChatWindow, draft: chatDraft,
+                        isVisible: store.dashboardVisible, updateProtection: updateProtection)
                         .id(ObjectIdentifier(chatStore))
                 } else {
                     ContentUnavailableView(
@@ -154,7 +163,7 @@ struct DashboardRootView: View {
                 }
             } else if navigation.selected == .hosting {
                 if let hostingStore {
-                    HostingSettingsView(store: hostingStore)
+                    HostingSettingsView(store: hostingStore, draft: hostingDraft, updateProtection: updateProtection)
                 } else {
                     ContentUnavailableView(
                         "Hosting unavailable",
@@ -174,7 +183,8 @@ struct DashboardRootView: View {
                     controlStore: controlStore,
                     monitorStore: store,
                     selection: navigation.settingsPage,
-                    draft: settingsDraft
+                    draft: settingsDraft,
+                    updateProtection: updateProtection
                 )
             } else {
                 HealthView(store: store)
@@ -182,7 +192,7 @@ struct DashboardRootView: View {
         }
         .toolbar {
             if let nudge = store.inactivityNudge {
-                PopupNudgeControl(store: nudge)
+                PopupNudgeControl(store: nudge, updateProtection: updateProtection)
                     .labelStyle(.titleAndIcon)
             }
             Button { settingsExpanded = true; navigation.selected = .settings } label: { Label("Settings", systemImage: "gearshape") }

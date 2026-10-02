@@ -5,6 +5,7 @@ import SwiftUI
 struct PopupAutoModeControl: View {
     @ObservedObject var store: ProviderControlStore
     let openModels: () -> Void
+    var updateProtection: AppUpdateEditorProtection? = nil
     @State private var showsSetup = false
 
     var body: some View {
@@ -18,7 +19,7 @@ struct PopupAutoModeControl: View {
         .help("Advertise selected models with one slot and a chosen startup model")
         .accessibilityIdentifier("popover.auto")
         .sheet(isPresented: $showsSetup) {
-            PopupAutoModeSetup(store: store, openModels: openModels)
+            PopupAutoModeSetup(store: store, openModels: openModels, updateProtection: updateProtection)
         }
     }
 }
@@ -26,9 +27,14 @@ struct PopupAutoModeControl: View {
 private struct PopupAutoModeSetup: View {
     @ObservedObject var store: ProviderControlStore
     let openModels: () -> Void
+    var updateProtection: AppUpdateEditorProtection? = nil
     @Environment(\.dismiss) private var dismiss
-    @State private var preferredModelID = ""
+    @State private var planDraft = PopupAutoPlanDraft()
+    @State private var editorOwner = UUID()
+    @State private var isMounted = false
     @State private var saved = false
+
+    private var preferredModelID: String { planDraft.preferredModelID }
 
     private var candidates: [ModelInventoryItem] {
         store.snapshot?.inventory.myCatalog.filter {
@@ -49,14 +55,13 @@ private struct PopupAutoModeSetup: View {
                 Section("Startup plan") {
                     LabeledContent("Model slots", value: "1 · Recommended")
                     LabeledContent("Selected models", value: (store.draft?.original.enabled.count ?? 0).formatted())
-                    Picker("Preload at startup", selection: $preferredModelID) {
+                    Picker("Preload at startup", selection: protectedPlanBinding) {
                         Text("Choose a model").tag("")
                         ForEach(candidates, id: \.catalogID) { model in
                             Text(model.displayName).tag(model.catalogID)
                         }
                     }
                     .accessibilityIdentifier("popover.auto.preload")
-                    .onChange(of: preferredModelID) { _, _ in saved = false }
                     Text("The coordinator can send work to any selected model. Bloomy enables startup preload for the model you choose; other models load on demand.")
                         .font(.callout).foregroundStyle(.secondary)
                     Button("Choose selected models…") {
@@ -67,10 +72,15 @@ private struct PopupAutoModeSetup: View {
                 }
                 Section {
                     Button("Save Auto plan") {
+                        let requestedModelID = preferredModelID
+                        let revision = planDraft.revision
                         Task {
-                            await store.configureAutomaticMode(preferredModelID: preferredModelID)
-                            saved = store.errorMessage == nil && store.draft?.hasChanges == false
-                                && store.savedAutomaticStartupModelID == preferredModelID
+                            await store.configureAutomaticMode(preferredModelID: requestedModelID)
+                            let verified = store.errorMessage == nil && store.draft?.hasChanges == false
+                                && store.savedAutomaticStartupModelID == requestedModelID
+                            guard isMounted else { return }
+                            saved = verified && planDraft.didSave(modelID: requestedModelID, revision: revision)
+                            updateProtection?.setBlocked(planDraft.hasChanges, owner: editorOwner)
                         }
                     }
                     .disabled(store.automaticModeUnavailableReason(preferredModelID: preferredModelID) != nil)
@@ -106,10 +116,52 @@ private struct PopupAutoModeSetup: View {
         }
         .padding(20)
         .frame(width: 540, height: 560)
+        .onAppear { isMounted = true }
+        .onDisappear {
+            isMounted = false
+            updateProtection?.endEditing(owner: editorOwner)
+        }
         .task {
             await store.refreshPreservingDraft()
-            preferredModelID = candidates.first(where: \.isPreloaded)?.catalogID
-                ?? candidates.first?.catalogID ?? ""
+            guard !Task.isCancelled, isMounted else { return }
+            planDraft.initialize(modelID: candidates.first(where: \.isPreloaded)?.catalogID
+                ?? candidates.first?.catalogID ?? "")
         }
+    }
+
+    private var protectedPlanBinding: Binding<String> {
+        Binding(get: { preferredModelID }, set: {
+            planDraft.edit(modelID: $0)
+            saved = false
+            updateProtection?.setBlocked(planDraft.hasChanges, owner: editorOwner)
+        })
+    }
+}
+
+/// The suggested startup choice is clean. Only a deliberate changed selection
+/// blocks an update, and older save completions cannot consume newer choices.
+struct PopupAutoPlanDraft {
+    private(set) var preferredModelID = ""
+    private var baselineModelID = ""
+    private(set) var revision: UInt64 = 0
+
+    var hasChanges: Bool { preferredModelID != baselineModelID }
+
+    mutating func initialize(modelID: String) {
+        guard revision == 0 else { return }
+        preferredModelID = modelID
+        baselineModelID = modelID
+    }
+
+    mutating func edit(modelID: String) {
+        preferredModelID = modelID
+        revision &+= 1
+    }
+
+    @discardableResult
+    mutating func didSave(modelID: String, revision: UInt64) -> Bool {
+        guard self.revision == revision, preferredModelID == modelID else { return false }
+        baselineModelID = modelID
+        return true
     }
 }

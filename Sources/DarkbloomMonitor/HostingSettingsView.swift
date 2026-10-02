@@ -7,14 +7,25 @@ import SwiftUI
 /// an app-owned inference server or writes hosting values into provider.toml.
 struct HostingSettingsView: View {
     @ObservedObject var store: HostingSettingsStore
-    @State private var portText = ""
-    @State private var customAddressText = ""
+    @StateObject private var draft: HostingSettingsDraftState
+    private let updateProtection: AppUpdateEditorProtection?
+    @State private var tokenEditorOwner = UUID()
     @State private var customAddressError: String?
     @State private var copiedCommand = false
     @State private var bearerTokenText = ""
 
+    init(
+        store: HostingSettingsStore,
+        draft: HostingSettingsDraftState? = nil,
+        updateProtection: AppUpdateEditorProtection? = nil
+    ) {
+        self.store = store
+        _draft = StateObject(wrappedValue: draft ?? HostingSettingsDraftState(options: store.options))
+        self.updateProtection = updateProtection
+    }
+
     private var isPortValid: Bool {
-        guard let port = UInt16(portText) else { return false }
+        guard let port = UInt16(draft.portText) else { return false }
         return port > 0
     }
 
@@ -23,13 +34,29 @@ struct HostingSettingsView: View {
     }
 
     private var standaloneCommandMatchesDraft: Bool {
-        store.cliSupportsHosting && isPortValid && UInt16(portText) == store.options.port
+        store.cliSupportsHosting && isPortValid && UInt16(draft.portText) == store.options.port
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
+
+                if draft.hasUnsavedEdits(comparedTo: store.options) {
+                    HStack {
+                        Text("Port or address input has not been saved.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Button("Discard input edits") {
+                            draft.discardInputEdits(comparedTo: store.options)
+                            customAddressError = nil
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Restore port and address text to the saved settings.")
+                        .accessibilityIdentifier("hosting.discardInputEdits")
+                    }
+                }
 
                 if let error = store.errorMessage {
                     HostingNotice(
@@ -63,11 +90,16 @@ struct HostingSettingsView: View {
         }
         .accessibilityIdentifier("hosting.page")
         .onAppear {
-            portText = String(store.options.port)
-            if store.options.bindScope == .specificInterface {
-                customAddressText = store.options.bindAddress
-            }
+            draft.synchronize(to: store.options)
+            updateProtection?.setBlocked(!bearerTokenText.isEmpty, owner: tokenEditorOwner)
             store.refreshEnvironment()
+        }
+        .onChange(of: store.options) { _, options in
+            draft.synchronize(to: options)
+        }
+        .onDisappear {
+            bearerTokenText = ""
+            updateProtection?.endEditing(owner: tokenEditorOwner)
         }
         .confirmationDialog(
             store.exposureConfirmationTitle,
@@ -251,20 +283,16 @@ struct HostingSettingsView: View {
                 HStack(alignment: .center, spacing: 14) {
                     Label("Port", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
                         .font(.headline)
-                    TextField(String(HostingOptions.defaultPort), text: $portText)
+                    TextField(String(HostingOptions.defaultPort), text: portBinding)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 110)
                         .monospacedDigit()
                         .accessibilityLabel("Local endpoint port")
                         .accessibilityIdentifier("hosting.port")
-                        .onChange(of: portText) { _, value in
-                            _ = store.setPortText(value)
-                            store.clearErrorMessage()
-                        }
                     Text("Default \(String(HostingOptions.defaultPort))")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                    if !portText.isEmpty && !isPortValid {
+                    if !draft.portText.isEmpty && !isPortValid {
                         Label("Enter 1–65,535", systemImage: "exclamationmark.circle.fill")
                             .font(.caption)
                             .foregroundStyle(.red)
@@ -325,13 +353,13 @@ struct HostingSettingsView: View {
                             }
 
                             HStack(spacing: 10) {
-                                TextField("Enter an active IPv4 address", text: $customAddressText)
+                                TextField("Enter an active IPv4 address", text: $draft.customAddressText)
                                     .textFieldStyle(.roundedBorder)
                                     .font(.callout.monospacedDigit())
                                     .accessibilityLabel("Custom local interface address")
                                     .accessibilityIdentifier("hosting.bind.customAddress")
                                 Button("Use address") { useCustomAddress() }
-                                    .disabled(customAddressText == store.options.bindAddress)
+                                    .disabled(draft.customAddressText == store.options.bindAddress)
                                     .accessibilityIdentifier("hosting.bind.useCustomAddress")
                             }
                             if let customAddressError {
@@ -406,20 +434,22 @@ struct HostingSettingsView: View {
                 }
 
                 HStack(spacing: 10) {
-                    SecureField("Set a custom bearer token", text: $bearerTokenText)
+                    SecureField("Set a custom bearer token", text: bearerTokenBinding)
                         .textFieldStyle(.roundedBorder)
                         .accessibilityIdentifier("hosting.auth.bearerToken")
-                        .onChange(of: bearerTokenText) { _, _ in
-                            store.clearErrorMessage()
-                        }
                     Button("Save token") {
                         if store.saveBearerToken(bearerTokenText) {
-                            bearerTokenText = ""
+                            clearBearerTokenInput()
                         }
                     }
                     .buttonStyle(.bordered)
                     .disabled(!LocalEndpointTokenFile.isValidBearerToken(bearerTokenText))
                     .accessibilityIdentifier("hosting.auth.saveToken")
+                    if !bearerTokenText.isEmpty {
+                        Button("Clear input") { clearBearerTokenInput() }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("hosting.auth.clearTokenInput")
+                    }
                 }
                 Text("16–256 letters, numbers, or - . _ ~ + / =. Saved as `~/.darkbloom/local_token` with private file permissions—not in app preferences.")
                     .font(.caption)
@@ -660,6 +690,35 @@ struct HostingSettingsView: View {
         return pending.bindScope == .allInterfaces ? "Expose on all interfaces" : "Allow LAN access"
     }
 
+    private var portBinding: Binding<String> {
+        Binding(
+            get: { draft.portText },
+            set: { value in
+                draft.portText = value
+                _ = store.setPortText(value)
+                store.clearErrorMessage()
+            }
+        )
+    }
+
+    private var bearerTokenBinding: Binding<String> {
+        Binding(
+            get: { bearerTokenText },
+            set: { value in
+                // Register before assigning text, so an updater cannot observe
+                // an unprotected edit while SwiftUI schedules its next render.
+                updateProtection?.setBlocked(!value.isEmpty, owner: tokenEditorOwner)
+                bearerTokenText = value
+                store.clearErrorMessage()
+            }
+        )
+    }
+
+    private func clearBearerTokenInput() {
+        bearerTokenText = ""
+        updateProtection?.endEditing(owner: tokenEditorOwner)
+    }
+
     private var authenticationBinding: Binding<Bool> {
         Binding(
             get: { store.options.requiresAuthentication },
@@ -685,7 +744,7 @@ struct HostingSettingsView: View {
             }
             _ = store.setBindAddress(address)
             if preset == .specificInterface {
-                customAddressText = address
+                draft.customAddressText = address
             }
         } label: {
             HStack(alignment: .top, spacing: 10) {
@@ -724,19 +783,19 @@ struct HostingSettingsView: View {
     }
 
     private func selectAddress(_ address: String) {
-        customAddressText = address
+        draft.customAddressText = address
         customAddressError = nil
         _ = store.setBindAddress(address)
     }
 
     private func useCustomAddress() {
-        guard HostingAddressPolicy.isSupportedBindAddress(customAddressText),
-              HostingAddressPolicy.bindScope(for: customAddressText) == .specificInterface
+        guard HostingAddressPolicy.isSupportedBindAddress(draft.customAddressText),
+              HostingAddressPolicy.bindScope(for: draft.customAddressText) == .specificInterface
         else {
             customAddressError = "Enter a valid RFC 1918 LAN or Tailscale IPv4 address."
             return
         }
-        _ = store.setBindAddress(customAddressText)
+        _ = store.setBindAddress(draft.customAddressText)
         customAddressError = nil
     }
 }

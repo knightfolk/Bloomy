@@ -372,6 +372,11 @@ private final class FixtureModel: ObservableObject {
     let directory: URL
     let focusDiagnostics: FixtureFocusDiagnostics
     let navigation: DashboardNavigation
+    let settingsDraft = ProviderSettingsDraftState()
+    let chatDraft = ChatDraftState()
+    let popupSettingsDraft = ProviderSettingsDraftState()
+    let updateProtection = AppUpdateEditorProtection()
+    let hostingDraft: HostingSettingsDraftState
     var presentDashboard: ((DashboardDestination?, SettingsPage?) -> Void)?
     lazy var popup = FixturePopoverController(model: self)
     @Published var monitor: MonitorStore
@@ -399,6 +404,7 @@ private final class FixtureModel: ObservableObject {
         navigation = DashboardNavigation(defaults: defaults)
         let stores = Self.makeStores(.fresh, defaults: defaults, directory: directory)
         monitor = stores.0; control = stores.1; hosting = stores.2; chat = stores.3
+        hostingDraft = HostingSettingsDraftState(options: stores.2.options)
     }
     private static func makeStores(_ scenario: FixtureScenario, defaults: UserDefaults, directory: URL) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore) {
         let tokens = FixtureTokens()
@@ -592,7 +598,8 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
                 openSettings: { [weak self] page in self?.navigate(.settings, settingsPage: page) },
                 openDashboard: { [weak self] in self?.navigate() },
                 openModels: { [weak self] in self?.navigate(.models) },
-                openHosting: { [weak self] in self?.navigate(.hosting) })
+                openHosting: { [weak self] in self?.navigate(.hosting) },
+                updateProtection: model.updateProtection, popupSettingsDraft: model.popupSettingsDraft)
             popover.contentViewController = NSHostingController(rootView: content)
             popover.contentSize = NSSize(width: 560, height: 430)
         }
@@ -688,22 +695,27 @@ private struct FixturePopoverContent: View {
     let openDashboard: () -> Void
     let openModels: () -> Void
     let openHosting: () -> Void
+    let updateProtection: AppUpdateEditorProtection
+    let popupSettingsDraft: ProviderSettingsDraftState
 
     init(store: MonitorStore, control: ProviderControlStore, visibility: PopoverVisibility,
          defaults: UserDefaults, openSettings: @escaping (SettingsPage?) -> Void,
          openDashboard: @escaping () -> Void, openModels: @escaping () -> Void,
-         openHosting: @escaping () -> Void) {
+         openHosting: @escaping () -> Void, updateProtection: AppUpdateEditorProtection,
+         popupSettingsDraft: ProviderSettingsDraftState) {
         self.store = store; self.control = control; self.visibility = visibility
         self.defaults = defaults
         _appearance = AppStorage(wrappedValue: "light", ApplicationAppearance.defaultsKey, store: defaults)
         self.openSettings = openSettings; self.openDashboard = openDashboard
         self.openModels = openModels; self.openHosting = openHosting
+        self.updateProtection = updateProtection; self.popupSettingsDraft = popupSettingsDraft
     }
 
     var body: some View {
         MonitorPopover(store: store, isVisible: visibility.isVisible,
             ownsVisibleFanPolling: false, openSettings: openSettings,
-            openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
+            openDashboard: openDashboard, openModels: openModels, openHosting: openHosting,
+            updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft)
             .environmentObject(control)
             .defaultAppStorage(defaults)
             .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
@@ -947,7 +959,8 @@ private struct FixtureReviewView: View {
                 FixtureChatVerificationControls(model: model, chat: model.chat)
                 if let issue = model.issue { Text(issue).foregroundStyle(.red).padding(6) }
                 DashboardRootView(store: model.monitor, controlStore: model.control, hostingStore: model.hosting,
-                    chatStore: model.chat, navigation: model.navigation)
+                    chatStore: model.chat, navigation: model.navigation, settingsDraft: model.settingsDraft,
+                    chatDraft: model.chatDraft, hostingDraft: model.hostingDraft, updateProtection: model.updateProtection)
                     .overlay { if !model.ready { ProgressView("Preparing synthetic sources…").padding().background(.regularMaterial) } }
             }
             .defaultAppStorage(model.defaults)

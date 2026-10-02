@@ -85,7 +85,7 @@ final class ControlAppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
                  untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
         guard !canRelaunch() else { return false }
-        message = "Update ready. Finish or discard edits and pending provider actions to restart Bloomy."
+        message = "Update ready. Finish or discard edits. Bloomy will restart when pending requests and actions finish."
         resumeTask?.cancel()
         resumeTask = Task { @MainActor [weak self] in
             while let self, !self.canRelaunch() {

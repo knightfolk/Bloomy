@@ -85,10 +85,13 @@ struct UnifiedLogTests {
             events.append(event)
         }
 
-        #expect(events.map(\.message) == [
+        // A waiting consumer receives pipe order; queued events use the
+        // newest-first buffer. Consumer scheduling must not decide this test.
+        #expect(events.count == 2)
+        #expect(Set(events.map(\.message)) == Set([
             "Message unavailable (privacy redacted)",
             "Connected to coordinator",
-        ])
+        ]))
     }
 
     @Test("paused stream retains only the newest 100 unique events")

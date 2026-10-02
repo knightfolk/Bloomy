@@ -419,6 +419,8 @@ struct MonitorPopover: View {
     let openDashboard: () -> Void
     let openModels: () -> Void
     let openHosting: () -> Void
+    let updateProtection: AppUpdateEditorProtection?
+    @StateObject private var popupSettingsDraft: ProviderSettingsDraftState
     @State private var showsFans = false
     @State private var pendingSingleModelID: String?
     @State private var pendingSwapModelID: String?
@@ -432,7 +434,9 @@ struct MonitorPopover: View {
         openSettings: @escaping (SettingsPage?) -> Void = { _ in },
         openDashboard: @escaping () -> Void = {},
         openModels: @escaping () -> Void = {},
-        openHosting: @escaping () -> Void = {}
+        openHosting: @escaping () -> Void = {},
+        updateProtection: AppUpdateEditorProtection? = nil,
+        popupSettingsDraft: ProviderSettingsDraftState? = nil
     ) {
         self.store = store
         self.isVisible = isVisible
@@ -441,6 +445,8 @@ struct MonitorPopover: View {
         self.openDashboard = openDashboard
         self.openModels = openModels
         self.openHosting = openHosting
+        self.updateProtection = updateProtection
+        _popupSettingsDraft = StateObject(wrappedValue: popupSettingsDraft ?? ProviderSettingsDraftState())
     }
 
     var body: some View {
@@ -469,9 +475,9 @@ struct MonitorPopover: View {
             .padding(12)
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
             HStack(spacing: 10) {
-                PopupAutoModeControl(store: controlStore, openModels: openModels)
+                PopupAutoModeControl(store: controlStore, openModels: openModels, updateProtection: updateProtection)
                 if let nudge = store.inactivityNudge {
-                    PopupNudgeControl(store: nudge)
+                    PopupNudgeControl(store: nudge, updateProtection: updateProtection)
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 }
@@ -522,7 +528,7 @@ struct MonitorPopover: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showsFans) {
             if let extras = store.providerExtras {
-                PopupFanPanel(extras: extras, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling) { label, mutation in
+                PopupFanPanel(extras: extras, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling, draft: popupSettingsDraft) { label, mutation in
                     await controlStore.performSettingsMutation(label, mutation: mutation)
                 }
             }
@@ -1373,6 +1379,7 @@ struct PopupFanPanel: View {
     @ObservedObject var extras: ProviderExtrasStore
     var isVisible: Bool = true
     var ownsVisibleFanPolling: Bool = true
+    var draft: ProviderSettingsDraftState? = nil
     let performMutation: ProviderExtrasMutationExecutor
     @Environment(\.dismiss) private var dismiss
 
@@ -1384,7 +1391,7 @@ struct PopupFanPanel: View {
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }.padding()
             Form {
-                ProviderFanControlSettingsView(store: extras, performMutation: performMutation, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling, compactPresentation: true)
+                ProviderFanControlSettingsView(store: extras, performMutation: performMutation, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling, compactPresentation: true, draft: draft)
             }.formStyle(.grouped)
         }
         .frame(width: 560, height: 520)

@@ -8,8 +8,12 @@ private final class ChatWindowVisibility: ObservableObject {
 
 private struct VisibleWindowChat: View {
     let store: ChatStore
+    let draft: ChatDraftState
+    let updateProtection: AppUpdateEditorProtection?
     @ObservedObject var visibility: ChatWindowVisibility
-    var body: some View { ChatView(store: store, isVisible: visibility.isVisible) }
+    var body: some View {
+        ChatView(store: store, draft: draft, isVisible: visibility.isVisible, updateProtection: updateProtection)
+    }
 }
 
 /// Retained, resizable pop-out chat window. It hosts the same `ChatStore` as
@@ -18,6 +22,7 @@ private struct VisibleWindowChat: View {
 @MainActor
 final class ChatWindowController: NSWindowController, NSWindowDelegate {
     private let store: ChatStore
+    let chatDraft: ChatDraftState
     private let frameAutosaveName: String?
     private var isTransitioningFullScreen = false
     private let visibility = ChatWindowVisibility()
@@ -25,11 +30,16 @@ final class ChatWindowController: NSWindowController, NSWindowDelegate {
     init(
         store: ChatStore,
         frameAutosaveName: String? = "DarkbloomChatPopOut",
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        updateProtection: AppUpdateEditorProtection? = nil
     ) {
         self.store = store
+        let draft = ChatDraftState()
+        self.chatDraft = draft
         self.frameAutosaveName = frameAutosaveName
-        let content = NSHostingController(rootView: VisibleWindowChat(store: store, visibility: visibility))
+        let content = NSHostingController(rootView: VisibleWindowChat(
+            store: store, draft: draft, updateProtection: updateProtection, visibility: visibility
+        ))
         let window = NSWindow(contentViewController: content)
         window.title = "\(MonitorApplicationIdentity.displayName) — Chat"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -47,6 +57,10 @@ final class ChatWindowController: NSWindowController, NSWindowDelegate {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    var hasUnsavedChatEdits: Bool {
+        chatDraft.hasUnsentText(in: store.conversation?.id)
+    }
 
     func present(activate: Bool = true) {
         if window?.isMiniaturized == true { window?.deminiaturize(nil) }
