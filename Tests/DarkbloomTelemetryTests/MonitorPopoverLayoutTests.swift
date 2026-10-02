@@ -469,14 +469,27 @@ struct MonitorPopoverLayoutTests {
         let suite = "Darkbloom.PopupHeight.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "popover.availableExpanded")
         let now = Date()
         let modelIDs = ["model-a", "model-b", "model-c", "model-d", "model-e", "model-f"]
+        let selectedIDs = Array(modelIDs.prefix(3))
         let store = MonitorStore(service: TelemetryService(
-            source: AutoModeTelemetrySource(now: now, modelIDs: Array(modelIDs.prefix(3)), warmCount: 1), now: { now }),
+            source: AutoModeTelemetrySource(now: now, modelIDs: selectedIDs, warmCount: 1), now: { now }),
             initial: .unavailable(now: now), now: { now })
         await store.refreshTelemetryImmediately()
-        let controlStore = ProviderControlStore(controller: InertSettingsController(sources: .unknown, savedIDs: modelIDs, slots: 1))
+        let controlStore = ProviderControlStore(controller: InertSettingsController(
+            sources: .unknown, savedIDs: selectedIDs, slots: 1, downloadedIDs: modelIDs))
         await controlStore.refresh()
+        // Rendering uses the real clock. A busy full test run can age the frozen
+        // telemetry, so the saved fallback must retain the same selected rows.
+        let savedIDs = try #require(controlStore.snapshot?.inventory.myCatalog.filter(\.isEnabled).map(\.catalogID).sorted())
+        #expect(PopupModelGroups.advertised(snapshot: store.snapshot, control: controlStore.snapshot, now: now) == selectedIDs)
+        #expect(PopupModelGroups.advertised(snapshot: store.snapshot, control: controlStore.snapshot, now: now.addingTimeInterval(11)) == nil)
+        for renderTime in [now, now.addingTimeInterval(11)] {
+            let selected = PopupModelGroups.advertised(snapshot: store.snapshot, control: controlStore.snapshot, now: renderTime) ?? savedIDs
+            #expect(selected == selectedIDs)
+            #expect(Set(modelIDs).subtracting(selected).count == 3)
+        }
         let popover = NSPopover()
         let host = FittingPopoverHostingController(rootView: MonitorPopover(store: store, isVisible: false)
             .environmentObject(controlStore).defaultAppStorage(defaults).id(false), popover: popover)
@@ -514,6 +527,7 @@ struct MonitorPopoverLayoutTests {
             }
             if height == 1_400 {
                 if expanded { #expect(fitted.height > (collapsedHeight ?? 0)) }
+                else if let collapsedHeight { #expect(fitted.height == collapsedHeight) }
                 else { collapsedHeight = fitted.height }
             }
         }
@@ -825,7 +839,9 @@ private struct UnusedError: Error {}
 private actor InertSettingsController: ProviderControlling {
     private let value: ProviderControlSnapshot
 
-    init(sources: ProviderControlSourceStates = .allFresh, savedIDs: [String] = [], slots: Int? = nil) {
+    init(sources: ProviderControlSourceStates = .allFresh, savedIDs: [String] = [], slots: Int? = nil,
+         downloadedIDs: [String]? = nil) {
+        let catalogIDs = downloadedIDs ?? savedIDs
         let selection = ProviderModelSelection(enabled: savedIDs, preloaded: [])
         let draft = ProviderConfigDraft(
             sourceRevision: "layout-fixture",
@@ -857,13 +873,13 @@ private actor InertSettingsController: ProviderControlling {
             ),
         ]
         let inventory = ModelInventoryBuilder.build(
-            catalog: catalog + savedIDs.map { CatalogModel(id: $0, displayName: $0, family: "model", modelType: "llm", capabilities: [], sizeGB: 8, minimumRAMGB: 16, active: true) },
-            local: [LocalModel(
+            catalog: catalog + catalogIDs.map { CatalogModel(id: $0, displayName: $0, family: "model", modelType: "llm", capabilities: [], sizeGB: 8, minimumRAMGB: 16, active: true) },
+            local: (downloadedIDs == nil ? [LocalModel(
                 id: "downloaded-model",
                 modelType: "llm",
                 sizeBytes: 8_500_000_000,
                 estimatedMemoryGB: nil
-            )] + savedIDs.map { LocalModel(id: $0, modelType: "llm", sizeBytes: 8_000_000_000, estimatedMemoryGB: nil) },
+            )] : []) + catalogIDs.map { LocalModel(id: $0, modelType: "llm", sizeBytes: 8_000_000_000, estimatedMemoryGB: nil) },
             selection: selection,
             daemon: nil,
             loadedModels: []

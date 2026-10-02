@@ -128,7 +128,8 @@ struct ProviderResourcesView: View {
     }
 
     private var requestActivityMetric: some View {
-        let presentation = ProviderRequestActivityPresentation.make(daemonState: daemonState)
+        let card = ProviderRequestCardPresentation.make(source: store.snapshot.state, now: Date())
+        let presentation = card.activity
         let requestSubtitle: String = switch presentation.mode {
         case .draining: "left · new work paused"
         case .stopped: "provider not serving"
@@ -156,7 +157,7 @@ struct ProviderResourcesView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if daemonStateIsStale {
+                if card.showsLastReport {
                     Text("Last report")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.orange)
@@ -168,10 +169,10 @@ struct ProviderResourcesView: View {
         .padding(11)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(presentation.detail)
-        .accessibilityValue("\(presentation.value), \(presentation.status)")
+        .accessibilityLabel(card.accessibilityLabel)
+        .accessibilityValue(card.accessibilityValue)
         .accessibilityIdentifier("provider-resource.requests")
-        .help(presentation.detail)
+        .help(card.help)
     }
 
     @ViewBuilder
@@ -219,8 +220,6 @@ struct ProviderResourcesView: View {
         .accessibilityIdentifier("provider-resource.gpu-memory")
     }
 
-    private var daemonState: DaemonState? { store.snapshot.state.value }
-
     private var daemonStateIsStale: Bool {
         HealthPresentation.daemonWarning(store.snapshot.state, at: Date()) != nil
     }
@@ -266,4 +265,27 @@ struct ProviderResourcesView: View {
         case .unavailable: .secondary
         }
     }
+}
+
+/// Preserve the daemon's numeric/mode interpretation while distinguishing a
+/// current observation from retained evidence in every spoken description.
+struct ProviderRequestCardPresentation: Equatable {
+    let activity: ProviderRequestActivityPresentation
+    let showsLastReport: Bool
+
+    static func make(source: SourceAvailability<DaemonState>, now: Date) -> Self {
+        Self(activity: ProviderRequestActivityPresentation.make(daemonState: source.value),
+             showsLastReport: source.value != nil && HealthPresentation.daemonWarning(source, at: now) != nil)
+    }
+
+    var accessibilityLabel: String {
+        guard showsLastReport else { return activity.detail }
+        return "Last reported provider request activity: \(activity.value), \(activity.status). Current activity is unknown."
+    }
+
+    var accessibilityValue: String {
+        "\(showsLastReport ? "Last report, " : "")\(activity.value), \(activity.status)"
+    }
+
+    var help: String { accessibilityLabel }
 }

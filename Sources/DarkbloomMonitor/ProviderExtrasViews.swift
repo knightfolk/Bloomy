@@ -1,6 +1,162 @@
 import DarkbloomTelemetry
 import SwiftUI
 
+struct ProviderThermalPresentation: Equatable {
+    enum Freshness: Equatable {
+        case current, stale, invalid, unavailable
+
+        var readingQualifier: String? {
+            switch self {
+            case .current, .unavailable: nil
+            case .stale: "Last observed"
+            case .invalid: "Unverified"
+            }
+        }
+
+        static func make(capturedAt: Date, maximumAge: TimeInterval, at now: Date) -> Self {
+            let age = now.timeIntervalSince(capturedAt)
+            guard age.isFinite, age >= 0 else { return .invalid }
+            return age <= maximumAge ? .current : .stale
+        }
+    }
+
+    enum HelperPosture: Equatable {
+        case active, waiting, disabled, notLoaded, unavailable, unverified
+        case lastActive, lastWaiting, lastDisabled, lastNotLoaded
+
+        var message: String {
+            switch self {
+            case .active: "Fan helper is active while the provider is serving."
+            case .waiting: "Fan helper is waiting for provider activity."
+            case .disabled: "Fan helper is disabled."
+            case .notLoaded: "Darkbloom fan helper is not loaded."
+            case .unavailable: "Darkbloom fan helper status is unavailable."
+            case .unverified: "Fan helper activity is unverified."
+            case .lastActive: "Last observed: fan helper was active while the provider was serving."
+            case .lastWaiting: "Last observed: fan helper was waiting for provider activity."
+            case .lastDisabled: "Last observed: fan helper was disabled."
+            case .lastNotLoaded: "Last observed: fan helper was not loaded."
+            }
+        }
+    }
+
+    struct FanReading: Equatable, Identifiable {
+        let reading: ProviderFanReading
+        let actualRPM: Double
+        let freshness: Freshness
+        var id: Int { reading.index }
+        var index: Int { reading.index }
+    }
+
+    let status: ProviderFanStatus
+    let cliFreshness: Freshness
+    let helperFreshness: Freshness
+    let displayedTemperatureCelsius: Double?
+    let displayedFans: [FanReading]
+    let temperatureFreshness: Freshness
+    let readingsAreStale: Bool
+    let helperPosture: HelperPosture
+
+    var hasReadings: Bool { displayedTemperatureCelsius != nil || !displayedFans.isEmpty }
+
+    var fanFreshness: Freshness {
+        if displayedFans.contains(where: { $0.freshness == .invalid }) { return .invalid }
+        if displayedFans.contains(where: { $0.freshness == .stale }) { return .stale }
+        return displayedFans.isEmpty ? .unavailable : .current
+    }
+
+    static func make(from source: SourceAvailability<ProviderFanStatus>?, at now: Date) -> Self? {
+        let status: ProviderFanStatus
+        let cliFreshness: Freshness
+        switch source {
+        case .available(let value, let capturedAt):
+            status = value
+            cliFreshness = Freshness.make(capturedAt: capturedAt, maximumAge: ProviderExtrasSnapshot.maximumSourceAge, at: now)
+        case .stale(let value, let capturedAt, _):
+            status = value
+            let timestamp = Freshness.make(capturedAt: capturedAt, maximumAge: ProviderExtrasSnapshot.maximumSourceAge, at: now)
+            cliFreshness = timestamp == .invalid ? .invalid : .stale
+        case .unavailable, nil:
+            return nil
+        }
+        let helperFreshness = status.helper.map {
+            Freshness.make(capturedAt: $0.updatedAt, maximumAge: ProviderFanStatus.maximumHelperAge, at: now)
+        } ?? .unavailable
+        let helperIsCurrent = helperFreshness == .current && !status.helperErrorPresent && status.loaded
+        let diagnosticIsCurrent = cliFreshness == .current && !status.diagnosticErrorPresent
+        let temperature: Double?
+        let temperatureFreshness: Freshness
+        // Select each reading independently. A current diagnostic temperature
+        // must not erase a last-known RPM, or vice versa.
+        if helperIsCurrent, let value = status.helper?.gpuTemperatureCelsius {
+            temperature = value
+            temperatureFreshness = cliFreshness
+        } else if diagnosticIsCurrent, let value = status.diagnostic.gpuTemperatures.first?.celsius {
+            temperature = value
+            temperatureFreshness = .current
+        } else {
+            temperature = status.displayedTemperatureCelsius
+            temperatureFreshness = temperature == nil ? .unavailable
+                : cliFreshness == .invalid || (status.helper?.gpuTemperatureCelsius != nil && helperFreshness == .invalid) ? .invalid : .stale
+        }
+        let helperFans = status.helper?.fans ?? []
+        let diagnosticFans = status.diagnostic.fans
+        let fanIndices = Set(helperFans.map(\.index) + diagnosticFans.map(\.index)).sorted()
+        let fans: [FanReading] = fanIndices.compactMap { index in
+            let helper = helperFans.first { $0.index == index && usableRPM($0.actualRPM) }
+            let diagnostic = diagnosticFans.first { $0.index == index && usableRPM($0.actualRPM) }
+            let reading: ProviderFanReading
+            let freshness: Freshness
+            if helperIsCurrent, let helper {
+                reading = helper
+                freshness = cliFreshness
+            } else if diagnosticIsCurrent, let diagnostic {
+                reading = diagnostic
+                freshness = .current
+            } else if let helper {
+                reading = helper
+                freshness = cliFreshness == .invalid || helperFreshness == .invalid ? .invalid : .stale
+            } else if let diagnostic {
+                reading = diagnostic
+                freshness = cliFreshness == .invalid ? .invalid : .stale
+            } else {
+                return nil
+            }
+            guard let rpm = reading.actualRPM else { return nil }
+            return FanReading(reading: reading, actualRPM: rpm, freshness: freshness)
+        }
+        let readingsAreStale = cliFreshness != .current
+            || (temperature != nil && temperatureFreshness != .current)
+            || fans.contains(where: { $0.freshness != .current })
+        let posture: HelperPosture
+        if cliFreshness == .invalid {
+            posture = .unverified
+        } else if !status.loaded {
+            posture = cliFreshness == .current ? .notLoaded : .lastNotLoaded
+        } else if status.helperErrorPresent || status.helper == nil {
+            posture = cliFreshness == .current ? .unavailable : .unverified
+        } else if helperFreshness == .invalid {
+            posture = .unverified
+        } else if let helper = status.helper {
+            let current = cliFreshness == .current && helperIsCurrent
+            if !helper.enabled { posture = current ? .disabled : .lastDisabled }
+            else if helper.providerActive { posture = current ? .active : .lastActive }
+            else { posture = current ? .waiting : .lastWaiting }
+        } else {
+            posture = .unverified
+        }
+        return Self(status: status, cliFreshness: cliFreshness, helperFreshness: helperFreshness,
+                    displayedTemperatureCelsius: temperature, displayedFans: fans,
+                    temperatureFreshness: temperatureFreshness,
+                    readingsAreStale: readingsAreStale, helperPosture: posture)
+    }
+
+    private static func usableRPM(_ value: Double?) -> Bool {
+        guard let value else { return false }
+        return value.isFinite && (0...100_000).contains(value)
+    }
+}
+
 /// Compact read-only temperature and fan readings from the official CLI.
 struct ProviderThermalView: View {
     @ObservedObject var store: ProviderExtrasStore
@@ -10,15 +166,9 @@ struct ProviderThermalView: View {
         TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 5), isVisible: isVisible)) { _ in
             let now = Date()
             Group {
-                switch store.snapshot?.fanStatus {
-                case .available(let status, let capturedAt):
-                    content(
-                        status: status.helperIsFresh(at: now) ? status : status.withoutHelper(),
-                        stale: !Self.isFresh(capturedAt: capturedAt, at: now) || (!status.helperIsFresh(at: now) && status.diagnostic.fans.isEmpty && status.diagnostic.gpuTemperatures.isEmpty)
-                    )
-                case .stale(let status, _, _):
-                    content(status: status, stale: true)
-                case .unavailable, nil:
+                if let presentation = ProviderThermalPresentation.make(from: store.snapshot?.fanStatus, at: now) {
+                    content(presentation)
+                } else {
                     Label("Fan telemetry unavailable", systemImage: "thermometer.medium")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -28,39 +178,38 @@ struct ProviderThermalView: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func content(status: ProviderFanStatus, stale: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private func content(_ presentation: ProviderThermalPresentation) -> some View {
+        let status = presentation.status
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Label("Thermals", systemImage: "thermometer.medium")
                     .font(.headline)
-                if stale {
+                if presentation.readingsAreStale {
                     Text("Stale")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.orange)
-                } else if status.diagnostic.supported {
+                } else if status.diagnostic.supported && presentation.hasReadings {
                     Text("Live")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
             }
             HStack(spacing: 14) {
-                if let temperature = status.displayedTemperatureCelsius {
-                    Label(Self.temperature(temperature), systemImage: "flame")
-                        .monospacedDigit()
+                if let temperature = presentation.displayedTemperatureCelsius {
+                    Self.readingLabel(Self.temperature(temperature), systemImage: "flame",
+                        accessibilityName: "Temperature", freshness: presentation.temperatureFreshness)
                 }
-                ForEach(status.displayedFans) { fan in
-                    if let rpm = fan.actualRPM {
-                        Label("Fan \(fan.index + 1) \(Self.rpm(rpm))", systemImage: "wind")
-                            .monospacedDigit()
-                    }
+                ForEach(presentation.displayedFans) { fan in
+                    Self.readingLabel("Fan \(fan.index + 1) \(Self.rpm(fan.actualRPM))", systemImage: "wind",
+                        freshness: fan.freshness)
                 }
-                if status.displayedTemperatureCelsius == nil && status.displayedFans.isEmpty {
+                if !presentation.hasReadings {
                     Text(status.diagnostic.supported ? "Waiting for sensor readings" : "Unsupported hardware")
                         .foregroundStyle(.secondary)
                 }
             }
             .font(.callout)
-            Text(Self.posture(status))
+            Text(presentation.helperPosture.message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -76,22 +225,21 @@ struct ProviderThermalView: View {
         String(format: "%.0f RPM", value)
     }
 
-    private static func isFresh(capturedAt: Date, at now: Date) -> Bool {
-        let age = now.timeIntervalSince(capturedAt)
-        return age.isFinite && age >= 0 && age <= ProviderExtrasSnapshot.maximumSourceAge
+    static func readingLabel(_ value: String, systemImage: String, accessibilityName: String = "",
+                             freshness: ProviderThermalPresentation.Freshness) -> some View {
+        let qualifier = freshness.readingQualifier
+        return VStack(alignment: .leading, spacing: 2) {
+            Label(value, systemImage: systemImage)
+                .monospacedDigit()
+                .fixedSize(horizontal: true, vertical: false)
+            if let qualifier {
+                Text(qualifier).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(accessibilityName.isEmpty ? "" : accessibilityName + " ")\(value)\(qualifier.map { ". \($0) reading." } ?? "")")
     }
 
-    private static func posture(_ status: ProviderFanStatus) -> String {
-        guard status.loaded else {
-            return "Darkbloom fan helper is not loaded."
-        }
-        guard let helper = status.helper else {
-            return "Darkbloom fan helper status is unavailable."
-        }
-        return helper.providerActive
-            ? "Fan helper is active while the provider is serving."
-            : "Fan helper is waiting for provider activity."
-    }
 }
 
 /// Nonsecret edit buffers for one settings surface. The dashboard retains this

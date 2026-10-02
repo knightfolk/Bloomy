@@ -72,7 +72,7 @@ struct PopupFanSummary: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Fan helper and live cooling readings")
+        .help("Fan helper and cooling readings")
         .accessibilityIdentifier("popup.fans")
         .task(id: isVisible && ownsVisibleFanPolling) {
             guard isVisible && ownsVisibleFanPolling else { return }

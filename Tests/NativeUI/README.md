@@ -140,6 +140,14 @@ by 90 seconds and omits diagnostic readings, exposing the last-known fallback.
 **Unavailable settings** supplies first-read failures with no prior good extras
 data; it does not imply an unsupported CLI. All three scenarios use inert clients
 and their Refresh actions preserve the selected condition.
+**Partial cooling** keeps the CLI capture and diagnostic temperature current,
+but expires a two-fan helper journal. The diagnostic includes fan 1 metadata
+without RPM and a measured fan 2 RPM, exercising per-fan retention and freshness.
+**Disabled helper** supplies current readings with helper enabled=false and
+providerActive=true, exercising precedence of the disabled state.
+**Unavailable runtime** has no daemon observation or authoritative stopped
+status; it must show unknown activity rather than a stopped zero or Last report.
+These are inert presentation scenarios, not changes to a running provider.
 The banner controls switch Light/Dark and window content sizes 800 × 560 and
 1280 × 900. Appearance settings share the same isolated preference suite.
 **Static menu-bar activity** asks the review label to retain a stationary active

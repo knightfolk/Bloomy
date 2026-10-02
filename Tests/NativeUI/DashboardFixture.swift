@@ -7,15 +7,16 @@ import SwiftUI
 enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case fresh = "Fresh", stale = "Stale", staleCatalog = "Stale catalog", offline = "Offline"
     case expiredSettings = "Expired settings", expiredHelper = "Expired helper", unavailableSettings = "Unavailable settings"
+    case partialCooling = "Partial cooling", disabledHelper = "Disabled helper", unavailableRuntime = "Unavailable runtime"
     var id: String { rawValue }
-    var hasCurrentRuntime: Bool { self != .stale && self != .offline }
+    var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
     func availability<T: Equatable & Sendable>(_ value: T, at date: Date) -> SourceAvailability<T> {
         switch self {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper:
             .available(value: value, capturedAt: date)
         case .stale: .stale(value: value, capturedAt: date, reason: "Synthetic source stopped refreshing")
-        case .offline: .unavailable(reason: "Synthetic source offline")
+        case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic source unavailable")
         }
     }
 }
@@ -78,7 +79,10 @@ private enum FixtureData {
 
 private struct FixtureTelemetrySource: TelemetrySource {
     let scenario: FixtureScenario
-    func readDaemonState() async throws -> DaemonState { FixtureData.snapshot(scenario, now: Date()).state.value! }
+    func readDaemonState() async throws -> DaemonState {
+        guard let value = FixtureData.snapshot(scenario, now: Date()).state.value else { throw FixtureError.offline }
+        return value
+    }
     func readLoadedModels() async throws -> LoadedModelsState {
         guard let value = FixtureData.snapshot(scenario, now: Date()).loadedModels.value else { throw FixtureError.offline }; return value
     }
@@ -95,10 +99,10 @@ private struct FixtureEarnings: AccountEarningsFetching {
     let scenario: FixtureScenario
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
-        case .offline: .unavailable(reason: "Synthetic account source offline")
+        case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
         }
     }
     func jobCompletionSummary(now: Date, calendar: Calendar) async throws -> JobCompletionSummary? {
@@ -248,15 +252,21 @@ private actor FixtureExtras: ProviderExtrasProviding {
                 fanStatus: .unavailable(reason: "Synthetic first read failed"),
                 autoUpdateStatus: .unavailable(reason: "Synthetic first read failed"))
         }
-        let helperDate = scenario == .expiredHelper ? now.addingTimeInterval(-90) : date
-        let fans = [ProviderFanReading(index: 0, actualRPM: 2_200, targetRPM: 2_200, minimumRPM: 1_200, maximumRPM: 5_200, mode: "automatic")]
+        let helperExpired = scenario == .expiredHelper || scenario == .partialCooling
+        let helperDate = helperExpired ? now.addingTimeInterval(-90) : date
+        let fans = (0..<(scenario == .partialCooling ? 2 : 1)).map {
+            ProviderFanReading(index: $0, actualRPM: 2_200, targetRPM: 2_200, minimumRPM: 1_200, maximumRPM: 5_200, mode: "automatic")
+        }
         let fan = ProviderFanStatus(capability: ProviderFanStatus.controlCapability, installed: true, loaded: true,
-            helper: ProviderFanHelperStatus(enabled: true, providerActive: true, mode: "automatic", chip: "Synthetic",
+            helper: ProviderFanHelperStatus(enabled: scenario != .disabledHelper, providerActive: true, mode: "automatic", chip: "Synthetic",
                 gpuTemperatureCelsius: 54, triggerTemperatureCelsius: 65, releaseTemperatureCelsius: 55,
                 speedPercent: 80, fans: fans, updatedAt: helperDate),
             diagnostic: ProviderFanDiagnostic(chip: "Synthetic", supported: true,
-                gpuTemperatures: scenario == .expiredHelper ? [] : [ProviderFanTemperature(key: "Synthetic GPU", celsius: 54)],
-                fans: scenario == .expiredHelper ? [] : fans),
+                gpuTemperatures: scenario == .expiredHelper ? [] : [ProviderFanTemperature(key: "Synthetic GPU", celsius: scenario == .partialCooling ? 42 : 54)],
+                fans: scenario == .partialCooling
+                    ? [ProviderFanReading(index: 0, actualRPM: nil, targetRPM: nil, minimumRPM: 1_200, maximumRPM: 5_200, mode: "automatic"),
+                       ProviderFanReading(index: 1, actualRPM: 1_200, targetRPM: nil, minimumRPM: 1_200, maximumRPM: 5_200, mode: "automatic")]
+                    : helperExpired ? [] : fans),
             helperErrorPresent: false, diagnosticErrorPresent: false)
         return ProviderExtrasSnapshot(capturedAt: date,
             idlePolicy: scenario.availability(ProviderIdlePolicy(idleTimeoutMinutes: minutes, policy: "idle_timeout", summary: "Free after \(minutes) minutes idle", pinned: false), at: date),
