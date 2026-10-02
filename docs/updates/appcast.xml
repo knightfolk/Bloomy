@@ -3,6 +3,34 @@
     <channel>
         <title>Bloomy</title>
         <item>
+            <title>1.9.13</title>
+            <pubDate>Thu, 01 Oct 2026 17:46:56 -0700</pubDate>
+            <sparkle:version>138</sparkle:version>
+            <sparkle:shortVersionString>1.9.13</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Bloomy v1.9.13
+
+Activity now has separate Earnings and Metrics tabs. Local performance history
+records measured serving speed, observed active time, provider request and token
+counter increases, GPU use, model transitions, and native Autopilot phases.
+Missing readings, provider restarts and counter resets remain explicit gaps.
+
+Recording continues while Bloomy runs, even with the dashboard closed. Private
+storage retains up to 30 days / 100,000 structured observations, retries failed
+writes, and shows recording errors. Prompts, responses, API keys and raw logs are
+excluded. No telemetry is uploaded.
+
+Activity model filters now have consistent dimensions and spacing. Chart controls
+align cleanly, and the new Metrics view supports narrow and wide windows, model
+filters, local refresh, and 24-hour, 7-day and 30-day periods.
+
+Autopilot phase is read-only and recognizes Darkbloom 0.9.16's shadow rollout.
+This release does not enable Autopilot or change provider model settings.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/Bloomy/releases/download/v1.9.13/Bloomy-1.9.13-mac-arm64.zip" length="8784436" type="application/octet-stream" sparkle:edSignature="4NoFk5Gebg6MTerxWRCuWmDv9ec1sYeiAUzuoAlI2eBP/xNb0/+bwmpJwzxCBL+f/xeFR+5vVX7HPuTmZH8SBw=="/>
+        </item>
+        <item>
             <title>1.9.12</title>
             <pubDate>Wed, 30 Sep 2026 10:40:54 -0700</pubDate>
             <sparkle:version>137</sparkle:version>
