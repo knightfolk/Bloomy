@@ -376,6 +376,13 @@ private struct ProviderAdvancedSettingsHost: View {
         Group {
             switch page {
             case .provider:
+                ProviderAutopilotSettingsView(
+                    store: extras,
+                    control: control,
+                    performMutation: performMutation,
+                    isVisible: isVisible,
+                    draft: draft
+                )
                 ProviderAdvancedSettingsView(
                     store: extras,
                     performMutation: performMutation,

@@ -229,15 +229,49 @@ private actor FixtureSeries: NetworkSeriesFetching {
         return NetworkSeriesSnapshot(buckets: buckets, bucketSeconds: 3_600, startAt: start, endAt: end, updatedAt: date, capturedAt: date)
     }
 }
+private enum FixtureAutopilotMode: String, CaseIterable, Sendable {
+    case off = "Off", shadow = "Observing", active = "Active", paused = "Paused"
+    case waiting = "Waiting", mismatch = "Unconfirmed", unavailable = "Unavailable"
+    case blockedPreload = "Preload needs repair"
+}
+
+private actor FixtureAutopilot {
+    private var mode: FixtureAutopilotMode = .off
+    private var enrollmentCount = 0
+    private var policyCount = 0
+    func setMode(_ value: FixtureAutopilotMode) { mode = value }
+    func read() -> SourceAvailability<ProviderAutopilotStatus> {
+        guard mode != .unavailable else { return .unavailable(reason: "Synthetic Autopilot read failed") }
+        let enabled = mode != .off && mode != .blockedPreload
+        return .available(value: .init(configuredEnabled: enabled, consentRecorded: enabled,
+            configuredPaused: mode == .paused, selectedModels: enabled ? FixtureData.modelIDs : [],
+            pinnedModels: [], configuredRevision: "fixture",
+            live: enabled ? .init(protocolVersion: 3, enabled: true, active: mode == .active,
+                observeOnly: mode == .shadow, paused: mode == .paused, cachedOnly: true,
+                revision: mode == .mismatch ? "old" : "fixture") : nil,
+            phase: mode == .active ? .active : mode == .paused ? .paused : mode == .waiting ? .waiting : .shadow),
+            capturedAt: Date())
+    }
+    func enroll() { enrollmentCount += 1; mode = .shadow }
+    func setupIsBlocked() -> Bool { mode == .blockedPreload }
+    func apply(_ action: ProviderAutopilotPolicyAction) {
+        policyCount += 1
+        mode = action == .disable ? .off : action == .pause ? .paused : .shadow
+    }
+    func proof() -> [String: Int] { ["synthetic": 1, "enrollmentCount": enrollmentCount, "policyCount": policyCount] }
+}
+
 private actor FixtureController: ProviderControlling {
     let scenario: FixtureScenario
+    let autopilot: FixtureAutopilot
     private var removedModels = Set<String>()
     var selection = ProviderModelSelection(enabled: Array(FixtureData.modelIDs.prefix(3)), preloaded: Array(FixtureData.modelIDs.prefix(2)))
     var slots = 3
     var startupPreload: Bool? = true
     var concurrent = 4
-    init(scenario: FixtureScenario) {
+    init(scenario: FixtureScenario, autopilot: FixtureAutopilot) {
         self.scenario = scenario
+        self.autopilot = autopilot
         if scenario == .aliasStartup {
             // Use the catalog's actual unique family alias independently of
             // the exact preload selector.
@@ -285,6 +319,18 @@ private actor FixtureController: ProviderControlling {
     func delete(_ localModelID: String) async throws {}
     func activityRisk() async -> ProviderActivityRisk { .idle }
     func execute(_ action: ProviderLifecycleAction, enabledModels: [String]) async throws {}
+    func performAutopilotEnrollment(hosting: HostingOptions,
+        onPhase: ProviderMutationPhaseObserver?) async throws -> ProviderAutopilotEnrollmentCompletion {
+        if await autopilot.setupIsBlocked() {
+            throw ProviderControlError.inventoryUnavailable(
+                "Saved preload aliases would lose their enabled match during enrollment. In Models, clear those preloads or reselect the exact downloaded model IDs, save, then retry."
+            )
+        }
+        await autopilot.enroll()
+        await onPhase?(.reconciling)
+        return .init(controls: .refreshed(try await refresh()), status: await autopilot.read(),
+            commandSucceeded: true, savedPolicyPreserved: true)
+    }
 }
 private enum FixtureFanReadback: String, CaseIterable, Identifiable, Sendable {
     case held = "Original policy", missing = "Failed readback", matching = "Confirm submission"
@@ -301,6 +347,7 @@ private struct FixtureFanProof: Codable, Sendable {
 
 private actor FixtureExtras: ProviderExtrasProviding {
     let scenario: FixtureScenario
+    let autopilot: FixtureAutopilot
     private let frozenAt = Date()
     var minutes = 30
     var mtp = false
@@ -314,7 +361,11 @@ private actor FixtureExtras: ProviderExtrasProviding {
             submittedSpeedPercent: submittedFanPolicy?.speedPercent,
             submittedTemperatureCelsius: submittedFanPolicy?.triggerTemperatureCelsius)
     }
-    init(scenario: FixtureScenario) { self.scenario = scenario }
+    init(scenario: FixtureScenario, autopilot: FixtureAutopilot) { self.scenario = scenario; self.autopilot = autopilot }
+    func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus> { await autopilot.read() }
+    func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws { await autopilot.apply(action) }
+    func setAutopilotMode(_ value: FixtureAutopilotMode) async { await autopilot.setMode(value) }
+    func autopilotProof() async -> [String: Int] { await autopilot.proof() }
     func refresh() async -> ProviderExtrasSnapshot {
         let now = Date()
         let date = scenario == .frozenSettings ? frozenAt : scenario == .stale ? now.addingTimeInterval(-900)
@@ -324,7 +375,8 @@ private actor FixtureExtras: ProviderExtrasProviding {
                 idlePolicy: .unavailable(reason: "Synthetic first read failed"),
                 betaFeatures: .unavailable(reason: "Synthetic first read failed"),
                 fanStatus: .unavailable(reason: "Synthetic first read failed"),
-                autoUpdateStatus: .unavailable(reason: "Synthetic first read failed"))
+                autoUpdateStatus: .unavailable(reason: "Synthetic first read failed"),
+                autopilotStatus: .unavailable(reason: "Synthetic first read failed"))
         }
         let helperExpired = scenario == .expiredHelper || scenario == .partialCooling
         let helperDate = helperExpired ? now.addingTimeInterval(-90) : date
@@ -343,13 +395,16 @@ private actor FixtureExtras: ProviderExtrasProviding {
                        ProviderFanReading(index: 1, actualRPM: 1_200, targetRPM: nil, minimumRPM: 1_200, maximumRPM: 5_200, mode: "automatic")]
                     : helperExpired ? [] : fans),
             helperErrorPresent: false, diagnosticErrorPresent: false)
+        let autopilotSource = await autopilot.read()
+        let observedAutopilot = autopilotSource.value.map { scenario.availability($0, at: date) } ?? autopilotSource
         return ProviderExtrasSnapshot(capturedAt: date,
             idlePolicy: scenario.availability(ProviderIdlePolicy(idleTimeoutMinutes: minutes, policy: "idle_timeout", summary: "Free after \(minutes) minutes idle", pinned: false), at: date),
             betaFeatures: scenario.availability([ProviderBetaFeature(id: "mtp", title: "Multi-token prediction", state: mtp ? .on : .auto,
                 enabled: mtp ? true : nil, requiresRestart: true, summary: "Synthetic setting for eligible models.")], at: date),
             fanStatus: scenario == .fanConfirmation && fanReadback == .missing && submittedFanPolicy != nil
                 ? .unavailable(reason: "Synthetic fan readback failed") : scenario.availability(fan, at: date),
-            autoUpdateStatus: scenario.availability(ProviderAutoUpdateStatus(enabled: autoUpdate), at: date))
+            autoUpdateStatus: scenario.availability(ProviderAutoUpdateStatus(enabled: autoUpdate), at: date),
+            autopilotStatus: observedAutopilot)
     }
     func saveIdle(minutes: Int) async throws { self.minutes = minutes }
     func setBeta(id: String, enabled: Bool) async throws { mtp = enabled }
@@ -616,9 +671,10 @@ private final class FixtureModel: ObservableObject {
     private static func makeStores(_ scenario: FixtureScenario, defaults: UserDefaults, directory: URL,
         capacityCapturedAt: Date? = nil) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore, FixtureExtras, FixtureController, FixtureEarnings, FixtureLogFeed) {
         let tokens = FixtureTokens()
-        let controller = FixtureController(scenario: scenario)
+        let autopilot = FixtureAutopilot()
+        let controller = FixtureController(scenario: scenario, autopilot: autopilot)
         let control = ProviderControlStore(controller: controller, homeDirectory: directory, hostingOptions: { .default })
-        let extrasClient = FixtureExtras(scenario: scenario)
+        let extrasClient = FixtureExtras(scenario: scenario, autopilot: autopilot)
         let extras = ProviderExtrasStore(client: extrasClient)
         let earningsClient = FixtureEarnings(scenario: scenario)
         let seededAt = Date()
@@ -655,6 +711,16 @@ private final class FixtureModel: ObservableObject {
         guard ready, !isTerminating else { return }
         await controllerClient.removeGemmaFromInventory()
         await control.refreshPreservingDraft()
+    }
+    func setAutopilotMode(_ value: FixtureAutopilotMode) async {
+        guard ready, !isTerminating else { return }
+        await extrasClient.setAutopilotMode(value)
+        await monitor.providerExtras?.refreshAutopilot()
+    }
+    func saveAutopilotProof() async {
+        if let data = try? JSONEncoder().encode(await extrasClient.autopilotProof()) {
+            try? data.write(to: directory.appendingPathComponent("fixture-autopilot-proof.json"), options: .atomic)
+        }
     }
     func setNetworkExpiryReview(_ enabled: Bool) async {
         networkExpiryReview = enabled
@@ -1593,6 +1659,13 @@ private struct FixtureReviewView: View {
                     .frame(width: 210)
                     .help("Synthetic popup height budget only; the Mac's screen and preferences stay unchanged.")
                     Menu("Data checks") {
+                        Menu("Synthetic Autopilot") {
+                            ForEach(FixtureAutopilotMode.allCases, id: \.self) { mode in
+                                Button(mode.rawValue) { Task { await model.setAutopilotMode(mode) } }
+                            }
+                            Divider()
+                            Button("Save action counts") { Task { await model.saveAutopilotProof() } }
+                        }
                         Button(model.cacheProofStatus) { model.runCacheVisibilityProof() }
                             .disabled(model.proofRunning || !model.ready || navigation.selected != .overview)
                         Button(model.chatFocusProofStatus) { model.runChatFocusProof() }

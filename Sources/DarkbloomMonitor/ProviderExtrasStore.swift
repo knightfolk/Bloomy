@@ -60,6 +60,10 @@ final class ProviderExtrasStore: ObservableObject {
     var visibleFanSubscriberCount: Int { visibleFanSubscribers.count }
     var currentDate: Date { now() }
 
+    var autopilotEvidenceIsFresh: Bool {
+        ProviderSettingsFreshnessPolicy.isFresh(snapshot?.autopilotStatus, at: now())
+    }
+
     var autoUpdateEvidenceIsFresh: Bool {
         ProviderSettingsFreshnessPolicy.isFresh(snapshot?.autoUpdateStatus, at: now())
     }
@@ -112,8 +116,11 @@ final class ProviderExtrasStore: ObservableObject {
         let verificationDue = age.map { !$0.isFinite || $0 < 0 || $0 >= staticVerificationInterval } ?? true
         if snapshot == nil || verificationDue || staticSourcesNeedRetry {
             await refresh()
-        } else if visibleFanSubscribers.isEmpty {
-            await refreshFan()
+        } else {
+            if visibleFanSubscribers.isEmpty { await refreshFan() }
+            // A visible fan read owns the shared gate. Background work must
+            // not wait for it; the next existing tick retries Autopilot status.
+            if refreshTask == nil { await refreshAutopilot() }
         }
     }
 
@@ -189,7 +196,8 @@ final class ProviderExtrasStore: ObservableObject {
                 betaFeatures: current.betaFeatures,
                 fanStatus: Self.retainLastGood(fan, previous: current.fanStatus,
                     reason: "Darkbloom fan status refresh failed"),
-                autoUpdateStatus: current.autoUpdateStatus
+                autoUpdateStatus: current.autoUpdateStatus,
+                autopilotStatus: current.autopilotStatus
             )
         }
         refreshTask = task
@@ -197,6 +205,59 @@ final class ProviderExtrasStore: ObservableObject {
         if refreshGeneration == generation {
             refreshTask = nil
             isRefreshing = false
+        }
+    }
+
+    /// Shares the existing polling/refresh gate; no independent timer is created.
+    func refreshAutopilot() async {
+        guard !Task.isCancelled, !mutationInFlight else { return }
+        guard snapshot != nil else { await refresh(); return }
+        if let previous = refreshTask { await previous.value }
+        guard !Task.isCancelled, !mutationInFlight, refreshTask == nil else { return }
+        isRefreshing = true
+        refreshIncludesStatic = false
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
+        let client = self.client
+        let task = Task { @MainActor [weak self] in
+            let status = await client.refreshAutopilot()
+            guard let self, !Task.isCancelled, self.refreshGeneration == generation,
+                  let current = self.snapshot else { return }
+            self.snapshot = ProviderExtrasSnapshot(
+                capturedAt: current.capturedAt, idlePolicy: current.idlePolicy,
+                betaFeatures: current.betaFeatures, fanStatus: current.fanStatus,
+                autoUpdateStatus: current.autoUpdateStatus,
+                autopilotStatus: Self.retainLastGood(status, previous: current.autopilotStatus,
+                    reason: "Darkbloom Autopilot refresh failed")
+            )
+        }
+        refreshTask = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        if refreshGeneration == generation { refreshTask = nil; isRefreshing = false }
+    }
+
+    func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws {
+        try requireFreshEvidence(snapshot?.autopilotStatus)
+        guard snapshot?.autopilotStatus?.value?.allows(action) == true,
+              !mutationInFlight else { throw ProviderExtrasMutationError.commandFailed }
+        mutationInFlight = true
+        errorMessage = nil
+        defer { mutationInFlight = false }
+        var commandConfirmed = false
+        do {
+            try await client.setAutopilotPolicy(action)
+            commandConfirmed = true
+        } catch {
+            // A cancellation or command failure can follow a persisted write.
+        }
+        // Store-level reconciliation must outlive the originating view/task as
+        // well as the client's command readback. Await an uncancelled task so
+        // refresh's cancellation handler cannot discard its fresh merge.
+        await Task.detached { await self.refresh(force: true) }.value
+        guard commandConfirmed, autopilotEvidenceIsFresh,
+              snapshot?.autopilotStatus?.value?.confirms(action) == true else {
+            errorMessage = "Autopilot change could not be confirmed. Refresh before trying again."
+            throw ProviderExtrasMutationError.commandFailed
         }
     }
 
@@ -386,6 +447,10 @@ final class ProviderExtrasStore: ObservableObject {
                 refreshed.autoUpdateStatus,
                 previous: previous?.autoUpdateStatus,
                 reason: "Darkbloom automatic-update status refresh failed"
+            ),
+            autopilotStatus: mergeOptional(
+                refreshed.autopilotStatus, previous: previous?.autopilotStatus,
+                reason: "Darkbloom Autopilot refresh failed"
             )
         )
     }

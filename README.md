@@ -19,6 +19,15 @@ change the model this Mac advertises when fresh demand, earnings, power, and
 idle-state evidence support a meaningful estimated gain. Both wait when the
 evidence is incomplete. Neither can promise public work or income.
 
+**Settings → Provider → Autopilot** offers experimental opt-in directly in
+Bloomy. Enable opens a consent sheet, checks the downloaded model selection,
+and uses the supported provider startup internally; no terminal command or
+interactive startup selector is required. Enrollment reports eligible cached
+network models and does not itself activate live control. The status separates
+shadow observation, active control, pause, and pending confirmation. Pause keeps
+enrollment; Leave removes it. Accepted transitions may finish after either action.
+Bloomy's optional profit switching defers while native Autopilot owns model selection.
+
 Open **Diagnostics → Action History** for persistent nudge outcomes, provider
 and model actions, and reported account-wide jobs and base rewards. History is
 kept locally for up to 30 days or 5,000 entries, without credentials or prompt
@@ -94,6 +103,7 @@ explicit, off-by-default setting with its own evidence and timing checks.
 - Separate whole-Mac GPU utilization and measured fan-speed rings, with fresh temperature coloring
 - Concurrency selections from 1–24 and resident-model limits staged together with model selections
 - Clear saved-state labels for idle-memory, beta, and electricity settings
+- App-native experimental Autopilot opt-in, pause/resume and leave controls
 - Starting/Restarting progress that blocks repeated clicks until fresh telemetry arrives
 - Signed automatic and manual Control updates, a separate CLI update notice,
   and an explicit automatic CLI-update setting
@@ -283,6 +293,14 @@ Idle-memory and beta controls use official CLI commands and require a restart to
 apply. They share the model/lifecycle action gate and cannot overwrite a staged
 model draft. Automatic CLI updates use `darkbloom autoupdate` and apply when the
 provider next starts.
+
+Autopilot uses the official enrollment path and preserves saved preload,
+capacity, memory, schedule and hosting preferences. A saved preload alias that
+would become invalid after startup is refused before changing anything; select
+an exact downloaded startup model in Models first. All enabled models must be
+present and eligible. Status changes are confirmed by readback; missing or stale
+evidence stays explicit and disables writes until refreshed. There is no app
+control that promotes shadow mode to live control; the coordinator owns rollout.
 
 Fan controls use only the official experimental CLI helper. Enable/configure are
 limited to the CLI's 60–90% target and a validated temperature threshold; every

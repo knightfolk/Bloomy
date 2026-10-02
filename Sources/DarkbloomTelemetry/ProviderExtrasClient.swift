@@ -2,6 +2,8 @@ import Foundation
 
 public protocol ProviderExtrasProviding: Sendable {
     func refresh() async -> ProviderExtrasSnapshot
+    func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus>
+    func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws
     func refreshFan() async -> SourceAvailability<ProviderFanStatus>
     func saveIdle(minutes: Int) async throws
     func setBeta(id: String, enabled: Bool) async throws
@@ -13,6 +15,14 @@ public protocol ProviderExtrasProviding: Sendable {
 }
 
 public extension ProviderExtrasProviding {
+    func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus> {
+        .unavailable(reason: "Darkbloom Autopilot is unavailable")
+    }
+
+    func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws {
+        throw ProviderExtrasMutationError.commandFailed
+    }
+
     func refreshFan() async -> SourceAvailability<ProviderFanStatus> {
         await refresh().fanStatus
     }
@@ -42,6 +52,14 @@ public enum ProviderFanMutationAction: String, Equatable, Sendable {
 }
 
 public enum ProviderExtrasCommand {
+    public static func autopilotStatus(executable: URL, config: URL) -> ProcessCommand {
+        ProcessCommand(executable: executable, arguments: ["autopilot", "status", "--json", "--config", config.path])
+    }
+
+    public static func setAutopilotPolicy(executable: URL, config: URL, action: ProviderAutopilotPolicyAction) -> ProcessCommand {
+        ProcessCommand(executable: executable, arguments: ["autopilot", action.rawValue, "--config", config.path])
+    }
+
     public static func idleStatus(executable: URL, config: URL) -> ProcessCommand {
         ProcessCommand(
             executable: executable,
@@ -218,7 +236,8 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
                 idlePolicy: .unavailable(reason: "Darkbloom idle policy is unavailable"),
                 betaFeatures: .unavailable(reason: "Darkbloom beta features are unavailable"),
                 fanStatus: .unavailable(reason: "Darkbloom fan status is unavailable"),
-                autoUpdateStatus: nil
+                autoUpdateStatus: nil,
+                autopilotStatus: .unavailable(reason: "Darkbloom Autopilot is unavailable")
             )
         }
 
@@ -226,13 +245,15 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
         async let beta = readBeta(executable: executable, capturedAt: capturedAt)
         async let fan = readFan(executable: executable)
         async let autoUpdate = readAutoUpdate(executable: executable, capturedAt: capturedAt)
+        async let autopilot = refreshAutopilot()
 
         return await ProviderExtrasSnapshot(
             capturedAt: capturedAt,
             idlePolicy: idle,
             betaFeatures: beta,
             fanStatus: fan,
-            autoUpdateStatus: autoUpdate
+            autoUpdateStatus: autoUpdate,
+            autopilotStatus: autopilot
         )
     }
 
@@ -310,6 +331,63 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
 
     public func uninstallFan() async throws {
         try await runFanMutation(action: .uninstall)
+    }
+
+    public func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus> {
+        guard let executable = resolveExecutable() else {
+            return .unavailable(reason: "Darkbloom Autopilot is unavailable")
+        }
+        do {
+            let result = try await run(ProviderExtrasCommand.autopilotStatus(executable: executable, config: policy.providerConfig))
+            guard result.exitCode == 0 else { throw ProviderExtrasParseError.invalidPayload }
+            var value = try ProviderExtrasParser.parseAutopilot(result.standardOutput)
+            let capturedAt = now()
+            guard capturedAt.timeIntervalSince1970.isFinite else { throw ProviderExtrasParseError.invalidValue }
+            if value.live != nil && !autopilotDaemonMatches(at: capturedAt) {
+                value = value.withoutLiveEvidence()
+            }
+            return .available(value: value, capturedAt: capturedAt)
+        } catch {
+            return .unavailable(reason: "Darkbloom Autopilot is unavailable")
+        }
+    }
+
+    private func autopilotDaemonMatches(at date: Date) -> Bool {
+        guard let data = try? Data(contentsOf: policy.daemonState),
+              data.count <= DarkbloomSourcePolicy.processOutputByteLimit,
+              let daemon = try? DaemonStateParser.parse(data), let path = daemon.configPath,
+              URL(fileURLWithPath: path).standardizedFileURL == policy.providerConfig.standardizedFileURL else { return false }
+        let age = date.timeIntervalSince1970 - daemon.writtenAt
+        return age.isFinite && age >= 0 && age <= ProviderControlSourceState.maximumEvidenceAge
+    }
+
+    public func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws {
+        guard let executable = resolveExecutable() else { throw ProviderExtrasMutationError.executableUnavailable }
+        // Read immediately before dispatch. Cached UI evidence is never the write authority.
+        guard case .available(let before, _) = await refreshAutopilot(), before.allows(action) else {
+            throw ProviderExtrasMutationError.commandFailed
+        }
+        let beforeConfig = try ProviderConfigDocument(data: Data(contentsOf: policy.providerConfig))
+        let beforePolicy = try ProviderAutopilotPreservationBaseline.read(policy.providerConfig)
+        var commandSucceeded = false
+        do {
+            try await runMutation(ProviderExtrasCommand.setAutopilotPolicy(executable: executable, config: policy.providerConfig, action: action))
+            commandSucceeded = true
+        } catch {
+            // A command can persist policy before a failed live notification.
+        }
+        let after = await Task.detached { await self.refreshAutopilot() }.value
+        let afterConfig = try? ProviderConfigDocument(data: Data(contentsOf: policy.providerConfig))
+        let afterPolicy = try? ProviderAutopilotPreservationBaseline.read(policy.providerConfig)
+        guard afterConfig?.selection == beforeConfig.selection,
+              (afterConfig?.maxModelSlots ?? 3) == (beforeConfig.maxModelSlots ?? 3),
+              (afterConfig?.startupPreload ?? true) == (beforeConfig.startupPreload ?? true),
+              (afterConfig?.engineV2MaxConcurrent ?? 4) == (beforeConfig.engineV2MaxConcurrent ?? 4),
+              afterPolicy == beforePolicy, commandSucceeded, case .available(let status, _) = after,
+              status.confirms(action), status.selectedModels == before.selectedModels,
+              status.pinnedModels == before.pinnedModels else {
+            throw ProviderExtrasMutationError.commandFailed
+        }
     }
 
     private func resolveExecutable() -> URL? {
@@ -483,7 +561,8 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
             idlePolicy: .unavailable(reason: "Darkbloom idle policy is unavailable"),
             betaFeatures: .unavailable(reason: "Darkbloom beta features are unavailable"),
             fanStatus: .unavailable(reason: "Darkbloom fan status is unavailable"),
-            autoUpdateStatus: nil
+            autoUpdateStatus: nil,
+                autopilotStatus: .unavailable(reason: "Darkbloom Autopilot is unavailable")
         )
     }
 }

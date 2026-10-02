@@ -118,13 +118,15 @@ public enum DarkbloomCommand {
         executable: URL,
         config: URL,
         models: [String],
-        hosting: HostingOptions = .default
+        hosting: HostingOptions = .default,
+        autopilot: Bool = false
     ) -> ProcessCommand {
         precondition(hosting.isValid, "Hosting options must be validated before dispatch")
         var args = [
             "start", "--config", config.path,
             "--timeout", String(DarkbloomSourcePolicy.lifecycleDrainTimeoutSeconds),
         ]
+        if autopilot { args.append("--autopilot") }
         for model in models { args += ["--model", model] }
         args += hosting.startArguments
         return ProcessCommand(executable: executable, arguments: args)

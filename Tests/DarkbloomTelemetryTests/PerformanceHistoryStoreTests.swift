@@ -147,10 +147,11 @@ struct PerformanceHistoryStoreTests {
 
     @Test("malformed optional Autopilot phase does not break old daemon decoding")
     func optionalAutopilotPhase() throws {
-        for phase: Any in ["active", "waiting_inventory", "waiting_inventory_SECRET", "SECRET provider prose", 42, NSNull()] {
+        for phase: Any in ["active", "waiting_inventory", "waiting_inventory_SECRET", "SECRET provider prose", 42, true, ["unexpected": true], NSNull()] {
             let state = try state(now: Date(), active: false, phase: phase)
             let expected = (phase as? String).flatMap { ["active", "waiting_inventory"].contains($0) ? $0 : nil }
             #expect(state.autopilotPhase == expected)
+            #expect(state.autopilotPhaseIsUnrecognized == (!(phase is NSNull) && expected == nil))
             #expect(state.currentModel == "gemma")
             let text = String(decoding: try JSONEncoder().encode(PerformanceSample.capture(
                 try snapshot(now: Date(), active: false, phase: phase), at: Date())), as: UTF8.self)

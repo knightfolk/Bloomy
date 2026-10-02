@@ -53,6 +53,9 @@ public struct DaemonState: Equatable, Sendable {
     public let runtimeCapabilities: [String]?
     /// Canonical read-only native Autopilot phase. Absence is unknown.
     public let autopilotPhase: String?
+    /// Preserve presence of an unrecognized phase without retaining its prose.
+    /// Automatic consumers must not mistake a future mode for an older schema.
+    public let autopilotPhaseIsUnrecognized: Bool
 
     public var loadFailures: [ModelLoadFailure] { modelLoadFailures }
 
@@ -79,7 +82,8 @@ public struct DaemonState: Equatable, Sendable {
         availability: ProviderAvailabilityState? = nil,
         configPath: String? = nil,
         runtimeCapabilities: [String]? = nil,
-        autopilotPhase: String? = nil
+        autopilotPhase: String? = nil,
+        autopilotPhaseIsUnrecognized: Bool = false
     ) {
         self.schema = schema
         self.version = version
@@ -104,6 +108,8 @@ public struct DaemonState: Equatable, Sendable {
         self.configPath = configPath
         self.runtimeCapabilities = runtimeCapabilities
         self.autopilotPhase = autopilotPhase.flatMap { KnownAutopilotPhase.contains($0) ? $0 : nil }
+        self.autopilotPhaseIsUnrecognized = autopilotPhaseIsUnrecognized
+            || (autopilotPhase.map { !KnownAutopilotPhase.contains($0) } ?? false)
     }
 }
 

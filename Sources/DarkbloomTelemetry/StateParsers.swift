@@ -102,7 +102,8 @@ public enum DaemonStateParser {
             runtimeCapabilities: raw.runtimeCapabilities.map {
                 Array($0.compactMap(safeCapability).prefix(64))
             },
-            autopilotPhase: raw.autopilotPhase
+            autopilotPhase: raw.autopilotPhase,
+            autopilotPhaseIsUnrecognized: raw.autopilotPhaseIsUnrecognized
         )
     }
 
@@ -168,6 +169,7 @@ private struct RawDaemonState: Decodable {
     let configPath: String?
     let runtimeCapabilities: [String]?
     let autopilotPhase: String?
+    let autopilotPhaseIsUnrecognized: Bool
 
     enum CodingKeys: String, CodingKey {
         case schema, stats, version, trust, pid, capacity, slots
@@ -214,6 +216,8 @@ private struct RawDaemonState: Decodable {
         configPath = try values.decodeIfPresent(String.self, forKey: .configPath)
         runtimeCapabilities = try values.decodeIfPresent([String].self, forKey: .runtimeCapabilities)
         autopilotPhase = try? values.decode(String.self, forKey: .autopilotPhase)
+        autopilotPhaseIsUnrecognized = values.contains(.autopilotPhase)
+            && (try? values.decodeNil(forKey: .autopilotPhase)) != true && autopilotPhase == nil
     }
 }
 

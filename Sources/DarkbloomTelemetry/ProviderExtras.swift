@@ -274,19 +274,22 @@ public struct ProviderExtrasSnapshot: Equatable, Sendable {
     public let betaFeatures: SourceAvailability<[ProviderBetaFeature]>
     public let fanStatus: SourceAvailability<ProviderFanStatus>
     public let autoUpdateStatus: SourceAvailability<ProviderAutoUpdateStatus>?
+    public let autopilotStatus: SourceAvailability<ProviderAutopilotStatus>?
 
     public init(
         capturedAt: Date,
         idlePolicy: SourceAvailability<ProviderIdlePolicy>,
         betaFeatures: SourceAvailability<[ProviderBetaFeature]>,
         fanStatus: SourceAvailability<ProviderFanStatus>,
-        autoUpdateStatus: SourceAvailability<ProviderAutoUpdateStatus>? = nil
+        autoUpdateStatus: SourceAvailability<ProviderAutoUpdateStatus>? = nil,
+        autopilotStatus: SourceAvailability<ProviderAutopilotStatus>? = nil
     ) {
         self.capturedAt = capturedAt
         self.idlePolicy = idlePolicy
         self.betaFeatures = betaFeatures
         self.fanStatus = fanStatus
         self.autoUpdateStatus = autoUpdateStatus
+        self.autopilotStatus = autopilotStatus
     }
 
     public var idle: SourceAvailability<ProviderIdlePolicy> { idlePolicy }

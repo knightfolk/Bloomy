@@ -6,6 +6,7 @@ public enum ActionHistoryAction: String, Codable, CaseIterable, Sendable {
     case startProvider, stopProvider, restartProvider, hosting, cooling
     case idleSettings, betaSettings, nudgeSettings, nudgeKey, profitSettings
     case providerUpdates, job, baseReward, watcher
+    case autopilotEnrollment, autopilotPause, autopilotResume, autopilotDisable
 }
 
 public enum ActionHistoryTrigger: String, Codable, CaseIterable, Sendable {

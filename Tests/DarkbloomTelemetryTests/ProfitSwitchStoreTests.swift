@@ -10,6 +10,68 @@ import Testing
 struct ProfitSwitchStoreTests {
     private let start = Date(timeIntervalSince1970: 2_000_000_000)
 
+    @Test("a malformed reported phase cannot become legacy permission to swap")
+    func malformedReportedPhase() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.defaults.removePersistentDomain(forName: fixture.suite) }
+        fixture.store.setEnabled(true)
+        let json: [String: Any] = ["schema": 1, "version": "fixture", "pid": 42,
+            "current_model": "current", "warm_models": ["current"], "advertised_models": ["current"],
+            "stats": ["tokens_generated": 1, "requests_served": 1, "usage_gaps": 0],
+            "inference_active": false, "started_at": start.timeIntervalSince1970 - 7_200,
+            "written_at": start.timeIntervalSince1970,
+            "process_identity": ["pid": 42, "start_time_micros": 1234], "autopilot_phase": 42]
+        let state = try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: json))
+        #expect(state.autopilotPhase == nil)
+        #expect(state.autopilotPhaseIsUnrecognized)
+        fixture.store.observe(telemetry: TelemetrySnapshot(
+            state: .available(value: state, capturedAt: start), loadedModels: .unavailable(reason: "unused"),
+            status: .unavailable(reason: "unused"), eventFeed: .unavailable(reason: "unused"),
+            tokenRate: .unavailable(reason: "unused"), diagnostics: [], capturedAt: start, menuStatus: .online),
+            network: .unavailable(reason: "unused"), profits: [], profitsCapturedAt: nil)
+        #expect(fixture.store.status == "Paused while Autopilot owns model selection.")
+        #expect(await fixture.controller.switches.isEmpty)
+        #expect(fixture.store.lastAttempt == nil)
+    }
+
+    @Test("native Autopilot ownership prevents competing Bloomy swaps",
+          arguments: ["active", "paused", "waiting", "waiting_inventory", "transitioning", "recovering", "future-phase"])
+    func autopilotOwnsSelection(phase: String) async throws {
+        let fixture = try makeFixture()
+        defer { fixture.defaults.removePersistentDomain(forName: fixture.suite) }
+        fixture.store.setEnabled(true)
+        await drive(fixture, through: 3_700, autopilotPhase: phase)
+        #expect(await fixture.controller.switches.isEmpty)
+        #expect(fixture.store.lastAttempt == nil)
+        #expect(fixture.store.enabled)
+        #expect(fixture.store.status == "Paused while Autopilot owns model selection.")
+    }
+
+    @Test("off and shadow modes preserve optional Bloomy profit switching", arguments: ["off", "shadow"])
+    func observationDoesNotOwnSelection(phase: String) async throws {
+        let fixture = try makeFixture()
+        defer { fixture.defaults.removePersistentDomain(forName: fixture.suite) }
+        fixture.store.setEnabled(true)
+        await drive(fixture, through: 3_600, autopilotPhase: phase)
+        await waitForSwitch(fixture.controller)
+        #expect(await fixture.controller.switches == ["candidate"])
+        await fixture.store.stop()
+    }
+
+    @Test("fresh Autopilot ownership discovered after refresh prevents dispatch", arguments: ["active", "future-phase"])
+    func lateOwnership(phase: String) async throws {
+        let fixture = try makeFixture(controllerAutopilotPhase: phase)
+        defer { fixture.defaults.removePersistentDomain(forName: fixture.suite) }
+        fixture.store.setEnabled(true)
+        await drive(fixture, through: 3_600, autopilotPhase: "shadow")
+        // Let the queued refresh/dispatch path run. Cancelling immediately
+        // would make this pass even if the post-refresh ownership guard broke.
+        await waitForSwitch(fixture.controller)
+        await fixture.store.stop()
+        #expect(await fixture.controller.switches.isEmpty)
+        #expect(fixture.store.lastAttempt == nil)
+    }
+
     @Test("switching is off by default")
     func defaultOff() async throws {
         let fixture = try makeFixture()
@@ -148,11 +210,13 @@ struct ProfitSwitchStoreTests {
         defaults providedDefaults: UserDefaults? = nil,
         clock providedClock: ProfitTestClock? = nil,
         switchFails: Bool = false,
-        availableMemoryGB: Double? = 128
+        availableMemoryGB: Double? = 128,
+        controllerAutopilotPhase: String? = nil
     ) throws -> ProfitFixture {
         let defaults = try #require(providedDefaults ?? UserDefaults(suiteName: suite))
         let clock = providedClock ?? ProfitTestClock(start)
-        let controller = ProfitTestController(clock: clock, switchFails: switchFails)
+        let controller = ProfitTestController(clock: clock, switchFails: switchFails,
+            autopilotPhase: controllerAutopilotPhase)
         let warmup = ProfitTestWarmup()
         let control = ProviderControlStore(controller: controller, warmupProbe: warmup, now: { clock.now() })
         let store = ProfitSwitchStore(control: control, defaults: defaults,
@@ -167,11 +231,12 @@ struct ProfitSwitchStoreTests {
         from first: Int = 0,
         through last: Int,
         active: Bool = false,
-        knownCandidateProfit: Bool = true
+        knownCandidateProfit: Bool = true,
+        autopilotPhase: String? = nil
     ) async {
         for second in stride(from: first, through: last, by: 10) {
             await observe(fixture, offset: second, active: active,
-                          knownCandidateProfit: knownCandidateProfit)
+                          knownCandidateProfit: knownCandidateProfit, autopilotPhase: autopilotPhase)
         }
     }
 
@@ -179,12 +244,13 @@ struct ProfitSwitchStoreTests {
         _ fixture: ProfitFixture,
         offset: Int,
         active: Bool = false,
-        knownCandidateProfit: Bool = true
+        knownCandidateProfit: Bool = true,
+        autopilotPhase: String? = nil
     ) async {
         let instant = start.addingTimeInterval(Double(offset))
         fixture.clock.set(instant)
         if fixture.control.snapshot == nil { await fixture.control.refresh() }
-        let state = profitDaemon(at: instant, active: active)
+        let state = profitDaemon(at: instant, active: active, autopilotPhase: autopilotPhase)
         let telemetry = TelemetrySnapshot(
             state: .available(value: state, capturedAt: instant),
             loadedModels: .unavailable(reason: "unused"),
@@ -237,16 +303,18 @@ private final class ProfitTestClock: @unchecked Sendable {
 private actor ProfitTestController: ProviderControlling {
     private let clock: ProfitTestClock
     private let switchFails: Bool
+    private let autopilotPhase: String?
     private var currentModel = "current"
     private(set) var switches: [String] = []
 
-    init(clock: ProfitTestClock, switchFails: Bool) {
+    init(clock: ProfitTestClock, switchFails: Bool, autopilotPhase: String? = nil) {
         self.clock = clock
         self.switchFails = switchFails
+        self.autopilotPhase = autopilotPhase
     }
 
     func refresh() async throws -> ProviderControlSnapshot {
-        profitControlSnapshot(at: clock.now(), model: currentModel)
+        profitControlSnapshot(at: clock.now(), model: currentModel, autopilotPhase: autopilotPhase)
     }
 
     func performSingleModelSwitch(
@@ -283,7 +351,8 @@ private actor ProfitTestWarmup: SelfRouteWarmupProbing {
     }
 }
 
-private func profitDaemon(at date: Date, model: String = "current", active: Bool = false) -> DaemonState {
+private func profitDaemon(at date: Date, model: String = "current", active: Bool = false,
+    autopilotPhase: String? = nil) -> DaemonState {
     DaemonState(
         schema: 1, version: "fixture", currentModel: model, warmModels: [model],
         stats: ProviderStats(tokensGenerated: 1, requestsServed: 1, usageGaps: 0),
@@ -299,11 +368,11 @@ private func profitDaemon(at date: Date, model: String = "current", active: Bool
         startupPreloadPendingModels: [],
         modelSwitch: ProviderModelSwitchState(outcome: .serving, models: [model],
                                               remainingRequests: active ? 1 : 0),
-        runtimeCapabilities: []
+        runtimeCapabilities: [], autopilotPhase: autopilotPhase
     )
 }
 
-private func profitControlSnapshot(at date: Date, model: String) -> ProviderControlSnapshot {
+private func profitControlSnapshot(at date: Date, model: String, autopilotPhase: String? = nil) -> ProviderControlSnapshot {
     let catalog = ["current", "candidate"].map {
         CatalogModel(id: $0, displayName: $0, family: $0, modelType: "text",
                      capabilities: ["text"], sizeGB: 2, minimumRAMGB: 4,
@@ -313,7 +382,7 @@ private func profitControlSnapshot(at date: Date, model: String) -> ProviderCont
         LocalModel(id: $0, modelType: "text", sizeBytes: 1_000, estimatedMemoryGB: 4)
     }
     let selection = ProviderModelSelection(enabled: ["current", "candidate"], preloaded: [])
-    let daemon = profitDaemon(at: date, model: model)
+    let daemon = profitDaemon(at: date, model: model, autopilotPhase: autopilotPhase)
     let source: ProviderControlSourceState = .fresh(evidenceAt: date)
     return ProviderControlSnapshot(
         inventory: ModelInventoryBuilder.build(catalog: catalog, local: local,

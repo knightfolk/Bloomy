@@ -64,6 +64,7 @@ final class ProviderControlStore: ObservableObject {
     @Published private(set) var operation: ProviderOperation = .idle
     @Published private(set) var operationPhase: ProviderMutationPhase?
     @Published private(set) var pendingConfirmation: LifecycleConfirmation?
+    @Published private(set) var autopilotEnrollmentMessage: String?
     @Published private(set) var errorMessage: String?
     @Published private(set) var latestDownloadProgressLine: String?
     @Published private(set) var switchWarmupStatus: SwitchWarmupStatus? { didSet { recordSelectionWarmup() } }
@@ -1078,6 +1079,65 @@ final class ProviderControlStore: ObservableObject {
         await awaitTask(task)
     }
 
+    var autopilotEnrollmentUnavailableReason: String? {
+        guard operation == .idle else { return "Another provider action is in progress." }
+        guard pendingConfirmation == nil else { return "Finish the pending provider action first." }
+        guard draft?.hasChanges != true else { return "Save or discard pending model changes before enrolling." }
+        guard hostingOptions().mode != .standalone else { return "Autopilot requires network provider serving." }
+        return nil
+    }
+
+    /// The native consent sheet authorizes this single graceful startup. Its
+    /// authoritative preflight and reconciliation are owned by the controller.
+    @discardableResult
+    func enrollAutopilot() async -> Bool {
+        guard autopilotEnrollmentUnavailableReason == nil,
+              let generation = begin(.lifecycle(.start), historyAction: .autopilotEnrollment) else { return false }
+        autopilotEnrollmentMessage = nil
+        let controller = self.controller
+        let hosting = hostingOptions()
+        var confirmed = false
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var observedEnrollmentOutcome: ActionHistoryOutcome?
+            defer { finish(generation, observedOutcome: observedEnrollmentOutcome) }
+            do {
+                let completion = try await controller.performAutopilotEnrollment(hosting: hosting,
+                    onPhase: { [weak self] phase in
+                        await self?.advanceMutationPhase(phase, generation: generation)
+                    })
+                observedEnrollmentOutcome = .unconfirmed
+                if let refreshed = completion.controls.snapshot {
+                    accept(refreshed, preserving: draft?.hasChanges == true ? draft : nil)
+                } else {
+                    invalidateActionableSnapshot()
+                }
+                if completion.liveEnrollmentConfirmed {
+                    confirmed = true
+                    observedEnrollmentOutcome = .succeeded
+                    autopilotEnrollmentMessage = "Autopilot enrollment confirmed."
+                } else if completion.savedEnrollmentConfirmed {
+                    autopilotEnrollmentMessage = "Autopilot consent was saved. Refresh to check its current mode."
+                    errorMessage = "Autopilot consent is saved, but live confirmation is pending."
+                } else {
+                    errorMessage = "Autopilot enrollment could not be confirmed. Saved settings were refreshed; review them before retrying."
+                }
+                await refreshTelemetry()
+            } catch let error as ProviderControlError {
+                errorMessage = controlErrorMessage(error, action: "enroll Autopilot")
+            } catch let error as ProviderConfigError {
+                errorMessage = configErrorMessage(error)
+            } catch is CancellationError {
+                errorMessage = "Autopilot enrollment was cancelled before dispatch."
+            } catch {
+                errorMessage = "Autopilot enrollment could not be confirmed. Refresh before trying again."
+            }
+        }
+        currentTask = task
+        await awaitTask(task)
+        return confirmed
+    }
+
     /// Serialize official CLI setting writes with every existing model/lifecycle
     /// operation. A pending confirmation or staged model draft must be resolved
     /// first, because the CLI changes the same TOML revision.
@@ -1086,7 +1146,10 @@ final class ProviderControlStore: ObservableObject {
         failureMessage: String? = nil,
         mutation: @escaping @Sendable () async throws -> Void
     ) async -> Bool {
-        let historyAction: ActionHistoryAction = label == "hosting" ? .hosting
+        let historyAction: ActionHistoryAction = label == "Autopilot pause" ? .autopilotPause
+            : label == "Autopilot resume" ? .autopilotResume
+            : label == "Autopilot disable" ? .autopilotDisable
+            : label == "hosting" ? .hosting
             : label.hasPrefix("fan control") ? .cooling
             : label == "idle memory policy" ? .idleSettings
             : label.hasPrefix("beta ") ? .betaSettings
@@ -1308,7 +1371,7 @@ final class ProviderControlStore: ObservableObject {
         case .deleting(let id): action = .deleteModel; recordedModel = id
         case .lifecycle(let value):
             switch value {
-            case .start: action = .startProvider
+            case .start: action = historyAction ?? .startProvider
             case .stop: action = .stopProvider
             case .restart: action = .restartProvider
             }
@@ -1338,10 +1401,10 @@ final class ProviderControlStore: ObservableObject {
         operationPhase = phase
     }
 
-    private func finish(_ generation: UInt64) {
+    private func finish(_ generation: UInt64, observedOutcome: ActionHistoryOutcome? = nil) {
         guard operationGeneration == generation else { return }
         actionHistory?.finish(historyOperationID,
-            outcome: historyCancelled || Task.isCancelled ? .cancelled : (pendingConfirmation != nil ? .skipped : (errorMessage == nil ? .succeeded : .unconfirmed)),
+            outcome: observedOutcome ?? (historyCancelled || Task.isCancelled ? .cancelled : (pendingConfirmation != nil ? .skipped : (errorMessage == nil ? .succeeded : .unconfirmed))),
             reason: pendingConfirmation != nil ? .confirmationRequired : (errorMessage == nil ? nil : .notConfirmed))
         historyOperationID = nil
         currentTask = nil
@@ -1474,7 +1537,9 @@ final class ProviderControlStore: ObservableObject {
         case .inventoryUnavailable(let reason):
             Self.safeInventoryDiagnostics.contains(reason)
                 ? diagnosticSanitizer.sanitize(reason)
-                : "Model inventory is unavailable."
+                : (action == "enroll Autopilot"
+                    ? "Saved models could not be verified for Autopilot. Refresh Models before trying again."
+                    : "Model inventory is unavailable.")
         case .deleteBlocked(let reason):
             Self.safeDeleteDiagnostics.contains(reason)
                 ? diagnosticSanitizer.sanitize(reason)
@@ -1490,7 +1555,9 @@ final class ProviderControlStore: ObservableObject {
         case .liveSwitchUnavailable(let reason):
             Self.safeLiveSwitchDiagnostics.contains(reason)
                 ? diagnosticSanitizer.sanitize(reason)
-                : "Apply Live is unavailable."
+                : (action == "enroll Autopilot"
+                    ? "Autopilot enrollment is unavailable. Refresh before trying again."
+                    : "Apply Live is unavailable.")
         }
     }
 
@@ -1534,6 +1601,8 @@ final class ProviderControlStore: ObservableObject {
     }
 
     private static let safeInventoryDiagnostics: Set<String> = [
+        "Every saved model must be eligible for this provider before enrolling",
+        "Saved preload aliases would lose their enabled match during enrollment. In Models, clear those preloads or reselect the exact downloaded model IDs, save, then retry.",
         "The requested model is not a fresh available catalog entry",
         "Saved model selection is not an unambiguous downloaded catalog model",
         "Model catalog is unavailable",
@@ -1564,6 +1633,11 @@ final class ProviderControlStore: ObservableObject {
     }
 
     private static let safeLiveSwitchDiagnostics: Set<String> = [
+        "Autopilot enrollment is unavailable in this build",
+        "Autopilot requires network provider serving",
+        "Refresh Autopilot status before enrolling",
+        "Autopilot is already enrolled. Refresh its current settings instead of restarting.",
+        "Autopilot requires a saved network model selection",
         "Refresh current provider state before applying live",
         "Upgrade the running provider to use Apply Live",
         "The running provider uses a different configuration",

@@ -155,6 +155,10 @@ public typealias ProviderMutationPhaseObserver =
     @Sendable (ProviderMutationPhase) async -> Void
 
 public protocol ProviderControlling: Sendable {
+    func performAutopilotEnrollment(
+        hosting: HostingOptions,
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderAutopilotEnrollmentCompletion
     func refresh() async throws -> ProviderControlSnapshot
     func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult
     func download(
@@ -202,6 +206,13 @@ public protocol ProviderControlling: Sendable {
 }
 
 public extension ProviderControlling {
+    func performAutopilotEnrollment(
+        hosting: HostingOptions,
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderAutopilotEnrollmentCompletion {
+        throw ProviderControlError.liveSwitchUnavailable("Autopilot enrollment is unavailable in this build")
+    }
+
     func performSave(
         _ draft: ProviderConfigDraft,
         onPhase: ProviderMutationPhaseObserver?
@@ -554,6 +565,99 @@ public actor ProviderControlService: ProviderControlling, ProviderSavedCapacityR
             dispatchedAt: dispatchedAt,
             using: executable
         ) ?? .outcomeUncertain
+    }
+
+    /// Supported opt-in constructs upstream's verified cached inventory and records
+    /// consent through noninteractive start. Never synthesize enrollment TOML.
+    public func performAutopilotEnrollment(
+        hosting: HostingOptions,
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderAutopilotEnrollmentCompletion {
+        guard hosting.isValid, hosting.mode != .standalone else {
+            throw ProviderControlError.liveSwitchUnavailable("Autopilot requires network provider serving")
+        }
+        try beginCommand()
+        defer { endCommand() }
+        let executable = try resolveExecutable()
+        let client = ProviderExtrasClient(policy: policy, runner: runner, now: now)
+        guard case .available(let currentStatus, _) = await client.refreshAutopilot() else {
+            throw ProviderControlError.liveSwitchUnavailable("Refresh Autopilot status before enrolling")
+        }
+        if currentStatus.isEnrolled {
+            throw ProviderControlError.liveSwitchUnavailable("Autopilot is already enrolled. Refresh its current settings instead of restarting.")
+        }
+        let before = try await configStore.load()
+        let policyBefore = try ProviderAutopilotPreservationBaseline.read(policy.providerConfig)
+        guard !policyBefore.privateOnly, !before.original.enabled.isEmpty else {
+            throw ProviderControlError.liveSwitchUnavailable("Autopilot requires a saved network model selection")
+        }
+        let sources = try await readModelSources(using: executable, allowStaleSources: false)
+        let models = try resolvedLocalModelIDs(for: before.original.enabled, in: sources)
+        guard Set(before.original.preloaded).isSubset(of: Set(models)) else {
+            throw ProviderControlError.inventoryUnavailable(
+                "Saved preload aliases would lose their enabled match during enrollment. In Models, clear those preloads or reselect the exact downloaded model IDs, save, then retry."
+            )
+        }
+        let daemonRead = try? await telemetrySource.readDaemonState()
+        let daemon: DaemonState? = daemonRead.flatMap { state in
+            let age = now().timeIntervalSince1970 - state.writtenAt
+            guard age.isFinite, age >= 0, age <= ProviderControlSourceState.maximumEvidenceAge,
+                  let path = state.configPath, URL(fileURLWithPath: path).standardizedFileURL == policy.providerConfig.standardizedFileURL else { return nil }
+            return state
+        }
+        for modelID in models {
+            guard let model = sources.catalog.first(where: { $0.id == modelID }), model.active,
+                  model.minimumRAMGB <= Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824),
+                  ProviderAutopilotModelPreflight.isEligible(model, runtimeCapabilities: daemon?.runtimeCapabilities)
+            else {
+                throw ProviderControlError.inventoryUnavailable("Every saved model must be eligible for this provider before enrolling")
+            }
+        }
+        // External edits during the status/inventory reads invalidate this attempt.
+        guard try await configStore.load().sourceRevision == before.sourceRevision,
+              try ProviderAutopilotPreservationBaseline.read(policy.providerConfig) == policyBefore else {
+            throw ProviderConfigError.changedExternally
+        }
+        try Task.checkCancellation()
+        let command = DarkbloomCommand.start(executable: executable, config: policy.providerConfig,
+                                             models: models, hosting: hosting, autopilot: true)
+        let dispatchEvidence = MutationDispatchEvidence()
+        var commandSucceeded = false
+        do {
+            let result: CommandResult
+            if let reporting = runner as? any LaunchReportingProcessExecuting {
+                result = try await reporting.run(command, timeout: DarkbloomSourcePolicy.lifecycleCommandTimeout,
+                    outputLimit: DarkbloomSourcePolicy.mutationOutputByteLimit, onOutput: nil,
+                    onLaunch: dispatchEvidence.recordPossibleLaunch)
+            } else {
+                dispatchEvidence.recordPossibleLaunch()
+                result = try await runner.run(command, timeout: DarkbloomSourcePolicy.lifecycleCommandTimeout,
+                    outputLimit: DarkbloomSourcePolicy.mutationOutputByteLimit, onOutput: nil)
+            }
+            commandSucceeded = result.exitCode == 0
+        } catch {
+            guard dispatchEvidence.indicatesPossibleLaunch else { throw error }
+        }
+        await onPhase?(.reconciling)
+        // All dispatched outcomes may persist selection/consent, including exit != 0.
+        let service = self
+        let reconciled = await Task.detached {
+            let controls = await service.refreshAfterCompletedMutation(using: executable)
+            let status = await client.refreshAutopilot()
+            let after = try? await service.configStore.load()
+            let policyAfter = try? ProviderAutopilotPreservationBaseline.read(service.policy.providerConfig)
+            let selectionPreserved = after.map { draft in
+                Set(draft.original.enabled) == Set(models)
+                    && draft.original.preloaded == before.original.preloaded
+                    && (draft.originalMaxModelSlots ?? 3) == (before.originalMaxModelSlots ?? 3)
+                    && (draft.originalStartupPreload ?? true) == (before.originalStartupPreload ?? true)
+                    && (draft.originalEngineV2MaxConcurrent ?? 4) == (before.originalEngineV2MaxConcurrent ?? 4)
+            } ?? false
+            return (controls, status, selectionPreserved && policyAfter == policyBefore
+                && status.value.map { Set(models).isSubset(of: Set($0.selectedModels)) } == true)
+        }.value
+        return ProviderAutopilotEnrollmentCompletion(controls: reconciled.0, status: reconciled.1,
+            commandSucceeded: commandSucceeded, savedPolicyPreserved: reconciled.2)
     }
 
     private func confirmStartedProvider(

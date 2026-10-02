@@ -103,6 +103,13 @@ final class ProfitSwitchStore: ObservableObject {
         self.profitsCapturedAt = profitsCapturedAt
         let instant = now()
         guard enabled else { return }
+        if case .available(let state, _) = telemetry.state,
+           !Self.allowsBloomySelection(state) {
+            policy.reset()
+            currentSince = nil
+            status = "Paused while Autopilot owns model selection."
+            return
+        }
         guard case .available(let state, _) = telemetry.state,
               servingState(state, at: instant) else {
             policy.reset()
@@ -217,13 +224,21 @@ final class ProfitSwitchStore: ObservableObject {
 
     private func servingState(_ state: DaemonState, at instant: Date) -> Bool {
         let age = instant.timeIntervalSince1970 - state.writtenAt
-        guard age.isFinite, (0...10).contains(age), state.trust?.status == "online",
+        guard Self.allowsBloomySelection(state),
+              age.isFinite, (0...10).contains(age), state.trust?.status == "online",
               state.lifecycle?.outcome == .serving,
               state.advertisedModels == [state.currentModel], state.warmModels == [state.currentModel],
               state.startupPreloadPendingModels?.isEmpty == true,
               state.availability == nil, state.modelLoadFailures.isEmpty,
               state.modelSwitch?.outcome == .serving else { return false }
         return true
+    }
+
+    /// Pausing native Autopilot retains residency ownership. Reuse this guard
+    /// both during observation and after the asynchronous pre-dispatch refresh.
+    private static func allowsBloomySelection(_ state: DaemonState) -> Bool {
+        !state.autopilotPhaseIsUnrecognized
+            && (state.autopilotPhase == nil || state.autopilotPhase == "off" || state.autopilotPhase == "shadow")
     }
 
     private func idle(_ state: DaemonState, at instant: Date) -> Bool {

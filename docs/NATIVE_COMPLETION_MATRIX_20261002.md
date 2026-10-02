@@ -43,7 +43,7 @@ Settings sidebar/key loop.
 | Menu Bar | **Partial:** compact Light/Dark; dark unsupported saved-value fallback. [History], [Host] | Injected motion/lifecycle proof; complete picker key loop open. [Charts] | **Covered fixture/unit:** effective five-minute fallback; explicit Off retained without implicit rewrite. [Host] | Wide page; idle-picker keyboard; normal-speed rings under changing activity. |
 | Electricity | **Partial:** compact light/dark blank/negative/zero; expanded explanation. [Latest] | Validation present independently in AX; arrow opens disclosure, label AX press does not. [Latest] | **Covered fixture/recorder tests:** invalid price waits; zero valid; Off retains price and stops sampling. [Latest] | Wide/standalone key loop; missing adapter, storage-error and coverage states. |
 | Updates | **Partial:** wide light expired; compact light unavailable/fresh; dark CLI notice. [Health], [Provider] | Named action; inert Check for updates restores current wording. [Recovery], [Provider] | **Covered fixture/unit:** expiry blocks writes; historical restart notice stays historical. [Provider] | Wide dark full app/CLI/provider states; keyboard retry/actions. |
-| Provider: idle/beta/profit switching/nudge | **Partial:** compact light/dark expiry; wide dark invalid idle draft; Native71 compact dark lower profit controls and complete Nudge guide. [Provider], [Update], [Editors] | Reachable Discard; expiry removes beta Change; native increment/decrement timing actions and secure guide gate. Complete lower-control keyboard loop open. [Provider], [Nav], [Editors] | **Covered fixture/unit:** typed45 survives expiry/Refresh; fresh save reconciles; late edits protected; lower fixture actions stay inert. [Provider], [Update], [Editors] | Wide light unavailable states; full keyboard loop; app-native Autopilot opt-in/on/off integration newly requested. |
+| Provider: idle/beta/profit switching/nudge/Autopilot | **Partial:** compact light/dark expiry; Native71 lower controls/Nudge guide; Native79 wide light consent and compact dark Autopilot states/repair guidance. [Provider], [Update], [Editors], [Autopilot] | Native consent Escape/Tab/Space, Pause/Resume/Leave actions and usable failed-read Refresh; Leave alert screenshot remains unaccepted. Complete lower-control key loop open. [Provider], [Nav], [Editors], [Autopilot] | **Covered fixture/unit:** retained idle draft; immediate Autopilot draft guard; shadow/active/unconfirmed/stale distinctions; preserved enrollment settings and uncertain-result readback. All native actions inert. [Provider], [Autopilot] | Full key/VoiceOver loop; rendered Leave alert; real opt-in/restart and preservation; wider unavailable layouts. |
 | Fans | **Partial:** compact unavailable/expired/pending; wide dark mixed field freshness. [Health], [Provider] | Spoken per-field age; expired helper removes toggle; Refresh actionable. [Provider] | **Covered fixture/unit:** exactly one fake submission retained through failed/mismatched reads until matching confirmation. [Provider] | Compact mixed/error policy editor and wide light; complete keyboard traversal. |
 | iPhone Companion | **Partial:** compact light/dark fits. [Latest] | Full page/sidebar name; no unsupported setup controls. [Nav], [Latest] | **Covered fixture:** explicitly unavailable pairing/remote controls. [Latest] | Wide/standalone availability reading and sidebar entry. |
 | Support/review/exporter | **Partial:** latest compact light/dark warning; earlier wide light keyboard. [Latest], [Quit] | Sheet-targeted Tab/Space, gated Return, exporter/preview Escape covered. [Quit] | **Covered fixture/unit:** frozen availability/live flips; known-empty distinction; review resets. Latest saved/shared nothing. [Latest] | Latest wide warning/known-empty case; recheck current sheet/export focus. |
@@ -82,7 +82,9 @@ distinct from complete native chart accessibility proof. Invalid SwiftPM
 AX hosts, rejected candidates and partial motion results are not accepted full
 proof; [Charts] documents normal NSApplication helper requirements. [Editors] adds Native71–76 bounded Hosting/Models/Provider checks, the rejected
 AX candidates, the final 1,385-test pass and release compile. Complete focus
-reveal, VoiceOver, native Autopilot integration and the wider matrix remain open.
+reveal, VoiceOver and the wider matrix remain open. [Autopilot] adds Native79,
+1,417 passing tests and release compilation for app-native consent and policy
+controls; real enrollment, rendered Leave confirmation and distribution remain open.
 No release or permission authority follows from this matrix.
 
 ## Evidence index
@@ -108,3 +110,5 @@ Each table's linked shorthand resolves to the exact repository review below.
 [Keys]: NATIVE_CHAT_KEYBOARD_LOGS_REVIEW_20261002.md
 [Wide]: WIDE_DASHBOARD_KEYBOARD_REVIEW_20261002.md
 [Editors]: HOSTING_STARTUP_NATIVE_REVIEW_20261002.md
+
+[Autopilot]: AUTOPILOT_NATIVE_REVIEW_20261002.md
