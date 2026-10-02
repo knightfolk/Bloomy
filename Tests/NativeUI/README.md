@@ -529,3 +529,26 @@ actual CPU/GPU/power behavior, provider availability, or distribution readiness.
 Quit the fixture after review. Retain its manifest and task-owned evidence for
 provenance; temporary histories may be removed only once review no longer needs
 them and the fixture has quit.
+
+### Manage-sheet keyboard regression
+
+From Overview, Data checks → Model keyboard proof runs three finite checks in
+an owned synthetic Model Manager window with a 360-point Manage sheet. Activate
+the fixture with an actual key press before starting: background accessibility
+menu presses do not guarantee macOS activation. Failure to acquire the exact
+owned key window is a reported failure, never a skipped assertion.
+
+The forward and backward native key loops must reach header/footer Done, runtime,
+Enabled, Preload and Details, with exact AX focus and full control-frame
+visibility. Both directions must move the real scroll viewport. Focused footer
+Done must close the sheet. The helper checks unchanged settings/preferences,
+one synthetic refresh, zero mutations, and released window/sheet/host/store.
+It is bounded to 45 seconds plus cleanup and writes incremental and terminal
+`model-manage-keyboard-proof.json` in the banner's unique temporary directory.
+Quit cancels and joins it; do not interact with its window during the proof.
+
+This NSWindow key loop complements actual Tab/Shift-Tab/Space/Escape testing;
+it does not establish SwiftUI's complete internal focus order, selected-text
+Escape, input-method composition or VoiceOver. Preserve rejected reports before
+retrying. See `docs/MODEL_KEYBOARD_NATIVE_REVIEW_20261002.md` for the accepted
+bounded observations and rejected activation candidates.

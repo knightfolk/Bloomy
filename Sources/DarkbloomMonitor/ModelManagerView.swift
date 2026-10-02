@@ -772,30 +772,35 @@ struct ModelManagerView: View {
         }
         .sheet(item: $inspectedModel) { item in
             VStack(spacing: 0) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            Text("Model settings & forecast").font(.title2.bold())
-                            Spacer()
-                            Button("Done") { inspectedModel = nil }.keyboardShortcut(.cancelAction)
-                                .accessibilityIdentifier("models.manage.done")
+                ScrollViewReader { reader in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                Text("Model settings & forecast").font(.title2.bold())
+                                Spacer()
+                                Button("Done") { inspectedModel = nil }.keyboardShortcut(.cancelAction)
+                                    .accessibilityIdentifier("models.manage.done")
+                                    .modifier(ModelManageKeyboardReveal(target: .header))
+                            }
+                            switch ModelManagerSheetPresentation.make(catalogID: item.catalogID, inventory: store.snapshot?.inventory) {
+                            case .current(let current):
+                                modelCard(current, at: Date(), presentation: currentPresentation(at: Date()), expanded: true)
+                            case .unavailable:
+                                ContentUnavailableView("Model unavailable", systemImage: "cpu",
+                                    description: Text("This model cannot be matched to one current catalog entry. Refresh model controls to check again. Your staged edits are retained."))
+                                    .accessibilityIdentifier("models.manage.unavailable")
+                                Button("Refresh model controls") { Task { await store.refreshPreservingDraft() } }
+                                    .disabled(store.operation != .idle)
+                                    .modifier(ModelManageKeyboardReveal(target: .refresh))
+                            }
                         }
-                        switch ModelManagerSheetPresentation.make(catalogID: item.catalogID, inventory: store.snapshot?.inventory) {
-                        case .current(let current):
-                            modelCard(current, at: Date(), presentation: currentPresentation(at: Date()), expanded: true)
-                        case .unavailable:
-                            ContentUnavailableView("Model unavailable", systemImage: "cpu",
-                                description: Text("This model cannot be matched to one current catalog entry. Refresh model controls to check again. Your staged edits are retained."))
-                                .accessibilityIdentifier("models.manage.unavailable")
-                            Button("Refresh model controls") { Task { await store.refreshPreservingDraft() } }
-                                .disabled(store.operation != .idle)
-                        }
+                        .padding(24)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(24)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("models.manage.scroll")
+                    .environment(\.modelManageFocusReveal, { target in reader.scrollTo(target, anchor: .center) })
                 }
-                .accessibilityIdentifier("models.manage.scroll")
                 Divider()
                 HStack {
                     Spacer()
@@ -808,6 +813,8 @@ struct ModelManagerView: View {
             .frame(width: ModelManagerSheetHeightPolicy.width,
                 height: ModelManagerSheetHeightPolicy.height(screenBudget: modelSheetScreenBudget,
                     hostMaximum: modelSheetMaximumHeight))
+            .background(ModelManageEscapeHandler { inspectedModel = nil }
+                .frame(width: 0, height: 0).accessibilityHidden(true))
         }
         .onAppear(perform: restoreWhatIfRuntime)
         .onChange(of: whatIfRunPercent) { _, runtime in
@@ -1918,6 +1925,7 @@ struct ModelCardSummary: View {
                 .accessibilityLabel("What-if daily runtime for \(item.displayName)")
                 .accessibilityValue("\(runPercent) percent, \(hours(runPercent)) hours per day")
                 .accessibilityHint(Self.whatIfEstimateHint)
+                .modifier(ModelManageKeyboardReveal(target: .runtime))
 
             if runPercent > 0, let profit = forecast.profitUSDPerDay {
                 HStack(alignment: .top, spacing: 8) {
@@ -2080,6 +2088,7 @@ private struct ModelDetailsDisclosureStyle: DisclosureGroupStyle {
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
+            .modifier(ModelManageKeyboardReveal(target: .details))
             if configuration.isExpanded {
                 configuration.content.padding(.leading, 14)
             }
@@ -2176,7 +2185,7 @@ struct DownloadedModelRow: View {
             ModelOptionToggle(title: "Enabled", isOn: enabledBinding, checkbox: checkbox,
                 accessibilityName: presentation.enableAction?.accessibilityLabel ?? "Enable \(item.displayName)",
                 accessibilityHintText: presentation.enableAction?.accessibilityHint ?? "",
-                accessibilityID: "model.\(item.catalogID).enable")
+                accessibilityID: "model.\(item.catalogID).enable", keyboardFocusTarget: .enabled)
                 .disabled(presentation.enableAction?.isEnabled != true)
                 .help(presentation.enableAction?.isEnabled == false
                       ? (presentation.enableAction?.accessibilityHint ?? "Unavailable")
@@ -2190,7 +2199,7 @@ struct DownloadedModelRow: View {
             ModelOptionToggle(title: "Load at startup", isOn: preloadedBinding, checkbox: checkbox,
                 accessibilityName: presentation.preloadAction?.accessibilityLabel ?? "Preload \(item.displayName)",
                 accessibilityHintText: presentation.preloadAction?.accessibilityHint ?? "",
-                accessibilityID: "model.\(item.catalogID).preload")
+                accessibilityID: "model.\(item.catalogID).preload", keyboardFocusTarget: .preload)
                 .disabled(presentation.preloadAction?.isEnabled != true)
                 .help(presentation.preloadAction?.isEnabled == false
                       ? (presentation.preloadAction?.accessibilityHint ?? "Unavailable")
@@ -2215,6 +2224,7 @@ struct DownloadedModelRow: View {
                 presentation.deleteAction?.accessibilityHint ?? ""
             )
             .accessibilityIdentifier("model.\(item.catalogID).delete")
+            .modifier(ModelManageKeyboardReveal(target: .delete))
         }
     }
 
@@ -2289,6 +2299,7 @@ struct ModelOptionToggle: View {
     var accessibilityName: String? = nil
     var accessibilityHintText = ""
     var accessibilityID = ""
+    var keyboardFocusTarget: ModelManageFocusTarget = .enabled
 
     var body: some View {
         if checkbox {
@@ -2323,6 +2334,7 @@ struct ModelOptionToggle: View {
             .accessibilityLabel(accessibilityName ?? title)
             .accessibilityHint(accessibilityHintText)
             .accessibilityIdentifier(accessibilityID)
+            .modifier(ModelManageKeyboardReveal(target: keyboardFocusTarget))
     }
 }
 
@@ -2408,6 +2420,7 @@ private struct AvailableModelRow: View {
                         presentation.downloadAction?.accessibilityHint ?? ""
                     )
                     .accessibilityIdentifier("model.\(item.catalogID).download")
+                    .modifier(ModelManageKeyboardReveal(target: .download))
                 }
             }
 

@@ -56,6 +56,8 @@ Changes prepared for 1.9.15:
 
 - App-native Autopilot enrollment uses supported noninteractive commands, preserves saved choices, reconciles uncertain outcomes and distinguishes shadow, active, paused and stale status. Native79 verifies consent, immediate dirty-draft guards, inert Enable/Pause/Resume/Leave and actionable recovery; 1,417 tests and the final release compile pass. `docs/AUTOPILOT_NATIVE_REVIEW_20261002.md` records exact provenance, the unaccepted blank Leave-alert capture, protected production and remaining real-provider/accessibility/distribution gates. This focused checkpoint does not complete the broader plan.
 
+- Manage-sheet focus scrolls native controls into view with centered margins; a sheet-owned plain-Escape handler closes selected canonical text without consuming modified Escape. Actual Native83 Tab/Shift-Tab/selection checks, Native84's 3/3 finite key-loop/cleanup proof, 1,417 passing tests and release compilation are recorded in `docs/MODEL_KEYBOARD_NATIVE_REVIEW_20261002.md`. Background activation failures remain recorded, and VoiceOver, real composition, other displays, native alert rendering and the wider matrix remain open. Installed production and its provider were unchanged.
+
 ## Evidence and limits
 
 Baseline: signed 1.9.14/build 139 on the same Mac. Thirty-second process CPU windows measured 13.27% of one core with Metrics visible and 11.03% with the dashboard minimized; median RSS was 284.5 MiB and 304.1 MiB respectively. These are short observations under live provider traffic, not battery-life estimates or a universal idle baseline.

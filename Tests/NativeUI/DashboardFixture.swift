@@ -641,7 +641,9 @@ private final class FixtureModel: ObservableObject {
     private var cacheProofTask: Task<Void, Never>?
     @Published private(set) var chatFocusProofStatus = "Chat Cancel focus proof"
     private var chatFocusProofTask: Task<Void, Never>?
-    var proofRunning: Bool { nativeProofTask != nil || cacheProofTask != nil || chatFocusProofTask != nil }
+    @Published private(set) var modelKeyboardProofStatus = "Model keyboard proof"
+    private var modelKeyboardProofTask: Task<Void, Never>?
+    var proofRunning: Bool { nativeProofTask != nil || cacheProofTask != nil || chatFocusProofTask != nil || modelKeyboardProofTask != nil }
     @Published private(set) var chatVerificationTest: FixtureChatVerification?
     private var chatVerificationClient: FixtureChatVerificationClient?
     private var loadTask: Task<Void, Never>?
@@ -829,7 +831,7 @@ private final class FixtureModel: ObservableObject {
         chatVerificationTest = verification
     }
     func load() async {
-        guard !isTerminating, cacheProofTask == nil, chatFocusProofTask == nil else { return }
+        guard !isTerminating, cacheProofTask == nil, chatFocusProofTask == nil, modelKeyboardProofTask == nil else { return }
         let requestedScenario = scenario
         loadGeneration += 1
         let generation = loadGeneration
@@ -979,6 +981,10 @@ private final class FixtureModel: ObservableObject {
         chatFocusProof?.cancel()
         await chatFocusProof?.value
         chatFocusProofTask = nil
+        let modelKeyboardProof = modelKeyboardProofTask
+        modelKeyboardProof?.cancel()
+        await modelKeyboardProof?.value
+        modelKeyboardProofTask = nil
         await popup.closeAndWait(resetContent: true)
         retireChatWindow()
         chat.cancelSend()
@@ -993,6 +999,17 @@ private final class FixtureModel: ObservableObject {
             let passed = await ChatComposerFocusProof.run(outputDirectory: self.directory)
             self.chatFocusProofStatus = passed ? "Chat focus proof passed" : "Chat focus proof failed"
             self.chatFocusProofTask = nil
+        }
+    }
+
+    func runModelKeyboardProof() {
+        guard !proofRunning, loadTask == nil, ready, !isTerminating,
+              navigation.selected == .overview else { return }
+        modelKeyboardProofStatus = "Model keyboard proof running…"
+        modelKeyboardProofTask = Task { @MainActor in
+            let passed = await ModelManageKeyboardProof.run(outputDirectory: self.directory)
+            self.modelKeyboardProofStatus = passed ? "Model keyboard proof passed" : "Model keyboard proof failed"
+            self.modelKeyboardProofTask = nil
         }
     }
 }
@@ -1669,6 +1686,8 @@ private struct FixtureReviewView: View {
                         Button(model.cacheProofStatus) { model.runCacheVisibilityProof() }
                             .disabled(model.proofRunning || !model.ready || navigation.selected != .overview)
                         Button(model.chatFocusProofStatus) { model.runChatFocusProof() }
+                            .disabled(model.proofRunning || !model.ready || navigation.selected != .overview)
+                        Button(model.modelKeyboardProofStatus) { model.runModelKeyboardProof() }
                             .disabled(model.proofRunning || !model.ready || navigation.selected != .overview)
                         Divider()
                         Button("Prepend one synthetic log event") {
