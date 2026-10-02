@@ -170,12 +170,48 @@ to check canonical selection identity in the native menu and response provenance
 Replacing a fixture Chat store closes its owned pop-out and cancels the prior
 inert send before publishing the replacement; it cannot leave two review stores
 serving different conversations in visible windows.
+For the Cancel focus regression, start **Held reply for 30 seconds**, focus the
+message editor, type a synthetic message and send with Command-Return. Confirm
+the held send is active, then use Control-Tab to reach the actual Cancel button.
+Space followed immediately by typing, without an intervening observation, must
+cancel the send and place that text in the same composer while leaving sidebar
+selection unchanged. Inspect both the Cancelled transcript phase and the draft;
+typing after a reply completed or a skipped Cancel does not prove this case.
+Repeat in the dashboard and pop-out. Pressing Cancel through AX while the editor
+still has focus is a separate path and cannot reproduce removed-button focus.
+Data checks → **Chat Cancel focus proof**, enabled on Overview, runs four finite
+cases in two separately owned Chat views sharing an inert store. First use the
+fixture's native Window → **Show Dashboard** command so it is actually active;
+raising its window alone does not establish that prerequisite. The JSON records
+actual app/key-window/responder context, exact Cancel accessibility focus, the
+existing native editor, independent drafts, completion/external-cancel sentinel
+focus, and terminal send/window/host/deadline cleanup. Missing native focus or
+key-window evidence fails the proof. Held completions handle cancellation before
+and after registration, and shutdown rejects queued late calls. Quit cancels and
+joins the proof. This native key-loop/AX-press check complements the real keyboard
+sequence above; it does not synthesize OS keyboard input or prove VoiceOver.
 The Data checks menu can reduce the synthetic Earnings report to Qwen (use the
 actual Earnings Refresh afterward), constrain the model sheet to 360 points, or
 remove Gemma from synthetic inventory. Window > Remove Gemma from inventory
 (synthetic), also Control-Option-Command-R, permits that last change while the
 Manage sheet is open. It only changes in-memory fixture records and preserves
 staged provider drafts. Scenario replacement restores its initial fake records.
+Each prepared scenario seeds 48 immutable synthetic log payloads. Ordinary
+five-second telemetry ticks advance source capture dates and runtime state while
+retaining those payloads, timestamps, and Logs row identities. Explicit inert
+source reads use the same retained feed. Data checks → **Prepend one synthetic
+log event** adds one distinctly named Notice event at the front; existing events
+retain their order and identity until the normal 100-event bound drops the oldest.
+Fixture publications are serialized so an in-flight tick cannot overwrite a
+new arrival. Reload/scenario replacement seeds a new feed and resets arrivals.
+The arrival action is disabled for stale/offline/unavailable runtime, Frozen
+settings, network expiry review, and native proofs; it cannot turn unavailable
+evidence into a fresh feed or disturb a controlled expiry interval.
+For sustained Logs selection review, select an older visible event, leave it
+selected across multiple five-second ticks, then prepend an arrival and inspect
+the unchanged selected details. Apply a filter that retains that selected event,
+then one that excludes it, to check the production selection policy. This is a
+repeatable synthetic review path, not proof of live log collection.
 Network expiry review reconstructs the inert stores with one capacity capture
 100 seconds in the past and pauses synthetic source ticks. The normal 120-second
 network freshness rule and production visible clock must show its remaining

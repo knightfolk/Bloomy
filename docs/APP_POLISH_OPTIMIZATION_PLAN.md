@@ -2,6 +2,9 @@
 
 The ongoing goal is a consistent, polished native Mac app with minimal background cost. A verified release checkpoint does not establish that every screen or state has completed review.
 
+The [native completion matrix](NATIVE_COMPLETION_MATRIX_20261002.md) indexes all
+22 surfaces, distinguishing bounded coverage and each remaining proof gap.
+
 ## Optimization checkpoint
 
 Changes prepared for 1.9.15:
@@ -46,6 +49,7 @@ Changes prepared for 1.9.15:
 - Chat names speakers while preserving selectable messages and canonical model identity; New Chat requires explicit cancellation during a send. Earnings retains selected filters without inventing results. Opportunity qualifies each retained network value and aligns expanded cards. Metrics uses finite nonnegative render-time freshness without moving its analysis window. Model sheets fit their host screen, retain missing-model drafts, and reject late callbacks whose alias now identifies another model. Bounded native and regression evidence is recorded in `docs/CHAT_ACTIVITY_MODELS_NATIVE_REVIEW_20261002.md`; the wider native and distribution matrices remain open.
 - History derives one visible snapshot and supports full model-ID search, with cheaper fields matched before formatting. Network-cache restoration joins cancelled reads before refreshing and retains the existing cadence/backoff. Six finite model-image families reuse their normalized marks. Component measurements, Native 62's compact History/icon/disclosure proof, 1,357 passing tests, and the release compile are recorded in `docs/HISTORY_CACHE_IMAGE_EFFICIENCY_REVIEW_20261002.md`. Sustained native hidden-window/route-away proof was inconclusive; broader native, production, and distribution gates remain open.
 - Electricity describes actual recording readiness, and prepared Support reports retain their alert-history availability metadata. Logs derives one display snapshot with bounded temporary date formatters while preserving identities, selection, export, and date semantics. Compact light/dark native checks, independent review, the 1,368-test pass, release build, and a finite real-window/cache-child visibility proof are recorded in `docs/SETTINGS_LOGS_VISIBILITY_REVIEW_20261002.md`. The two 65-second holds show no hidden/absent cache reads and prompt refresh on restoration/remount; this bounded synthetic host proof does not replace production navigation, VoiceOver, comparable whole-app profiling, or distribution gates.
+- Explicit Chat Cancel restores the initiating composer after its keyboard-focused button disappears, without shared-store completion focus changes. Native dashboard/pop-out keyboard proof, four finite two-view focus cases with owned cleanup, stable selected Logs across publications/arrivals/filters, and the unchanged 1,368-test pass plus release compile are recorded in `docs/NATIVE_CHAT_KEYBOARD_LOGS_REVIEW_20261002.md`. The matrix remains open; actual VoiceOver awaits the scoped desktop-setting reply. A measured model-cache timestamp rebuild cost was small, so no production cache rewrite was made.
 
 ## Evidence and limits
 

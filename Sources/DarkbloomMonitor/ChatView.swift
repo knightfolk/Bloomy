@@ -60,6 +60,7 @@ struct ChatView: View {
     @State private var showsKeyEditor = false
     @State private var keyDraft = ""
     @State private var keyError: String?
+    @FocusState private var composerFocused: Bool
 
     init(store: ChatStore, openPopOut: (() -> Void)? = nil, draft: ChatDraftState? = nil, isVisible: Bool = true,
          updateProtection: AppUpdateEditorProtection? = nil) {
@@ -99,8 +100,12 @@ struct ChatView: View {
             draft.reconcile(with: store.conversation?.id)
         }
         .onDisappear {
+            composerFocused = false
             store.setChatSurfaceVisible(false, id: visibilityID)
             clearConsumerKeyDraft()
+        }
+        .onChange(of: isVisible) { _, visible in
+            if !visible { composerFocused = false }
         }
         .task(id: isVisible) {
             guard !Task.isCancelled else { return }
@@ -394,6 +399,7 @@ struct ChatView: View {
                     get: { draft.visibleText(in: store.conversation?.id) },
                     set: { draft.updateText($0, in: store.conversation?.id) }
                 ))
+                    .focused($composerFocused)
                     .accessibilityLabel("Chat message")
                     .font(.body)
                     .scrollContentBackground(.hidden)
@@ -409,7 +415,15 @@ struct ChatView: View {
                     )
                 if store.isSending {
                     Button(role: .cancel) {
+                        let wasSending = store.isSending
+                        let conversationID = store.conversation?.id
                         store.cancelSend()
+                        // Cancel disappears when the send stops. Keep the
+                        // initiating Chat surface ready for the next message.
+                        if wasSending, !store.isSending, isVisible,
+                           store.conversation?.id == conversationID {
+                            composerFocused = true
+                        }
                     } label: {
                         Label("Cancel", systemImage: "stop.circle")
                     }

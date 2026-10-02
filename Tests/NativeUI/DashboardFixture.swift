@@ -33,7 +33,18 @@ private enum FixtureData {
         CatalogModel(id: modelIDs[3], displayName: "PrismML Bonsai 2 27B", family: "bonsai", modelType: "text", capabilities: ["chat"], sizeGB: 8.6, minimumRAMGB: 16, active: true),
         CatalogModel(id: "qwen3-8b", displayName: "Qwen 3 8B", family: "qwen", modelType: "text", capabilities: ["chat", "tools"], sizeGB: 5.2, minimumRAMGB: 12, active: true)
     ]
-    static func snapshot(_ scenario: FixtureScenario, now: Date) -> TelemetrySnapshot {
+    static func logEvents(_ scenario: FixtureScenario, now: Date) -> [LogEvent] {
+        let date = scenario == .stale ? now.addingTimeInterval(-900) : now
+        return (0..<48).map { index in
+            let eventDate = date.addingTimeInterval(Double(-index * 60))
+            let severity: LogSeverity = index % 9 == 0 ? .warning : .info
+            let source: LogSource = index % 2 == 0 ? .legacy : .unified
+            let message = index % 9 == 0 ? "Synthetic delayed refresh; retained evidence" : "Synthetic job completed"
+            return LogEvent(timestamp: eventDate, severity: severity, category: "Synthetic review",
+                message: message, source: source, processID: 4242, processImage: "Fixture")
+        }
+    }
+    static func snapshot(_ scenario: FixtureScenario, now: Date, events: [LogEvent]? = nil) -> TelemetrySnapshot {
         let date = scenario == .stale ? now.addingTimeInterval(-900) : now
         let state = DaemonState(schema: 1, version: "0.9.17", currentModel: scenario == .offline ? "" : modelIDs[0],
             warmModels: scenario == .offline ? [] : Array(modelIDs.prefix(2)),
@@ -56,14 +67,6 @@ private enum FixtureData {
         status.hardware = "Synthetic 64 GB Mac"; status.daemon = scenario == .offline ? "Stopped" : "Running"
         status.configuredModel = modelIDs[0]; status.localModelCount = catalog.count
         status.requestCount = 236; status.tokenCount = 126_400
-        let events: [LogEvent] = (0..<48).map { index in
-            let eventDate = date.addingTimeInterval(Double(-index * 60))
-            let severity: LogSeverity = index % 9 == 0 ? .warning : .info
-            let source: LogSource = index % 2 == 0 ? .legacy : .unified
-            let message = index % 9 == 0 ? "Synthetic delayed refresh; retained evidence" : "Synthetic job completed"
-            return LogEvent(timestamp: eventDate, severity: severity, category: "Synthetic review",
-                message: message, source: source, processID: 4242, processImage: "Fixture")
-        }
         // Offline has matching current synthetic daemon and official CLI
         // stopped-status evidence; unrelated sources remain unavailable.
         let stateAvailability: SourceAvailability<DaemonState> = scenario == .offline
@@ -73,15 +76,32 @@ private enum FixtureData {
                 models: Array(modelIDs.prefix(2)), updatedAt: date.timeIntervalSince1970), at: date),
             status: scenario == .offline
                 ? .available(value: status, capturedAt: date) : scenario.availability(status, at: date),
-            eventFeed: scenario.availability(EventFeed(events: events, legacyReadAt: date, unifiedActivityAt: date), at: date),
+            eventFeed: scenario.availability(EventFeed(events: events ?? logEvents(scenario, now: now), legacyReadAt: date, unifiedActivityAt: date), at: date),
             tokenRate: scenario.hasCurrentRuntime ? .available(tokensPerSecond: 52.7, label: "Synthetic observed rate") : .unavailable(reason: "Synthetic inactive source"),
             diagnostics: scenario.hasCurrentRuntime ? [] : [AcquisitionDiagnostic(id: "fixture", source: "Synthetic review", message: "Synthetic source \(scenario.rawValue.lowercased())", occurredAt: now)],
             capturedAt: now, menuStatus: scenario.hasCurrentRuntime ? .online : scenario == .stale ? .stale : .offline)
     }
 }
 
+/// Event payloads are seeded once for one prepared session. Source capture
+/// dates can advance without rewriting the immutable keys used by Logs.
+private actor FixtureLogFeed {
+    private var retained: [LogEvent]
+    private var arrivals = 0
+    init(events: [LogEvent]) { retained = Array(events.prefix(100)) }
+    func events(limit: Int = 100) -> [LogEvent] { Array(retained.prefix(max(0, min(limit, 100)))) }
+    func prepend(at date: Date) {
+        arrivals += 1
+        retained.insert(LogEvent(timestamp: date, severity: .notice, category: "Synthetic arrival",
+            message: "Synthetic log arrival \(arrivals) · \(UUID().uuidString)", source: .unified,
+            processID: 4242, processImage: "Fixture"), at: 0)
+        if retained.count > 100 { retained.removeLast(retained.count - 100) }
+    }
+}
+
 private struct FixtureTelemetrySource: TelemetrySource {
     let scenario: FixtureScenario
+    let logFeed: FixtureLogFeed
     func readDaemonState() async throws -> DaemonState {
         guard let value = FixtureData.snapshot(scenario, now: Date()).state.value else { throw FixtureError.offline }
         return value
@@ -93,7 +113,8 @@ private struct FixtureTelemetrySource: TelemetrySource {
         guard let value = FixtureData.snapshot(scenario, now: Date()).status.value else { throw FixtureError.offline }; return value
     }
     func readLegacyEvents(limit: Int) async throws -> [LogEvent] {
-        Array((FixtureData.snapshot(scenario, now: Date()).eventFeed.value?.events ?? []).prefix(limit))
+        guard scenario != .offline, scenario != .unavailableRuntime else { return [] }
+        return await logFeed.events(limit: limit)
     }
 }
 private enum FixtureError: Error { case offline }
@@ -548,6 +569,7 @@ private final class FixtureModel: ObservableObject {
     private var extrasClient: FixtureExtras
     private var controllerClient: FixtureController
     private var earningsClient: FixtureEarnings
+    private var logFeed: FixtureLogFeed
     @Published var limitedActivityModels = false
     @Published var modelSheetHeightLimit: CGFloat?
     @Published var networkExpiryReview = false
@@ -561,10 +583,14 @@ private final class FixtureModel: ObservableObject {
     private var nativeProofTask: Task<Void, Never>?
     @Published private(set) var cacheProofStatus = "Cache visibility proof"
     private var cacheProofTask: Task<Void, Never>?
-    var proofRunning: Bool { nativeProofTask != nil || cacheProofTask != nil }
+    @Published private(set) var chatFocusProofStatus = "Chat Cancel focus proof"
+    private var chatFocusProofTask: Task<Void, Never>?
+    var proofRunning: Bool { nativeProofTask != nil || cacheProofTask != nil || chatFocusProofTask != nil }
     @Published private(set) var chatVerificationTest: FixtureChatVerification?
     private var chatVerificationClient: FixtureChatVerificationClient?
     private var loadTask: Task<Void, Never>?
+    private var telemetryPublicationTask: Task<Void, Never>?
+    private var telemetryPublicationID = UUID()
     private var loadGeneration = 0
     private var isTerminating = false
     private var dashboardVisible = true
@@ -583,18 +609,22 @@ private final class FixtureModel: ObservableObject {
         let stores = Self.makeStores(.fresh, defaults: defaults, directory: directory)
         monitor = stores.0; control = stores.1; hosting = stores.2; chat = stores.3; extrasClient = stores.4
         controllerClient = stores.5; earningsClient = stores.6
+        logFeed = stores.7
         hostingDraft = HostingSettingsDraftState(options: stores.2.options)
     }
     private static func makeStores(_ scenario: FixtureScenario, defaults: UserDefaults, directory: URL,
-        capacityCapturedAt: Date? = nil) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore, FixtureExtras, FixtureController, FixtureEarnings) {
+        capacityCapturedAt: Date? = nil) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore, FixtureExtras, FixtureController, FixtureEarnings, FixtureLogFeed) {
         let tokens = FixtureTokens()
         let controller = FixtureController(scenario: scenario)
         let control = ProviderControlStore(controller: controller, homeDirectory: directory, hostingOptions: { .default })
         let extrasClient = FixtureExtras(scenario: scenario)
         let extras = ProviderExtrasStore(client: extrasClient)
         let earningsClient = FixtureEarnings(scenario: scenario)
-        let monitor = MonitorStore(service: TelemetryService(source: FixtureTelemetrySource(scenario: scenario)),
-            initial: FixtureData.snapshot(scenario, now: Date()), providerExtras: extras,
+        let seededAt = Date()
+        let events = FixtureData.logEvents(scenario, now: seededAt)
+        let logFeed = FixtureLogFeed(events: events)
+        let monitor = MonitorStore(service: TelemetryService(source: FixtureTelemetrySource(scenario: scenario, logFeed: logFeed)),
+            initial: FixtureData.snapshot(scenario, now: seededAt, events: events), providerExtras: extras,
             earningsClient: earningsClient,
             networkCapacityClient: FixtureCapacity(scenario: scenario, fixedCapture: capacityCapturedAt), publicCatalogClient: FixtureCatalog(scenario: scenario),
             publicPricingClient: FixturePricing(scenario: scenario), networkSeriesClient: FixtureSeries(scenario: scenario),
@@ -614,7 +644,7 @@ private final class FixtureModel: ObservableObject {
         monitor.attachRecommendationInventory { control.snapshot }
         monitor.setDashboardVisible(true)
         hosting.refreshEnvironment()
-        return (monitor, control, hosting, chat, extrasClient, controller, earningsClient)
+        return (monitor, control, hosting, chat, extrasClient, controller, earningsClient, logFeed)
     }
     func limitActivityModels(_ value: Bool) async {
         limitedActivityModels = value
@@ -662,8 +692,46 @@ private final class FixtureModel: ObservableObject {
         let currentScenario = scenario
         let currentMonitor = monitor
         let currentControl = control
-        await currentMonitor.accept(FixtureData.snapshot(currentScenario, now: Date()))
+        await publishTelemetry(scenario: currentScenario, monitor: currentMonitor, logFeed: logFeed)
         await currentControl.refreshPreservingDraft()
+    }
+    private func publishTelemetry(scenario: FixtureScenario, monitor: MonitorStore, logFeed: FixtureLogFeed) async {
+        let generation = loadGeneration
+        let previous = telemetryPublicationTask
+        let publicationID = UUID()
+        let task = Task { @MainActor [weak self] in
+            // accept() can suspend. Read the latest retained feed only after
+            // the previous publication finishes so arrivals cannot roll back.
+            await previous?.value
+            guard let self, !Task.isCancelled, self.ready, !self.isTerminating,
+                  generation == self.loadGeneration else { return }
+            let events = await logFeed.events()
+            guard !Task.isCancelled, self.ready, !self.isTerminating,
+                  generation == self.loadGeneration else { return }
+            await monitor.accept(FixtureData.snapshot(scenario, now: Date(), events: events))
+        }
+        telemetryPublicationID = publicationID
+        telemetryPublicationTask = task
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        if telemetryPublicationID == publicationID { telemetryPublicationTask = nil }
+    }
+    var canPrependLogEvent: Bool {
+        ready && !isTerminating && !proofRunning && scenario.hasCurrentRuntime
+            && scenario != .frozenSettings && !networkExpiryReview
+    }
+    func prependLogEvent() async {
+        guard canPrependLogEvent else { return }
+        let generation = loadGeneration
+        let currentScenario = scenario
+        let currentMonitor = monitor
+        let currentLogFeed = logFeed
+        await currentLogFeed.prepend(at: Date())
+        guard !Task.isCancelled, canPrependLogEvent, generation == loadGeneration else { return }
+        await publishTelemetry(scenario: currentScenario, monitor: currentMonitor, logFeed: currentLogFeed)
     }
     func setDashboardVisible(_ visible: Bool) {
         dashboardVisible = visible
@@ -694,7 +762,7 @@ private final class FixtureModel: ObservableObject {
         chatVerificationTest = verification
     }
     func load() async {
-        guard !isTerminating, cacheProofTask == nil else { return }
+        guard !isTerminating, cacheProofTask == nil, chatFocusProofTask == nil else { return }
         let requestedScenario = scenario
         loadGeneration += 1
         let generation = loadGeneration
@@ -778,6 +846,7 @@ private final class FixtureModel: ObservableObject {
         chat.cancelSend()
         monitor = preparedMonitor; control = preparedControl; hosting = stores.2; chat = stores.3; extrasClient = stores.4
         controllerClient = stores.5; earningsClient = stores.6
+        logFeed = stores.7
         limitedActivityModels = false
         fanReadback = .held
         chatVerificationTest = nil
@@ -827,6 +896,10 @@ private final class FixtureModel: ObservableObject {
         loading?.cancel()
         await loading?.value
         loadTask = nil
+        let publishing = telemetryPublicationTask
+        publishing?.cancel()
+        await publishing?.value
+        telemetryPublicationTask = nil
         let proof = nativeProofTask
         proof?.cancel()
         await proof?.value
@@ -835,10 +908,25 @@ private final class FixtureModel: ObservableObject {
         cacheProof?.cancel()
         await cacheProof?.value
         cacheProofTask = nil
+        let chatFocusProof = chatFocusProofTask
+        chatFocusProof?.cancel()
+        await chatFocusProof?.value
+        chatFocusProofTask = nil
         await popup.closeAndWait(resetContent: true)
         retireChatWindow()
         chat.cancelSend()
         await monitor.stop()
+    }
+
+    func runChatFocusProof() {
+        guard !proofRunning, loadTask == nil, ready, !isTerminating,
+              navigation.selected == .overview else { return }
+        chatFocusProofStatus = "Chat focus proof running…"
+        chatFocusProofTask = Task { @MainActor in
+            let passed = await ChatComposerFocusProof.run(outputDirectory: self.directory)
+            self.chatFocusProofStatus = passed ? "Chat focus proof passed" : "Chat focus proof failed"
+            self.chatFocusProofTask = nil
+        }
     }
 }
 
@@ -1504,7 +1592,14 @@ private struct FixtureReviewView: View {
                     Menu("Data checks") {
                         Button(model.cacheProofStatus) { model.runCacheVisibilityProof() }
                             .disabled(model.proofRunning || !model.ready || navigation.selected != .overview)
+                        Button(model.chatFocusProofStatus) { model.runChatFocusProof() }
+                            .disabled(model.proofRunning || !model.ready || navigation.selected != .overview)
                         Divider()
+                        Button("Prepend one synthetic log event") {
+                            Task { await model.prependLogEvent() }
+                        }
+                        .disabled(!model.canPrependLogEvent)
+                        .help("Adds one uniquely named event; older log payloads stay unchanged within the 100-event bound.")
                         Button(model.limitedActivityModels ? "Restore all Earnings models" : "Report only Qwen in Earnings") {
                             Task { await model.limitActivityModels(!model.limitedActivityModels) }
                         }
