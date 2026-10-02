@@ -118,7 +118,7 @@ struct MonitorSettingsView: View {
     private func pageDescription(_ page: SettingsPage) -> String {
         switch page {
         case .appearance: "Choose how Bloomy looks. Changes apply immediately."
-        case .menuBar: "Choose the metric shown in the menu bar. Changes apply immediately."
+        case .menuBar: "Three circles show your model, GPU usage, and cooling. Changes apply immediately."
         case .electricity: "Track electricity estimates and set your local price."
         case .updates: "App, CLI, and provider update preferences."
         case .provider: "Saved idle-memory and experimental feature choices."
@@ -224,7 +224,7 @@ private struct GeneralSettingsView: View {
             if page == .menuBar {
                 Section("Menu bar · Applies immediately") {
                     Label("Model · GPU · Cooling", systemImage: "circle.grid.3x1")
-                    Text("The model ring spins during work. The GPU ring shows whole-Mac usage. The cooling ring shows the highest fan speed percentage of its reported maximum RPM, colored by GPU temperature. Hover for readings and details.")
+                    Text("The model ring spins during work. The model and cooling rings use green, yellow, or red for GPU temperature. The GPU ring shows whole-Mac usage. The cooling ring shows the highest fan speed percentage of its reported maximum RPM. Hover for readings and details.")
                         .font(.callout).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
