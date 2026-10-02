@@ -956,7 +956,7 @@ final class ProviderControlStore: ObservableObject {
                         let refreshed = try await controller.refresh()
                         try Task.checkCancellation()
                         accept(refreshed, preserving: draft)
-                        let comparison = ProviderSelectionComparison.make(snapshot: refreshed, now: Date())
+                        let comparison = ProviderSelectionComparison.make(snapshot: refreshed, now: now())
                         if comparison.differs || comparison.advertised == nil {
                             let risk = await controller.activityRisk()
                             try Task.checkCancellation()
@@ -1014,7 +1014,7 @@ final class ProviderControlStore: ObservableObject {
                     let refreshed = try await controller.refresh()
                     try Task.checkCancellation()
                     accept(refreshed, preserving: draft)
-                    let current = ProviderSelectionComparison.make(snapshot: refreshed, now: Date())
+                    let current = ProviderSelectionComparison.make(snapshot: refreshed, now: now())
                     guard current == confirmed else {
                         pendingConfirmation = .restartSelection(finalRisk, current)
                         finish(generation)

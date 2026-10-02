@@ -12,10 +12,12 @@ private let providerControlTestNow = Date(timeIntervalSince1970: 1_750_000_000)
 struct ProviderControlStoreTests {
     @Test("idle restart still confirms a different advertised set and rechecks changes")
     func restartConfirmsSelectionChanges() async throws {
-        let now = Date()
+        // Selection confirmation is the subject here, not wall-clock expiry.
+        // A busy parallel rendering suite must not age this fixture stale.
+        let now = providerControlTestNow
         let first = try selectionFixture(advertised: ["second-model"], now: now)
         let controller = FakeProviderController.fixture(snapshot: first, activityRisks: [.idle, .idle, .idle])
-        let store = ProviderControlStore(controller: controller)
+        let store = ProviderControlStore(controller: controller, now: { now })
         await store.refresh()
         await store.request(.restart)
         #expect(await controller.executedActions.isEmpty)
