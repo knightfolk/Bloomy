@@ -122,4 +122,130 @@ struct ChartSeriesStyleTests {
         #expect(ChartSeriesCueSelection.areaCues([]).isEmpty)
     }
 
+    @Test("a one-bucket Area keeps its observed work and selected-model attribution")
+    func isolatedAreaObservation() {
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 1_800_000_000), duration: 86_400)
+        for series in ["Work", "owner/selected-model"] {
+            let value = ActivityChartValue(interval: interval, series: series, amountUSD: 0.15, run: 0)
+            let segments = ChartSeriesCueSelection.isolatedAreaSegments([value])
+            #expect(segments == [ActivityChartSegment(interval: interval, series: series, startUSD: 0, endUSD: 0.15)])
+            #expect(segments.map(\.id) == [value.id])
+        }
+    }
+
+    @Test("only one-value series runs get scalar points; multi-value endpoints do not")
+    func isolatedAreaRunIdentity() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        func value(_ index: Int, run: Int, amount: Double) -> ActivityChartValue {
+            ActivityChartValue(interval: DateInterval(start: start.addingTimeInterval(Double(index) * 86_400), duration: 86_400),
+                series: "same-model", amountUSD: amount, run: run)
+        }
+        let values = [value(0, run: 0, amount: 2), value(1, run: 0, amount: 3),
+            value(3, run: 1, amount: 4), value(5, run: 2, amount: 0), value(6, run: 2, amount: 5),
+            value(8, run: 3, amount: 6)]
+        let original = values
+        let segments = ChartSeriesCueSelection.isolatedAreaSegments(values)
+        #expect(segments.map(\.id) == [values[2].id, values[5].id])
+        #expect(segments.map(\.endUSD) == [4, 6])
+        #expect(values == original)
+        // Bucket distance alone does not redefine the chart's explicit run.
+        #expect(ChartSeriesCueSelection.isolatedAreaSegments([value(0, run: 0, amount: 2), value(3, run: 0, amount: 3)]).isEmpty)
+    }
+
+    @Test("isolated Area positions include surrounding multi-value runs and separate signed stacks")
+    func isolatedAreaSignedStacks() {
+        let first = DateInterval(start: Date(timeIntervalSince1970: 1_800_000_000), duration: 3_600)
+        let next = DateInterval(start: first.end, duration: 3_600)
+        let values = [
+            ActivityChartValue(interval: first, series: "z-positive", amountUSD: 2, run: 0),
+            ActivityChartValue(interval: first, series: "z-negative", amountUSD: -3, run: 0),
+            ActivityChartValue(interval: first, series: "a-positive", amountUSD: 4, run: 0),
+            ActivityChartValue(interval: first, series: "a-negative", amountUSD: -5, run: 0),
+            ActivityChartValue(interval: first, series: "zero", amountUSD: 0, run: 0),
+            ActivityChartValue(interval: next, series: "z-positive", amountUSD: 7, run: 0),
+            ActivityChartValue(interval: next, series: "z-negative", amountUSD: -9, run: 0),
+        ]
+        let original = values
+        let segments = ChartSeriesCueSelection.isolatedAreaSegments(values)
+        #expect(segments.map(\.series) == ["a-positive", "a-negative", "zero"])
+        #expect(segments.map(\.startUSD) == [2, -3, 6])
+        #expect(segments.map(\.endUSD) == [6, -8, 6])
+        #expect(segments.allSatisfy { $0.interval == first })
+        let cues = ChartSeriesCueSelection.areaCues(values)
+        for segment in segments where segment.series != "zero" {
+            #expect(cues.contains(segment))
+        }
+        #expect(values == original)
+    }
+
+    @Test("recorded scalar zero stays zero while absent and invalid data create no point")
+    func isolatedAreaZeroAndMissing() {
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 1_800_000_000), duration: 3_600)
+        let zero = ActivityChartValue(interval: interval, series: "Work", amountUSD: 0, run: 0)
+        #expect(ChartSeriesCueSelection.isolatedAreaSegments([zero]) == [
+            ActivityChartSegment(interval: interval, series: "Work", startUSD: 0, endUSD: 0),
+        ])
+        #expect(ChartSeriesCueSelection.isolatedAreaSegments([]).isEmpty)
+        for amount in [Double.nan, .infinity, -.infinity] {
+            let invalid = ActivityChartValue(interval: interval, series: "unknown", amountUSD: amount, run: 0)
+            #expect(ChartSeriesCueSelection.isolatedAreaSegments([invalid]).isEmpty)
+        }
+    }
+
+    @Test("point money describes each original observation independently of a mixed-scale axis")
+    func mixedScalePointAmountLabels() throws {
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 1_800_000_000), duration: 3_600)
+        let values = [
+            ActivityChartValue(interval: interval, series: "ordinary", amountUSD: 0.15, run: 0),
+            ActivityChartValue(interval: interval, series: "micro", amountUSD: 0.000001, run: 0),
+            ActivityChartValue(interval: interval, series: "fractional", amountUSD: -0.00000025, run: 0),
+            ActivityChartValue(interval: interval, series: "zero", amountUSD: 0, run: 0),
+        ]
+        let original = values
+        let axis = ActivityChartAxis.yAxis(maximum: 0.150001)
+        #expect(axis.fractionDigits == 2)
+        let amountsByID = Dictionary(uniqueKeysWithValues: values.map { ($0.id, $0.amountUSD) })
+        let labels = ChartSeriesCueSelection.isolatedAreaSegments(values).compactMap { segment in
+            amountsByID[segment.id].map { ChartSeriesCueSelection.pointAmountLabel($0, locale: Locale(identifier: "en_US")) }
+        }
+        try #require(labels.count == 4)
+        #expect(labels[0].contains("0.1500"))
+        #expect(labels[1].contains("0.000001"))
+        #expect(labels[2].contains("0.00000025") && labels[2].contains("-"))
+        #expect(labels[3].contains("0.0000"))
+        #expect(Set(labels).count == 4)
+        #expect(values == original)
+    }
+
+    @Test("tiny point labels remain nonzero and respect currency locale")
+    func tinyPointAmountLabels() {
+        let locale = Locale(identifier: "en_US")
+        let zero = ChartSeriesCueSelection.pointAmountLabel(0, locale: locale)
+        for amount in [0.000001, 0.00000025, 0.00000001, 1e-12] {
+            #expect(ChartSeriesCueSelection.pointAmountLabel(amount, locale: locale) != zero)
+            let negative = ChartSeriesCueSelection.pointAmountLabel(-amount, locale: locale)
+            #expect(negative != zero && negative.contains("-"))
+        }
+        #expect(ChartSeriesCueSelection.pointAmountLabel(0.000001, locale: Locale(identifier: "de_DE")).contains("0,000001"))
+        #expect(ChartSeriesCueSelection.pointAmountLabel(-0.0, locale: locale) == zero)
+        // A large preceding stack can erase the tiny value in end - start.
+        // The label must continue to use its original observation instead.
+        let tiny = 0.000001
+        #expect((1e12 + tiny) - 1e12 == 0)
+        #expect(ChartSeriesCueSelection.pointAmountLabel(tiny, locale: locale).contains("0.000001"))
+    }
+
+    @Test("scientific USD fallback preserves extremely small signed values; nonfinite is unavailable")
+    func pointAmountFallbacks() throws {
+        for amount in [1e-13, -2.5e-20, Double.leastNonzeroMagnitude, -Double.leastNonzeroMagnitude] {
+            let label = ChartSeriesCueSelection.pointAmountLabel(amount, locale: Locale(identifier: "en_US"))
+            #expect(label.hasSuffix(" USD"))
+            let numeric = try #require(Double(String(label.dropLast(4))))
+            #expect(numeric == amount && numeric != 0)
+        }
+        for amount in [Double.nan, .infinity, -.infinity] {
+            #expect(ChartSeriesCueSelection.pointAmountLabel(amount) == "Amount unavailable")
+        }
+    }
+
 }

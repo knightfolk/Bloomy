@@ -121,6 +121,29 @@ struct OpportunityComparisonTests {
         #expect(OpportunityPresentation.name(value, metadata: nil) == value.id)
     }
 
+    @Test("visible aliases remain searchable without catalog metadata", arguments: [
+        ("gemma-4-26b-qat-4bit", "Gemma 4"),
+        ("EigenLabs/Qwen3.8-27B-4bit-mtp", "Qwen 3.8"),
+    ])
+    func absentMetadataSearch(example: (String, String)) {
+        let value = model(example.0, active: 1)
+        #expect(OpportunityPresentation.matchesSearch(example.1, model: value, metadata: nil))
+        #expect(OpportunityPresentation.matchesSearch(ModelDisplayName.short(value.id), model: value, metadata: nil))
+        #expect(OpportunityPresentation.matchesSearch(value.id.uppercased(), model: value, metadata: nil))
+        #expect(OpportunityPresentation.matchesSearch("", model: value, metadata: nil))
+        #expect(!OpportunityPresentation.matchesSearch("unrelated model", model: value, metadata: nil))
+    }
+
+    @Test("search preserves catalog names and canonical identity without borrowing another model's name")
+    func catalogNameSearch() {
+        let value = model("organization/technical-id", active: 1)
+        let metadata = CatalogModel(id: value.id, displayName: "Readable model", family: "example", modelType: "text",
+            capabilities: [], sizeGB: 10, minimumRAMGB: 16, active: true)
+        #expect(OpportunityPresentation.matchesSearch("readable", model: value, metadata: metadata))
+        #expect(OpportunityPresentation.matchesSearch(value.id, model: value, metadata: metadata))
+        #expect(!OpportunityPresentation.matchesSearch("Readable model", model: model("different", active: 1), metadata: metadata))
+    }
+
     private func model(_ id: String, active: Int, queued: Int = 0, accepting: Bool = true) -> NetworkModelCapacity {
         NetworkModelCapacity(id: id, ready: true, canAccept: accepting, routableProviders: 10,
             warmProviders: 10, runningProviders: 1, coldProviders: 0, activeRequests: active,

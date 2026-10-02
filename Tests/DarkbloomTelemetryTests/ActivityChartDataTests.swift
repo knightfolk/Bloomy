@@ -117,6 +117,63 @@ struct ActivityChartDataTests {
         #expect(axis.values == [-0.15, -0.1, -0.05, 0, 0.05, 0.1, 0.15])
     }
 
+    @Test("tiny positive, negative, and mixed profit retains distinct finite ticks", arguments: [0.000004, 0.000001, 0.00000025, 0.00000001])
+    func tinySignedProfitAxis(magnitude: Double) {
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 3_600), duration: 3_600)
+        for amounts in [[magnitude], [-magnitude], [-magnitude, magnitude / 2]] {
+            let values = amounts.enumerated().map { index, amount in
+                ActivityChartValue(interval: interval, series: "model-\(index)", amountUSD: amount, run: 0)
+            }
+            for stacked in [false, true] {
+                let bounds = ActivityChartData.profitBounds(values: values, stacked: stacked)
+                let axis = ActivityChartAxis.signedYAxis(minimum: bounds.minimum, maximum: bounds.maximum)
+                expectUsableAxis(axis, minimum: bounds.minimum, maximum: bounds.maximum)
+                #expect(axis.lowerBound == -axis.upperBound)
+                // Formatting must not turn a tiny but nonzero range into a
+                // chart whose currency tick labels all claim to be zero.
+                let labels = axis.values.map {
+                    $0.formatted(.currency(code: "USD").locale(Locale(identifier: "en_US_POSIX"))
+                        .precision(.fractionLength(axis.fractionDigits)))
+                }
+                #expect(Set(labels).count == axis.values.count)
+            }
+        }
+    }
+
+    @Test("tiny gross earnings retains distinct ticks and a covering positive domain", arguments: [0.000009, 0.000001, 0.00000025, 0.00000001])
+    func tinyPositiveAxis(maximum: Double) {
+        let axis = ActivityChartAxis.yAxis(maximum: maximum)
+        expectUsableAxis(axis, minimum: 0, maximum: maximum)
+        #expect(axis.lowerBound == 0)
+    }
+
+    @Test("finite numeric extremes cannot underflow the axis step or overflow its bounds", arguments: [Double.leastNonzeroMagnitude, Double.leastNormalMagnitude, Double.greatestFiniteMagnitude])
+    func extremeAxis(magnitude: Double) {
+        expectUsableAxis(ActivityChartAxis.yAxis(maximum: magnitude), minimum: 0, maximum: magnitude)
+        expectUsableAxis(ActivityChartAxis.signedYAxis(minimum: -magnitude, maximum: magnitude),
+            minimum: -magnitude, maximum: magnitude)
+    }
+
+    @Test("nonfinite and empty axis inputs use finite zero-containing fallback domains")
+    func nonfiniteAxis() {
+        for value in [Double.nan, .infinity, -.infinity, 0] {
+            expectUsableAxis(ActivityChartAxis.yAxis(maximum: value), minimum: 0, maximum: 0)
+            expectUsableAxis(ActivityChartAxis.signedYAxis(minimum: value, maximum: value), minimum: 0, maximum: 0)
+        }
+        expectUsableAxis(ActivityChartAxis.signedYAxis(minimum: .nan, maximum: 0.000001), minimum: 0, maximum: 0.000001)
+        expectUsableAxis(ActivityChartAxis.signedYAxis(minimum: -0.000001, maximum: .infinity), minimum: -0.000001, maximum: 0)
+    }
+
+    private func expectUsableAxis(_ axis: ActivityChartYAxis, minimum: Double, maximum: Double) {
+        #expect(axis.lowerBound.isFinite && axis.upperBound.isFinite)
+        #expect(axis.lowerBound < axis.upperBound)
+        #expect(axis.lowerBound <= minimum && axis.upperBound >= maximum)
+        #expect(axis.values.count >= 2 && axis.values.count <= 13)
+        #expect(axis.values.allSatisfy { $0.isFinite && $0 >= axis.lowerBound && $0 <= axis.upperBound })
+        #expect(axis.values.contains(0))
+        #expect(zip(axis.values, axis.values.dropFirst()).allSatisfy { pair in pair.0 < pair.1 })
+    }
+
     @Test("line and area series break into new runs across unknown buckets")
     func unknownBucketsBreakRuns() {
         let first = DateInterval(start: Date(timeIntervalSince1970: 3_600), duration: 3_600)

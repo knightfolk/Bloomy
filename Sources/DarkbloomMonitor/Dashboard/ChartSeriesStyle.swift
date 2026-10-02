@@ -1,4 +1,5 @@
 import Charts
+import Foundation
 import SwiftUI
 
 /// Color stays useful, but a stable number, shape, and stroke also identify
@@ -115,6 +116,41 @@ struct ChartSeriesBadge: View {
 /// Select only one existing, nonzero mark per series for a small direct label.
 /// Prefer its largest magnitude, where the label has the most room to fit.
 enum ChartSeriesCueSelection {
+    /// Describe the observation, independently of its stack or axis scale.
+    /// Keep ordinary money compact, but never round nonzero evidence to zero.
+    static func pointAmountLabel(_ amount: Double, locale: Locale = .current) -> String {
+        guard amount.isFinite else { return "Amount unavailable" }
+        let magnitude = abs(amount)
+        if magnitude > 0, magnitude < 1e-12 {
+            // Double's scientific description preserves even subnormal values
+            // without hundreds of decimal places in a spoken currency label.
+            return "\(amount) USD"
+        }
+        let digits = magnitude > 0 ? max(4, Int(min(12, ceil(-log10(magnitude)) + 2))) : 4
+        return (amount == 0 ? 0 : amount).formatted(.currency(code: "USD").locale(locale)
+            .precision(.fractionLength(4...digits)))
+    }
+
+    /// A single observation has no area polygon. Preserve its real stacked
+    /// extent so the caller can show a point without inventing another value.
+    static func isolatedAreaSegments(_ values: [ActivityChartValue]) -> [ActivityChartSegment] {
+        let runCounts = Dictionary(grouping: values, by: \.runKey).mapValues(\.count)
+        var cursors: [Date: (positive: Double, negative: Double)] = [:]
+        var isolated: [ActivityChartSegment] = []
+        for value in values where value.amountUSD.isFinite {
+            var cursor = cursors[value.interval.start] ?? (positive: 0, negative: 0)
+            let beginning = value.amountUSD >= 0 ? cursor.positive : cursor.negative
+            let end = beginning + value.amountUSD
+            guard end.isFinite else { continue }
+            if value.amountUSD >= 0 { cursor.positive = end } else { cursor.negative = end }
+            cursors[value.interval.start] = cursor
+            guard runCounts[value.runKey] == 1 else { continue }
+            isolated.append(ActivityChartSegment(interval: value.interval, series: value.series,
+                startUSD: beginning, endUSD: end))
+        }
+        return isolated
+    }
+
     /// Area annotations use the very same series and bucket values as the
     /// plotted marks. Totals-only clients can attribute a selected model here
     /// even when the separate bar-segment fallback still names aggregate Work.

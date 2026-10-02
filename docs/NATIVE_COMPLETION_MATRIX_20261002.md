@@ -17,10 +17,10 @@ No new application inspection was performed for this matrix.
 | Route / surface | Rendered light/dark, compact/wide evidence | Keyboard / accessibility / motion | Truth / draft safety | Prioritized remaining route proof |
 | --- | --- | --- | --- | --- |
 | Popup: Available, Cooling, Auto, Nudge | **Partial:** dark/grayscale actual screen; 80/240/360-point budgets; later light/dark icons. [Popup], [History] | Native scrolling reaches footer; Fan policy Tab/Space. Motion 13/14; genuine occlusion fails. [Charts] | **Covered fixture:** Auto readback; fan draft survives Refresh/reopen; Nudge guide without credentials. [Popup] | Physical-wheel/keyboard nested scrolling; moved anchors and other displays. |
-| Overview | **Partial:** early wide fresh/light, compact offline/light; later compact light/dark mixed cooling. [Base], [Resources] | Tab-to-sidebar/Down-to-Activity; qualified request/thermal AX labels. [Nav], [Resources] | **Covered fixture:** missing earnings unavailable; current/retained/absent request and fan readings distinct. [Resources] | Updated wide dark; expanded cards and sustained source updates. |
-| Activity — Earnings | **Partial:** compact light baseline/dark retained filter; noncolor chart cues. [Base], [CAM], [Charts] | Base-reward-aware All models label; shapes, line styles, sparse badges/legends. [CAM], [Charts] | **Covered fixture/unit:** absent selected model retained; unchanged attribution, signed stacks and unknown gaps. [CAM], [Charts] | Wide charts; keyboard date/range/filter controls; dense 30-day and scalar/empty cues. |
+| Overview | **Partial:** early wide fresh/light, compact offline/light; compact light/dark mixed cooling; Native67 wide dark expanded Running/saved selection. [Base], [Resources], [Wide] | Tab-to-sidebar/Down-to-Activity; qualified request/thermal AX labels; outer scrolling reaches expanded footer. [Nav], [Resources], [Wide] | **Covered fixture:** missing earnings unavailable; current/retained/absent request and fan readings distinct. [Resources] | Sustained source updates; broader expanded/missing-state keyboard paths. |
+| Activity — Earnings | **Partial:** compact light/dark retained filters; wide dark thirty-day Bars/Lines/Area; final wide light/compact dark scalar Area points. [CAM], [Charts], [Wide] | Native From/Through/filter/chart key paths; shapes, line styles and numbered cues. Custom per-point amount not individually exposed by CUA. [Wide] | **Covered fixture/unit:** selected model retained; signed stacks/unknown gaps; finite tiny axes and original-point amount precision. [CAM], [Wide] | Native empty/negative/known-zero overlap and micro-value cues; complete key loop and spoken point labels. |
 | Activity — Metrics | **Partial:** compact dark charts/light no-work visit; light/dark grayscale logos. [Base], [Charts] | **Covered native AX:** one Refresh metrics button/press/callback in empty/stale cases. [Charts] | **Covered unit/components:** stale speed excluded; render-time freshness/rollback preserves analysis window. [CAM] | Wide controls/visits; actual between-tick arrival and expiry in final host. |
-| Opportunity — Models | **Partial:** compact dark expanded cards; wide light aligned neighbors. [CAM] | Contextual Details label/body checked after rejected crashing candidates. [CAM] | **Covered fixture:** source-held expiry qualifies standalone routing/pressure as past reports. [CAM] | Keyboard search/Details/recommendations; missing/partial evidence; compact light final cards. |
+| Opportunity — Models | **Partial:** compact dark expanded cards; wide light aligned neighbors; corrected compact light/dark guidance and wide dark search/cards. [CAM], [Wide] | Native search, Tab/Space Qwen/Gemma Details and expanded page scroll; offscreen lazy-card traversal remains partial. [CAM], [Wide] | **Covered fixture/unit:** retained routing/pressure qualified; visible aliases searchable without catalog metadata; guidance no longer blanks compact page. [CAM], [Wide] | Missing/partial evidence and maintenance/full history; complete keyboard/VoiceOver traversal. |
 | Opportunity — Network activity/infrastructure | **Partial:** compact dark chart; compact light Refresh; light/dark failed retries. [Base], [Recovery] | Explicit Refresh; separate real-window helper passes two 65-second hidden/absent holds. [Latest] | **Covered unit/fixture:** honest failed-read state; cancelled reads joined; immediate restoration. [History], [Latest] | Actual dashboard route-away/minimize holds; wide controls and infrastructure disclosure traversal. |
 | Models — list/Capacity/startup picker | **Partial:** compact fresh/dark, stale/light; wide light; alias picker compact dark/wide light. [Base], [Host] | **Covered bounded native AX:** contextual card/checkbox actions and separate drafts. [Charts] | **Covered fixture/unit:** unknown residency distinct; raw alias/no-op preserved; explicit selection/Discard; ambiguity guarded. [Host], [CAM] | Final wide dark; keyboard capacity/disclosures; rendered ambiguous/missing inventory. |
 | Models — Manage editor | **Partial:** final compact dark 620 × 360 sheet. [CAM] | Native press proof; scrolling reaches Done; Escape closes. [Charts], [CAM] | **Covered fixture/unit:** disappearing model retains edits, removes obsolete controls, blocks Save; late alias callback rejected. [CAM] | Light sheet and keyboard scrolling; native alias-reassignment callback scenario. |
@@ -28,7 +28,7 @@ No new application inspection was performed for this matrix.
 | Chat — dashboard | **Partial:** compact light send/Cancel; dark resize/draft; paid/local explanations fit. [CAM], [Popup], [Keys] | Native64 route keys; Native65 keyboard Cancel restores composer, normal completion keeps picker focus; Native67 four two-view focus cases. [Keys] | **Covered fixture/unit:** expiry/failed/empty reads retain drafts; held send gates New Chat; Cancel keeps delivery warning. [Expiry], [CAM], [Keys] | Transcript/key-editor traversal; paid-send states and speaker narration; complete light/dark key loop. |
 | Chat — pop-out | **Partial:** 460 × 520 light/dark; close/reopen draft. [CAM] | Native65 dark keyboard Cancel restores its composer; dashboard draft remains independent. [Keys] | **Covered fixture/unit:** independent draft and verification ownership; updater protection; four shared-store focus assertions. [Expiry], [Update], [Keys] | Remaining independent route/key-editor flow; other sizes; close/minimize during send and verification. |
 | Action History | **Partial:** final compact light canonical/alias search/details; earlier dark compact/wide expanded notes. [History], [Draft] | Selection and independent scrolling observed; full key loop open. [History] | **Covered unit/fixture:** exact search/order; mid-row correction; selected details; Jobs empty state. [History] | Mixed jobs/actions/base rewards; keyboard filters/selection; actual arrivals while selected. |
-| Health & Logs — Source health | **Partial:** wide dark baseline; compact light stale/offline. [Base], [Health] | Native AX freshness rows include timestamps/reasons. [Health] | **Covered fixture:** stopped-source captures differ from unavailable sources; stale warning wraps. [Health] | Expanded verification/daemon/thermal/advanced sections in compact dark and missing states. |
+| Health & Logs — Source health | **Partial:** wide dark; compact light stale/offline; Native70 wide/compact dark all four sections expanded with reachable final rows. [Health], [Wide] | AX freshness timestamps/reasons; native outer scrolling reaches full verification/daemon/thermal/advanced details. [Health], [Wide] | **Covered fixture:** process mismatch remains verification unavailable; thermal last-observed readings stay qualified. [Health], [Wide] | Expanded missing states/long IDs and reasons; complete disclosure keyboard/VoiceOver loop. |
 | Health & Logs — Logs/export | **Partial:** compact light/dark stable selected details; earlier wide dark details. [Keys], [Latest], [Health] | Native page action reaches full details; table wheel independent; full key loop partial. [Keys] | **Covered unit/fixture:** frozen export/gate; corrected payloads/duplicate identity; Native65 selection survives source ticks/arrival/matching filter and clears on exclusion. [Latest], [Keys] | Wide final export/details; keyboard traversal; retention-cap/quiet locale/time-zone changes. |
 
 ## Every Settings page
@@ -53,9 +53,10 @@ Settings sidebar/key loop.
 1. **Actual VoiceOver plus remaining decision-control keyboard paths:** Models,
    Hosting, Chat and Support; confirm spoken freshness/errors, canonical identity,
    secure input and reachable Discard/Cancel/Done/review gates.
-2. **Weakest final layouts and stable updates:** wide dark Overview/Earnings/
-   Opportunity, compact light Models, expanded Health/settings; resized Logs
-   details/export and retention-cap/locale changes after stable-arrival proof.
+2. **Remaining layouts and stable updates:** compact light Models, lower Provider
+   controls, expanded missing-state Health, Earnings empty/negative/known-zero
+   cues; resized Logs export and retention-cap/locale changes after stable-arrival
+   proof. Wide Overview/Opportunity and dense/scalar Earnings have bounded proof.
 3. **Actual motion/display boundary:** system Reduce Motion delivery, genuine
    occlusion diagnosis, moved anchors/other displays, physical-wheel and keyboard
    tiny-popup reachability. Do not weaken the failed prerequisite.
@@ -74,7 +75,10 @@ failure remains separate: [sanitized diagnostic](PROVIDER_CACHE_STARTUP_DIAGNOST
 five-of-five finite cache proof. These are bounded local assertions.
 [Keys] records Native64 baseline, Native65 keyboard/Logs observations and
 Native67's four finite focus cases with cleanup. Actual keyboard typing and
-helper key-loop/AX press remain distinct assertions. Invalid SwiftPM
+helper key-loop/AX press remain distinct assertions. [Wide] adds Native67–71
+bounded Overview/Opportunity/Health/Earnings observations, 1,381 passing tests,
+and final release compilation. Tiny-axis and point precision tests remain
+distinct from complete native chart accessibility proof. Invalid SwiftPM
 AX hosts, rejected candidates and partial motion results are not accepted full
 proof; [Charts] documents normal NSApplication helper requirements. No release
 or permission authority follows from this matrix.
@@ -100,3 +104,4 @@ Each table's linked shorthand resolves to the exact repository review below.
 [History]: HISTORY_CACHE_IMAGE_EFFICIENCY_REVIEW_20261002.md
 [Latest]: SETTINGS_LOGS_VISIBILITY_REVIEW_20261002.md
 [Keys]: NATIVE_CHAT_KEYBOARD_LOGS_REVIEW_20261002.md
+[Wide]: WIDE_DASHBOARD_KEYBOARD_REVIEW_20261002.md

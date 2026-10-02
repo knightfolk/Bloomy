@@ -336,25 +336,12 @@ enum ActivityChartAxis {
 
     static func yAxis(maximum: Double) -> ActivityChartYAxis {
         let safeMaximum = maximum.isFinite ? max(0, maximum) : 0
-        guard safeMaximum > 0 else {
-            return ActivityChartYAxis(lowerBound: 0, upperBound: 1, values: [0, 0.25, 0.5, 0.75, 1], fractionDigits: 2)
-        }
-
-        let rawStep = safeMaximum / 4
-        let magnitude = pow(10, floor(log10(rawStep)))
-        let normalized = rawStep / magnitude
-        let preferred: Double = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10
-        let step = preferred * magnitude
-        let upperBound = ceil(safeMaximum / step) * step
-        let count = max(1, Int((upperBound / step).rounded()))
-        let values = (0...count).map { index in
-            (Double(index) * step * 1_000_000).rounded() / 1_000_000
-        }
+        let scale = numericScale(maximum: safeMaximum)
         return ActivityChartYAxis(
             lowerBound: 0,
-            upperBound: upperBound,
-            values: values,
-            fractionDigits: step < 0.01 ? 4 : 2
+            upperBound: max(safeMaximum, tick(scale.upperBound, step: scale.step)),
+            values: (0...scale.count).map { tick(Double($0) * scale.step, step: scale.step) },
+            fractionDigits: fractionDigits(step: scale.step)
         )
     }
 
@@ -362,20 +349,45 @@ enum ActivityChartAxis {
         let safeMinimum = minimum.isFinite ? minimum : 0
         let safeMaximum = maximum.isFinite ? maximum : 0
         let magnitude = max(abs(safeMinimum), abs(safeMaximum))
-        let positive = yAxis(maximum: magnitude)
-        let step = positive.values.count > 1
-            ? ((positive.values[1] - positive.values[0]) * 1_000_000).rounded() / 1_000_000
-            : 0.25
-        let upperBound = (positive.upperBound * 1_000_000).rounded() / 1_000_000
-        let count = max(1, Int((upperBound / step).rounded()))
-        let values = (-count...count).map { index in
-            (Double(index) * step * 1_000_000).rounded() / 1_000_000
-        }
+        // Keep the numeric step: display rounding can make adjacent tiny ticks
+        // identical, and subtracting those ticks would produce a zero divisor.
+        let scale = numericScale(maximum: magnitude)
+        let roundedBound = tick(scale.upperBound, step: scale.step)
+        let upperBound = max(magnitude, roundedBound)
         return ActivityChartYAxis(
             lowerBound: -upperBound,
             upperBound: upperBound,
-            values: values,
-            fractionDigits: positive.fractionDigits
+            values: (-scale.count...scale.count).map { tick(Double($0) * scale.step, step: scale.step) },
+            fractionDigits: fractionDigits(step: scale.step)
         )
+    }
+
+    private static func numericScale(maximum: Double) -> (step: Double, count: Int, upperBound: Double) {
+        guard maximum > 0 else { return (0.25, 4, 1) }
+        let rawStep = maximum / 4
+        let magnitude = rawStep > 0 ? pow(10, floor(log10(rawStep))) : 0
+        // Subnormal values may underflow either the division or power of ten.
+        guard magnitude > 0, magnitude.isFinite else { return (maximum, 1, maximum) }
+        let normalized = rawStep / magnitude
+        let preferred: Double = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10
+        let step = preferred * magnitude
+        let count = max(1, Int(ceil(maximum / step)))
+        let upperBound = Double(count) * step
+        // Rounding up near Double's limit can overflow even for finite input.
+        guard upperBound.isFinite else { return (rawStep, 4, maximum) }
+        return (step, count, upperBound)
+    }
+
+    private static func tick(_ value: Double, step: Double) -> Double {
+        let scaled = value * 1_000_000
+        // Preserve the existing micro-dollar normalization for ordinary axes,
+        // while keeping fractional-micro-dollar ticks and large values intact.
+        guard step >= 0.000001, scaled.isFinite else { return value }
+        return scaled.rounded() / 1_000_000
+    }
+
+    private static func fractionDigits(step: Double) -> Int {
+        guard step < 0.0001 else { return step < 0.01 ? 4 : 2 }
+        return max(4, Int(min(12, ceil(-log10(step)) + 1)))
     }
 }

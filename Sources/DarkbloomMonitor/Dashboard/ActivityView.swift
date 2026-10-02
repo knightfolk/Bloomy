@@ -458,7 +458,13 @@ struct ActivityView: View {
             : []
         let valueCues = chartStyle == .area || stackedBars ? [] : ChartSeriesCueSelection.values(values)
         let segmentCues = stackedBars ? ChartSeriesCueSelection.segments(segments) : []
-        let areaCues = chartStyle == .area ? ChartSeriesCueSelection.areaCues(values) : []
+        let isolatedArea = chartStyle == .area ? ChartSeriesCueSelection.isolatedAreaSegments(values) : []
+        let isolatedAreaIDs = Set(isolatedArea.map(\.id))
+        let isolatedAreaAmounts: [String: Double] = isolatedArea.isEmpty ? [:] : values.reduce(into: [:]) { amounts, value in
+            if isolatedAreaIDs.contains(value.id) { amounts[value.id] = value.amountUSD }
+        }
+        let areaCues = chartStyle == .area
+            ? ChartSeriesCueSelection.areaCues(values).filter { !isolatedAreaIDs.contains($0.id) } : []
         let visibleSeries = stackedBars
             ? segments.map(\.series) : values.map(\.series)
         let styles = ChartSeriesStyles(domain: chartStyleDomain + visibleSeries)
@@ -480,6 +486,24 @@ struct ActivityView: View {
             Chart {
                 chartMarks(query: query, values: values, segments: segments,
                     styles: styles, valueCues: valueCues, segmentCues: segmentCues)
+                // A single value cannot form an area. Place its symbol within
+                // the recorded bucket, using the same signed stack endpoint.
+                ForEach(isolatedArea) { segment in
+                    if let originalAmount = isolatedAreaAmounts[segment.id] {
+                        PointMark(
+                            x: .value("Period", segment.interval.start.addingTimeInterval(segment.interval.duration / 2)),
+                            y: .value("Recorded USD", segment.endUSD)
+                        )
+                        .foregroundStyle(by: .value("Series", segment.series))
+                        .symbol(styles[segment.series].symbol.shape)
+                        .symbolSize(48)
+                        .annotation(position: .trailing, spacing: 4) {
+                            ChartSeriesBadge(number: styles[segment.series].number)
+                        }
+                        .accessibilityLabel(Text("\(segment.series), recorded period beginning \(segment.interval.start.formatted(date: .abbreviated, time: .shortened))"))
+                        .accessibilityValue(Text(ChartSeriesCueSelection.pointAmountLabel(originalAmount)))
+                    }
+                }
             }
                 .id(query.model)
                 .chartXScale(domain: range.start...range.end)
@@ -540,7 +564,7 @@ struct ActivityView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(chartMetric == .estimatedProfit
             ? "Estimated net profit per earning model-hour in US dollars by local time, with positive and negative values around zero. Numbered labels and the legend identify each series."
-            : "Recorded gross earnings in US dollars by local time. Numbered labels and the legend identify the series. Full values and coverage are in the table below.")
+            : "Recorded gross earnings in US dollars by local time. Numbered labels and the legend identify the series. Aggregate totals and coverage are in the table below.")
     }
 
     @ChartContentBuilder

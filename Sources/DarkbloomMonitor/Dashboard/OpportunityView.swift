@@ -73,6 +73,14 @@ enum OpportunityPresentation {
         guard let metadata, metadata.id == model.id, !metadata.displayName.isEmpty else { return model.id }
         return metadata.displayName
     }
+
+    static func matchesSearch(_ search: String, model: NetworkModelCapacity, metadata: CatalogModel?) -> Bool {
+        guard !search.isEmpty else { return true }
+        let displayName = name(model, metadata: metadata)
+        return model.id.localizedCaseInsensitiveContains(search)
+            || displayName.localizedCaseInsensitiveContains(search)
+            || ModelDisplayName.short(displayName).localizedCaseInsensitiveContains(search)
+    }
 }
 
 enum OpportunityCardFreshness {
@@ -143,63 +151,62 @@ private struct OpportunityModelListView: View {
     @State private var refreshing = false
 
     var body: some View {
-        TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 10), isVisible: store.dashboardVisible)) { _ in
-            let now = Date()
-            VStack(alignment: .leading, spacing: 14) {
-                DisclosureGroup {
-                    RecommendationEvidenceCard(
-                        decision: store.recommendationDecision,
-                        history: store.recommendationHistory,
-                        historyAvailable: store.recommendationHistoryAvailable
-                    )
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("Model guidance", systemImage: "checklist").font(.subheadline.weight(.semibold))
-                        Text(store.recommendationDecision.map { OpportunityPresentation.recommendationTitle($0.outcome) }
-                             ?? "Waiting for evidence")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(12)
-                .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
-                HStack {
-                    TextField("Find a model", text: $search)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityLabel("Filter network models")
-                    Button {
-                        refreshing = true
-                        Task {
-                            await store.refreshNetworkCapacity()
-                            await store.refreshPublicCatalog()
-                            refreshing = false
+        GeometryReader { geometry in
+            TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 10), isVisible: store.dashboardVisible)) { _ in
+                let now = Date()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        DisclosureGroup {
+                            RecommendationEvidenceCard(
+                                decision: store.recommendationDecision,
+                                history: store.recommendationHistory,
+                                historyAvailable: store.recommendationHistoryAvailable
+                            )
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label("Model guidance", systemImage: "checklist").font(.subheadline.weight(.semibold))
+                                Text(store.recommendationDecision.map { OpportunityPresentation.recommendationTitle($0.outcome) }
+                                     ?? "Waiting for evidence")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
-                    } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                    .disabled(refreshing)
-                }
-                if let capacity = store.networkCapacity.value {
-                    let current = PopupNetworkDemandPresentation.freshness(of: store.networkCapacity, at: now) == .current
-                    HStack(spacing: 6) {
-                        Circle().fill(current ? Color.green : Color.orange).frame(width: 6, height: 6)
-                        Text(current ? "Live network" : "Last known demand")
-                        Text("·")
-                        Text(capacity.capturedAt, style: .relative)
-                        Spacer()
-                        Text("Demand first")
-                    }.font(.callout).foregroundStyle(.secondary)
-                    if !current {
-                        Label("Data is out of date. Refresh before choosing a model.", systemImage: "clock")
-                            .font(.callout).foregroundStyle(.orange)
-                    }
-                    if capacity.isDraining {
-                        ContentUnavailableView(current ? "Network maintenance" : "Last reported: maintenance",
-                            systemImage: "wrench.and.screwdriver", description: Text("Model capacity is temporarily withdrawn."))
-                    } else {
-                        let models = OpportunityPresentation.ordered(capacity.models).filter { model in
-                            search.isEmpty || model.id.localizedCaseInsensitiveContains(search)
-                                || OpportunityPresentation.name(model, metadata: metadata(model.id)).localizedCaseInsensitiveContains(search)
+                        .padding(12)
+                        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
+                        HStack {
+                            TextField("Find a model", text: $search)
+                                .textFieldStyle(.roundedBorder)
+                                .accessibilityLabel("Filter network models")
+                            Button {
+                                refreshing = true
+                                Task {
+                                    await store.refreshNetworkCapacity()
+                                    await store.refreshPublicCatalog()
+                                    refreshing = false
+                                }
+                            } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                            .disabled(refreshing)
                         }
-                        GeometryReader { geometry in
-                            ScrollView {
+                        if let capacity = store.networkCapacity.value {
+                            let current = PopupNetworkDemandPresentation.freshness(of: store.networkCapacity, at: now) == .current
+                            HStack(spacing: 6) {
+                                Circle().fill(current ? Color.green : Color.orange).frame(width: 6, height: 6)
+                                Text(current ? "Live network" : "Last known demand")
+                                Text("·")
+                                Text(capacity.capturedAt, style: .relative)
+                                Spacer()
+                                Text("Demand first")
+                            }.font(.callout).foregroundStyle(.secondary)
+                            if !current {
+                                Label("Data is out of date. Refresh before choosing a model.", systemImage: "clock")
+                                    .font(.callout).foregroundStyle(.orange)
+                            }
+                            if capacity.isDraining {
+                                ContentUnavailableView(current ? "Network maintenance" : "Last reported: maintenance",
+                                    systemImage: "wrench.and.screwdriver", description: Text("Model capacity is temporarily withdrawn."))
+                            } else {
+                                let models = OpportunityPresentation.ordered(capacity.models).filter { model in
+                                    OpportunityPresentation.matchesSearch(search, model: model, metadata: metadata(model.id))
+                                }
                                 VStack(alignment: .leading, spacing: 12) {
                                     if models.isEmpty {
                                         ContentUnavailableView(search.isEmpty ? "No models reported" : "No matching models",
@@ -236,11 +243,12 @@ private struct OpportunityModelListView: View {
                                     }.padding(.top, 6)
                                 }
                             }
+                        } else {
+                            ContentUnavailableView("Waiting for network demand", systemImage: "network",
+                                description: Text("Your local provider continues independently. Try Refresh to check again."))
                         }
                     }
-                } else {
-                    ContentUnavailableView("Waiting for network demand", systemImage: "network",
-                        description: Text("Your local provider continues independently. Try Refresh to check again."))
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
