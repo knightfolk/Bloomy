@@ -8,22 +8,22 @@ struct ChatView: View {
     @ObservedObject var store: ChatStore
     var openPopOut: (() -> Void)? = nil
 
-    @State private var draft = ""
-    /// The conversation this window's draft was written in. A draft may only
-    /// ever be sent to the conversation it belongs to, so an unsent draft
-    /// can never ride along when a new chat starts on a different route.
-    @State private var draftConversationID: UUID?
+    @StateObject private var draft: ChatDraftState
     @State private var showsNewChatDialog = false
     @State private var showsKeyEditor = false
     @State private var keyDraft = ""
     @State private var keyError: String?
 
+    init(store: ChatStore, openPopOut: (() -> Void)? = nil, draft: ChatDraftState? = nil) {
+        self.store = store
+        self.openPopOut = openPopOut
+        // The dashboard injects its retained draft. Standalone windows own
+        // their own state, so their unsent messages never overwrite it.
+        _draft = StateObject(wrappedValue: draft ?? ChatDraftState())
+    }
+
     private var draftBelongsToActiveConversation: Bool {
-        ChatDraftPolicy.canSend(
-            draft: draft,
-            draftConversationID: draftConversationID,
-            activeConversationID: store.conversation?.id
-        )
+        draft.canSend(to: store.conversation?.id)
     }
 
     var body: some View {
@@ -43,11 +43,13 @@ struct ChatView: View {
         .sheet(isPresented: $showsNewChatDialog) {
             ChatNewConversationDialog(store: store)
         }
+        .onAppear {
+            // Chat may have been unmounted while another window started a
+            // new conversation. Reconcile before allowing this draft back.
+            draft.reconcile(with: store.conversation?.id)
+        }
         .onChange(of: store.conversation?.id) { _, _ in
-            // A new conversation (the only route change) discards this
-            // window's unsent draft immediately.
-            draft = ""
-            draftConversationID = nil
+            draft.clear()
         }
     }
 
@@ -164,6 +166,7 @@ struct ChatView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel("Retry balance")
                 .help("Retry the balance check")
             } else {
                 Text("Balance: checking…")
@@ -189,6 +192,7 @@ struct ChatView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel("Retry pricing")
                     .help("Retry the pricing check")
                 }
                 .font(.caption)
@@ -272,6 +276,7 @@ struct ChatView: View {
                 Image(systemName: "xmark.circle.fill")
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss notice")
         }
         .font(.caption)
         .padding(8)
@@ -304,30 +309,10 @@ struct ChatView: View {
             }
             HStack(alignment: .bottom, spacing: 8) {
                 TextEditor(text: Binding(
-                    get: {
-                        // An edit owned by a previous conversation reads as
-                        // empty here, so stale text can never display or
-                        // send after a route change.
-                        ChatDraftPolicy.visibleDraft(
-                            draft: draft,
-                            draftConversationID: draftConversationID,
-                            activeConversationID: store.conversation?.id
-                        )
-                    },
-                    set: { newValue in
-                        // Discard edits that arrive while the stored owner
-                        // is a different conversation (the window between a
-                        // route change and onChange); only a fresh, empty
-                        // draft may acquire the active conversation.
-                        if let owner = draftConversationID, owner != store.conversation?.id {
-                            draft = ""
-                            draftConversationID = nil
-                            return
-                        }
-                        draft = newValue
-                        draftConversationID = store.conversation?.id
-                    }
+                    get: { draft.visibleText(in: store.conversation?.id) },
+                    set: { draft.updateText($0, in: store.conversation?.id) }
                 ))
+                    .accessibilityLabel("Chat message")
                     .font(.body)
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 44, maxHeight: 120)
@@ -348,16 +333,7 @@ struct ChatView: View {
                     }
                 } else {
                     Button {
-                        guard draftBelongsToActiveConversation else {
-                            draft = ""
-                            draftConversationID = nil
-                            return
-                        }
-                        draftConversationID = store.conversation?.id
-                        // Keep the draft when the store rejects the turn (a
-                        // gate may have expired without a visible change).
-                        if !store.send(draft) { return }
-                        draft = ""
+                        draft.send(using: store)
                     } label: {
                         Label("Send", systemImage: "paperplane.fill")
                     }
@@ -365,7 +341,7 @@ struct ChatView: View {
                     .disabled(
                         !store.canSend
                             || !draftBelongsToActiveConversation
-                            || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     )
                 }
             }
@@ -589,7 +565,7 @@ private struct ChatNewConversationDialog: View {
 
 /// Consumer API key entry. The key is written straight to the Keychain and
 /// never displayed, echoed back, or persisted anywhere else.
-private struct ConsumerKeyEditor: View {
+struct ConsumerKeyEditor: View {
     @ObservedObject var store: ChatStore
     @Binding var draft: String
     @Binding var errorMessage: String?
@@ -613,6 +589,7 @@ private struct ConsumerKeyEditor: View {
                     .font(.callout)
             }
             SecureField("dk-…", text: $draft)
+                .accessibilityLabel("Consumer API key")
                 .disabled(store.keyPresence != .missing)
             if let errorMessage {
                 Text(errorMessage).font(.caption).foregroundStyle(.red)
@@ -657,6 +634,62 @@ private struct ConsumerKeyEditor: View {
             // Belt-and-braces: no pasted key survives the sheet in any path.
             draft = ""
         }
+    }
+}
+
+/// Only unsent message text and its conversation owner are retained. Keys
+/// and sheet state stay in ChatView and are never part of this object.
+@MainActor
+final class ChatDraftState: ObservableObject {
+    @Published private(set) var text = ""
+    @Published private(set) var conversationID: UUID?
+
+    func canSend(to activeConversationID: UUID?) -> Bool {
+        ChatDraftPolicy.canSend(
+            draft: text,
+            draftConversationID: conversationID,
+            activeConversationID: activeConversationID
+        )
+    }
+
+    func visibleText(in activeConversationID: UUID?) -> String {
+        ChatDraftPolicy.visibleDraft(
+            draft: text,
+            draftConversationID: conversationID,
+            activeConversationID: activeConversationID
+        )
+    }
+
+    func updateText(_ newValue: String, in activeConversationID: UUID?) {
+        // Preserve the edit guard for the interval before onChange runs:
+        // an old editor callback must not stamp old text onto a new chat.
+        if let owner = conversationID, owner != activeConversationID {
+            clear()
+            return
+        }
+        text = newValue
+        conversationID = activeConversationID
+    }
+
+    func reconcile(with activeConversationID: UUID?) {
+        if conversationID != activeConversationID {
+            clear()
+        }
+    }
+
+    func clear() {
+        text = ""
+        conversationID = nil
+    }
+
+    func send(using store: ChatStore) {
+        guard canSend(to: store.conversation?.id) else {
+            clear()
+            return
+        }
+        // Rejected sends retain the draft, including its owner. Accepted
+        // sends have already copied the prompt into the transcript.
+        if store.send(text) { clear() }
     }
 }
 

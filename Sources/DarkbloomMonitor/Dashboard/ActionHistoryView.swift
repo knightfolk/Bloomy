@@ -22,75 +22,82 @@ struct ActionHistoryView: View {
     @State private var filter = ActionHistoryFilter.all
     @State private var searchText = ""
     @State private var selectedID: UUID?
+    @State private var showsRecordingNotes: Bool
 
-    init(store: ActionHistoryStore, selectedID: UUID? = nil) {
+    init(store: ActionHistoryStore, selectedID: UUID? = nil, showsRecordingNotes: Bool = false) {
         self.store = store
         _selectedID = State(initialValue: selectedID)
+        _showsRecordingNotes = State(initialValue: showsRecordingNotes)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-            recordingNotes
-            if let storageError = store.storageError {
-                Label(storageError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("actionHistory.storageError")
-            }
-            controls
-            if filteredEvents.isEmpty {
-                emptyState
-            } else {
-                Table(filteredEvents, selection: $selectedID) {
-                    TableColumn("Time") { event in
-                        Text(event.occurredAt, format: .dateTime.month().day().hour().minute())
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .help(event.occurredAt.formatted(date: .complete, time: .complete))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    recordingNotes
+                    if let storageError = store.storageError {
+                        Label(storageError, systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("actionHistory.storageError")
                     }
-                    .width(min: 112, ideal: 145)
+                    controls
+                    if filteredEvents.isEmpty {
+                        emptyState
+                    } else {
+                        Table(filteredEvents, selection: $selectedID) {
+                            TableColumn("Time") { event in
+                                Text(event.occurredAt, format: .dateTime.month().day().hour().minute())
+                                    .monospacedDigit()
+                                    .lineLimit(1)
+                                    .help(event.occurredAt.formatted(date: .complete, time: .complete))
+                            }
+                            .width(min: 112, ideal: 145)
 
-                    TableColumn("Action") { event in
-                        Text(Self.actionLabel(event))
-                            .lineLimit(1)
-                            .help(Self.actionLabel(event))
-                    }
-                    .width(min: 100, ideal: 135)
+                            TableColumn("Action") { event in
+                                Text(Self.actionLabel(event))
+                                    .lineLimit(1)
+                                    .help(Self.actionLabel(event))
+                            }
+                            .width(min: 100, ideal: 135)
 
-                    TableColumn("Trigger") { event in
-                        Text(Self.titleCase(event.trigger.rawValue))
-                            .lineLimit(1)
-                    }
-                    .width(min: 72, ideal: 100)
+                            TableColumn("Trigger") { event in
+                                Text(Self.titleCase(event.trigger.rawValue))
+                                    .lineLimit(1)
+                            }
+                            .width(min: 72, ideal: 100)
 
-                    TableColumn("Result") { event in
-                        Label(Self.titleCase(event.outcome.rawValue), systemImage: Self.outcomeSymbol(event.outcome.rawValue))
-                            .foregroundStyle(Self.outcomeColor(event.outcome.rawValue))
-                            .lineLimit(1)
-                            .help(Self.titleCase(event.outcome.rawValue))
-                    }
-                    .width(min: 94, ideal: 118)
+                            TableColumn("Result") { event in
+                                Label(Self.titleCase(event.outcome.rawValue), systemImage: Self.outcomeSymbol(event.outcome.rawValue))
+                                    .foregroundStyle(Self.outcomeColor(event.outcome.rawValue))
+                                    .lineLimit(1)
+                                    .help(Self.titleCase(event.outcome.rawValue))
+                            }
+                            .width(min: 94, ideal: 118)
 
-                    TableColumn("Model") { event in
-                        Text(Self.modelLabel(event))
-                            .lineLimit(1)
-                            .help(event.model ?? "No model recorded")
+                            TableColumn("Model") { event in
+                                Text(Self.modelLabel(event))
+                                    .lineLimit(1)
+                                    .help(event.model ?? "No model recorded")
+                            }
+                            .width(min: 110, ideal: 190)
+                        }
+                        .frame(minHeight: 180, idealHeight: 300, maxHeight: 320)
+                        .accessibilityLabel("Action and job history")
+
+                        if let selectedEvent {
+                            ScrollView { details(for: selectedEvent) }
+                                .frame(minHeight: 100, idealHeight: 160, maxHeight: 180)
+                        } else {
+                            Text("Select an entry to see its details.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .width(min: 110, ideal: 190)
                 }
-                .frame(minHeight: 180, idealHeight: 300, maxHeight: 320)
-                .accessibilityLabel("Action and job history")
-
-                if let selectedEvent {
-                    ScrollView { details(for: selectedEvent) }
-                        .frame(minHeight: 100, idealHeight: 160, maxHeight: 180)
-                } else {
-                    Text("Select an entry to see its details.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(20)
@@ -121,15 +128,19 @@ struct ActionHistoryView: View {
             Label(recordingStartLabel, systemImage: "clock")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            DisclosureGroup("About this history") {
-            Text("Action tracking starts from that date; older actions are not backfilled. Reported jobs and base rewards may include up to 30 days of earlier account history, subject to the server’s history limit. Entries are retained for up to 30 days, with a 5,000-entry limit.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("Job and reward records come from account-wide earnings history and may be incomplete because the server limits history. They may reflect another owned machine and do not prove this Mac served the work.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            DisclosureGroup("About this history", isExpanded: $showsRecordingNotes) {
+                // Keep long wrapping notes from contributing an unbounded
+                // ideal height during native split-view size negotiation.
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Action tracking starts from that date; older actions are not backfilled. Reported jobs and base rewards may include up to 30 days of earlier account history, subject to the server’s history limit. Entries are retained for up to 30 days, with a 5,000-entry limit.")
+                        Text("Job and reward records come from account-wide earnings history and may be incomplete because the server limits history. They may reflect another owned machine and do not prove this Mac served the work.")
+                    }
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 140)
             }.font(.caption)
         }
         .padding(12)

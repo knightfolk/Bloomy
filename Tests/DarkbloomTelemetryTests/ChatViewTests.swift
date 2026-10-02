@@ -162,6 +162,173 @@ struct ChatViewTests {
         controller.close()
     }
 
+    @Test("unmounting and returning to Chat retains the conversation's unsent draft")
+    func retainedDraftSurvivesNavigation() async throws {
+        let store = await makeStore()
+        store.startConversation(route: .local)
+        try await waitForModels(store: store)
+        let draft = ChatDraftState()
+        let prompt = "Keep this unsent draft during navigation."
+        draft.updateText(prompt, in: store.conversation?.id)
+
+        let content = NSHostingController(rootView: AnyView(ChatView(store: store, draft: draft)))
+        let window = NSWindow(contentViewController: content)
+        defer { window.close() }
+        window.setContentSize(NSSize(width: 980, height: 640))
+        window.orderBack(nil)
+        try await settle(content.view)
+        #expect(try composer(in: content.view).string == prompt)
+
+        // A destination switch removes Chat completely, matching the root's
+        // conditional mounting without keeping hidden work alive.
+        content.rootView = AnyView(Text("Hosting"))
+        try await settle(content.view)
+        #expect(draft.text == prompt)
+        content.rootView = AnyView(ChatView(store: store, draft: draft))
+        try await settle(content.view)
+        #expect(try composer(in: content.view).string == prompt)
+        #expect(draft.canSend(to: store.conversation?.id))
+    }
+
+    @Test("a conversation changed while Chat is hidden clears its retained draft on return")
+    func hiddenConversationChangeClearsDraft() async throws {
+        let store = await makeStore()
+        store.startConversation(route: .local)
+        try await waitForModels(store: store)
+        let firstID = try #require(store.conversation?.id)
+        let draft = ChatDraftState()
+        draft.updateText("Local unsent text", in: firstID)
+        let content = NSHostingController(rootView: AnyView(ChatView(store: store, draft: draft)))
+        let window = NSWindow(contentViewController: content)
+        defer { window.close() }
+        window.setContentSize(NSSize(width: 980, height: 640))
+        window.orderBack(nil)
+        try await settle(content.view)
+        content.rootView = AnyView(Text("Hosting"))
+        try await settle(content.view)
+
+        store.startConversation(route: .network)
+        try await waitForModels(store: store)
+        #expect(store.conversation?.id != firstID)
+        #expect(draft.text == "Local unsent text")
+        #expect(!draft.canSend(to: store.conversation?.id))
+        let visibleDraft = draft.visibleText(in: store.conversation?.id)
+        #expect(visibleDraft.isEmpty)
+
+        content.rootView = AnyView(ChatView(store: store, draft: draft))
+        try await settle(content.view)
+        #expect(draft.text.isEmpty)
+        #expect(draft.conversationID == nil)
+        #expect(try composer(in: content.view).string.isEmpty)
+    }
+
+    @Test("standalone chat composers own independent drafts")
+    func standaloneDraftsAreIndependent() async throws {
+        let store = await makeStore()
+        store.startConversation(route: .local)
+        try await waitForModels(store: store)
+        let dashboardDraft = ChatDraftState()
+        dashboardDraft.updateText("Dashboard draft", in: store.conversation?.id)
+        let first = NSHostingController(rootView: ChatView(store: store))
+        let second = NSHostingController(rootView: ChatView(store: store))
+        let firstWindow = NSWindow(contentViewController: first)
+        let secondWindow = NSWindow(contentViewController: second)
+        defer { firstWindow.close(); secondWindow.close() }
+        for window in [firstWindow, secondWindow] {
+            window.setContentSize(NSSize(width: 560, height: 680))
+            window.orderBack(nil)
+        }
+        try await settle(first.view)
+        try await settle(second.view)
+        let firstEditor = try composer(in: first.view)
+        firstEditor.insertText("Pop-out draft", replacementRange: NSRange(location: 0, length: 0))
+        try await settle(first.view)
+        #expect(firstEditor.string == "Pop-out draft")
+        #expect(try composer(in: second.view).string.isEmpty)
+        #expect(dashboardDraft.text == "Dashboard draft")
+    }
+
+    @Test("rejected sends retain a draft and accepted sends clear it")
+    func draftSendLifecycle() async throws {
+        let store = await makeStore()
+        store.startConversation(route: .network)
+        try await waitForModels(store: store)
+        let draft = ChatDraftState()
+        let networkID = try #require(store.conversation?.id)
+        draft.updateText("Keep this unpaid draft", in: networkID)
+        // The paid acknowledgement is absent: this is a real store rejection.
+        draft.send(using: store)
+        #expect(draft.text == "Keep this unpaid draft")
+        #expect(draft.conversationID == networkID)
+        #expect(store.conversation?.entries.isEmpty == true)
+
+        store.startConversation(route: .local)
+        try await waitForModels(store: store)
+        draft.reconcile(with: store.conversation?.id)
+        draft.updateText("Accepted local prompt", in: store.conversation?.id)
+        draft.send(using: store)
+        #expect(draft.text.isEmpty)
+        #expect(draft.conversationID == nil)
+        #expect(store.conversation?.entries.first?.text == "Accepted local prompt")
+        store.cancelSend()
+    }
+
+    @Test("an old composer edit cannot acquire a new conversation")
+    func staleEditorCallbackIsDiscarded() {
+        let draft = ChatDraftState()
+        let first = UUID()
+        let second = UUID()
+        draft.updateText("First chat draft", in: first)
+        draft.updateText("Delayed old editor callback", in: second)
+        #expect(draft.text.isEmpty)
+        #expect(draft.conversationID == nil)
+        draft.updateText("Fresh second chat draft", in: second)
+        #expect(draft.text == "Fresh second chat draft")
+        #expect(draft.canSend(to: second))
+    }
+
+    @Test("closing the consumer key editor wipes its text without touching a retained chat draft")
+    func credentialDraftIsNotRetainedWithChat() async throws {
+        let store = await makeStore()
+        store.startConversation(route: .local)
+        try await waitForModels(store: store)
+        let draft = ChatDraftState()
+        draft.updateText("Ordinary chat message", in: store.conversation?.id)
+        var keyText = "dk-synthetic-unsaved-key"
+        var keyError: String?
+        let content = NSHostingController(rootView: AnyView(ConsumerKeyEditor(
+            store: store,
+            draft: Binding(get: { keyText }, set: { keyText = $0 }),
+            errorMessage: Binding(get: { keyError }, set: { keyError = $0 })
+        )))
+        let window = NSWindow(contentViewController: content)
+        defer { window.close() }
+        window.orderBack(nil)
+        try await settle(content.view)
+        #expect(keyText == "dk-synthetic-unsaved-key")
+        content.rootView = AnyView(Text("Hosting"))
+        try await settle(content.view)
+        #expect(keyText.isEmpty)
+        #expect(draft.text == "Ordinary chat message")
+        #expect(draft.canSend(to: store.conversation?.id))
+    }
+
+    private func settle(_ view: NSView) async throws {
+        try await Task.sleep(for: .milliseconds(150))
+        view.layoutSubtreeIfNeeded()
+    }
+
+    private func composer(in view: NSView) throws -> NSTextView {
+        func find(in current: NSView) -> NSTextView? {
+            if let editor = current as? NSTextView { return editor }
+            for child in current.subviews {
+                if let editor = find(in: child) { return editor }
+            }
+            return nil
+        }
+        return try #require(find(in: view), "Chat must mount its native message editor")
+    }
+
     /// The hosted chat content and window frame must stay close to the
     /// requested size after layout. An unbounded ideal height (for example a
     /// misapplied `fixedSize`) makes the hosting controller grow the window

@@ -78,6 +78,8 @@ struct DashboardRootView: View {
     var chatStore: ChatStore? = nil
     var openChatWindow: (() -> Void)? = nil
     @ObservedObject var navigation: DashboardNavigation
+    @StateObject private var chatDraft = ChatDraftState()
+    @StateObject private var settingsDraft = ProviderSettingsDraftState()
     @AppStorage("sidebar.monitor.expanded") private var monitorExpanded = true
     @AppStorage("sidebar.workspace.expanded") private var workspaceExpanded = true
     @AppStorage("sidebar.diagnostics.expanded") private var diagnosticsExpanded = true
@@ -112,7 +114,7 @@ struct DashboardRootView: View {
                 DashboardOverviewView(store: store, controlStore: controlStore)
             } else if navigation.selected == .chat {
                 if let chatStore {
-                    ChatView(store: chatStore, openPopOut: openChatWindow)
+                    ChatView(store: chatStore, openPopOut: openChatWindow, draft: chatDraft)
                 } else {
                     ContentUnavailableView(
                         "Chat unavailable",
@@ -152,7 +154,8 @@ struct DashboardRootView: View {
                     extrasStore: store.providerExtras,
                     controlStore: controlStore,
                     monitorStore: store,
-                    selection: navigation.settingsPage
+                    selection: navigation.settingsPage,
+                    draft: settingsDraft
                 )
             } else {
                 HealthView(store: store)

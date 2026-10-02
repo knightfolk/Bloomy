@@ -5,6 +5,90 @@ import SwiftUI
 @testable import DarkbloomMonitor
 
 struct LogsQueryTests {
+    @Test("selected log details survive new arrivals and reordered snapshots")
+    func retainsSelectionAcrossFeedChanges() {
+        let first = event(.error, .unified, "Inference", "First failure")
+        let selected = event(.warning, .legacy, "Memory", "Pressure")
+        let incoming = event(.notice, .unified, "Provider", "New arrival")
+        let selectedID = LogTableRow.make(events: [first, selected], query: LogsQuery())[1].id
+
+        for snapshot in [[incoming, first, selected], [selected, incoming, first], [selected]] {
+            let rows = LogTableRow.make(events: snapshot, query: LogsQuery())
+            #expect(LogTableRow.retainedSelection(selectedID, in: rows) == selectedID)
+            #expect(rows.first(where: { $0.id == selectedID })?.event == selected)
+        }
+        #expect(LogTableRow.retainedSelection(selectedID,
+            in: LogTableRow.make(events: [incoming, first], query: LogsQuery())) == nil)
+        #expect(LogTableRow.retainedSelection(selectedID, in: []) == nil)
+    }
+
+    @Test("matching filters preserve selection and excluding filters clear it")
+    func selectionFollowsVisibleEvents() {
+        let selected = event(.error, .unified, "Inference", "Qwen failed")
+        let other = event(.warning, .legacy, "Memory", "Pressure")
+        let events = [other, selected]
+        let selectedID = LogTableRow.make(events: events, query: LogsQuery())[1].id
+        let matching = LogsQuery(severity: .error, source: .unified, text: " qWeN ")
+        let matchingRows = LogTableRow.make(events: events, query: matching)
+        #expect(LogTableRow.retainedSelection(selectedID, in: matchingRows) == selectedID)
+        #expect(LogTableRow.retainedSelection(selectedID,
+            in: LogTableRow.make(events: events, query: LogsQuery())) == selectedID)
+        for query in [LogsQuery(severity: .warning), LogsQuery(source: .legacy), LogsQuery(text: "missing")] {
+            #expect(LogTableRow.retainedSelection(selectedID,
+                in: LogTableRow.make(events: events, query: query)) == nil)
+        }
+    }
+
+    @Test("duplicate occurrences stay separate while arrivals preserve existing selection")
+    func duplicateSelectionIdentity() {
+        let duplicate = event(.error, .unified, "Inference", "Repeated failure")
+        let other = event(.warning, .legacy, "Memory", "Pressure")
+        let original = LogTableRow.make(events: [duplicate, other, duplicate], query: LogsQuery())
+        let firstID = original[0].id
+        let secondID = original[2].id
+        #expect(firstID != secondID)
+        #expect(Set(original.map(\.id)).count == 3)
+
+        let reordered = LogTableRow.make(events: [other, duplicate, duplicate], query: LogsQuery())
+        #expect(reordered[1].id == firstID)
+        #expect(reordered[2].id == secondID)
+        let filtered = LogTableRow.make(events: [other, duplicate, duplicate], query: LogsQuery(source: .unified))
+        #expect(filtered.map(\.id) == [firstID, secondID])
+        #expect(filtered.map(\.event) == [duplicate, duplicate])
+        #expect(LogTableRow.retainedSelection(secondID, in: filtered) == secondID)
+
+        let added = LogTableRow.make(events: [duplicate, other, duplicate, duplicate], query: LogsQuery())
+        #expect(added.count == 4)
+        #expect(Set(added.map(\.id)).count == 4)
+        #expect(LogTableRow.retainedSelection(firstID, in: added) == firstID)
+        #expect(LogTableRow.retainedSelection(secondID, in: added) == secondID)
+        let removed = LogTableRow.make(events: [other, duplicate], query: LogsQuery())
+        #expect(LogTableRow.retainedSelection(firstID, in: removed) == firstID)
+        #expect(LogTableRow.retainedSelection(secondID, in: removed) == nil)
+        let otherAdded = LogTableRow.make(events: [other, other, duplicate, duplicate], query: LogsQuery())
+        #expect(LogTableRow.retainedSelection(secondID, in: otherAdded) == secondID)
+    }
+
+    @Test("log identity includes every immutable event field and preserves input order")
+    func distinguishesEventFields() {
+        func row(timestamp: Date? = nil, severity: LogSeverity = .error, category: String = "Inference",
+                 message: String = "Load failed", source: LogSource = .unified, pid: Int32? = nil,
+                 image: String? = nil) -> LogEvent {
+            LogEvent(timestamp: timestamp, severity: severity, category: category, message: message,
+                source: source, processID: pid, processImage: image)
+        }
+        let events = [row(), row(timestamp: Date(timeIntervalSince1970: 1)), row(severity: .warning),
+                      row(category: "Memory"), row(message: "Other failure"), row(source: .legacy),
+                      row(pid: 12), row(image: "worker")]
+        let rows = LogTableRow.make(events: events, query: LogsQuery())
+        #expect(Set(rows.map(\.id)).count == events.count)
+        #expect(rows.map(\.event) == events)
+        let reversed = LogTableRow.make(events: Array(events.reversed()), query: LogsQuery())
+        #expect(reversed.map(\.id) == Array(rows.map(\.id).reversed()))
+        let query = LogsQuery(source: .unified, text: "failure")
+        #expect(LogTableRow.make(events: events, query: query).map(\.event) == query.apply(events))
+    }
+
     @Test("identical messages from distinct sources and processes survive retention and filtering")
     func retainsEventOrigins() {
         let at = Date(timeIntervalSince1970: 1000)

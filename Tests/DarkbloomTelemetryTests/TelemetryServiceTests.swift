@@ -341,6 +341,119 @@ struct TelemetryServiceTests {
         #expect(loadedModelsStarted)
     }
 
+    @Test("unchanged freshness ticks do not publish snapshots")
+    func skipsUnchangedFreshnessTicks() async throws {
+        let clock = LockedNow(1_000)
+        let service = TelemetryService(
+            source: ScriptedTelemetrySource.successful(
+                state: sample(tokens: 10, writtenAt: 1_000),
+                loadedModels: loadedModels(updatedAt: 1_000)
+            ),
+            now: clock.read
+        )
+        _ = await service.refreshNow()
+        let stream = await service.snapshots()
+        var iterator = stream.makeAsyncIterator()
+        let initial = try #require(await iterator.next())
+        #expect(initial.menuStatus == .online)
+
+        for seconds in [1_000.0, 1_001, 1_010] {
+            clock.set(seconds)
+            await service.publishFreshnessTransitionIfChanged()
+        }
+        await service.stop()
+
+        // Finishing preserves a queued publication, so nil proves every tick was quiet.
+        #expect(await iterator.next() == nil)
+    }
+
+    @Test("freshness ticks preserve acquisition evidence across clock boundaries", arguments: [
+        (1_011.0, "State is older than 10 seconds",
+         "Loaded-model read is older than 10 seconds", nil as String?),
+        (1_060.0, "State is older than 10 seconds",
+         "Loaded-model read is older than 10 seconds", nil as String?),
+        (1_061.0, "State is older than 10 seconds",
+         "Loaded-model read is older than 10 seconds", "Status is older than 60 seconds"),
+        (999.0, "State write time is in the future",
+         "Loaded-model update time is in the future", "Status acquisition time is in the future"),
+    ])
+    func preservesFreshnessTickEvidence(
+        seconds: TimeInterval,
+        stateReason: String,
+        loadedModelsReason: String,
+        statusReason: String?
+    ) async throws {
+        let clock = LockedNow(1_000)
+        let service = TelemetryService(
+            source: ScriptedTelemetrySource.successful(
+                state: sample(tokens: 10, writtenAt: 1_000),
+                loadedModels: loadedModels(updatedAt: 1_000)
+            ),
+            now: clock.read
+        )
+        let initial = await service.refreshNow()
+        let stream = await service.snapshots()
+        var iterator = stream.makeAsyncIterator()
+        _ = await iterator.next()
+
+        clock.set(seconds)
+        await service.publishFreshnessTransitionIfChanged()
+        await service.stop()
+        let transition = try #require(await iterator.next())
+
+        #expect(transition.capturedAt == Date(timeIntervalSince1970: seconds))
+        #expect(transition.menuStatus == .stale)
+        #expect(transition.state == .stale(
+            value: try #require(initial.state.value),
+            capturedAt: Date(timeIntervalSince1970: 1_000),
+            reason: stateReason
+        ))
+        #expect(transition.loadedModels == .stale(
+            value: try #require(initial.loadedModels.value),
+            capturedAt: Date(timeIntervalSince1970: 1_000),
+            reason: loadedModelsReason
+        ))
+        if let statusReason {
+            #expect(transition.status == .stale(
+                value: try #require(initial.status.value),
+                capturedAt: Date(timeIntervalSince1970: 1_000),
+                reason: statusReason
+            ))
+        } else {
+            #expect(transition.status == initial.status)
+        }
+        #expect(transition.tokenRate == initial.tokenRate)
+        #expect(transition.eventFeed == initial.eventFeed)
+        #expect(transition.diagnostics == initial.diagnostics)
+        #expect(await iterator.next() == nil)
+    }
+
+    @Test("unchanged stale freshness ticks do not repeat a publication")
+    func skipsUnchangedStaleFreshnessTicks() async throws {
+        let clock = LockedNow(1_000)
+        let service = TelemetryService(
+            source: ScriptedTelemetrySource.successful(
+                state: sample(tokens: 10, writtenAt: 1_000)
+            ),
+            now: clock.read
+        )
+        _ = await service.refreshNow()
+        clock.set(1_011)
+        await service.publishFreshnessTransitionIfChanged()
+        let stream = await service.snapshots()
+        var iterator = stream.makeAsyncIterator()
+        let initial = try #require(await iterator.next())
+        #expect(initial.menuStatus == .stale)
+
+        for seconds in [1_011.0, 1_012, 1_060] {
+            clock.set(seconds)
+            await service.publishFreshnessTransitionIfChanged()
+        }
+        await service.stop()
+
+        #expect(await iterator.next() == nil)
+    }
+
     @Test("freshness heartbeat ages daemon and loaded-model acquisition evidence")
     func publishesFreshnessOnlyTransition() async {
         let clock = LockedNow(1_000)

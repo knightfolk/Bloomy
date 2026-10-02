@@ -27,6 +27,10 @@ Changes prepared for 1.9.15:
 - Explicit dashboard routes reopen their selected sidebar group. Native popup review covers Auto plan save/readback, Nudge setup, Cooling refresh, disclosures, navigation and clean fixture shutdown. A fresh native focus trace verifies the Overview Tab-to-sidebar/Down-to-Activity path; broader keyboard, VoiceOver and motion checks remain. Exact evidence and the correction to the earlier partial Tab test are in `docs/NATIVE_NAVIGATION_POPUP_REVIEW_20261002.md`.
 - Custom model-section disclosures and the dashboard GPU ring honor the system Reduce Motion preference. Controlled native motion proof remains separate from source and build verification.
 - Darkbloom 0.9.17 `waiting_inventory` is recognized in local metrics and presented as a model-inventory refresh state.
+- Dashboard Chat keeps its unsent message in memory for the current conversation while its page is removed. Provider and fan policy editors retain nonsecret drafts while only the selected settings page remains mounted; credentials and transient confirmations remain local to their editors.
+- Logs retain the selected event while its immutable identity remains visible after arrivals or filtering. Identical duplicates remain individually selectable, without claiming an occurrence identity the source does not provide.
+- Freshness heartbeat ticks compare source/menu status before constructing a full snapshot. Unchanged freshness avoids rebuilding the event feed and sorting diagnostics; successful source publications remain immediate.
+- Action History keeps expanded notes and selected details reachable within compact windows. Native before/partial/final geometry, draft navigation, window restoration, 1,178 passing tests, and the final release compile are recorded in `docs/NATIVE_DRAFT_HISTORY_REVIEW_20261002.md`. These are bounded isolated checks, not completion of the full native matrix.
 
 ## Evidence and limits
 
@@ -56,6 +60,8 @@ A release-optimized parser benchmark with a synthetic 129,789-byte warning-heavy
 Review the popup, Overview, Activity (Earnings and Metrics), Opportunity, Models, Hosting, Chat, Action History, Health & Logs, and every Settings page. The iPhone Companion page is a setup surface; it must not imply a shipped companion capability that is absent.
 
 For each route check light/dark appearance, narrow/wide windows, keyboard focus and shortcuts, accessibility names, Reduce Motion, tooltip usefulness, consistent card/pill sizing, missing/stale/offline states, retained unsaved drafts, and normal-speed updates without flashing or layout shifts. Inspect actual rendered screens; builds and fixtures alone are insufficient to claim complete visual polish.
+
+The next known Chat issue is verification-expiry presentation: after the two-minute local model check expires, the store safely rejects a stale Send, but the view can say “Verifying…” without a refresh in progress. Add timely expiry presentation and a clear refresh action before considering Chat fully reviewed.
 
 The provider and recovery watcher are deliberately stopped while Kevin uses the Mac for other work. Kevin authorizes a temporary provider start only if needed for a test; stop it again afterward. Use isolated fixtures for visual states that do not require a real provider, and do not swap or nudge merely to produce visual evidence.
 

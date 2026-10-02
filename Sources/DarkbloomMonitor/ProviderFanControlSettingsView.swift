@@ -83,19 +83,18 @@ struct ProviderFanControlSettingsView: View {
         performMutation: @escaping ProviderExtrasMutationExecutor,
         isVisible: Bool = true,
         ownsVisibleFanPolling: Bool = true,
-        compactPresentation: Bool = false
+        compactPresentation: Bool = false,
+        draft: ProviderSettingsDraftState? = nil
     ) {
         self.store = store
         self.performMutation = performMutation
         self.isVisible = isVisible
         self.ownsVisibleFanPolling = ownsVisibleFanPolling
         self.compactPresentation = compactPresentation
+        _draft = StateObject(wrappedValue: draft ?? ProviderSettingsDraftState())
     }
 
-    @State private var speedPercent = ProviderFanPolicy.default.speedPercent
-    @State private var triggerTemperature = ProviderFanPolicy.default.triggerTemperatureCelsius
-    @State private var draftDirty = false
-    @State private var selectedPreset: FanPreset?
+    @StateObject private var draft: ProviderSettingsDraftState
     @State private var showsPolicyEditor = false
     @State private var showsAdvancedActions = false
     @State private var mutationInFlight = false
@@ -202,7 +201,7 @@ struct ProviderFanControlSettingsView: View {
                     policyEditor(status: status)
                     if status.loaded {
                         Button("Save Fan Policy…") { stagePolicy(.configure) }
-                            .disabled(!fresh || !draftDirty || !canSubmitPolicy)
+                            .disabled(!fresh || !draft.fanDirty || !canSubmitPolicy)
                             .accessibilityIdentifier("settings.provider.fan.save")
                     }
                 }
@@ -297,7 +296,7 @@ struct ProviderFanControlSettingsView: View {
                 Text("Choose a starting point")
                     .font(.body.weight(.medium))
                 Spacer()
-                if draftDirty {
+                if draft.fanDirty {
                     Text("Unsaved")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.orange)
@@ -307,9 +306,9 @@ struct ProviderFanControlSettingsView: View {
                 ForEach(FanPreset.allCases) { preset in
                     Button(preset.title) { select(preset) }
                         .buttonStyle(.bordered)
-                        .tint(selectedPreset == preset ? .accentColor : .secondary)
+                        .tint(draft.fanPreset == preset ? .accentColor : .secondary)
                         .accessibilityLabel("Choose \(preset.title) fan policy")
-                        .accessibilityValue(selectedPreset == preset ? "Selected" : "Not selected")
+                        .accessibilityValue(draft.fanPreset == preset ? "Selected" : "Not selected")
                         .accessibilityIdentifier("settings.provider.fan.preset.\(preset.rawValue)")
                 }
             }
@@ -321,13 +320,13 @@ struct ProviderFanControlSettingsView: View {
                 HStack {
                     Text("Fan target")
                     Spacer()
-                    Text(Self.percent(speedPercent))
+                    Text(Self.percent(draft.fanSpeedPercent))
                         .monospacedDigit()
                         .fontWeight(.semibold)
                 }
                 Slider(value: speedBinding, in: ProviderFanPolicy.speedRange, step: 1)
                     .accessibilityLabel("Fan target")
-                    .accessibilityValue(Self.percent(speedPercent))
+                    .accessibilityValue(Self.percent(draft.fanSpeedPercent))
                     .accessibilityHint("Target fan speed after the trigger temperature is reached")
                     .accessibilityIdentifier("settings.provider.fan.speed")
             }
@@ -335,18 +334,18 @@ struct ProviderFanControlSettingsView: View {
                 HStack {
                     Text("Start at GPU temperature")
                     Spacer()
-                    Text(Self.temperature(triggerTemperature))
+                    Text(Self.temperature(draft.fanTriggerTemperature))
                         .monospacedDigit()
                         .fontWeight(.semibold)
                 }
                 Slider(value: temperatureBinding, in: ProviderFanPolicy.triggerTemperatureRange, step: 1)
                     .accessibilityLabel("GPU trigger temperature")
-                    .accessibilityValue(Self.temperature(triggerTemperature))
+                    .accessibilityValue(Self.temperature(draft.fanTriggerTemperature))
                     .accessibilityHint("GPU temperature where the fan target starts")
                     .accessibilityIdentifier("settings.provider.fan.temperature")
             }
             Label(
-                "At \(Self.temperature(triggerTemperature)), target \(Self.percent(speedPercent)) while the provider is active.",
+                "At \(Self.temperature(draft.fanTriggerTemperature)), target \(Self.percent(draft.fanSpeedPercent)) while the provider is active.",
                 systemImage: "fanblades"
             )
             .font(.callout.weight(.medium))
@@ -358,43 +357,25 @@ struct ProviderFanControlSettingsView: View {
     }
 
     private var speedBinding: Binding<Double> {
-        Binding(get: { speedPercent }, set: { speedPercent = $0; draftDirty = true; selectedPreset = nil })
+        Binding(get: { draft.fanSpeedPercent }, set: { draft.editFanSpeed($0) })
     }
 
     private var temperatureBinding: Binding<Double> {
-        Binding(get: { triggerTemperature }, set: { triggerTemperature = $0; draftDirty = true; selectedPreset = nil })
+        Binding(get: { draft.fanTriggerTemperature }, set: { draft.editFanTemperature($0) })
     }
 
-    private var policy: ProviderFanPolicy? {
-        return ProviderFanPolicy(
-            speedPercent: speedPercent,
-            triggerTemperatureCelsius: triggerTemperature
-        )
-    }
+    private var policy: ProviderFanPolicy? { draft.fanPolicy }
 
     private var canSubmitPolicy: Bool {
         policy != nil && !mutationInFlight && !store.mutationInFlight
     }
 
     private func syncDraft() {
-        guard !draftDirty else { return }
-        let helper = store.snapshot?.fanStatus.value?.helper
-        let policy = helper.flatMap {
-            ProviderFanPolicy(
-                speedPercent: $0.speedPercent,
-                triggerTemperatureCelsius: $0.triggerTemperatureCelsius
-            )
-        } ?? .default
-        speedPercent = policy.speedPercent
-        triggerTemperature = policy.triggerTemperatureCelsius
-        selectedPreset = FanPreset.allCases.first { $0.policy == policy }
+        draft.syncFan(from: store.snapshot?.fanStatus)
     }
 
     private func select(_ preset: FanPreset) {
-        speedPercent = preset.policy.speedPercent
-        triggerTemperature = preset.policy.triggerTemperatureCelsius
-        selectedPreset = preset
-        draftDirty = true
+        draft.selectFanPreset(preset)
     }
 
     private static func percent(_ value: Double) -> String {
@@ -420,6 +401,7 @@ struct ProviderFanControlSettingsView: View {
 
     private func run(_ action: FanAction) {
         guard !mutationInFlight, !store.mutationInFlight else { return }
+        let revision = draft.fanRevision
         mutationInFlight = true
         Task { @MainActor in
             let succeeded = await performMutation(action.operationLabel) {
@@ -434,8 +416,7 @@ struct ProviderFanControlSettingsView: View {
             if succeeded {
                 switch action {
                 case .enable, .configure:
-                    draftDirty = false
-                    syncDraft()
+                    draft.didSaveFan(revision: revision, source: store.snapshot?.fanStatus)
                 case .disable, .uninstall:
                     break
                 }

@@ -24,7 +24,8 @@ private enum FixtureData {
         CatalogModel(id: modelIDs[0], displayName: "Qwen 3.8 27B", family: "qwen", modelType: "text", capabilities: ["chat", "tools"], sizeGB: 16.3, minimumRAMGB: 36, active: true),
         CatalogModel(id: modelIDs[1], displayName: "Gemma 4 26B", family: "gemma", modelType: "text", capabilities: ["chat"], sizeGB: 15.6, minimumRAMGB: 32, active: true),
         CatalogModel(id: modelIDs[2], displayName: "GPT-OSS 20B", family: "gpt", modelType: "text", capabilities: ["chat"], sizeGB: 12.1, minimumRAMGB: 24, active: true),
-        CatalogModel(id: modelIDs[3], displayName: "PrismML Bonsai 2 27B", family: "bonsai", modelType: "text", capabilities: ["chat"], sizeGB: 8.6, minimumRAMGB: 16, active: true)
+        CatalogModel(id: modelIDs[3], displayName: "PrismML Bonsai 2 27B", family: "bonsai", modelType: "text", capabilities: ["chat"], sizeGB: 8.6, minimumRAMGB: 16, active: true),
+        CatalogModel(id: "qwen3-8b", displayName: "Qwen 3 8B", family: "qwen", modelType: "text", capabilities: ["chat", "tools"], sizeGB: 5.2, minimumRAMGB: 12, active: true)
     ]
     static func snapshot(_ scenario: FixtureScenario, now: Date) -> TelemetrySnapshot {
         let date = scenario == .stale ? now.addingTimeInterval(-900) : now
@@ -47,7 +48,7 @@ private enum FixtureData {
         var status = StatusSnapshot()
         status.version = "0.9.17"; status.providerName = "Synthetic review provider"
         status.hardware = "Synthetic 64 GB Mac"; status.daemon = scenario == .offline ? "Stopped" : "Running"
-        status.configuredModel = modelIDs[0]; status.localModelCount = 3
+        status.configuredModel = modelIDs[0]; status.localModelCount = catalog.count
         status.requestCount = 236; status.tokenCount = 126_400
         let events: [LogEvent] = (0..<48).map { index in
             let eventDate = date.addingTimeInterval(Double(-index * 60))
@@ -200,7 +201,9 @@ private actor FixtureController: ProviderControlling {
         // before building inventory, never retained as current residency.
         let daemon = scenario.hasCurrentRuntime ? FixtureData.snapshot(scenario, now: now).state.value : nil
         let loadedModelIDs = scenario.hasCurrentRuntime ? Array(FixtureData.modelIDs.prefix(2)) : []
-        let local = FixtureData.catalog.prefix(3).map { LocalModel(id: $0.id, modelType: "text", sizeBytes: Int64($0.sizeGB * 1e9), estimatedMemoryGB: nil) }
+        // Bonsai and Qwen 3 8B are downloaded but neither selected nor resident.
+        // Keep the three advertised models and two saved preload models intact.
+        let local = FixtureData.catalog.map { LocalModel(id: $0.id, modelType: "text", sizeBytes: Int64($0.sizeGB * 1e9), estimatedMemoryGB: nil) }
         let runtimeSource: ProviderControlSourceState = scenario.hasCurrentRuntime
             ? .fresh(evidenceAt: now) : scenario == .stale
             ? .stale("Synthetic runtime source stale") : .unavailable("Synthetic source offline")
@@ -320,6 +323,7 @@ private final class FixtureModel: ObservableObject {
     private var loadTask: Task<Void, Never>?
     private var loadGeneration = 0
     private var isTerminating = false
+    private var dashboardVisible = true
 
     init() {
         let suite = "dev.darkbloom.dashboard-fixture.session.\(UUID().uuidString)"
@@ -363,6 +367,10 @@ private final class FixtureModel: ObservableObject {
         let currentControl = control
         await currentMonitor.accept(FixtureData.snapshot(currentScenario, now: Date()))
         await currentControl.refreshPreservingDraft()
+    }
+    func setDashboardVisible(_ visible: Bool) {
+        dashboardVisible = visible
+        monitor.setDashboardVisible(visible)
     }
     func load() async {
         guard !isTerminating else { return }
@@ -440,12 +448,16 @@ private final class FixtureModel: ObservableObject {
             await preparedMonitor.stop()
             return
         }
+        // Window events can arrive while synthetic sources are preparing.
+        // Publish the replacement with the latest native visibility state.
+        preparedMonitor.setDashboardVisible(dashboardVisible)
         monitor = preparedMonitor; control = preparedControl; hosting = stores.2; chat = stores.3
         issue = preparationIssue
         ready = true
     }
     func stopForTermination() async {
         isTerminating = true
+        setDashboardVisible(false)
         ready = false
         loadGeneration += 1
         let loading = loadTask
@@ -822,15 +834,17 @@ private struct FixtureReviewView: View {
 // WindowGroup can add fullSizeContentView and make a different scroll-edge
 // presentation; this fixture should compare the same native window policy.
 @MainActor
-private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate {
+private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let model = FixtureModel()
     private var window: NSWindow?
     private var shutdownTask: Task<Void, Never>?
     private var shutdownApproved = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installApplicationMenus()
         let content = NSHostingController(rootView: FixtureReviewView(model: model))
         let window = FixtureWindow(contentViewController: content)
+        window.delegate = self
         window.focusDiagnostics = model.focusDiagnostics
         window.title = "Bloomy Dashboard — Synthetic Review"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -841,8 +855,69 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate 
         window.center()
         self.window = window
         window.makeKeyAndOrderFront(nil)
+        model.setDashboardVisible(true)
         NSApplication.shared.activate()
     }
+
+    private func installApplicationMenus(application: NSApplication = .shared) {
+        let mainMenu = NSMenu()
+        func submenu(_ title: String) -> NSMenu {
+            let menu = NSMenu(title: title)
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.submenu = menu
+            mainMenu.addItem(item)
+            return menu
+        }
+        func add(_ title: String, action: Selector, key: String = "",
+                 modifiers: NSEvent.ModifierFlags = .command,
+                 target: AnyObject? = nil, to menu: NSMenu) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            item.target = target
+            menu.addItem(item)
+        }
+        let appMenu = submenu("Bloomy Dashboard Fixture")
+        add("Quit Bloomy Dashboard Fixture", action: #selector(NSApplication.terminate(_:)),
+            key: "q", target: application, to: appMenu)
+
+        // Same selectors and shortcuts as production; nil targets let the
+        // native responder chain edit the focused synthetic text field.
+        let editMenu = submenu("Edit")
+        add("Undo", action: NSSelectorFromString("undo:"), key: "z", to: editMenu)
+        add("Redo", action: NSSelectorFromString("redo:"), key: "z", modifiers: [.command, .shift], to: editMenu)
+        editMenu.addItem(.separator())
+        add("Cut", action: #selector(NSText.cut(_:)), key: "x", to: editMenu)
+        add("Copy", action: #selector(NSText.copy(_:)), key: "c", to: editMenu)
+        add("Paste", action: #selector(NSText.paste(_:)), key: "v", to: editMenu)
+        add("Select All", action: #selector(NSText.selectAll(_:)), key: "a", to: editMenu)
+
+        let windowMenu = submenu("Window")
+        add("Minimize", action: #selector(NSWindow.performMiniaturize(_:)), key: "m", to: windowMenu)
+        windowMenu.addItem(.separator())
+        add("Show Dashboard", action: #selector(showDashboard), key: "d",
+            modifiers: [.command, .shift], target: self, to: windowMenu)
+        application.mainMenu = mainMenu
+        application.windowsMenu = windowMenu
+    }
+
+    @objc private func showDashboard() {
+        guard shutdownTask == nil, !shutdownApproved, let window else { return }
+        window.deminiaturize(nil)
+        window.makeKeyAndOrderFront(nil)
+        model.setDashboardVisible(true)
+        NSApplication.shared.activate()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showDashboard()
+        return false
+    }
+
+    // Mirror DashboardWindowController's visibility forwarding. Store.start()
+    // remains unused, so these events cannot start its autonomous collectors.
+    func windowWillClose(_ notification: Notification) { model.setDashboardVisible(false) }
+    func windowDidMiniaturize(_ notification: Notification) { model.setDashboardVisible(false) }
+    func windowDidDeminiaturize(_ notification: Notification) { model.setDashboardVisible(true) }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 

@@ -93,6 +93,81 @@ struct ProviderThermalView: View {
     }
 }
 
+/// Nonsecret edit buffers for one settings surface. The dashboard retains this
+/// object across destination changes; standalone settings and popup controls
+/// own independent instances. No tasks, credentials, or saved preferences live here.
+@MainActor
+final class ProviderSettingsDraftState: ObservableObject {
+    @Published private(set) var idleMinutesText = ""
+    @Published private(set) var idleDirty = false
+    @Published private(set) var fanSpeedPercent = ProviderFanPolicy.default.speedPercent
+    @Published private(set) var fanTriggerTemperature = ProviderFanPolicy.default.triggerTemperatureCelsius
+    @Published private(set) var fanDirty = false
+    @Published private(set) var fanPreset: FanPreset?
+    private(set) var idleRevision: UInt64 = 0
+    private(set) var fanRevision: UInt64 = 0
+
+    func editIdle(_ text: String) {
+        idleMinutesText = text
+        idleDirty = true
+        idleRevision &+= 1
+    }
+
+    func syncIdle(from source: SourceAvailability<ProviderIdlePolicy>?) {
+        guard !idleDirty, case .available(let policy, _) = source else { return }
+        idleMinutesText = String(policy.idleTimeoutMinutes)
+    }
+
+    func didSaveIdle(revision: UInt64, source: SourceAvailability<ProviderIdlePolicy>?) {
+        guard idleRevision == revision else { return }
+        idleDirty = false
+        syncIdle(from: source)
+    }
+
+    func editFanSpeed(_ value: Double) {
+        fanSpeedPercent = value
+        fanDirty = true
+        fanPreset = nil
+        fanRevision &+= 1
+    }
+
+    func editFanTemperature(_ value: Double) {
+        fanTriggerTemperature = value
+        fanDirty = true
+        fanPreset = nil
+        fanRevision &+= 1
+    }
+
+    func selectFanPreset(_ preset: FanPreset) {
+        fanSpeedPercent = preset.policy.speedPercent
+        fanTriggerTemperature = preset.policy.triggerTemperatureCelsius
+        fanPreset = preset
+        fanDirty = true
+        fanRevision &+= 1
+    }
+
+    var fanPolicy: ProviderFanPolicy? {
+        ProviderFanPolicy(speedPercent: fanSpeedPercent, triggerTemperatureCelsius: fanTriggerTemperature)
+    }
+
+    func syncFan(from source: SourceAvailability<ProviderFanStatus>?) {
+        guard !fanDirty else { return }
+        let helper = source?.value?.helper
+        let policy = helper.flatMap {
+            ProviderFanPolicy(speedPercent: $0.speedPercent, triggerTemperatureCelsius: $0.triggerTemperatureCelsius)
+        } ?? .default
+        fanSpeedPercent = policy.speedPercent
+        fanTriggerTemperature = policy.triggerTemperatureCelsius
+        fanPreset = FanPreset.allCases.first { $0.policy == policy }
+    }
+
+    func didSaveFan(revision: UInt64, source: SourceAvailability<ProviderFanStatus>?) {
+        guard fanRevision == revision else { return }
+        fanDirty = false
+        syncFan(from: source)
+    }
+}
+
 /// Settings sections for CLI idle-memory, beta, update, and fan controls.
 /// Writes are always routed through the parent-provided serial mutation gate.
 struct ProviderAdvancedSettingsView: View {
@@ -101,8 +176,7 @@ struct ProviderAdvancedSettingsView: View {
     let showsAutoUpdate: Bool
     let showsFanControls: Bool
 
-    @State private var idleMinutesText = ""
-    @State private var idleDraftDirty = false
+    @StateObject private var draft: ProviderSettingsDraftState
     @State private var idleSaveInFlight = false
     @State private var betaSaveIDs: Set<String> = []
     @State private var feedback: String?
@@ -111,12 +185,14 @@ struct ProviderAdvancedSettingsView: View {
         store: ProviderExtrasStore,
         performMutation: @escaping ProviderExtrasMutationExecutor,
         showsAutoUpdate: Bool = true,
-        showsFanControls: Bool = true
+        showsFanControls: Bool = true,
+        draft: ProviderSettingsDraftState? = nil
     ) {
         self.store = store
         self.performMutation = performMutation
         self.showsAutoUpdate = showsAutoUpdate
         self.showsFanControls = showsFanControls
+        _draft = StateObject(wrappedValue: draft ?? ProviderSettingsDraftState())
     }
 
     var body: some View {
@@ -131,7 +207,7 @@ struct ProviderAdvancedSettingsView: View {
                 ProviderAutoUpdateSettingsView(store: store, performMutation: performMutation)
             }
             if showsFanControls {
-                ProviderFanControlSettingsView(store: store, performMutation: performMutation)
+                ProviderFanControlSettingsView(store: store, performMutation: performMutation, draft: draft)
             }
             if let feedback {
                 Text(feedback)
@@ -174,7 +250,7 @@ struct ProviderAdvancedSettingsView: View {
                     Button(idleSaveInFlight ? "Saving…" : "Save") { saveIdle() }
                         .disabled(!canSaveIdle)
                 }
-                Text(idleDraftDirty ? "Unsaved change · Enter 0 to disable timed unloading, or 1–10,080 minutes." : "Enter 0 to disable timed unloading, or 1–10,080 minutes.")
+                Text(draft.idleDirty ? "Unsaved change · Enter 0 to disable timed unloading, or 1–10,080 minutes." : "Enter 0 to disable timed unloading, or 1–10,080 minutes.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("Saved configuration · Applies on restart. The running value is not reported by the CLI.")
@@ -264,8 +340,8 @@ struct ProviderAdvancedSettingsView: View {
     private var canSaveIdle: Bool {
         guard !idleSaveInFlight,
               !store.mutationInFlight,
-              idleDraftDirty,
-              let minutes = Int(idleMinutesText.trimmingCharacters(in: .whitespacesAndNewlines)),
+              draft.idleDirty,
+              let minutes = Int(draft.idleMinutesText.trimmingCharacters(in: .whitespacesAndNewlines)),
               ProviderIdlePolicy.isValid(minutes: minutes),
               isFresh(store.snapshot?.idlePolicy)
         else { return false }
@@ -274,21 +350,11 @@ struct ProviderAdvancedSettingsView: View {
     }
 
     private func syncIdleDraft() {
-        guard !idleDraftDirty,
-              case .available(let policy, _) = store.snapshot?.idlePolicy
-        else { return }
-        idleMinutesText = String(policy.idleTimeoutMinutes)
-        idleDraftDirty = false
+        draft.syncIdle(from: store.snapshot?.idlePolicy)
     }
 
     private var idleTextBinding: Binding<String> {
-        Binding(
-            get: { idleMinutesText },
-            set: {
-                idleMinutesText = $0
-                idleDraftDirty = true
-            }
-        )
+        Binding(get: { draft.idleMinutesText }, set: { draft.editIdle($0) })
     }
 
     private func isFresh<Value>(
@@ -302,12 +368,13 @@ struct ProviderAdvancedSettingsView: View {
 
     private func saveIdle() {
         guard canSaveIdle else { feedback = "Refresh before saving this setting."; return }
-        guard let minutes = Int(idleMinutesText.trimmingCharacters(in: .whitespacesAndNewlines)),
+        guard let minutes = Int(draft.idleMinutesText.trimmingCharacters(in: .whitespacesAndNewlines)),
               ProviderIdlePolicy.isValid(minutes: minutes)
         else {
             feedback = "Choose 0–10,080 minutes."
             return
         }
+        let revision = draft.idleRevision
         idleSaveInFlight = true
         Task { @MainActor in
             let succeeded = await performMutation("idle memory policy") {
@@ -315,8 +382,7 @@ struct ProviderAdvancedSettingsView: View {
             }
             idleSaveInFlight = false
             if succeeded {
-                idleDraftDirty = false
-                syncIdleDraft()
+                draft.didSaveIdle(revision: revision, source: store.snapshot?.idlePolicy)
                 feedback = "Saved. Restart Darkbloom to apply the idle policy."
             } else {
                 feedback = store.errorMessage ?? "The idle policy was not saved."

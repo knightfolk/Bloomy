@@ -14,6 +14,38 @@ struct ActionHistoryViewTests {
         #expect(ActionHistoryView.currency(1_250).contains("0.001250"))
     }
 
+    @Test("expanded history notes keep the native split view inside its window",
+          arguments: [false, true], [NSSize(width: 800, height: 480), NSSize(width: 800, height: 560), NSSize(width: 1280, height: 900)])
+    func expandedNotesStayBounded(selected: Bool, size: NSSize) async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("action-history-sizing-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ActionHistoryStore(url: directory.appendingPathComponent("actions.sqlite3"))
+        for _ in 0..<48 {
+            store.record(action: .swap, trigger: .manual, outcome: .failed,
+                         model: "qwen3.8-27b", reason: .notConfirmed)
+        }
+        let host = NSHostingController(rootView: NavigationSplitView {
+            List { Text("Action History") }.navigationSplitViewColumnWidth(210)
+        } detail: {
+            ActionHistoryView(store: store, selectedID: selected ? store.events.first?.id : nil,
+                              showsRecordingNotes: true)
+        })
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(size)
+        window.orderBack(nil)
+        defer { window.close() }
+        try await Task.sleep(for: .milliseconds(250))
+        host.view.layoutSubtreeIfNeeded()
+        let split = try #require(historySubviews(host.view).compactMap { $0 as? NSSplitView }.first)
+        let rect = split.convert(split.bounds, to: host.view)
+        #expect(host.view.bounds.height <= size.height + 1)
+        #expect(rect.height <= size.height + 1)
+        #expect(rect.minY >= host.view.bounds.minY - 1)
+        #expect(rect.maxY <= host.view.bounds.maxY + 1)
+    }
+
     @Test("account actions, skipped nudges, jobs, and rewards fit a 900 by 650 window")
     func renderHistory() async throws {
         let directory = FileManager.default.temporaryDirectory
@@ -64,4 +96,9 @@ struct ActionHistoryViewTests {
         try #require(bitmap.representation(using: .png, properties: [:]))
             .write(to: URL(fileURLWithPath: "/tmp/darkbloom-action-history-900x650.png"))
     }
+}
+
+@MainActor
+private func historySubviews(_ view: NSView) -> [NSView] {
+    [view] + view.subviews.flatMap(historySubviews)
 }

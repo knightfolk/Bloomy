@@ -10,11 +10,26 @@ struct MonitorSettingsView: View {
     var selection: SettingsPage? = nil
     @AppStorage(ApplicationAppearance.defaultsKey) private var appearanceModeRaw =
         AppAppearanceMode.system.rawValue
+    @StateObject private var draft: ProviderSettingsDraftState
     @State private var standaloneSelection: SettingsPage = .appearance
     @State private var supportPacketPreview: SupportPacketPreviewPresentation?
     @State private var isPreparingSupportPacket = false
     @State private var supportPacketPrepareFailed = false
     @State private var supportPacketPrepared = false
+
+    init(
+        extrasStore: ProviderExtrasStore? = nil,
+        controlStore: ProviderControlStore? = nil,
+        monitorStore: MonitorStore? = nil,
+        selection: SettingsPage? = nil,
+        draft: ProviderSettingsDraftState? = nil
+    ) {
+        self.extrasStore = extrasStore
+        self.controlStore = controlStore
+        self.monitorStore = monitorStore
+        self.selection = selection
+        _draft = StateObject(wrappedValue: draft ?? ProviderSettingsDraftState())
+    }
 
     var body: some View {
         Group {
@@ -57,18 +72,11 @@ struct MonitorSettingsView: View {
         }
     }
 
-    /// Keep each page mounted while navigating. The idle-memory and fan views
-    /// own edit buffers that should survive a trip to another Settings page.
+    /// Mount only the selected page. Draft state outlives these views without
+    /// retaining their controls, polling tasks, or unrelated local edit buffers.
     private func pages(selected: SettingsPage) -> some View {
-        ZStack {
-            ForEach(SettingsPage.allCases) { page in
-                pageForm(page, isVisible: selected == page && (monitorStore?.dashboardVisible ?? true))
-                    .opacity(selected == page ? 1 : 0)
-                    .allowsHitTesting(selected == page)
-                    .disabled(selected != page)
-                    .accessibilityHidden(selected != page)
-            }
-        }
+        pageForm(selected, isVisible: monitorStore?.dashboardVisible ?? true)
+            .id(selected)
     }
 
     private func pageForm(_ page: SettingsPage, isVisible: Bool) -> some View {
@@ -122,7 +130,8 @@ struct MonitorSettingsView: View {
                 extras: extrasStore,
                 control: controlStore,
                 page: page,
-                isVisible: isVisible
+                isVisible: isVisible,
+                draft: draft
             )
         } else {
             Section("Provider") {
@@ -282,6 +291,7 @@ private struct ProviderAdvancedSettingsHost: View {
     @ObservedObject var control: ProviderControlStore
     let page: SettingsPage
     let isVisible: Bool
+    let draft: ProviderSettingsDraftState
     @State private var isManuallyRefreshing = false
 
     var body: some View {
@@ -318,7 +328,8 @@ private struct ProviderAdvancedSettingsHost: View {
                     store: extras,
                     performMutation: performMutation,
                     showsAutoUpdate: false,
-                    showsFanControls: false
+                    showsFanControls: false,
+                    draft: draft
                 )
             case .updates:
                 ProviderAutoUpdateSettingsView(
@@ -329,7 +340,8 @@ private struct ProviderAdvancedSettingsHost: View {
                 ProviderFanControlSettingsView(
                     store: extras,
                     performMutation: performMutation,
-                    isVisible: isVisible
+                    isVisible: isVisible,
+                    draft: draft
                 )
             default:
                 EmptyView()

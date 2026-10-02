@@ -81,6 +81,23 @@ titled/closable/miniaturizable/resizable style and full-screen-primary policy as
 production `DashboardWindowController`. Its synthetic banner sits above the
 unchanged dashboard root. It does not use SwiftUI `WindowGroup`, whose native
 title-bar/scroll-edge policy can differ and confound a production comparison.
+The AppKit delegate forwards initial presentation, close, minimize, and restore
+to the current injected store's dashboard visibility; scenario/reload replacement
+inherits the latest window visibility. This permits native Metrics checks of
+hidden query/analysis cancellation, suspended timeline scheduling, and resumption
+after restore. It does not establish production telemetry polling behavior:
+`MonitorStore.start()` remains unused, and the fixture's five-second synthetic
+refresh continues independently of dashboard visibility.
+The fixture's native Edit menu uses production's responder-chain commands and
+shortcuts for Undo, Redo, Cut, Copy, Paste, and Select All. Focus a synthetic text
+field before testing Command-A and typing; these actions edit that field through
+AppKit rather than assigning its accessibility value. Window > Minimize uses the
+native window responder. Window > Show Dashboard and Dock reopen restore the
+same owned window and visibility without reconstructing the stores or starting
+collectors. These fixture menus contain only editing, native-window, and Quit
+commands; production update/provider handlers are not installed. Use the menu
+minimize/restore route for Metrics lifecycle review, with tracing disabled for
+normal timing proof.
 
 The standalone compiler does not invoke SwiftPM or its build lock. Its small
 output stays under `.build/native-dashboard-fixture`; `--output /absolute/path`
@@ -144,10 +161,15 @@ handling and is evidence about focus membership, not interaction performance.
 
 To diagnose a skipped sidebar, preserve the same manifest, scenario, appearance,
 window size, and initial selection. The diagnostic checkbox is an additional
-banner focus stop. Traverse from the banner controls using Tab
-until the first detail control receives focus, then click a sidebar row and use
-Down/Up and Space. Compare the responder and native list geometry in those
-samples. If the list is absent from the native tree, inspect the SwiftUI hosting
+banner focus stop. Traverse from the banner controls using Tab through a full
+focus cycle, recording every stop, including those after the first detail
+control. The native13b trace reached the sidebar one stop after the Overview
+detail control; reaching detail first does not prove the sidebar was skipped.
+At the sidebar stop, use Down/Up and Space and compare the responder, selected
+rows, and native list geometry. Only diagnose skipping if a complete controlled
+cycle fails to reach the list; if the 24-event budget is exhausted, start a fresh
+process and record a bounded continuation from a known stop. If the list is
+absent from the native tree, inspect the SwiftUI hosting
 boundary; if present but ineligible or skipped by valid edges, inspect those
 native eligibility/loop differences. If eligible and reachable in the native
 loop while Tab still skips it, investigate SwiftUI's internal focus traversal.
@@ -173,6 +195,12 @@ cancelled polling task before replacing stores or exiting. Dashboard, Settings,
 Models, and Hosting actions close the popup then route into the existing fixture
 window. Keep the synthetic banner visible behind popup proof captures. This
 proves native popup behavior, not placement beneath the production menu-bar item.
+The initial Fresh inventory includes two downloaded, unselected, unloaded models,
+Bonsai 2 27B and Qwen 3 8B, for native Available disclosure/card proof. Their
+sizes and memory requirements are synthetic examples. Gemma, GPT-OSS, and Qwen
+3.8 remain the three enabled/advertised models; the saved two-model preload and
+Auto sheet behavior remain intact. Catalog/local freshness still follows the
+selected scenario; downloaded files do not establish current residency.
 
 Rapid popup toggles retain every cancelled reader until it has been joined;
 cleanup awaits AppKit's native close-completion event before draining outstanding

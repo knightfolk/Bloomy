@@ -20,7 +20,7 @@ struct LogsQuery {
 struct LogsView: View {
     let feed: SourceAvailability<EventFeed>
     @State private var query = LogsQuery()
-    @State private var selectedID: Int?
+    @State private var selectedID: LogTableRow.ID?
     @State private var exportPreview: LogExportSnapshot?
     @State private var exportFailed = false
 
@@ -81,10 +81,9 @@ struct LogsView: View {
         .sheet(item: $exportPreview) { snapshot in
             LogExportPreviewView(snapshot: snapshot)
         }
-        .onChange(of: feed.value?.events) { _, _ in selectedID = nil }
-        .onChange(of: query.text) { _, _ in selectedID = nil }
-        .onChange(of: query.severity) { _, _ in selectedID = nil }
-        .onChange(of: query.source) { _, _ in selectedID = nil }
+        .onChange(of: rows.map(\.id)) { _, _ in
+            selectedID = LogTableRow.retainedSelection(selectedID, in: rows)
+        }
     }
 
     private static func compactTimestamp(_ date: Date?) -> String {
@@ -95,9 +94,7 @@ struct LogsView: View {
     }
 
     private var rows: [LogTableRow] {
-        (feed.value?.events ?? []).enumerated().compactMap { index, event in
-            query.apply([event]).isEmpty ? nil : LogTableRow(id: index, event: event)
-        }
+        LogTableRow.make(events: feed.value?.events ?? [], query: query)
     }
 
     private var toolbar: some View {
@@ -211,7 +208,52 @@ struct LogsView: View {
     }
 }
 
-private struct LogTableRow: Identifiable {
-    let id: Int
+struct LogTableRow: Identifiable {
+    struct ID: Hashable {
+        fileprivate let event: EventKey
+        let occurrence: Int
+    }
+
+    let id: ID
     let event: LogEvent
+
+    static func make(events: [LogEvent], query: LogsQuery) -> [LogTableRow] {
+        var occurrences: [EventKey: Int] = [:]
+        return events.compactMap { event in
+            let key = EventKey(event)
+            let occurrence = occurrences[key, default: 0]
+            occurrences[key] = occurrence + 1
+            // Assign before filtering so a filter cannot renumber matching rows.
+            guard !query.apply([event]).isEmpty else { return nil }
+            return LogTableRow(id: ID(event: key, occurrence: occurrence), event: event)
+        }
+    }
+
+    static func retainedSelection(_ selectedID: ID?, in rows: [LogTableRow]) -> ID? {
+        guard let selectedID, rows.contains(where: { $0.id == selectedID }) else { return nil }
+        return selectedID
+    }
+}
+
+// A value key survives prepends and reordering. The ordinal keeps equal payloads
+// separately selectable without claiming a source occurrence ID the feed lacks.
+// When equal occurrences change, retain the displayed payload while its ordinal exists.
+fileprivate struct EventKey: Hashable {
+    let timestamp: Date?
+    let severity: String
+    let category: String
+    let message: String
+    let source: String
+    let processID: Int32?
+    let processImage: String?
+
+    init(_ event: LogEvent) {
+        timestamp = event.timestamp
+        severity = event.severity.rawValue
+        category = event.category
+        message = event.message
+        source = event.source.rawValue
+        processID = event.processID
+        processImage = event.processImage
+    }
 }

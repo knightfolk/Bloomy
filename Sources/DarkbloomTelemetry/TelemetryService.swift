@@ -588,29 +588,47 @@ public actor TelemetryService {
     private func publishSnapshot() {
         guard !stopped else { return }
         let snapshot = makeSnapshot(at: now())
-        lastPublishedFreshness = freshnessSignature(for: snapshot)
+        lastPublishedFreshness = freshnessSignature(
+            state: snapshot.state,
+            loadedModels: snapshot.loadedModels,
+            status: snapshot.status,
+            menuStatus: snapshot.menuStatus
+        )
         for continuation in continuations.values {
             continuation.yield(snapshot)
         }
     }
 
-    private func publishFreshnessTransitionIfChanged() {
+    // Internal so tests can await a tick without starting independent source pollers.
+    func publishFreshnessTransitionIfChanged() {
         guard !stopped else { return }
-        let snapshot = makeSnapshot(at: now())
-        let freshness = freshnessSignature(for: snapshot)
+        let capturedAt = now()
+        let state = stateAvailability(at: capturedAt)
+        let freshness = freshnessSignature(
+            state: state,
+            loadedModels: loadedModelsAvailability(at: capturedAt),
+            status: statusAvailability(at: capturedAt),
+            menuStatus: MenuPresentationStatus.derive(state: state, now: capturedAt)
+        )
         guard freshness != lastPublishedFreshness else { return }
+        let snapshot = makeSnapshot(at: capturedAt)
         lastPublishedFreshness = freshness
         for continuation in continuations.values {
             continuation.yield(snapshot)
         }
     }
 
-    private func freshnessSignature(for snapshot: TelemetrySnapshot) -> FreshnessSignature {
+    private func freshnessSignature(
+        state: SourceAvailability<DaemonState>,
+        loadedModels: SourceAvailability<LoadedModelsState>,
+        status: SourceAvailability<StatusSnapshot>,
+        menuStatus: MenuPresentationStatus
+    ) -> FreshnessSignature {
         FreshnessSignature(
-            state: sourceFreshness(snapshot.state),
-            loadedModels: sourceFreshness(snapshot.loadedModels),
-            status: sourceFreshness(snapshot.status),
-            menuStatus: snapshot.menuStatus
+            state: sourceFreshness(state),
+            loadedModels: sourceFreshness(loadedModels),
+            status: sourceFreshness(status),
+            menuStatus: menuStatus
         )
     }
 
