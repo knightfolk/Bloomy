@@ -20,6 +20,92 @@ private struct ModelTelemetryIndex<Value> {
     }
 }
 
+/// Inventory residency is a value, not evidence that it is still known.
+/// A missing runtime read can leave `.unloaded` in the inventory as a default.
+enum ModelCardResidencyPresentation: Equatable {
+    case known(InventoryLiveState)
+    case unavailable
+    case notDownloaded
+
+    var status: String {
+        switch self {
+        case .known(.active): "Serving now"
+        case .known(.loadedIdle): "Ready in memory"
+        case .known(.unloaded): "Not loaded"
+        case .unavailable: "Status unavailable"
+        case .notDownloaded: "Not downloaded"
+        }
+    }
+
+    var badge: String {
+        switch self {
+        case .known(.active): "Active"
+        case .known(.loadedIdle): "Loaded"
+        case .known(.unloaded): "Unloaded"
+        case .unavailable: "Unknown"
+        case .notDownloaded: "Not downloaded"
+        }
+    }
+
+    var accessibilityValue: String {
+        self == .unavailable ? "Provider residency unavailable" : badge
+    }
+}
+
+struct ModelManagerResidencyEvidence: Equatable {
+    var providerKnownStopped = false
+    var controlResidencyIsFresh = false
+
+    func presentation(for item: ModelInventoryItem) -> ModelCardResidencyPresentation {
+        guard item.isDownloaded else { return .notDownloaded }
+        if providerKnownStopped { return .known(.unloaded) }
+        return controlResidencyIsFresh ? .known(item.liveState) : .unavailable
+    }
+
+    static func make(
+        control: ProviderControlSnapshot?,
+        status: SourceAvailability<StatusSnapshot>,
+        daemon: SourceAvailability<DaemonState>,
+        at date: Date
+    ) -> Self {
+        let lifecycle = ProviderLifecycleSourceInput(
+            daemonState: freshDaemon(daemon, at: date),
+            status: freshAvailability(status, maximumAge: StatusSnapshot.maximumAge, at: date),
+            controlDaemonState: control?.sources.daemon,
+            currentTime: date
+        )
+        func fresh(_ source: ProviderControlSourceState?) -> Bool {
+            source?.evaluated(at: date, invalidReason: "Invalid residency timestamp",
+                staleReason: "Residency is stale", futureReason: "Residency timestamp is in the future")
+                .isMarkedFresh == true
+        }
+        return Self(providerKnownStopped: lifecycle.providerKnownRunning == false,
+            controlResidencyIsFresh: fresh(control?.sources.daemon) && fresh(control?.sources.loadedModels))
+    }
+
+    private static func freshAvailability<Value: Equatable & Sendable>(
+        _ source: SourceAvailability<Value>, maximumAge: TimeInterval, at date: Date
+    ) -> SourceAvailability<Value> {
+        guard case .available(_, let capturedAt) = source,
+              freshTimestamp(capturedAt.timeIntervalSince1970, maximumAge: maximumAge, at: date)
+        else { return .unavailable(reason: "Provider state is unavailable") }
+        return source
+    }
+
+    private static func freshDaemon(_ source: SourceAvailability<DaemonState>, at date: Date) -> SourceAvailability<DaemonState> {
+        guard case .available(let daemon, _) = source,
+              freshTimestamp(daemon.writtenAt, maximumAge: ProviderControlSourceState.maximumEvidenceAge, at: date)
+        else { return .unavailable(reason: "Provider activity is unavailable") }
+        return freshAvailability(source, maximumAge: ProviderControlSourceState.maximumEvidenceAge, at: date)
+    }
+
+    private static func freshTimestamp(_ timestamp: TimeInterval, maximumAge: TimeInterval, at date: Date) -> Bool {
+        guard timestamp.isFinite, date.timeIntervalSince1970.isFinite else { return false }
+        let age = date.timeIntervalSince1970 - timestamp
+        return age.isFinite && (0...maximumAge).contains(age)
+    }
+}
+
 struct ModelManagerPreparedPresentation {
     var grouping = ModelGrouping(enabled: [], available: [])
     fileprivate var rates = ModelTelemetryIndex<ModelTokenRateAverage>([], model: \.model)
@@ -27,6 +113,7 @@ struct ModelManagerPreparedPresentation {
     fileprivate var network = ModelTelemetryIndex<NetworkModelCapacity>([], model: \.id)
     var grades: [String: String] = [:]
     var networkIsCurrent = false
+    var residencyEvidence = ModelManagerResidencyEvidence()
 
     func tokenRate(for item: ModelInventoryItem) -> ModelTokenRateAverage? {
         rates.value(catalogID: item.catalogID, localID: item.localID)
@@ -73,8 +160,13 @@ final class ModelManagerPresentationCache {
     func prepare(
         myCatalog: [ModelInventoryItem], available: [ModelInventoryItem],
         enabledSelectors: [String]?, search: String,
-        telemetry: ModelManagerTelemetry, at date: Date
+        telemetry: ModelManagerTelemetry, at date: Date,
+        controlSnapshot: ProviderControlSnapshot? = nil,
+        providerStatus: SourceAvailability<StatusSnapshot> = .unavailable(reason: "Provider status unavailable"),
+        providerDaemonState: SourceAvailability<DaemonState> = .unavailable(reason: "Provider activity unavailable")
     ) -> ModelManagerPreparedPresentation {
+        prepared.residencyEvidence = ModelManagerResidencyEvidence.make(control: controlSnapshot,
+            status: providerStatus, daemon: providerDaemonState, at: date)
         let selectors = enabledSelectors.map(Set.init)
         func isEnabled(_ item: ModelInventoryItem) -> Bool {
             guard let selectors else { return item.isEnabled }
@@ -137,4 +229,39 @@ struct ModelDemandFreshnessTaskInput: Equatable {
     let capturedAt: Date?
     let sourceAvailable: Bool
     let isVisible: Bool
+}
+
+/// Schedule only evidence transitions rather than redrawing every card each second.
+struct ModelResidencyFreshnessTaskInput: Equatable {
+    let sources: ProviderControlSourceStates?
+    let status: SourceAvailability<StatusSnapshot>
+    let daemon: SourceAvailability<DaemonState>
+    let isVisible: Bool
+}
+
+enum ModelResidencyFreshnessSchedule {
+    static func nextTransition(input: ModelResidencyFreshnessTaskInput, at date: Date) -> Date? {
+        guard date.timeIntervalSince1970.isFinite else { return nil }
+        var transitions: [Date] = []
+        func include(_ timestamp: TimeInterval, maximumAge: TimeInterval) {
+            guard timestamp.isFinite else { return }
+            let evidenceAt = Date(timeIntervalSince1970: timestamp)
+            if evidenceAt > date { transitions.append(evidenceAt) }
+            let expiry = evidenceAt.addingTimeInterval(maximumAge + 0.001)
+            if expiry > date { transitions.append(expiry) }
+        }
+        for source in [input.sources?.daemon, input.sources?.loadedModels] {
+            if case .fresh(let evidenceAt) = source {
+                include(evidenceAt.timeIntervalSince1970, maximumAge: ProviderControlSourceState.maximumEvidenceAge)
+            }
+        }
+        if case .available(_, let capturedAt) = input.status {
+            include(capturedAt.timeIntervalSince1970, maximumAge: StatusSnapshot.maximumAge)
+        }
+        if case .available(let daemon, let capturedAt) = input.daemon {
+            include(capturedAt.timeIntervalSince1970, maximumAge: ProviderControlSourceState.maximumEvidenceAge)
+            include(daemon.writtenAt, maximumAge: ProviderControlSourceState.maximumEvidenceAge)
+        }
+        return transitions.min()
+    }
 }

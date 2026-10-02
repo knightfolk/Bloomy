@@ -31,7 +31,9 @@ struct ModelsView: View {
                         networkSourceAvailable: monitorStore.map { if case .available = $0.networkCapacity { true } else { false } } ?? false
                     ),
                     refreshDemand: monitorStore.map { store in { await store.refreshNetworkCapacity() } },
-                    isVisible: monitorStore?.dashboardVisible ?? true
+                    isVisible: monitorStore?.dashboardVisible ?? true,
+                    providerStatus: monitorStore?.snapshot.status ?? .unavailable(reason: "Provider status unavailable"),
+                    providerDaemonState: monitorStore?.snapshot.state ?? .unavailable(reason: "Provider activity unavailable")
                 )
             } else {
                 ContentUnavailableView("Model controls unavailable", systemImage: "cpu",

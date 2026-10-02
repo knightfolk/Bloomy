@@ -19,6 +19,8 @@ Changes prepared for 1.9.15:
 - Chat and Nudge startup presence checks request Keychain metadata in the background. Pending, missing, and unavailable status remain distinct; repeated UI checks do not query or decrypt a key.
 - Observed uptime keeps cached interval totals and clips the rolling window with binary searches. Every observation still persists; reopening, older timestamps and external writes rebuild the aggregate. Unknown gaps and the ten-second carry limit remain unchanged.
 - Legacy log parsing scans backward to the requested matching-event limit and reuses one date parser per read. The resulting events retain their original file order.
+- Model Manager requires fresh runtime evidence for Active, Loaded and Unloaded labels. Missing evidence shows an unknown state; freshness deadlines update visible cards without repeating display polling or rebuilding grades.
+- New Chat route descriptions wrap fully. Companion availability and Support report copy use plain language, with precise exclusions and the existing review-before-save gate retained.
 - Darkbloom 0.9.17 `waiting_inventory` is recognized in local metrics and presented as a model-inventory refresh state.
 
 ## Evidence and limits

@@ -20,6 +20,8 @@ Actual actor benchmark, same debug configuration, 50 chronological records after
 
 The 106,000-row bootstrap still takes about 15.5 ms. Cache entries occupy approximately 3.2 MiB plus spare array capacity. These are inert SQLite measurements, not total app CPU, resident-memory or energy measurements. The opt-in scaling test contains no speed assertion.
 
+Earlier timestamps deliberately use the original persisted ordering and rebuild. A large clock correction can leave future-dated persisted rows, so repeated observations before those rows may keep using that slower path. Their coverage remains correct and future rows are preserved; the benchmark improvement applies to chronological observations, not this fallback. The independent code review identified this remaining optimization boundary.
+
 Evidence: `/tmp/bloomy-uptime-baseline.log`, `/tmp/bloomy-uptime-optimized.log`, `/tmp/bloomy-uptime-optimized-isolated.log`. Tests include a 1,000-step reference oracle with mixed records, snapshots and reopening, duplicate timestamps, clock rollback, external connections, storage failures and a 5,000-record bounded-cache check.
 
 ## Legacy log selection

@@ -533,6 +533,8 @@ struct ModelManagerView: View {
     var telemetry = ModelManagerTelemetry()
     var refreshDemand: (() async -> Void)? = nil
     var isVisible = true
+    var providerStatus: SourceAvailability<StatusSnapshot> = .unavailable(reason: "Provider status unavailable")
+    var providerDaemonState: SourceAvailability<DaemonState> = .unavailable(reason: "Provider activity unavailable")
     @State private var presentationCache = ModelManagerPresentationCache()
     @State private var freshnessRevision: UInt64 = 0
     @State private var deletion: ModelDeletionConfirmation?
@@ -558,6 +560,17 @@ struct ModelManagerView: View {
             freshnessRevision &+= 1
             guard isVisible, telemetry.networkSourceAvailable else { return }
             while let transition = ModelDemandFreshnessSchedule.nextTransition(capacity: telemetry.networkCapacity, at: Date()) {
+                do { try await Task.sleep(for: .seconds(max(0.001, transition.timeIntervalSinceNow))) }
+                catch { return }
+                freshnessRevision &+= 1
+            }
+        }
+        .task(id: ModelResidencyFreshnessTaskInput(sources: store.snapshot?.sources,
+            status: providerStatus, daemon: providerDaemonState, isVisible: isVisible)) {
+            guard isVisible else { return }
+            let input = ModelResidencyFreshnessTaskInput(sources: store.snapshot?.sources,
+                status: providerStatus, daemon: providerDaemonState, isVisible: isVisible)
+            while let transition = ModelResidencyFreshnessSchedule.nextTransition(input: input, at: Date()) {
                 do { try await Task.sleep(for: .seconds(max(0.001, transition.timeIntervalSinceNow))) }
                 catch { return }
                 freshnessRevision &+= 1
@@ -610,7 +623,9 @@ struct ModelManagerView: View {
             myCatalog: store.snapshot?.inventory.myCatalog ?? [],
             available: store.snapshot?.inventory.available ?? [],
             enabledSelectors: store.draft?.selection.enabled,
-            search: search, telemetry: telemetry, at: date
+            search: search, telemetry: telemetry, at: date,
+            controlSnapshot: store.snapshot, providerStatus: providerStatus,
+            providerDaemonState: providerDaemonState
         )
     }
 
@@ -838,7 +853,8 @@ struct ModelManagerView: View {
                 runPercent: runPercent,
                 setRunPercent: { setWhatIfRunPercent($0, for: item) },
                 showsDetails: expanded,
-                demandPresentation: presentation.demand(for: item)
+                demandPresentation: presentation.demand(for: item),
+                residencyPresentation: presentation.residencyEvidence.presentation(for: item)
             )
             if expanded {
                 if item.isDownloaded, let snapshot = store.snapshot {
@@ -944,7 +960,7 @@ struct ModelManagerView: View {
                 .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
                 capacityCard("Simultaneous requests", icon: "arrow.triangle.branch",
                     value: draft.engineV2MaxConcurrent, defaultValue: 4, selectableMaximum: 24,
-                    explanation: "Maximum concurrent requests per model engine. Choose 1–24. Higher limits use more memory; CLI 0.9.7 caps actual per-model concurrency at 8. Model-specific overrides may also reduce it.",
+                    explanation: "Maximum concurrent requests per model engine. Choose 1–24. Higher limits use more memory. The default per-model cap is 8; reviewed supported profiles may allow more. Model-specific overrides may reduce it.",
                     set: store.setEngineV2MaxConcurrent)
                 capacityCard("Models kept in memory", icon: "memorychip",
                     value: draft.maxModelSlots, defaultValue: 3,
@@ -1157,6 +1173,7 @@ struct ModelCardSummary: View {
     let setRunPercent: (Int) -> Void
     var showsDetails = false
     var demandPresentation: ModelCardDemand? = nil
+    var residencyPresentation: ModelCardResidencyPresentation = .unavailable
 
     /// Informational content of not-yet-downloaded cards is muted, while the
     /// Download action stays fully opaque and enabled whenever it is allowed.
@@ -1178,8 +1195,9 @@ struct ModelCardSummary: View {
 
     private var cardFace: some View {
         CompactModelCard(modelID: item.catalogID,
-            status: item.isDownloaded ? (item.liveState == .active ? "Serving now" : item.liveState == .loadedIdle ? "Ready in memory" : "Not loaded") : "Not downloaded",
-            symbol: modelSymbol, tint: item.isDownloaded ? accent : .secondary,
+            status: displayedResidency.status,
+            symbol: displayedResidency == .unavailable ? "questionmark.circle" : modelSymbol,
+            tint: item.isDownloaded && displayedResidency != .unavailable ? accent : .secondary,
             metrics: compactMetrics, contentOnly: true,
             demand: demandPresentation ?? ModelCardDemand(model: capacity, isCurrent: capacity != nil))
     }
@@ -1228,29 +1246,30 @@ struct ModelCardSummary: View {
         .accessibilityValue(residencyDescription)
     }
 
-    private var residencyDescription: String {
-        guard item.isDownloaded else { return "Not downloaded" }
-        switch item.liveState {
-        case .active: return "Active"
-        case .loadedIdle: return "Loaded"
-        case .unloaded: return "Unloaded"
-        }
+    private var displayedResidency: ModelCardResidencyPresentation {
+        item.isDownloaded ? residencyPresentation : .notDownloaded
     }
+
+    private var residencyDescription: String { displayedResidency.accessibilityValue }
 
     private var residencyBadge: some View {
         Group {
-            if item.isDownloaded {
-                LiveStatePill(state: item.liveState)
+            if case .known(let state) = displayedResidency {
+                LiveStatePill(state: state)
             } else {
-                Text("Not downloaded")
+                Label(displayedResidency.badge,
+                    systemImage: displayedResidency == .unavailable ? "questionmark.circle" : "arrow.down.circle")
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(.quaternary, in: Capsule())
             }
         }
-        .help(item.isDownloaded
-            ? "Current provider residency or activity. Loaded means in memory; it does not necessarily mean serving a request. This can differ from your saved enable and startup settings."
-            : "Not downloaded to this Mac. The Download action remains available.")
+        .accessibilityLabel(displayedResidency.accessibilityValue)
+        .help(displayedResidency == .unavailable
+            ? "Current provider residency is unavailable. Refresh provider state to learn whether this model is loaded or serving."
+            : item.isDownloaded
+                ? "Current provider residency or activity. Loaded means in memory; it does not necessarily mean serving a request. This can differ from your saved enable and startup settings."
+                : "Not downloaded to this Mac. The Download action remains available.")
     }
 
     private var familyMark: some View {
@@ -1574,14 +1593,7 @@ struct ModelCardSummary: View {
                     }.fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 4)
-                if item.isDownloaded {
-                    LiveStatePill(state: item.liveState)
-                } else {
-                    Text("Available")
-                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.quaternary, in: Capsule())
-                }
+                residencyBadge
             }
 
             Label(ramFit, systemImage: ramFit.hasPrefix("Below") ? "exclamationmark.circle" : (ramFit.contains("unverified") ? "questionmark.circle" : "checkmark.circle"))

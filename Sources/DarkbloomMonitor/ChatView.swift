@@ -569,8 +569,10 @@ private struct ChatNewConversationDialog: View {
                     Text(title).font(.headline)
                     Text(detail).font(.caption).foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)

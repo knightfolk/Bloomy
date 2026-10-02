@@ -139,7 +139,8 @@ struct ModelCardSummaryRenderingTests {
                 grade: "A",
                 forecast: forecast,
                 runPercent: 50,
-                setRunPercent: { _ in }
+                setRunPercent: { _ in },
+                residencyPresentation: .known(item.liveState)
             )
             Divider()
             HStack(alignment: .center, spacing: 12) {

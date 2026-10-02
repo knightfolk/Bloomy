@@ -100,8 +100,8 @@ struct MonitorSettingsView: View {
                 }
             case .companion:
                 Section("iPhone companion") {
-                    LabeledContent("Signed background helper", value: "Coming soon")
-                    Text("Secure QR pairing and remote controls will appear here after the helper is packaged, signed, and verified on a physical iPhone. The current app does not enable it automatically.")
+                    LabeledContent("Availability", value: "Coming soon")
+                    Text("iPhone pairing and remote controls aren’t available in this version.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -139,29 +139,29 @@ struct MonitorSettingsView: View {
         case .provider: "Saved idle-memory and experimental feature choices."
         case .fans: "Fan helper status and controls from the official CLI."
         case .companion: "Companion availability and setup."
-        case .support: "Review a sanitized support packet before saving or sharing."
+        case .support: "Review a support report before saving or sharing."
         }
     }
 
     private var supportSection: some View {
         Section("Support") {
-            Text("Prepare a frozen packet with fixed provider status, allowlisted model identifiers, and sanitized alert history. Review it before saving or sharing.")
+            Text("Create a report with provider status, recognized model identifiers, recent alerts, and recommendations. Review its contents before saving or sharing.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button(isPreparingSupportPacket ? "Preparing…" : "Review support packet…") {
+            Button(isPreparingSupportPacket ? "Preparing…" : "Review support report…") {
                 prepareSupportPacket()
             }
             .accessibilityIdentifier("settings.supportPacket.preview")
             .disabled(monitorStore == nil || isPreparingSupportPacket)
 
             if supportPacketPrepareFailed {
-                Text("The support packet could not be prepared. Try again after telemetry refreshes.")
+                Text("The support report could not be prepared. Try again after status refreshes.")
                     .font(.callout)
                     .foregroundStyle(.orange)
             } else if supportPacketPrepared, monitorStore?.alertHistoryAvailable == false {
-                Text("Local alert history is unavailable. The packet contains the current sanitized snapshot only.")
+                Text("Local alert history is unavailable. Saved alerts aren’t included in this report.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

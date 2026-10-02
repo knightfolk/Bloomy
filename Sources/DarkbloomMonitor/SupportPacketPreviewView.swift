@@ -42,10 +42,10 @@ struct SupportPacketPreviewView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Review support packet").font(.title2.bold())
+            Text("Review support report").font(.title2.bold())
             Text("\(snapshot.alertCount) alerts · \(snapshot.omittedAlertCount) omitted · \(snapshot.data.count) bytes")
                 .foregroundStyle(.secondary)
-            Text("This frozen packet contains fixed status codes, explicitly allowlisted model IDs, bounded counters, and sanitized alert history. It excludes logs, free-form diagnostics, local paths, process IDs, coordinator URLs, and account identifiers. Review it before saving or sharing. Opening this preview does not create a file.")
+            Text("Includes provider status, recognized model identifiers, activity counts, alerts, and recommendations, with observation times and sources. Logs, account IDs, credentials, balances, file paths, and connection addresses are excluded. Previewing creates no file; review the report before saving or sharing.")
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
             ScrollView {
@@ -57,7 +57,7 @@ struct SupportPacketPreviewView: View {
                     .padding(12)
             }
             .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
-            Toggle("I reviewed this packet before saving or sharing", isOn: $reviewed)
+            Toggle("I reviewed this report before saving or sharing", isOn: $reviewed)
                 .toggleStyle(.checkbox)
             if let resultMessage {
                 Text(resultMessage).font(.callout).foregroundStyle(.secondary)
@@ -79,8 +79,8 @@ struct SupportPacketPreviewView: View {
             defaultFilename: "darkbloom-support-packet"
         ) { result in
             switch result {
-            case .success: resultMessage = "The reviewed packet was saved."
-            case .failure: resultMessage = "The packet could not be saved. You can retry or close this preview."
+            case .success: resultMessage = "The reviewed report was saved."
+            case .failure: resultMessage = "The report could not be saved. You can retry or close this preview."
             }
         }
     }

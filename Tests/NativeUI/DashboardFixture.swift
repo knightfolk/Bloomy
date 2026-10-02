@@ -1,0 +1,498 @@
+// Opt-in local native review. Every provider, account, chat, and token dependency
+// below is synthetic. Never call MonitorStore.start() from this host.
+import AppKit
+import SwiftUI
+@testable import DarkbloomTelemetry
+
+enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
+    case fresh = "Fresh", stale = "Stale", staleCatalog = "Stale catalog", offline = "Offline"
+    var id: String { rawValue }
+    var hasCurrentRuntime: Bool { self == .fresh || self == .staleCatalog }
+    var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
+    func availability<T: Equatable & Sendable>(_ value: T, at date: Date) -> SourceAvailability<T> {
+        switch self {
+        case .fresh, .staleCatalog: .available(value: value, capturedAt: date)
+        case .stale: .stale(value: value, capturedAt: date, reason: "Synthetic source stopped refreshing")
+        case .offline: .unavailable(reason: "Synthetic source offline")
+        }
+    }
+}
+
+private enum FixtureData {
+    static let modelIDs = ["qwen3.8-27b", "gemma-4-26b-qat-4bit", "gpt-oss-20b", "ternary-bonsai-2-27b"]
+    static let catalog = [
+        CatalogModel(id: modelIDs[0], displayName: "Qwen 3.8 27B", family: "qwen", modelType: "text", capabilities: ["chat", "tools"], sizeGB: 16.3, minimumRAMGB: 36, active: true),
+        CatalogModel(id: modelIDs[1], displayName: "Gemma 4 26B", family: "gemma", modelType: "text", capabilities: ["chat"], sizeGB: 15.6, minimumRAMGB: 32, active: true),
+        CatalogModel(id: modelIDs[2], displayName: "GPT-OSS 20B", family: "gpt", modelType: "text", capabilities: ["chat"], sizeGB: 12.1, minimumRAMGB: 24, active: true),
+        CatalogModel(id: modelIDs[3], displayName: "PrismML Bonsai 2 27B", family: "bonsai", modelType: "text", capabilities: ["chat"], sizeGB: 8.6, minimumRAMGB: 16, active: true)
+    ]
+    static func snapshot(_ scenario: FixtureScenario, now: Date) -> TelemetrySnapshot {
+        let date = scenario == .stale ? now.addingTimeInterval(-900) : now
+        let state = DaemonState(schema: 1, version: "0.9.17", currentModel: scenario == .offline ? "" : modelIDs[0],
+            warmModels: scenario == .offline ? [] : Array(modelIDs.prefix(2)),
+            stats: ProviderStats(tokensGenerated: 126_400, requestsServed: 236, usageGaps: 0),
+            trust: TrustState(level: "verified", status: scenario == .offline ? "offline" : "online",
+                reason: "Synthetic review", receivedAt: date.timeIntervalSince1970),
+            capacity: scenario == .offline ? nil : MemoryCapacity(totalMemoryGB: 64, gpuMemoryActiveGB: 32, gpuMemoryCacheGB: 6),
+            slots: scenario == .offline ? [] : [ModelSlot(model: modelIDs[0], mtpEnabled: true, mtpActive: true,
+                mtpReason: nil, kvBackend: "paged", requestedKVBackend: "paged")],
+            inferenceActive: scenario.hasCurrentRuntime,
+            startedAt: now.addingTimeInterval(-10_800).timeIntervalSince1970,
+            writtenAt: date.timeIntervalSince1970, pid: 4242,
+            processIdentity: ProcessIdentity(pid: 4242, startTimeMicros: 1_800_000_000),
+            advertisedModels: scenario == .offline ? [] : Array(modelIDs.prefix(3)),
+            lifecycle: ProviderLifecycleState(outcome: scenario == .offline ? .stopped : .serving,
+                remainingRequests: scenario.hasCurrentRuntime ? 2 : 0, coordinatorAcknowledged: true),
+            startupPreloadPendingModels: [], autopilotPhase: scenario == .offline ? nil : "shadow")
+        var status = StatusSnapshot()
+        status.version = "0.9.17"; status.providerName = "Synthetic review provider"
+        status.hardware = "Synthetic 64 GB Mac"; status.daemon = scenario == .offline ? "Stopped" : "Running"
+        status.configuredModel = modelIDs[0]; status.localModelCount = 3
+        status.requestCount = 236; status.tokenCount = 126_400
+        let events: [LogEvent] = (0..<48).map { index in
+            let eventDate = date.addingTimeInterval(Double(-index * 60))
+            let severity: LogSeverity = index % 9 == 0 ? .warning : .info
+            let source: LogSource = index % 2 == 0 ? .legacy : .unified
+            let message = index % 9 == 0 ? "Synthetic delayed refresh; retained evidence" : "Synthetic job completed"
+            return LogEvent(timestamp: eventDate, severity: severity, category: "Synthetic review",
+                message: message, source: source, processID: 4242, processImage: "Fixture")
+        }
+        // Offline has matching current synthetic daemon and official CLI
+        // stopped-status evidence; unrelated sources remain unavailable.
+        let stateAvailability: SourceAvailability<DaemonState> = scenario == .offline
+            ? .available(value: state, capturedAt: date) : scenario.availability(state, at: date)
+        return TelemetrySnapshot(state: stateAvailability,
+            loadedModels: scenario.availability(LoadedModelsState(schema: 1,
+                models: Array(modelIDs.prefix(2)), updatedAt: date.timeIntervalSince1970), at: date),
+            status: scenario == .offline
+                ? .available(value: status, capturedAt: date) : scenario.availability(status, at: date),
+            eventFeed: scenario.availability(EventFeed(events: events, legacyReadAt: date, unifiedActivityAt: date), at: date),
+            tokenRate: scenario.hasCurrentRuntime ? .available(tokensPerSecond: 52.7, label: "Synthetic observed rate") : .unavailable(reason: "Synthetic inactive source"),
+            diagnostics: scenario.hasCurrentRuntime ? [] : [AcquisitionDiagnostic(id: "fixture", source: "Synthetic review", message: "Synthetic source \(scenario.rawValue.lowercased())", occurredAt: now)],
+            capturedAt: now, menuStatus: scenario.hasCurrentRuntime ? .online : scenario == .stale ? .stale : .offline)
+    }
+}
+
+private struct FixtureTelemetrySource: TelemetrySource {
+    let scenario: FixtureScenario
+    func readDaemonState() async throws -> DaemonState { FixtureData.snapshot(scenario, now: Date()).state.value! }
+    func readLoadedModels() async throws -> LoadedModelsState {
+        guard let value = FixtureData.snapshot(scenario, now: Date()).loadedModels.value else { throw FixtureError.offline }; return value
+    }
+    func readStatus() async throws -> StatusSnapshot {
+        guard let value = FixtureData.snapshot(scenario, now: Date()).status.value else { throw FixtureError.offline }; return value
+    }
+    func readLegacyEvents(limit: Int) async throws -> [LogEvent] {
+        Array((FixtureData.snapshot(scenario, now: Date()).eventFeed.value?.events ?? []).prefix(limit))
+    }
+}
+private enum FixtureError: Error { case offline }
+
+private struct FixtureEarnings: AccountEarningsFetching {
+    let scenario: FixtureScenario
+    func fetch(now: Date) async throws -> EarningsPresentationValue {
+        switch scenario {
+        case .fresh, .staleCatalog: .observed(microUSD: 6_420_000, observedSeconds: 10_800)
+        case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
+        case .offline: .unavailable(reason: "Synthetic account source offline")
+        }
+    }
+    func jobCompletionSummary(now: Date, calendar: Calendar) async throws -> JobCompletionSummary? {
+        guard scenario.hasCurrentRuntime else { return nil }
+        return JobCompletionSummary(completedToday: 236, averagePerDay: 188, averagingDays: 7,
+            dayStart: calendar.startOfDay(for: now), capturedAt: now)
+    }
+    func todayEarningsSummary(now: Date, calendar: Calendar) async throws -> ObservedEarningsWindow? {
+        guard scenario.hasCurrentRuntime else { return nil }
+        return ObservedEarningsWindow(microUSD: 6_420_000, observedSeconds: 10_800,
+            calendarDayStart: calendar.startOfDay(for: now), capturedAt: now, coversDayToDate: false)
+    }
+    func weekEarningsSummary(now: Date, calendar: Calendar) async throws -> CalendarWeekEarningsSummary? {
+        guard scenario.hasCurrentRuntime else { return nil }
+        return CalendarWeekEarningsSummary(microUSD: 42_400_000, isComplete: false,
+            weekStart: calendar.dateInterval(of: .weekOfYear, for: now)?.start, capturedAt: now)
+    }
+    func modelEarnings(since: Date) async throws -> [ModelEarnings] {
+        guard scenario.hasCurrentRuntime else { return [] }
+        return FixtureData.modelIDs.prefix(3).enumerated().map { ModelEarnings(model: $0.element,
+            microUSD: Int64(3_000_000 / ($0.offset + 1)), jobs: Int64(100 / ($0.offset + 1))) }
+    }
+    func activity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ActivityBucket]? {
+        guard scenario.hasCurrentRuntime else { return nil }
+        return try ActivityCalendar.intervals(in: range, unit: unit, calendar: calendar).enumerated().map { index, interval in
+            ActivityBucket(interval: interval, totals: ActivityTotals(workMicroUSD: Int64(150_000 + index % 7 * 30_000),
+                rewardMicroUSD: 20_000, jobs: Int64(5 + index % 5), promptTokens: 2_000, completionTokens: 5_000), coverage: .recorded)
+        }
+    }
+    func activityModels(in range: DateInterval) async throws -> [String] { scenario.hasCurrentRuntime ? Array(FixtureData.modelIDs.prefix(3)) : [] }
+    func modelActivity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar, model: String?) async throws -> [ActivityBucket]? {
+        try await activity(in: range, unit: unit, calendar: calendar)
+    }
+}
+private actor FixtureCapacity: NetworkCapacityFetching {
+    let scenario: FixtureScenario
+    var attempts = 0
+    init(scenario: FixtureScenario) { self.scenario = scenario }
+    func fetch(at capturedAt: Date) async throws -> NetworkCapacitySnapshot {
+        attempts += 1
+        if scenario == .offline || (scenario == .stale && attempts > 1) { throw FixtureError.offline }
+        let models = FixtureData.modelIDs.enumerated().map { index, id in
+            ["id": id, "ready": true, "can_accept": true, "routable_providers": 8 + index,
+             "warm_providers": 4 + index, "running_providers": 9, "cold_providers": 2,
+             "active_requests": 14 - index * 3, "queued_requests": index, "queue_limit": 16,
+             "aggregate_tps": 420, "estimated_ttft_ms": 180, "token_budget_remaining": 8_000,
+             "token_budget_total": 16_000] as [String: Any]
+        }
+        return try NetworkCapacityParser.parse(JSONSerialization.data(withJSONObject: ["models": models]), capturedAt: capturedAt)
+    }
+}
+private actor FixtureCatalog: PublicCatalogFetching {
+    let scenario: FixtureScenario
+    private var attempts = 0
+    init(scenario: FixtureScenario) { self.scenario = scenario }
+    func fetch(at capturedAt: Date) async throws -> PublicCatalogSnapshot {
+        attempts += 1
+        if scenario == .offline || (scenario.hasStaleCatalog && attempts > 1) { throw FixtureError.offline }
+        return PublicCatalogSnapshot(models: FixtureData.catalog, capturedAt: capturedAt)
+    }
+}
+private actor FixturePricing: PublicPricingFetching {
+    let scenario: FixtureScenario
+    private var attempts = 0
+    init(scenario: FixtureScenario) { self.scenario = scenario }
+    func fetch(at capturedAt: Date) async throws -> PublicPricingSnapshot {
+        attempts += 1
+        if scenario == .offline || (scenario == .stale && attempts > 1) { throw FixtureError.offline }
+        let prices = FixtureData.modelIDs.map { ["model": $0, "input_price": 18_000, "output_price": 90_000] as [String: Any] }
+        return try PublicPricingSnapshot.parse(JSONSerialization.data(withJSONObject: ["prices": prices]), capturedAt: capturedAt)
+    }
+}
+private actor FixtureSeries: NetworkSeriesFetching {
+    let scenario: FixtureScenario
+    private var attempts = 0
+    init(scenario: FixtureScenario) { self.scenario = scenario }
+    func fetch(at date: Date) async throws -> NetworkSeriesSnapshot {
+        attempts += 1
+        if scenario == .offline || (scenario == .stale && attempts > 1) { throw FixtureError.offline }
+        let end = Date(timeIntervalSince1970: floor(date.timeIntervalSince1970 / 3_600) * 3_600)
+        let start = end.addingTimeInterval(-86_400)
+        let buckets: [NetworkSeriesBucket] = (0..<24).map { index in
+            let timestamp = start.addingTimeInterval(Double(index * 3_600))
+            let requests = Int64(500 + index * 12)
+            let promptTokens = Int64(25_000 + index * 300)
+            let completionTokens = Int64(40_000 + index * 900)
+            return NetworkSeriesBucket(timestamp: timestamp, requests: requests,
+                promptTokens: promptTokens, completionTokens: completionTokens)
+        }
+        return NetworkSeriesSnapshot(buckets: buckets, bucketSeconds: 3_600, startAt: start, endAt: end, updatedAt: date, capturedAt: date)
+    }
+}
+private actor FixtureController: ProviderControlling {
+    let scenario: FixtureScenario
+    var selection = ProviderModelSelection(enabled: Array(FixtureData.modelIDs.prefix(3)), preloaded: Array(FixtureData.modelIDs.prefix(2)))
+    var slots = 3
+    var concurrent = 4
+    init(scenario: FixtureScenario) { self.scenario = scenario }
+    func refresh() async throws -> ProviderControlSnapshot {
+        let now = Date()
+        // Match ProviderControlService: expired runtime evidence is omitted
+        // before building inventory, never retained as current residency.
+        let daemon = scenario.hasCurrentRuntime ? FixtureData.snapshot(scenario, now: now).state.value : nil
+        let loadedModelIDs = scenario.hasCurrentRuntime ? Array(FixtureData.modelIDs.prefix(2)) : []
+        let local = FixtureData.catalog.prefix(3).map { LocalModel(id: $0.id, modelType: "text", sizeBytes: Int64($0.sizeGB * 1e9), estimatedMemoryGB: nil) }
+        let runtimeSource: ProviderControlSourceState = scenario.hasCurrentRuntime
+            ? .fresh(evidenceAt: now) : scenario == .stale
+            ? .stale("Synthetic runtime source stale") : .unavailable("Synthetic source offline")
+        let catalogSource: ProviderControlSourceState = scenario.hasStaleCatalog
+            ? .stale("Synthetic catalog/local inventory retained") : runtimeSource
+        return ProviderControlSnapshot(inventory: ModelInventoryBuilder.build(catalog: FixtureData.catalog,
+            local: local, selection: selection, daemon: daemon, loadedModels: loadedModelIDs),
+            draft: ProviderConfigDraft(sourceRevision: "synthetic", original: selection, selection: selection,
+                originalMaxModelSlots: slots, maxModelSlots: slots, originalEngineV2MaxConcurrent: concurrent, engineV2MaxConcurrent: concurrent),
+            daemonState: daemon, capturedAt: now,
+            sources: ProviderControlSourceStates(catalog: catalogSource, localModels: catalogSource, daemon: runtimeSource, loadedModels: runtimeSource))
+    }
+    func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult {
+        selection = draft.selection; slots = draft.maxModelSlots ?? 3; concurrent = draft.engineV2MaxConcurrent ?? 4
+        return ProviderConfigSaveResult(draft: try await refresh().draft, restartRequired: true)
+    }
+    func download(_ modelID: String, onOutput: (@Sendable (ProcessOutputChunk) -> Void)?) async throws {}
+    func delete(_ localModelID: String) async throws {}
+    func activityRisk() async -> ProviderActivityRisk { .idle }
+    func execute(_ action: ProviderLifecycleAction, enabledModels: [String]) async throws {}
+}
+private actor FixtureExtras: ProviderExtrasProviding {
+    let scenario: FixtureScenario
+    var minutes = 30
+    var mtp = false
+    var autoUpdate = true
+    init(scenario: FixtureScenario) { self.scenario = scenario }
+    func refresh() async -> ProviderExtrasSnapshot {
+        let date = scenario == .stale ? Date().addingTimeInterval(-900) : Date()
+        let fans = [ProviderFanReading(index: 0, actualRPM: 2_200, targetRPM: 2_200, minimumRPM: 1_200, maximumRPM: 5_200, mode: "automatic")]
+        let fan = ProviderFanStatus(capability: ProviderFanStatus.controlCapability, installed: true, loaded: true,
+            helper: ProviderFanHelperStatus(enabled: true, providerActive: true, mode: "automatic", chip: "Synthetic",
+                gpuTemperatureCelsius: 54, triggerTemperatureCelsius: 65, releaseTemperatureCelsius: 55,
+                speedPercent: 42, fans: fans, updatedAt: date),
+            diagnostic: ProviderFanDiagnostic(chip: "Synthetic", supported: true,
+                gpuTemperatures: [ProviderFanTemperature(key: "Synthetic GPU", celsius: 54)], fans: fans),
+            helperErrorPresent: false, diagnosticErrorPresent: false)
+        return ProviderExtrasSnapshot(capturedAt: date,
+            idlePolicy: scenario.availability(ProviderIdlePolicy(idleTimeoutMinutes: minutes, policy: "idle_timeout", summary: "Free after \(minutes) minutes idle", pinned: false), at: date),
+            betaFeatures: scenario.availability([ProviderBetaFeature(id: "mtp", title: "Multi-token prediction", state: mtp ? .on : .auto,
+                enabled: mtp ? true : nil, requiresRestart: true, summary: "Synthetic setting for eligible models.")], at: date),
+            fanStatus: scenario.availability(fan, at: date),
+            autoUpdateStatus: scenario.availability(ProviderAutoUpdateStatus(enabled: autoUpdate), at: date))
+    }
+    func saveIdle(minutes: Int) async throws { self.minutes = minutes }
+    func setBeta(id: String, enabled: Bool) async throws { mtp = enabled }
+    func setAutoUpdate(enabled: Bool) async throws { autoUpdate = enabled }
+}
+
+// The builder injects this client into CLIUpdateStatusStore.shared in a staged
+// source copy: the production update view remains unchanged.
+struct FixtureCLIUpdates: CLIUpdateProviding {
+    func checkForUpdate() async -> SourceAvailability<CLIUpdateStatus> {
+        .available(value: .upToDate(version: "0.9.17"), capturedAt: Date())
+    }
+}
+// The production Infrastructure disclosure starts NetworkCacheStore polling.
+// Its staged default client must also be inert before any fixture launch.
+struct FixtureNetworkCache: NetworkCacheFetching {
+    func fetch(at capturedAt: Date) async throws -> NetworkCacheSnapshot {
+        NetworkCacheSnapshot(routingMode: .shadow, plannerEnabled: true,
+            plannerRunning: true, plannerReady: true, capturedAt: capturedAt)
+    }
+}
+private struct FixtureEndpoint: LocalEndpointFetching {
+    func fetch() async -> LocalEndpointAvailability { .none("Synthetic endpoint; no real server") }
+}
+private final class FixtureTokens: ConsumerKeyManaging, LocalEndpointTokenManaging, @unchecked Sendable {
+    private let lock = NSLock()
+    private var consumer: String?
+    private var bearer: String?
+    var hasKey: Bool { lock.withLock { consumer != nil } }
+    func store(_ key: String) throws { lock.withLock { consumer = key } }
+    func remove() { lock.withLock { consumer = nil } }
+    func withConsumerKey<R>(_ body: (String) throws -> R) rethrows -> R? {
+        guard let value = lock.withLock({ consumer }) else { return nil }; return try body(value)
+    }
+    func saveBearerToken(_ token: String) throws { lock.withLock { bearer = token } }
+    func withBearerToken(_ action: (String) -> Void) -> Bool {
+        guard let value = lock.withLock({ bearer }) else { return false }; action(value); return true
+    }
+}
+private struct FixtureChat: LocalChatRouteClient, NetworkChatRouteClient {
+    let scenario: FixtureScenario
+    func models(now: Date) async throws -> ChatModelListSnapshot {
+        if !scenario.hasCurrentRuntime { throw FixtureError.offline }
+        return ChatModelListSnapshot(modelIDs: FixtureData.modelIDs, capturedAt: now)
+    }
+    func complete(model: String, messages: [ChatMessagePayload]) async throws -> ChatCompletionOutcome {
+        if !scenario.hasCurrentRuntime { throw FixtureError.offline }
+        return ChatCompletionOutcome(content: "Synthetic reply — no model was called. This review conversation lives only in fixture memory.", model: model,
+            finishReason: "stop", promptTokens: 12, completionTokens: 22)
+    }
+}
+private struct FixtureBalance: ConsumerBalanceFetching {
+    func fetch(now: Date) async throws -> ConsumerBalanceSnapshot { ConsumerBalanceSnapshot(balanceMicroUSD: 2_400_000, capturedAt: now) }
+}
+
+@MainActor
+private final class FixtureModel: ObservableObject {
+    let defaults: UserDefaults
+    let directory: URL
+    let navigation: DashboardNavigation
+    @Published var monitor: MonitorStore
+    @Published var control: ProviderControlStore
+    @Published var hosting: HostingSettingsStore
+    @Published var chat: ChatStore
+    @Published var ready = false
+    @Published var issue: String?
+    @Published var scenario: FixtureScenario = .fresh
+
+    init() {
+        let suite = "dev.darkbloom.dashboard-fixture.session.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suite)!
+        defaults.set("light", forKey: ApplicationAppearance.defaultsKey)
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent("BloomyDashboardFixture-\(UUID().uuidString)", isDirectory: true)
+        navigation = DashboardNavigation(defaults: defaults)
+        let stores = Self.makeStores(.fresh, defaults: defaults, directory: directory)
+        monitor = stores.0; control = stores.1; hosting = stores.2; chat = stores.3
+    }
+    private static func makeStores(_ scenario: FixtureScenario, defaults: UserDefaults, directory: URL) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore) {
+        let tokens = FixtureTokens()
+        let controller = FixtureController(scenario: scenario)
+        let control = ProviderControlStore(controller: controller, homeDirectory: directory, hostingOptions: { .default })
+        let extras = ProviderExtrasStore(client: FixtureExtras(scenario: scenario))
+        let monitor = MonitorStore(service: TelemetryService(source: FixtureTelemetrySource(scenario: scenario)),
+            initial: FixtureData.snapshot(scenario, now: Date()), providerExtras: extras,
+            earningsClient: FixtureEarnings(scenario: scenario),
+            networkCapacityClient: FixtureCapacity(scenario: scenario), publicCatalogClient: FixtureCatalog(scenario: scenario),
+            publicPricingClient: FixturePricing(scenario: scenario), networkSeriesClient: FixtureSeries(scenario: scenario),
+            energyPreferences: defaults, energyRecorder: EnergyRecorder(file: directory.appendingPathComponent("energy.json"), readPower: { _ in nil }),
+            gpuUsage: SystemGPUUsageStore(read: { nil }), menuAttentionPreferences: defaults)
+        monitor.inactivityNudge = InactivityNudgeStore(keyStore: tokens, defaults: defaults,
+            evidence: { _ in .unavailable }, canAct: { false }, send: { _, _ in nil })
+        monitor.profitSwitch = ProfitSwitchStore(control: control, defaults: defaults, installedMemoryGB: 64, availableMemoryGB: { 24 })
+        let hosting = HostingSettingsStore(controlStore: control, endpointClient: FixtureEndpoint(), tokenFile: tokens,
+            cliVersionProvider: { scenario == .offline ? nil : "0.9.17" }, defaults: defaults, lanScanner: { ["192.168.50.20"] })
+        let chat = ChatStore(localClient: FixtureChat(scenario: scenario), networkClient: FixtureChat(scenario: scenario),
+            balanceClient: FixtureBalance(), pricingClient: FixturePricing(scenario: scenario), keyStore: tokens)
+        monitor.attachRecommendationInventory { control.snapshot }
+        monitor.setDashboardVisible(true)
+        hosting.refreshEnvironment()
+        return (monitor, control, hosting, chat)
+    }
+    func tick() async {
+        guard ready, scenario.hasCurrentRuntime || scenario == .offline else { return }
+        await monitor.accept(FixtureData.snapshot(scenario, now: Date()))
+        await control.refreshPreservingDraft()
+    }
+    func load() async {
+        ready = false; issue = nil
+        let stores = Self.makeStores(scenario, defaults: defaults, directory: directory)
+        monitor = stores.0; control = stores.1; hosting = stores.2; chat = stores.3
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let performanceURL = directory.appendingPathComponent("performance-\(scenario.id).sqlite")
+            let seedPerformance = !FileManager.default.fileExists(atPath: performanceURL.path)
+            let database = try PerformanceHistoryDatabase(url: performanceURL)
+            let now = Date()
+            for index in 0..<(seedPerformance ? 360 : 0) {
+                let date = now.addingTimeInterval(Double(index - 359) * 30)
+                // A bounded 90-second Bonsai visit: switch in at sample 356,
+                // remain singly resident/idle with flat counters through 358,
+                // switch back to Gemma at 359 without a counter increment.
+                // Other single-model visits contain active work and stale gaps.
+                let idleVisit = (356..<359).contains(index)
+                let idleBoundary = index == 359
+                let modelIndex = idleVisit ? 3 : index < 180 ? 0 : 1
+                let modelID = FixtureData.modelIDs[modelIndex]
+                let active = !idleVisit && !idleBoundary && index % 12 != 0
+                let counterIndex = min(index, 355)
+                try database.record(PerformanceSample(observedAt: date, sourceCapturedAt: date,
+                    quality: index % 80 == 0 ? .stale : .current, providerSession: "4242:1800",
+                    model: modelID, residentModels: [modelID],
+                    advertisedModels: Array(FixtureData.modelIDs.prefix(3)), inferenceActive: active,
+                    activeRequests: active ? 2 : 0, tokensPerSecond: active ? 40 + Double(index % 20) : 0,
+                    tokensGenerated: Int64(counterIndex * 300), requestsServed: Int64(counterIndex / 3),
+                    gpuUtilizationPercent: Double(35 + index % 45), gpuMemoryGB: 32, powerWatts: 75 + Double(index % 20), autopilotPhase: index % 90 < 8 ? "waiting_inventory" : "shadow"))
+            }
+            monitor.performanceHistory = PerformanceHistoryStore(url: performanceURL)
+            let history = ActionHistoryStore(url: directory.appendingPathComponent("actions-\(scenario.id).sqlite"))
+            if history.events.isEmpty {
+                for index in 0..<48 {
+                    history.record(action: index % 3 == 0 ? .swap : .saveSettings, trigger: .manual,
+                        outcome: index % 9 == 0 ? .failed : .succeeded, model: FixtureData.modelIDs[index % 3],
+                        reason: index % 9 == 0 ? .notConfirmed : .completed)
+                }
+            }
+            monitor.actionHistory = history; control.actionHistory = history
+            await control.refresh(); await monitor.providerExtras?.refresh()
+            await monitor.refreshEarnings(); await monitor.refreshPublicCatalog(); await monitor.refreshPublicPricing()
+            if scenario != .offline { await monitor.refreshNetworkCapacity(); await monitor.refreshNetworkSeries() }
+            if scenario == .stale {
+                await monitor.refreshNetworkCapacity(); await monitor.refreshNetworkSeries()
+                await monitor.refreshPublicPricing()
+            }
+            if scenario.hasStaleCatalog { await monitor.refreshPublicCatalog() }
+            await monitor.refreshRecommendation()
+        } catch { issue = "Synthetic history preparation failed: \(error.localizedDescription)" }
+        ready = true
+    }
+}
+
+private struct FixtureWindowCapture: NSViewRepresentable {
+    let size: CGSize
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.setContentSize(size)
+            window.title = "Bloomy Dashboard — Synthetic Review"
+        }
+    }
+}
+
+private struct FixtureReviewView: View {
+    @ObservedObject var model: FixtureModel
+    @AppStorage private var appearance: String
+    @State private var compact = false
+    init(model: FixtureModel) {
+        self.model = model
+        _appearance = AppStorage(wrappedValue: "light", ApplicationAppearance.defaultsKey, store: model.defaults)
+    }
+    var body: some View {
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("SYNTHETIC REVIEW · no provider or API calls").font(.headline)
+                        Text("CPU/GPU collectors disabled · thermal state is actual host state").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    Picker("Scenario", selection: $model.scenario) {
+                        ForEach(FixtureScenario.allCases) { Text($0.rawValue).tag($0) }
+                    }.frame(width: 150)
+                    Toggle("Dark", isOn: Binding(get: { appearance == "dark" }, set: { appearance = $0 ? "dark" : "light" })).toggleStyle(.checkbox)
+                    Toggle("800 × 560", isOn: $compact).toggleStyle(.checkbox)
+                    Button("Reload") { Task { await model.load() } }
+                }.padding(10).background(Color.orange.opacity(0.12))
+                if let issue = model.issue { Text(issue).foregroundStyle(.red).padding(6) }
+                DashboardRootView(store: model.monitor, controlStore: model.control, hostingStore: model.hosting,
+                    chatStore: model.chat, navigation: model.navigation)
+                    .overlay { if !model.ready { ProgressView("Preparing synthetic sources…").padding().background(.regularMaterial) } }
+            }
+            .defaultAppStorage(model.defaults)
+            .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+            .frame(minWidth: 800, minHeight: 560)
+            .background(FixtureWindowCapture(size: compact ? CGSize(width: 800, height: 560) : CGSize(width: 1280, height: 900)))
+            .task {
+                await model.load()
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                    await model.tick()
+                }
+            }
+            .onChange(of: model.scenario) { _, _ in Task { await model.load() } }
+    }
+}
+
+// Match the production DashboardWindowController host policy. A SwiftUI
+// WindowGroup can add fullSizeContentView and make a different scroll-edge
+// presentation; this fixture should compare the same native window policy.
+@MainActor
+private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate {
+    private let model = FixtureModel()
+    private var window: NSWindow?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let content = NSHostingController(rootView: FixtureReviewView(model: model))
+        let window = NSWindow(contentViewController: content)
+        window.title = "Bloomy Dashboard — Synthetic Review"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.collectionBehavior.insert(.fullScreenPrimary)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 1280, height: 900))
+        window.contentMinSize = NSSize(width: 800, height: 560)
+        window.center()
+        self.window = window
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate()
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+}
+
+@main
+struct DashboardFixture {
+    @MainActor
+    static func main() {
+        let application = NSApplication.shared
+        let delegate = FixtureApplicationDelegate()
+        application.setActivationPolicy(.regular)
+        application.delegate = delegate
+        application.run()
+        withExtendedLifetime(delegate) {}
+    }
+}
