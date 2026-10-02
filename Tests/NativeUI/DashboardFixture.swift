@@ -370,8 +370,41 @@ actor FixtureCLIUpdates: CLIUpdateProviding {
 // Its staged default client must also be inert before any fixture launch.
 struct FixtureNetworkCache: NetworkCacheFetching {
     func fetch(at capturedAt: Date) async throws -> NetworkCacheSnapshot {
-        NetworkCacheSnapshot(routingMode: .shadow, plannerEnabled: true,
+        try await FixtureNetworkCacheProbe.shared.recordFetch(at: capturedAt)
+        return NetworkCacheSnapshot(routingMode: .shadow, plannerEnabled: true,
             plannerRunning: true, plannerReady: true, capturedAt: capturedAt)
+    }
+}
+
+/// Count only inert cache reads so native disclosure/visibility review does
+/// not infer task suspension from appearance alone. No new polling clock.
+private actor FixtureNetworkCacheProbe {
+    static let shared = FixtureNetworkCacheProbe()
+    private var outputURL: URL?
+    private var reads = 0
+    private var lastReadAt: Date?
+
+    func configure(directory: URL) throws {
+        let url = directory.appendingPathComponent("network-cache-read-proof.json")
+        guard outputURL != url else { return }
+        outputURL = url
+        reads = 0
+        lastReadAt = nil
+        try write()
+    }
+
+    func recordFetch(at date: Date) throws {
+        reads += 1
+        lastReadAt = date
+        try write()
+    }
+
+    private func write() throws {
+        guard let outputURL else { return }
+        var value: [String: Any] = ["synthetic": true, "reads": reads]
+        if let lastReadAt { value["lastReadAt"] = lastReadAt.timeIntervalSince1970 }
+        try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+            .write(to: outputURL, options: .atomic)
     }
 }
 private struct FixtureEndpoint: LocalEndpointFetching {
@@ -684,6 +717,7 @@ private final class FixtureModel: ObservableObject {
         var preparationIssue: String?
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try await FixtureNetworkCacheProbe.shared.configure(directory: directory)
             let performanceURL = directory.appendingPathComponent("performance-\(requestedScenario.id).sqlite")
             let seedPerformance = !FileManager.default.fileExists(atPath: performanceURL.path)
             let database = try PerformanceHistoryDatabase(url: performanceURL)

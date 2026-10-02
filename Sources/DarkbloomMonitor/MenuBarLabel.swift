@@ -14,11 +14,56 @@ enum DarkbloomLogoAsset {
         return masks
     }()
 
+    @MainActor
+    private static let modelImageCache = ModelImageCache(source: { family in
+        modelMasks[family] ?? sourceImage
+    })
+
+    @MainActor
     static func modelImage(family: ModelFamilyIcon) -> NSImage? {
-        guard let source = modelMasks[family] ?? sourceImage else { return nil }
-        var bounds = NSRect(x: 0, y: 0, width: 96, height: 96)
-        guard let bitmap = source.cgImage(forProposedRect: &bounds, context: nil, hints: nil) else { return source }
-        return NSImage(cgImage: bitmap, size: NSSize(width: 96, height: 96))
+        modelImageCache.image(family: family)
+    }
+
+    /// Only normalized model marks are retained. Menu-bar drawing images keep
+    /// their existing native, dynamic tint behavior.
+    @MainActor
+    final class ModelImageCache {
+        private enum Entry {
+            case image(NSImage)
+            case missing
+        }
+        private var entries: [ModelFamilyIcon: Entry] = [:]
+        private let source: @MainActor (ModelFamilyIcon) -> NSImage?
+        private let normalize: @MainActor (NSImage) -> NSImage
+
+        init(source: @escaping @MainActor (ModelFamilyIcon) -> NSImage?,
+             normalize: @escaping @MainActor (NSImage) -> NSImage = ModelImageCache.normalizedImage) {
+            self.source = source
+            self.normalize = normalize
+        }
+
+        func image(family: ModelFamilyIcon) -> NSImage? {
+            if let entry = entries[family] {
+                switch entry {
+                case .image(let image): return image
+                case .missing: return nil
+                }
+            }
+            guard let source = source(family) else {
+                entries[family] = .missing
+                return nil
+            }
+            let image = normalize(source)
+            entries[family] = .image(image)
+            return image
+        }
+
+        // The pre-cache factory's normalization and original-source fallback.
+        static func normalizedImage(_ source: NSImage) -> NSImage {
+            var bounds = NSRect(x: 0, y: 0, width: 96, height: 96)
+            guard let bitmap = source.cgImage(forProposedRect: &bounds, context: nil, hints: nil) else { return source }
+            return NSImage(cgImage: bitmap, size: NSSize(width: 96, height: 96))
+        }
     }
 
     static func menuBarImage(tint: NSColor, family: ModelFamilyIcon = .darkbloom) -> NSImage? {

@@ -5,14 +5,35 @@ import SwiftUI
 final class NetworkCacheStore: ObservableObject {
     @Published private(set) var source: SourceAvailability<NetworkCacheSnapshot> = .unavailable(reason: "Waiting for network cache health")
     private let client: any NetworkCacheFetching
-    private var refreshing = false
+    private let sleep: @Sendable (Duration) async throws -> Void
+    private var refreshTask: Task<Void, Never>?
     private var failures = 0
-    init(client: any NetworkCacheFetching = NetworkCacheClient()) { self.client = client }
+    init(client: any NetworkCacheFetching = NetworkCacheClient()) {
+        self.client = client
+        sleep = { try await Task.sleep(for: $0) }
+    }
+
+    init(client: any NetworkCacheFetching, sleep: @escaping @Sendable (Duration) async throws -> Void) {
+        self.client = client
+        self.sleep = sleep
+    }
 
     func refresh() async {
-        guard !refreshing, !Task.isCancelled else { return }
-        refreshing = true
-        defer { refreshing = false }
+        guard refreshTask == nil, !Task.isCancelled else { return }
+        let task = Task { await performRefresh() }
+        refreshTask = task
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func performRefresh() async {
+        // Clear ownership before the task completes, so a joining observer can
+        // immediately start its own read rather than see an obsolete busy flag.
+        defer { refreshTask = nil }
+        guard !Task.isCancelled else { return }
         do {
             let value = try await client.fetch(at: Date())
             try Task.checkCancellation()
@@ -32,9 +53,13 @@ final class NetworkCacheStore: ObservableObject {
     }
 
     func observeWhileVisible() async {
+        // A hidden surface may have cancelled a transport that is still
+        // unwinding. Join that read before taking the restored surface's read.
+        if let previous = refreshTask, previous.isCancelled { await previous.value }
         while !Task.isCancelled {
             await refresh()
-            do { try await Task.sleep(for: .seconds(60 * pow(2, Double(failures)))) }
+            guard !Task.isCancelled else { return }
+            do { try await sleep(.seconds(60 * pow(2, Double(failures)))) }
             catch { return }
         }
     }

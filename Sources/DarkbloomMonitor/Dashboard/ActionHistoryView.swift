@@ -1,22 +1,6 @@
 import DarkbloomTelemetry
 import SwiftUI
 
-private enum ActionHistoryFilter: String, CaseIterable, Identifiable {
-    case all = "All"
-    case actions = "Actions"
-    case jobs = "Jobs"
-
-    var id: String { rawValue }
-
-    func includes(_ event: ActionHistoryEvent) -> Bool {
-        switch self {
-        case .all: true
-        case .actions: event.job == nil
-        case .jobs: event.job != nil
-        }
-    }
-}
-
 struct ActionHistoryView: View {
     @ObservedObject var store: ActionHistoryStore
     @State private var filter = ActionHistoryFilter.all
@@ -31,6 +15,9 @@ struct ActionHistoryView: View {
     }
 
     var body: some View {
+        let presentation = ActionHistoryPresentation.make(
+            events: store.events, filter: filter, searchText: searchText, selectedID: selectedID
+        )
         VStack(alignment: .leading, spacing: 12) {
             header
             ScrollView {
@@ -44,10 +31,10 @@ struct ActionHistoryView: View {
                             .accessibilityIdentifier("actionHistory.storageError")
                     }
                     controls
-                    if filteredEvents.isEmpty {
+                    if presentation.events.isEmpty {
                         emptyState
                     } else {
-                        Table(filteredEvents, selection: $selectedID) {
+                        Table(presentation.events, selection: $selectedID) {
                             TableColumn("Time") { event in
                                 Text(event.occurredAt, format: .dateTime.month().day().hour().minute())
                                     .monospacedDigit()
@@ -87,7 +74,7 @@ struct ActionHistoryView: View {
                         .frame(minHeight: 180, idealHeight: 300, maxHeight: 320)
                         .accessibilityLabel("Action and job history")
 
-                        if let selectedEvent {
+                        if let selectedEvent = presentation.selectedEvent {
                             ScrollView { details(for: selectedEvent) }
                                 .frame(minHeight: 100, idealHeight: 160, maxHeight: 180)
                         } else {
@@ -203,34 +190,6 @@ struct ActionHistoryView: View {
         }
     }
 
-    private var filteredEvents: [ActionHistoryEvent] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return store.events
-            .filter(filter.includes)
-            .filter { event in
-                guard !query.isEmpty else { return true }
-                let searchable = [
-                    Self.actionLabel(event), event.action.rawValue, event.trigger.rawValue,
-                    event.outcome.rawValue, event.model.map(Self.displayModel),
-                    event.reason?.rawValue, event.correlationID?.uuidString,
-                    event.job.map { String($0.earningID) },
-                    event.job.map { String($0.promptTokens) },
-                    event.job.map { String($0.completionTokens) },
-                    event.job.map { Self.currency($0.amountMicroUSD) },
-                ].compactMap { $0 }
-                return searchable.contains { $0.localizedCaseInsensitiveContains(query) }
-            }
-            .sorted {
-                if $0.occurredAt != $1.occurredAt { return $0.occurredAt > $1.occurredAt }
-                return $0.id.uuidString > $1.id.uuidString
-            }
-    }
-
-    private var selectedEvent: ActionHistoryEvent? {
-        guard let selectedID else { return nil }
-        return filteredEvents.first { $0.id == selectedID }
-    }
-
     private func details(for event: ActionHistoryEvent) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Entry details").font(.headline)
@@ -288,11 +247,7 @@ struct ActionHistoryView: View {
     }
 
     private static func actionLabel(_ event: ActionHistoryEvent) -> String {
-        if event.model?.caseInsensitiveCompare("base_reward") == .orderedSame
-            || event.action.rawValue.caseInsensitiveCompare("baseReward") == .orderedSame {
-            return "Base Reward"
-        }
-        return titleCase(event.action.rawValue)
+        ActionHistoryPresentation.actionLabel(event)
     }
 
     private static func modelLabel(_ event: ActionHistoryEvent) -> String {
@@ -302,19 +257,11 @@ struct ActionHistoryView: View {
     }
 
     private static func displayModel(_ model: String) -> String {
-        if model.caseInsensitiveCompare("base_reward") == .orderedSame { return "Base reward" }
-        return ModelDisplayName.short(model)
+        ActionHistoryPresentation.displayModel(model)
     }
 
-    /// Converts enum raw values without coupling the view to current case names.
     private static func titleCase(_ rawValue: String) -> String {
-        let spaced = rawValue
-            .replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
-            .replacingOccurrences(of: "([A-Z])([A-Z][a-z])", with: "$1 $2", options: .regularExpression)
-            .replacingOccurrences(of: "[-_]+", with: " ", options: .regularExpression)
-        return spaced.split(whereSeparator: \.isWhitespace).map { component in
-            component.prefix(1).uppercased() + component.dropFirst()
-        }.joined(separator: " ")
+        ActionHistoryPresentation.titleCase(rawValue)
     }
 
     private static func outcomeSymbol(_ rawValue: String) -> String {
@@ -336,6 +283,6 @@ struct ActionHistoryView: View {
     }
 
     static func currency(_ amountMicroUSD: Int64) -> String {
-        (Decimal(amountMicroUSD) / Decimal(1_000_000)).formatted(.currency(code: "USD").precision(.fractionLength(6)))
+        ActionHistoryPresentation.currency(amountMicroUSD)
     }
 }

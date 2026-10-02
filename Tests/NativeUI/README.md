@@ -467,6 +467,10 @@ nil reader, because the production resources view owns/starts its CPU sampler;
 `NetworkCacheStore` defaults to `FixtureNetworkCache`, because expanding the
 Infrastructure disclosure starts cache-health polling. Cache-health results are
 synthetic shadow/planner-ready values in every fixture scenario.
+The inert client writes `network-cache-read-proof.json` in the fixture's unique
+temporary directory. It starts at zero and records only the count and timestamp
+of fake reads. Use it to verify Infrastructure disclosure, route, and window
+visibility behavior; no additional polling clock or live request is introduced.
 All destination view bodies stay unchanged. The production app entry point is
 excluded; Sparkle is linked for its unchanged settings view, but never started,
 and the fixture plist has no update-feed configuration. These substitutions are
