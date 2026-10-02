@@ -47,6 +47,7 @@ struct PopoverVisibilityTests {
         defer { anchorWindow.close() }
         let retainedHost = try #require(status.popover.contentViewController)
         #expect(!status.popoverVisibility.isVisible)
+        #expect(extras.visibleFanSubscriberCount == 0)
         try await Task.sleep(for: .milliseconds(180))
         #expect(await client.fanReads == 0)
 
@@ -54,13 +55,15 @@ struct PopoverVisibilityTests {
         status.popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
         #expect(status.popover.isShown)
         #expect(status.popoverVisibility.isVisible)
+        #expect(extras.visibleFanSubscriberCount == 1)
         try await waitForReads(1, client: client)
         try await waitForReads(2, client: client)
         status.popover.performClose(nil)
         #expect(!status.popoverVisibility.isVisible)
-        // SwiftUI processes the task-id change asynchronously. Once that
-        // cancellation is delivered, hidden retained content must stay idle.
-        try await Task.sleep(for: .milliseconds(100))
+        #expect(extras.visibleFanSubscriberCount == 0)
+        // Native close removes the token synchronously. Wait for that exact
+        // cancelled task to finish before measuring a quiescent hidden popup.
+        await status.popoverFanCancellation?.value
         let readsAfterClose = await client.fanReads
         try await Task.sleep(for: .milliseconds(280))
         #expect(await client.fanReads == readsAfterClose)
@@ -69,15 +72,46 @@ struct PopoverVisibilityTests {
         status.popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
         #expect(status.popover.isShown)
         #expect(status.popoverVisibility.isVisible)
+        #expect(extras.visibleFanSubscriberCount == 1)
         try await waitForReads(readsAfterClose + 1, client: client)
         #expect(status.popover.contentViewController === retainedHost)
         status.invalidate()
         invalidated = true
         #expect(!status.popoverVisibility.isVisible)
-        try await Task.sleep(for: .milliseconds(100))
+        #expect(extras.visibleFanSubscriberCount == 0)
+        await status.popoverFanCancellation?.value
         let readsAfterInvalidation = await client.fanReads
         try await Task.sleep(for: .milliseconds(280))
         #expect(await client.fanReads == readsAfterInvalidation)
+        await extras.stop()
+    }
+
+    @Test("closing the popup keeps an independent Settings fan observer active")
+    func closeKeepsSettingsObserver() async throws {
+        let client = PopoverFanClient()
+        let extras = ProviderExtrasStore(client: client, visibleFanPollingInterval: .milliseconds(120))
+        await extras.refresh()
+        let monitor = MonitorStore(service: TelemetryService(source: PopoverInertTelemetry()), initial: .unavailable(now: Date()), providerExtras: extras)
+        let status = StatusItemController(store: monitor, controlStore: ProviderControlStore(controller: PopoverInertControl()))
+        defer { status.invalidate() }
+        let settings = Task { await extras.observeVisibleFan() }
+        defer { settings.cancel() }
+        try await waitForReads(1, client: client)
+        #expect(extras.visibleFanSubscriberCount == 1)
+        // Delegate callbacks are synchronous even when SwiftUI is busy.
+        status.popoverWillShow(Notification(name: NSPopover.willShowNotification))
+        #expect(extras.visibleFanSubscriberCount == 2)
+        status.popoverWillClose(Notification(name: NSPopover.willCloseNotification))
+        #expect(extras.visibleFanSubscriberCount == 1)
+        #expect(status.popoverFanCancellation == nil)
+        let afterPopupClose = await client.fanReads
+        try await waitForReads(afterPopupClose + 2, client: client)
+        settings.cancel()
+        await settings.value
+        #expect(extras.visibleFanSubscriberCount == 0)
+        let afterSettingsClose = await client.fanReads
+        try await Task.sleep(for: .milliseconds(280))
+        #expect(await client.fanReads == afterSettingsClose)
         await extras.stop()
     }
 

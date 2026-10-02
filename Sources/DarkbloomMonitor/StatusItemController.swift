@@ -19,6 +19,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     let popover = NSPopover()
     let popoverVisibility = PopoverVisibility()
+    private var popoverFanToken: UUID?
+    private(set) var popoverFanCancellation: Task<Void, Never>?
     private(set) var dashboardWindowController: DashboardWindowController?
     private(set) var chatWindowController: ChatWindowController?
     private let store: MonitorStore
@@ -77,6 +79,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     func invalidate() {
+        endPopoverFanObservation()
         popoverVisibility.setVisible(false)
         popover.performClose(nil)
         chatWindowController?.close()
@@ -102,15 +105,26 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     func popoverWillShow(_ notification: Notification) {
+        if popoverFanToken == nil {
+            popoverFanToken = store.providerExtras?.beginVisibleFanObservation()
+        }
         popoverVisibility.setVisible(true)
     }
 
     func popoverWillClose(_ notification: Notification) {
+        endPopoverFanObservation()
         popoverVisibility.setVisible(false)
     }
 
     func popoverDidClose(_ notification: Notification) {
+        endPopoverFanObservation()
         popoverVisibility.setVisible(false)
+    }
+
+    private func endPopoverFanObservation() {
+        guard let token = popoverFanToken else { return }
+        popoverFanToken = nil
+        popoverFanCancellation = store.providerExtras?.endVisibleFanObservation(token)
     }
 
     func showDashboard(section: DashboardDestination? = nil, settingsPage: SettingsPage? = nil, activate: Bool = true) {
@@ -226,10 +240,10 @@ private struct PopoverRootView: View {
     @ViewBuilder
     var body: some View {
         if let controlStore {
-            MonitorPopover(store: store, isVisible: visibility.isVisible, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
+            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
                 .environmentObject(controlStore)
         } else {
-            MonitorPopover(store: store, isVisible: visibility.isVisible, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
+            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
         }
     }
 }

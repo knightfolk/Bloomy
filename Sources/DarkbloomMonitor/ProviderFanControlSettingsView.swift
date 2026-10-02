@@ -75,17 +75,20 @@ struct ProviderFanControlSettingsView: View {
     @ObservedObject var store: ProviderExtrasStore
     let performMutation: ProviderExtrasMutationExecutor
     var isVisible: Bool
+    var ownsVisibleFanPolling: Bool
     var compactPresentation: Bool
 
     init(
         store: ProviderExtrasStore,
         performMutation: @escaping ProviderExtrasMutationExecutor,
         isVisible: Bool = true,
+        ownsVisibleFanPolling: Bool = true,
         compactPresentation: Bool = false
     ) {
         self.store = store
         self.performMutation = performMutation
         self.isVisible = isVisible
+        self.ownsVisibleFanPolling = ownsVisibleFanPolling
         self.compactPresentation = compactPresentation
     }
 
@@ -134,8 +137,8 @@ struct ProviderFanControlSettingsView: View {
         }
         .onAppear { syncDraft() }
         .onChange(of: store.snapshot?.fanStatus) { _, _ in syncDraft() }
-        .task(id: isVisible) {
-            guard isVisible else { return }
+        .task(id: isVisible && ownsVisibleFanPolling) {
+            guard isVisible && ownsVisibleFanPolling else { return }
             await store.observeVisibleFan()
         }
         .alert(item: $pendingAction) { action in

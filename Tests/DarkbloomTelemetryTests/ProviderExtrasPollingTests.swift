@@ -6,6 +6,25 @@ import Testing
 @Suite("Provider extras polling", .serialized)
 @MainActor
 struct ProviderExtrasPollingTests {
+    @Test("native subscription release cancels queued reads and leaves background refresh available")
+    func nativeSubscriptionRelease() async {
+        let clock = ExtrasPollingClock()
+        let client = ExtrasPollingClient(clock: clock)
+        let store = ProviderExtrasStore(client: client, now: clock.now)
+        await store.refresh()
+        let token = store.beginVisibleFanObservation()
+        #expect(store.visibleFanSubscriberCount == 1)
+        let cancelledPoller = store.endVisibleFanObservation(token)
+        #expect(store.visibleFanSubscriberCount == 0)
+        #expect(cancelledPoller != nil)
+        #expect(store.endVisibleFanObservation(token) == nil)
+        await cancelledPoller?.value
+        #expect(await client.fanReads == 0)
+        await store.refreshBackground()
+        #expect(await client.fanReads == 1)
+        await store.stop()
+    }
+
     @Test("background fan checks preserve static settings until periodic verification")
     func backgroundCadence() async {
         let clock = ExtrasPollingClock()

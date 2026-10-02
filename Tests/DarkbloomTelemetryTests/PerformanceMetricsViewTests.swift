@@ -8,6 +8,36 @@ import Testing
 @Suite("Performance metrics presentation", .serialized)
 @MainActor
 struct PerformanceMetricsViewTests {
+    @Test("coalesced display reads retain every immediate counter observation and stop on cancellation")
+    func displayCadencePreservesRecording() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let history = PerformanceHistoryStore(url: directory.appendingPathComponent("metrics.sqlite3"))
+        let now = Date()
+        let range = DateInterval(start: now.addingTimeInterval(-60), end: now.addingTimeInterval(60))
+        var displayedCounts: [Int] = []
+        let task = Task {
+            await MetricsRefreshLoop.run(interval: .milliseconds(150)) {
+                if let rows = try? await history.samples(in: range) { displayedCounts.append(rows.count) }
+            }
+        }
+        defer { task.cancel() }
+        for _ in 0..<100 where displayedCounts.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(displayedCounts == [0])
+        for index in 0..<25 {
+            await history.observe(metricSample(at: now.addingTimeInterval(Double(index)), counter: Int64(index * 900)))
+        }
+        for _ in 0..<100 where displayedCounts.last != 25 { try await Task.sleep(for: .milliseconds(5)) }
+        task.cancel()
+        await task.value
+        #expect(displayedCounts.last == 25)
+        #expect(displayedCounts.count < 25)
+        #expect(try await history.samples(in: range).count == 25)
+        let readsAtCancellation = displayedCounts.count
+        try await Task.sleep(for: .milliseconds(180))
+        #expect(displayedCounts.count == readsAtCancellation)
+    }
+
     @Test("hidden metrics do not schedule minute updates")
     func hiddenMetricsClock() {
         let start = Date(timeIntervalSince1970: 1_000)

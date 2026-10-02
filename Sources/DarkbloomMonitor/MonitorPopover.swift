@@ -412,6 +412,7 @@ struct MonitorPopover: View {
     @ObservedObject var store: MonitorStore
     @EnvironmentObject private var controlStore: ProviderControlStore
     let isVisible: Bool
+    let ownsVisibleFanPolling: Bool
     let openSettings: (SettingsPage?) -> Void
     let openDashboard: () -> Void
     let openModels: () -> Void
@@ -425,6 +426,7 @@ struct MonitorPopover: View {
     init(
         store: MonitorStore,
         isVisible: Bool = true,
+        ownsVisibleFanPolling: Bool = true,
         openSettings: @escaping (SettingsPage?) -> Void = { _ in },
         openDashboard: @escaping () -> Void = {},
         openModels: @escaping () -> Void = {},
@@ -432,6 +434,7 @@ struct MonitorPopover: View {
     ) {
         self.store = store
         self.isVisible = isVisible
+        self.ownsVisibleFanPolling = ownsVisibleFanPolling
         self.openSettings = openSettings
         self.openDashboard = openDashboard
         self.openModels = openModels
@@ -454,7 +457,7 @@ struct MonitorPopover: View {
                 CompactGPUGauge(usage: store.gpuUsage, now: currentTime)
                 Divider().frame(height: 38)
                 if let extras = store.providerExtras {
-                    PopupFanSummary(store: extras, now: currentTime, isVisible: isVisible) { showsFans = true }
+                    PopupFanSummary(store: extras, now: currentTime, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling) { showsFans = true }
                 } else {
                     Label("Fan readings unavailable", systemImage: "fan")
                         .font(.caption).foregroundStyle(.secondary)
@@ -517,7 +520,7 @@ struct MonitorPopover: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showsFans) {
             if let extras = store.providerExtras {
-                PopupFanPanel(extras: extras, isVisible: isVisible) { label, mutation in
+                PopupFanPanel(extras: extras, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling) { label, mutation in
                     await controlStore.performSettingsMutation(label, mutation: mutation)
                 }
             }
@@ -1367,6 +1370,7 @@ enum PopupModelName {
 struct PopupFanPanel: View {
     @ObservedObject var extras: ProviderExtrasStore
     var isVisible: Bool = true
+    var ownsVisibleFanPolling: Bool = true
     let performMutation: ProviderExtrasMutationExecutor
     @Environment(\.dismiss) private var dismiss
 
@@ -1378,7 +1382,7 @@ struct PopupFanPanel: View {
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }.padding()
             Form {
-                ProviderFanControlSettingsView(store: extras, performMutation: performMutation, isVisible: isVisible, compactPresentation: true)
+                ProviderFanControlSettingsView(store: extras, performMutation: performMutation, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling, compactPresentation: true)
             }.formStyle(.grouped)
         }
         .frame(width: 560, height: 520)

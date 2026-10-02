@@ -82,6 +82,9 @@ public struct ModelVisitHistory: Equatable, Sendable {
         for sample in samples {
             let eligible = Self.eligible(sample)
             if let prior = previous, var visit = current {
+                // Release the previous builder before appending to its arrays.
+                // Otherwise every observation copies the growing visit storage.
+                current = nil
                 if let interruption = Self.interruption(prior, sample) {
                     visit.finish(at: prior.observedAt, reason: interruption, truncated: true)
                     builders.append(visit)

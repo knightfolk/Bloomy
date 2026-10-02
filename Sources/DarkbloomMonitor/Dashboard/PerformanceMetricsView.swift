@@ -51,26 +51,30 @@ private struct RecordedPerformanceMetricsView: View {
                 storageError: history.storageError ?? readError,
                 loading: loading,
                 isVisible: isVisible,
-                now: context.date,
+                now: max(context.date, samples.last?.observedAt ?? context.date),
                 onRefresh: { refreshID += 1 },
                 onPeriodChange: { period = $0 }
             )
         }
-        .task(id: PerformanceHistoryQuery(revision: isVisible ? history.revision : 0, period: period, refreshID: refreshID, isVisible: isVisible)) {
+        .task(id: PerformanceHistoryQuery(period: period, refreshID: refreshID, isVisible: isVisible)) {
             guard isVisible else { return }
-            loading = samples.isEmpty
-            do {
-                // Fetch the selected period with every model retained so model
-                // summaries cannot bridge intervening nonmatching observations.
-                let result = try await history.samples(in: period.range(endingAt: Date()))
-                guard !Task.isCancelled else { return }
-                samples = result
-                readError = nil
-            } catch {
-                guard !Task.isCancelled else { return }
-                readError = "Local metrics could not be read."
+            // Capture stays immediate; aggregate display work is coalesced.
+            // Period changes, reopening, and explicit refresh start a new task.
+            await MetricsRefreshLoop.run(interval: .seconds(30)) {
+                loading = samples.isEmpty
+                do {
+                    // Retain every model so summaries cannot bridge intervening
+                    // nonmatching observations or uncertain boundaries.
+                    let result = try await history.samples(in: period.range(endingAt: Date()))
+                    guard !Task.isCancelled else { return }
+                    samples = result
+                    readError = nil
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    readError = "Local metrics could not be read."
+                }
+                loading = false
             }
-            loading = false
         }
     }
 }
@@ -222,7 +226,7 @@ struct PerformanceMetricsContent: View {
                     Button(action: onRefresh) { Label("Refresh metrics", systemImage: "arrow.clockwise") }
                         .labelStyle(.iconOnly)
                         .controlSize(.regular)
-                        .help("Read local metrics again")
+                        .help("Read local metrics again. This view also refreshes every 30 seconds while open.")
                 }
             }
             if let storageError {
@@ -335,7 +339,7 @@ struct PerformanceMetricsContent: View {
                     Text("Recording started \(recordingStartedAt.formatted(date: .abbreviated, time: .shortened)).")
                 }
                 Text("\(presentation.staleCount) stale · \(presentation.unavailableCount) unavailable observations. Unobserved time is unknown; it is not recorded as idle or zero.")
-                Text("Saved locally while Bloomy is open. Up to 30 days / 100,000 samples are retained. Counters use increasing readings within the same provider session; resets and gaps are excluded.")
+                Text("Saved locally while Bloomy is open. The display refreshes every 30 seconds, or when you tap Refresh. Up to 30 days / 100,000 samples are retained. Counters use increasing readings within the same provider session; resets and gaps are excluded.")
                 Text("GPU use and power describe the whole Mac and include other apps. Model filtering does not isolate a model’s hardware consumption. GPU memory is reported by the provider.")
                 if let latest = presentation.latestForModel, latest.quality == .current,
                    now.timeIntervalSince(latest.observedAt) <= 90 {
@@ -478,10 +482,21 @@ private struct PerformanceMetricsQuery: Hashable {
 }
 
 private struct PerformanceHistoryQuery: Hashable {
-    let revision: UInt64
     let period: PerformanceMetricsPeriod
     let refreshID: Int
     let isVisible: Bool
+}
+
+@MainActor
+enum MetricsRefreshLoop {
+    static func run(interval: Duration, read: @MainActor () async -> Void) async {
+        while !Task.isCancelled {
+            await read()
+            guard !Task.isCancelled else { return }
+            do { try await Task.sleep(for: interval) }
+            catch { return }
+        }
+    }
 }
 
 /// The view owns its background analysis. Cancelling a period/filter/visibility
@@ -527,12 +542,19 @@ struct PerformanceMetricsSnapshot: Sendable {
         if cancellationRequested() { self = Self.empty; return }
         let inPeriod = samples.filter { $0.observedAt >= range.start && $0.observedAt <= range.end }
         let residentMeasurements = PerformanceMetricsPresentation.residentMeasurements(inPeriod)
-        let visible = residentMeasurements.filter { model == nil || $0.model == model }
+        let latestForModel = residentMeasurements.last { model == nil || $0.model == model }
         if cancellationRequested() { self = Self.empty; return }
         let summary = PerformanceSummary(samples: residentMeasurements, model: model)
-        let staleCount = inPeriod.filter { $0.quality == .stale }.count
-        let unavailableCount = inPeriod.filter { $0.quality == .unavailable }.count
-        let models = Array(Set(inPeriod.flatMap { ($0.model.map { [$0] } ?? []) + $0.residentModels })).sorted()
+        var staleCount = 0
+        var unavailableCount = 0
+        var modelIDs = Set<String>()
+        for sample in inPeriod {
+            if sample.quality == .stale { staleCount += 1 }
+            if sample.quality == .unavailable { unavailableCount += 1 }
+            if let id = sample.model { modelIDs.insert(id) }
+            modelIDs.formUnion(sample.residentModels)
+        }
+        let models = modelIDs.sorted()
         if cancellationRequested() { self = Self.empty; return }
         let points = PerformanceMetricsPresentation.ratePoints(samples: residentMeasurements, model: model)
         let ratePoints = PerformanceMetricsPresentation.reducedRatePoints(points)
@@ -547,7 +569,7 @@ struct PerformanceMetricsSnapshot: Sendable {
         self.unavailableCount = unavailableCount
         self.models = models
         latest = inPeriod.last
-        latestForModel = visible.last
+        self.latestForModel = latestForModel
         chartWasReduced = points.count > 600
         self.ratePoints = ratePoints
         transitionCount = changes.count

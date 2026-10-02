@@ -6,6 +6,7 @@ struct PopupFanSummary: View {
     @ObservedObject var store: ProviderExtrasStore
     let now: Date
     var isVisible: Bool = true
+    var ownsVisibleFanPolling: Bool = true
     let open: () -> Void
 
     private var status: ProviderFanStatus? {
@@ -73,8 +74,8 @@ struct PopupFanSummary: View {
         .buttonStyle(.plain)
         .help("Fan helper and live cooling readings")
         .accessibilityIdentifier("popup.fans")
-        .task(id: isVisible) {
-            guard isVisible else { return }
+        .task(id: isVisible && ownsVisibleFanPolling) {
+            guard isVisible && ownsVisibleFanPolling else { return }
             await store.observeVisibleFan()
         }
     }

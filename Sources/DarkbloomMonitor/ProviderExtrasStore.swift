@@ -31,6 +31,8 @@ final class ProviderExtrasStore: ObservableObject {
     private var refreshGeneration: UInt64 = 0
     private var refreshIncludesStatic = false
 
+    var visibleFanSubscriberCount: Int { visibleFanSubscribers.count }
+
     /// Production initializer. It resolves only the approved Darkbloom CLI
     /// candidates from the shared source policy and performs read-only polling
     /// until a caller explicitly invokes a mutation method.
@@ -88,10 +90,9 @@ final class ProviderExtrasStore: ObservableObject {
         return false
     }
 
-    /// Each visible surface owns a subscription for the lifetime of its task.
-    /// Opening a second surface shares the existing cadence, and closing the
-    /// last surface cancels the owned poller and its read.
-    func observeVisibleFan() async {
+    /// Native surfaces release their token when they close, independently of
+    /// SwiftUI processing the hidden view's next update.
+    func beginVisibleFanObservation() -> UUID {
         let token = UUID()
         visibleFanSubscribers.insert(token)
         if visibleFanPollingTask == nil {
@@ -104,23 +105,37 @@ final class ProviderExtrasStore: ObservableObject {
                 }
             }
         }
-        defer {
-            visibleFanSubscribers.remove(token)
-            if visibleFanSubscribers.isEmpty {
-                visibleFanPollingTask?.cancel()
-                visibleFanPollingTask = nil
-            }
-        }
+        return token
+    }
+
+    /// Returns the cancelled poller so callers can await its read finishing.
+    /// Other visible surfaces retain the shared cadence.
+    @discardableResult
+    func endVisibleFanObservation(_ token: UUID) -> Task<Void, Never>? {
+        guard visibleFanSubscribers.remove(token) != nil,
+              visibleFanSubscribers.isEmpty else { return nil }
+        let polling = visibleFanPollingTask
+        polling?.cancel()
+        visibleFanPollingTask = nil
+        return polling
+    }
+
+    /// SwiftUI settings surfaces retain task-scoped subscriptions.
+    func observeVisibleFan() async {
+        guard !Task.isCancelled else { return }
+        let token = beginVisibleFanObservation()
         while !Task.isCancelled {
             do { try await Task.sleep(for: .seconds(31_536_000)) }
-            catch { return }
+            catch { break }
         }
+        let cancelledPoller = endVisibleFanObservation(token)
+        await cancelledPoller?.value
     }
 
     /// Shares the refresh gate with full polling and mutations. No policy is
     /// written by live readings.
     func refreshFan() async {
-        guard !mutationInFlight else { return }
+        guard !Task.isCancelled, !mutationInFlight else { return }
         guard snapshot != nil else { await refresh(); return }
         if let previous = refreshTask { await previous.value; return }
         isRefreshing = true
@@ -129,6 +144,7 @@ final class ProviderExtrasStore: ObservableObject {
         let generation = refreshGeneration
         let client = self.client
         let task = Task { @MainActor [weak self] in
+            guard !Task.isCancelled else { return }
             let fan = await client.refreshFan()
             guard let self, !Task.isCancelled, self.refreshGeneration == generation,
                   let current = self.snapshot else { return }
