@@ -37,7 +37,8 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
 
     required init?(coder: NSCoder) { nil }
 
-    func present(section: DashboardDestination? = nil, activate: Bool = true) {
+    func present(section: DashboardDestination? = nil, settingsPage: SettingsPage? = nil, activate: Bool = true) {
+        if let settingsPage { navigation.settingsPage = settingsPage }
         if let section { navigation.selected = section }
         if activate { showWindow(nil) } else { window?.orderBack(nil) }
         window?.deminiaturize(nil)

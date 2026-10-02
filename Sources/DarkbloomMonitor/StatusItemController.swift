@@ -3,11 +3,22 @@ import DarkbloomTelemetry
 import SwiftUI
 
 @MainActor
-final class StatusItemController: NSObject {
+final class PopoverVisibility: ObservableObject {
+    @Published private(set) var isVisible = false
+
+    func setVisible(_ visible: Bool) {
+        guard isVisible != visible else { return }
+        isVisible = visible
+    }
+}
+
+@MainActor
+final class StatusItemController: NSObject, NSPopoverDelegate {
     static let itemWidth: CGFloat = 80
 
     private let statusItem: NSStatusItem
-    private let popover = NSPopover()
+    let popover = NSPopover()
+    let popoverVisibility = PopoverVisibility()
     private(set) var dashboardWindowController: DashboardWindowController?
     private(set) var chatWindowController: ChatWindowController?
     private let store: MonitorStore
@@ -50,12 +61,14 @@ final class StatusItemController: NSObject {
         ])
 
         popover.behavior = .transient
+        popover.delegate = self
         popover.contentSize = NSSize(width: 560, height: 430)
         popover.contentViewController = NSHostingController(
             rootView: PopoverRootView(
                 store: store,
+                visibility: popoverVisibility,
                 controlStore: controlStore,
-                openSettings: { [weak self] in self?.showSettings() },
+                openSettings: { [weak self] page in self?.showSettings(page: page) },
                 openDashboard: { [weak self] in self?.showDashboard() },
                 openModels: { [weak self] in self?.showDashboard(section: .models) },
                 openHosting: { [weak self] in self?.showDashboard(section: .hosting) }
@@ -64,6 +77,7 @@ final class StatusItemController: NSObject {
     }
 
     func invalidate() {
+        popoverVisibility.setVisible(false)
         popover.performClose(nil)
         chatWindowController?.close()
         dashboardWindowController?.close()
@@ -74,15 +88,32 @@ final class StatusItemController: NSObject {
         if popover.isShown {
             popover.performClose(sender)
         } else {
-            let controlStore = self.controlStore
-            Task { @MainActor [weak controlStore] in
-                await controlStore?.refreshPreservingDraft()
-            }
-            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            showPopover()
         }
     }
 
-    func showDashboard(section: DashboardDestination? = nil, activate: Bool = true) {
+    func showPopover() {
+        guard !popover.isShown, let button = statusItem.button else { return }
+        let controlStore = self.controlStore
+        Task { @MainActor [weak controlStore] in
+            await controlStore?.refreshPreservingDraft()
+        }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
+    func popoverWillShow(_ notification: Notification) {
+        popoverVisibility.setVisible(true)
+    }
+
+    func popoverWillClose(_ notification: Notification) {
+        popoverVisibility.setVisible(false)
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        popoverVisibility.setVisible(false)
+    }
+
+    func showDashboard(section: DashboardDestination? = nil, settingsPage: SettingsPage? = nil, activate: Bool = true) {
         popover.performClose(nil)
         if dashboardWindowController == nil {
             dashboardWindowController = DashboardWindowController(
@@ -92,7 +123,7 @@ final class StatusItemController: NSObject {
                 defaults: defaults
             )
         }
-        dashboardWindowController?.present(section: section, activate: activate)
+        dashboardWindowController?.present(section: section, settingsPage: settingsPage, activate: activate)
     }
 
     /// Opens the resizable pop-out chat window. It shares the dashboard
@@ -105,8 +136,8 @@ final class StatusItemController: NSObject {
         chatWindowController?.present(activate: activate)
     }
 
-    func showSettings(activate: Bool = true) {
-        showDashboard(section: .settings, activate: activate)
+    func showSettings(page: SettingsPage? = nil, activate: Bool = true) {
+        showDashboard(section: .settings, settingsPage: page, activate: activate)
     }
 }
 
@@ -185,8 +216,9 @@ private struct MenuBarStatusContent: View {
 
 private struct PopoverRootView: View {
     @ObservedObject var store: MonitorStore
+    @ObservedObject var visibility: PopoverVisibility
     let controlStore: ProviderControlStore?
-    let openSettings: () -> Void
+    let openSettings: (SettingsPage?) -> Void
     let openDashboard: () -> Void
     let openModels: () -> Void
     let openHosting: () -> Void
@@ -194,10 +226,10 @@ private struct PopoverRootView: View {
     @ViewBuilder
     var body: some View {
         if let controlStore {
-            MonitorPopover(store: store, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
+            MonitorPopover(store: store, isVisible: visibility.isVisible, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
                 .environmentObject(controlStore)
         } else {
-            MonitorPopover(store: store, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
+            MonitorPopover(store: store, isVisible: visibility.isVisible, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting)
         }
     }
 }

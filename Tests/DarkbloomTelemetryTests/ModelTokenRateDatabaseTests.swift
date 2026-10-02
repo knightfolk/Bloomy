@@ -4,6 +4,23 @@ import Testing
 
 @Suite("Calendar-day model token-rate database")
 struct ModelTokenRateDatabaseTests {
+    @Test("insertion feedback identifies duplicates and invalid samples without adding measurements")
+    func insertionFeedback() async throws {
+        let url = temporaryDatabaseURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let database = try ModelTokenRateDatabase(url: url)
+        let date = Date(timeIntervalSince1970: 2_000_000)
+        let identity = ProcessIdentity(pid: 42, startTimeMicros: 9000)
+        let recorder: any ModelTokenRateRecording = database
+        #expect(try await recorder.recordIfNew(model: "gemma", tokensPerSecond: 20, capturedAt: date,
+                                             processIdentity: identity, writtenAt: 1))
+        #expect(try await !recorder.recordIfNew(model: "gemma", tokensPerSecond: 99, capturedAt: date,
+                                              processIdentity: identity, writtenAt: 1))
+        #expect(try await !recorder.recordIfNew(model: "gemma", tokensPerSecond: 0, capturedAt: date,
+                                              processIdentity: identity, writtenAt: 2))
+        #expect(try await database.averages(from: date.addingTimeInterval(-1), through: date).first?.tokensPerSecond == 20)
+    }
+
     @Test("model history preserves sampled peaks and gaps without mixing other models")
     func modelHistory() async throws {
         let database = try ModelTokenRateDatabase(url: temporaryDatabaseURL())

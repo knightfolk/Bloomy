@@ -35,7 +35,8 @@ private actor PerformanceJournal {
     }
 
     func samples(in interval: DateInterval) throws -> [PerformanceSample] {
-        try opened().samples(in: interval)
+        try Task.checkCancellation()
+        return try opened().samples(in: interval)
     }
 }
 
@@ -87,10 +88,15 @@ final class PerformanceHistoryStore: ObservableObject {
 
     func samples(in interval: DateInterval) async throws -> [PerformanceSample] {
         do {
+            try Task.checkCancellation()
             let samples = try await journal.samples(in: interval)
+            try Task.checkCancellation()
             readError = nil
             storageError = recordError
             return samples
+        } catch is CancellationError {
+            // Changing the filter or closing a window is not a storage fault.
+            throw CancellationError()
         } catch {
             readError = "Performance history could not be read. Refresh to retry."
             storageError = recordError ?? readError

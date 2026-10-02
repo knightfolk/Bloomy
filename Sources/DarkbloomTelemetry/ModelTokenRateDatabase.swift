@@ -19,6 +19,16 @@ public protocol ModelTokenRateRecording: Sendable {
         writtenAt: TimeInterval
     ) async throws
 
+    /// Reports whether this observation changed persisted history. Recorders
+    /// without insertion feedback conservatively invalidate cached averages.
+    func recordIfNew(
+        model: String,
+        tokensPerSecond: Double,
+        capturedAt: Date,
+        processIdentity: ProcessIdentity,
+        writtenAt: TimeInterval
+    ) async throws -> Bool
+
     func averages(
         from start: Date,
         through end: Date
@@ -28,6 +38,18 @@ public protocol ModelTokenRateRecording: Sendable {
 }
 
 public extension ModelTokenRateRecording {
+    func recordIfNew(
+        model: String,
+        tokensPerSecond: Double,
+        capturedAt: Date,
+        processIdentity: ProcessIdentity,
+        writtenAt: TimeInterval
+    ) async throws -> Bool {
+        try await record(model: model, tokensPerSecond: tokensPerSecond, capturedAt: capturedAt,
+                         processIdentity: processIdentity, writtenAt: writtenAt)
+        return true
+    }
+
     func history(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar, model: String) async throws -> [ModelRateBucket]? { nil }
 }
 
@@ -123,13 +145,24 @@ public actor ModelTokenRateDatabase: ModelTokenRateRecording {
         processIdentity: ProcessIdentity,
         writtenAt: TimeInterval
     ) throws {
+        _ = try recordIfNew(model: model, tokensPerSecond: tokensPerSecond, capturedAt: capturedAt,
+                            processIdentity: processIdentity, writtenAt: writtenAt)
+    }
+
+    public func recordIfNew(
+        model: String,
+        tokensPerSecond: Double,
+        capturedAt: Date,
+        processIdentity: ProcessIdentity,
+        writtenAt: TimeInterval
+    ) throws -> Bool {
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty,
               tokensPerSecond.isFinite,
               tokensPerSecond > 0,
               capturedAt.timeIntervalSince1970.isFinite,
               writtenAt.isFinite
-        else { return }
+        else { return false }
 
         let statement = try prepare("""
             INSERT OR IGNORE INTO token_rate_samples
@@ -144,6 +177,7 @@ public actor ModelTokenRateDatabase: ModelTokenRateRecording {
         sqlite3_bind_int64(statement, 5, processIdentity.startTimeMicros)
         sqlite3_bind_double(statement, 6, writtenAt)
         guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
+        guard sqlite3_changes(try requireConnection()) > 0 else { return false }
 
         // Retention is independent of the range a user happens to view. Use
         // the newest persisted observation so late samples cannot move the
@@ -154,6 +188,7 @@ public actor ModelTokenRateDatabase: ModelTokenRateRecording {
             """)
         defer { sqlite3_finalize(prune) }
         guard sqlite3_step(prune) == SQLITE_DONE else { throw lastError() }
+        return true
     }
 
     public func averages(
@@ -177,7 +212,9 @@ public actor ModelTokenRateDatabase: ModelTokenRateRecording {
         sqlite3_bind_double(statement, 2, end.timeIntervalSince1970)
 
         var values: [ModelTokenRateAverage] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            defer { result = sqlite3_step(statement) }
             guard let modelCString = sqlite3_column_text(statement, 0) else { continue }
             values.append(ModelTokenRateAverage(
                 model: String(cString: modelCString),
@@ -186,6 +223,7 @@ public actor ModelTokenRateDatabase: ModelTokenRateRecording {
                 queryPeriod: DateInterval(start: start, end: end)
             ))
         }
+        guard result == SQLITE_DONE else { throw lastError() }
         return values
     }
 

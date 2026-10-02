@@ -23,10 +23,11 @@ enum PerformanceMetricsPeriod: String, CaseIterable, Identifiable, Sendable {
 
 struct PerformanceMetricsView: View {
     let history: PerformanceHistoryStore?
+    var isVisible = true
 
     var body: some View {
         if let history {
-            RecordedPerformanceMetricsView(history: history)
+            RecordedPerformanceMetricsView(history: history, isVisible: isVisible)
         } else {
             PerformanceMetricsContent(samples: [], recordingStartedAt: nil)
         }
@@ -35,6 +36,7 @@ struct PerformanceMetricsView: View {
 
 private struct RecordedPerformanceMetricsView: View {
     @ObservedObject var history: PerformanceHistoryStore
+    let isVisible: Bool
     @State private var samples: [PerformanceSample] = []
     @State private var loading = false
     @State private var readError: String?
@@ -42,18 +44,20 @@ private struct RecordedPerformanceMetricsView: View {
     @State private var refreshID = 0
 
     var body: some View {
-        TimelineView(.everyMinute) { context in
+        TimelineView(MetricsTimelineSchedule(isVisible: isVisible)) { context in
             PerformanceMetricsContent(
                 samples: samples,
                 recordingStartedAt: history.recordingStartedAt,
                 storageError: history.storageError ?? readError,
                 loading: loading,
+                isVisible: isVisible,
                 now: context.date,
                 onRefresh: { refreshID += 1 },
                 onPeriodChange: { period = $0 }
             )
         }
-        .task(id: PerformanceHistoryQuery(revision: history.revision, period: period, refreshID: refreshID)) {
+        .task(id: PerformanceHistoryQuery(revision: isVisible ? history.revision : 0, period: period, refreshID: refreshID, isVisible: isVisible)) {
+            guard isVisible else { return }
             loading = samples.isEmpty
             do {
                 // Fetch the selected period with every model retained so model
@@ -71,12 +75,30 @@ private struct RecordedPerformanceMetricsView: View {
     }
 }
 
+/// Retained hidden content gets an initial date, without scheduling wake-ups.
+struct MetricsTimelineSchedule: TimelineSchedule {
+    let isVisible: Bool
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> Entries {
+        Entries(nextDate: startDate, repeats: isVisible)
+    }
+    struct Entries: Sequence, IteratorProtocol {
+        var nextDate: Date?
+        let repeats: Bool
+        mutating func next() -> Date? {
+            guard let date = nextDate else { return nil }
+            nextDate = repeats ? date.addingTimeInterval(60) : nil
+            return date
+        }
+    }
+}
+
 /// Value-driven content also supports synthetic native rendering evidence.
 struct PerformanceMetricsContent: View {
     let samples: [PerformanceSample]
     let recordingStartedAt: Date?
     var storageError: String? = nil
     var loading = false
+    var isVisible = true
     var now = Date()
     var onRefresh: (() -> Void)? = nil
     var onPeriodChange: (PerformanceMetricsPeriod) -> Void = { _ in }
@@ -87,13 +109,14 @@ struct PerformanceMetricsContent: View {
 
     init(
         samples: [PerformanceSample], recordingStartedAt: Date?, storageError: String? = nil,
-        loading: Bool = false, now: Date = Date(), onRefresh: (() -> Void)? = nil,
+        loading: Bool = false, isVisible: Bool = true, now: Date = Date(), onRefresh: (() -> Void)? = nil,
         onPeriodChange: @escaping (PerformanceMetricsPeriod) -> Void = { _ in }
     ) {
         self.samples = samples
         self.recordingStartedAt = recordingStartedAt
         self.storageError = storageError
         self.loading = loading
+        self.isVisible = isVisible
         self.now = now
         self.onRefresh = onRefresh
         self.onPeriodChange = onPeriodChange
@@ -134,14 +157,12 @@ struct PerformanceMetricsContent: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .scrollIndicators(.automatic)
         .onChange(of: period) { _, value in onPeriodChange(value) }
-        .task(id: PerformanceMetricsQuery(period: period, model: model, count: samples.count, lastID: samples.last?.id, now: now)) {
+        .task(id: PerformanceMetricsQuery(period: period, model: model, count: samples.count, lastID: samples.last?.id, now: isVisible ? now : .distantPast, isVisible: isVisible)) {
+            guard isVisible else { return }
             let input = samples
             let interval = range
             let selectedModel = model
-            let result = await Task.detached(priority: .userInitiated) {
-                PerformanceMetricsSnapshot(samples: input, range: interval, model: selectedModel)
-            }.value
-            guard !Task.isCancelled else { return }
+            guard let result = await PerformanceMetricsAnalysis.make(samples: input, range: interval, model: selectedModel), !Task.isCancelled else { return }
             presentation = result
         }
     }
@@ -297,7 +318,8 @@ struct PerformanceMetricsContent: View {
                         .help(transition.model ?? "No current model measurement")
                     Spacer(minLength: 0)
                     if let phase = transition.autopilotPhase {
-                        Text(phase).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Text(phase == "waiting_inventory" ? "Refresh model inventory" : phase)
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
             }
@@ -452,12 +474,35 @@ private struct PerformanceMetricsQuery: Hashable {
     let count: Int
     let lastID: UUID?
     let now: Date
+    let isVisible: Bool
 }
 
 private struct PerformanceHistoryQuery: Hashable {
     let revision: UInt64
     let period: PerformanceMetricsPeriod
     let refreshID: Int
+    let isVisible: Bool
+}
+
+/// The view owns its background analysis. Cancelling a period/filter/visibility
+/// task also cancels the worker, so obsolete results neither draw nor queue work.
+enum PerformanceMetricsAnalysis {
+    static func make(samples: [PerformanceSample], range: DateInterval, model: String?) async -> PerformanceMetricsSnapshot? {
+        guard !Task.isCancelled else { return nil }
+        let worker = Task.detached(priority: .userInitiated) { () -> PerformanceMetricsSnapshot? in
+            guard !Task.isCancelled else { return nil }
+            let result = PerformanceMetricsSnapshot(
+                samples: samples, range: range, model: model,
+                cancellationRequested: { Task.isCancelled }
+            )
+            return Task.isCancelled ? nil : result
+        }
+        return await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+    }
 }
 
 struct PerformanceMetricsSnapshot: Sendable {
@@ -478,24 +523,35 @@ struct PerformanceMetricsSnapshot: Sendable {
 
     static let empty = PerformanceMetricsSnapshot(samples: [], range: DateInterval(start: .distantPast, end: .distantFuture), model: nil)
 
-    init(samples: [PerformanceSample], range: DateInterval, model: String?) {
+    init(samples: [PerformanceSample], range: DateInterval, model: String?, cancellationRequested: @Sendable () -> Bool = { false }) {
+        if cancellationRequested() { self = Self.empty; return }
         let inPeriod = samples.filter { $0.observedAt >= range.start && $0.observedAt <= range.end }
         let residentMeasurements = PerformanceMetricsPresentation.residentMeasurements(inPeriod)
         let visible = residentMeasurements.filter { model == nil || $0.model == model }
-        summary = PerformanceSummary(samples: residentMeasurements, model: model)
+        if cancellationRequested() { self = Self.empty; return }
+        let summary = PerformanceSummary(samples: residentMeasurements, model: model)
+        let staleCount = inPeriod.filter { $0.quality == .stale }.count
+        let unavailableCount = inPeriod.filter { $0.quality == .unavailable }.count
+        let models = Array(Set(inPeriod.flatMap { ($0.model.map { [$0] } ?? []) + $0.residentModels })).sorted()
+        if cancellationRequested() { self = Self.empty; return }
+        let points = PerformanceMetricsPresentation.ratePoints(samples: residentMeasurements, model: model)
+        let ratePoints = PerformanceMetricsPresentation.reducedRatePoints(points)
+        if cancellationRequested() { self = Self.empty; return }
+        let changes = PerformanceMetricsPresentation.transitions(samples: inPeriod)
+        if cancellationRequested() { self = Self.empty; return }
+        let analyzedVisits = ModelVisitHistory(samples: samples, period: range, maximumVisits: 100_000).visits.filter { model == nil || $0.model == model }
+        if cancellationRequested() { self = Self.empty; return }
+        self.summary = summary
         sampleCount = inPeriod.count
-        staleCount = inPeriod.filter { $0.quality == .stale }.count
-        unavailableCount = inPeriod.filter { $0.quality == .unavailable }.count
-        models = Array(Set(inPeriod.flatMap { ($0.model.map { [$0] } ?? []) + $0.residentModels })).sorted()
+        self.staleCount = staleCount
+        self.unavailableCount = unavailableCount
+        self.models = models
         latest = inPeriod.last
         latestForModel = visible.last
-        let points = PerformanceMetricsPresentation.ratePoints(samples: residentMeasurements, model: model)
         chartWasReduced = points.count > 600
-        ratePoints = PerformanceMetricsPresentation.reducedRatePoints(points)
-        let changes = PerformanceMetricsPresentation.transitions(samples: inPeriod)
+        self.ratePoints = ratePoints
         transitionCount = changes.count
         transitions = Array(changes.suffix(100))
-        let analyzedVisits = ModelVisitHistory(samples: samples, period: range, maximumVisits: 100_000).visits.filter { model == nil || $0.model == model }
         visitSummary = ModelVisitSummary(visits: analyzedVisits)
         visits = Array(analyzedVisits.suffix(500))
         withoutWorkVisits = Array(analyzedVisits.filter { $0.outcome == .noObservedWork }.suffix(500))

@@ -30,7 +30,8 @@ struct ModelsView: View {
                         networkCapacity: monitorStore?.networkCapacity.value,
                         networkSourceAvailable: monitorStore.map { if case .available = $0.networkCapacity { true } else { false } } ?? false
                     ),
-                    refreshDemand: monitorStore.map { store in { await store.refreshNetworkCapacity() } }
+                    refreshDemand: monitorStore.map { store in { await store.refreshNetworkCapacity() } },
+                    isVisible: monitorStore?.dashboardVisible ?? true
                 )
             } else {
                 ContentUnavailableView("Model controls unavailable", systemImage: "cpu",

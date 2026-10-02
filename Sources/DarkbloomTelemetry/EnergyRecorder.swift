@@ -11,6 +11,7 @@ public actor EnergyRecorder {
     private let file: URL
     private let readPower: @Sendable (Date) -> EnergyReading?
     private var history: EnergyHistory?
+    private var database: EnergyHistoryDatabase?
 
     public init(file: URL, readPower: @escaping @Sendable (Date) -> EnergyReading? = {
         MacAdapterPower.read(now: $0)
@@ -30,7 +31,13 @@ public actor EnergyRecorder {
             return .init(reading: nil, intervals: [], issue: nil)
         }
         do {
-            if history == nil { history = try EnergyHistoryFile.read(from: file) }
+            if history == nil {
+                let database = try EnergyHistoryDatabase(
+                    url: EnergyHistoryDatabase.databaseURL(forLegacyFile: file), legacyFile: file
+                )
+                history = try database.history()
+                self.database = database
+            }
         } catch {
             return .init(reading: nil, intervals: [], issue: "Energy history could not be read; existing file preserved.")
         }
@@ -42,12 +49,18 @@ public actor EnergyRecorder {
             history?.breakContinuity()
             return .init(reading: nil, intervals: history?.intervals ?? [], issue: "Adapter power unavailable; measurement gap.")
         }
-        history?.append(reading, usdPerKWh: rate, modelActivity: modelActivity)
+        let interval = history?.append(reading, usdPerKWh: rate, modelActivity: modelActivity)
         do {
-            if let history { try EnergyHistoryFile.write(history, to: file) }
+            if let interval {
+                guard let database else { throw EnergyHistoryDatabaseError.unavailable }
+                try database.append(interval)
+            }
             return .init(reading: reading, intervals: history?.intervals ?? [], issue: nil)
         } catch {
-            history?.breakContinuity()
+            // Reload only committed measurements before the next attempt.
+            // Neither a failed write nor downtime may seed a new sample chain.
+            history = nil
+            database = nil
             return .init(reading: reading, intervals: [], issue: "Energy history could not be saved.")
         }
     }

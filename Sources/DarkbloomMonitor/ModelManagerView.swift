@@ -69,6 +69,11 @@ enum ModelManagerPresentation {
     }
 
     static func opportunityGrade(modelID: String, peers: [ModelOpportunitySignal]) -> String? {
+        opportunityGrades(peers: peers)[modelID]
+    }
+
+    /// Calibrate the enabled peer population once for the whole card grid.
+    static func opportunityGrades(peers: [ModelOpportunitySignal]) -> [String: String] {
         let calibrated = peers.filter { signal in
             guard signal.activeHours >= 2,
                   let speed = signal.tokensPerSecond, speed.isFinite, speed > 0,
@@ -76,25 +81,24 @@ enum ModelManagerPresentation {
                   let profit = signal.netProfitUSDPerActiveHour, profit.isFinite else { return false }
             return demandScore(demand) > 0
         }
-        guard let target = calibrated.first(where: { $0.modelID == modelID }),
-              let targetSpeed = target.tokensPerSecond,
-              let targetDemand = target.demand,
-              let targetProfit = target.netProfitUSDPerActiveHour,
-              let fastest = calibrated.compactMap(\.tokensPerSecond).max(), fastest > 0 else { return nil }
-        guard targetProfit > 0 else { return "F" }
+        guard let fastest = calibrated.compactMap(\.tokensPerSecond).max(), fastest > 0 else { return [:] }
         let bestProfit = calibrated.compactMap(\.netProfitUSDPerActiveHour).filter({ $0 > 0 }).max() ?? 0
-
-        let speedPoints = targetSpeed / fastest * 40
-        let demandPoints = demandScore(targetDemand) * 30
-        let profitPoints = targetProfit == 0 || bestProfit == 0 ? 0 : targetProfit / bestProfit * 30
-        let score = speedPoints + demandPoints + min(30, profitPoints)
-        switch score {
-        case 90...: return "A"
-        case 80..<90: return "B"
-        case 70..<80: return "C"
-        case 60..<70: return "D"
-        default: return "F"
+        var grades: [String: String] = [:]
+        for target in calibrated where grades[target.modelID] == nil {
+            guard let speed = target.tokensPerSecond, let demand = target.demand,
+                  let profit = target.netProfitUSDPerActiveHour else { continue }
+            guard profit > 0 else { grades[target.modelID] = "F"; continue }
+            let score = speed / fastest * 40 + demandScore(demand) * 30
+                + min(30, bestProfit == 0 ? 0 : profit / bestProfit * 30)
+            switch score {
+            case 90...: grades[target.modelID] = "A"
+            case 80..<90: grades[target.modelID] = "B"
+            case 70..<80: grades[target.modelID] = "C"
+            case 60..<70: grades[target.modelID] = "D"
+            default: grades[target.modelID] = "F"
+            }
         }
+        return grades
     }
 
     private static func demandScore(_ band: NetworkDemandBand) -> Double {
@@ -159,7 +163,7 @@ enum ModelManagerPresentation {
     }
 }
 
-struct ModelManagerTelemetry {
+struct ModelManagerTelemetry: Equatable {
     var tokenRates: [ModelTokenRateAverage] = []
     var servingAverages: [ModelServingProfitAverage] = []
     var networkCapacity: NetworkCapacitySnapshot?
@@ -528,6 +532,9 @@ struct ModelManagerView: View {
     var networkContext: (String, Date) -> [String] = { _, _ in [] }
     var telemetry = ModelManagerTelemetry()
     var refreshDemand: (() async -> Void)? = nil
+    var isVisible = true
+    @State private var presentationCache = ModelManagerPresentationCache()
+    @State private var freshnessRevision: UInt64 = 0
     @State private var deletion: ModelDeletionConfirmation?
     @State private var search = ""
     @State private var inspectedModel: ModelInventoryItem?
@@ -538,12 +545,22 @@ struct ModelManagerView: View {
     @AppStorage(ModelGroupScope.capacity.defaultsKey) private var capacityGroupCollapsed = true
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            let now = Date()
-            VStack(spacing: 0) {
-                modelList(currentTime: now)
-                Divider()
-                ModelManagerFooter(store: store)
+        let _ = freshnessRevision
+        let now = Date()
+        let presentation = currentPresentation(at: now)
+        VStack(spacing: 0) {
+            modelList(presentation: presentation)
+            Divider()
+            ModelManagerFooter(store: store)
+        }
+        .task(id: ModelDemandFreshnessTaskInput(capturedAt: telemetry.networkCapacity?.capturedAt,
+            sourceAvailable: telemetry.networkSourceAvailable, isVisible: isVisible)) {
+            freshnessRevision &+= 1
+            guard isVisible, telemetry.networkSourceAvailable else { return }
+            while let transition = ModelDemandFreshnessSchedule.nextTransition(capacity: telemetry.networkCapacity, at: Date()) {
+                do { try await Task.sleep(for: .seconds(max(0.001, transition.timeIntervalSinceNow))) }
+                catch { return }
+                freshnessRevision &+= 1
             }
         }
         .alert(item: $deletion) { confirmation in
@@ -568,7 +585,7 @@ struct ModelManagerView: View {
                 ScrollView {
                     let current = store.snapshot?.inventory.myCatalog.first { $0.catalogID == item.catalogID }
                         ?? store.snapshot?.inventory.available.first { $0.catalogID == item.catalogID } ?? item
-                    modelCard(current, at: Date(), expanded: true)
+                    modelCard(current, at: Date(), presentation: currentPresentation(at: Date()), expanded: true)
                 }
             }.padding(24).frame(width: 620, height: 740)
         }
@@ -588,21 +605,27 @@ struct ModelManagerView: View {
         }
     }
 
-    private var currentGrouping: ModelGrouping {
-        ModelGrouping.partition(
+    private func currentPresentation(at date: Date) -> ModelManagerPreparedPresentation {
+        presentationCache.prepare(
             myCatalog: store.snapshot?.inventory.myCatalog ?? [],
             available: store.snapshot?.inventory.available ?? [],
-            search: search,
-            isEnabled: isEffectivelyEnabled
+            enabledSelectors: store.draft?.selection.enabled,
+            search: search, telemetry: telemetry, at: date
         )
     }
 
-    private func modelList(currentTime: Date) -> some View {
+    private func modelList(presentation: ModelManagerPreparedPresentation) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 modelSearchField
                 Spacer(minLength: 4)
-                demandFreshness(at: currentTime)
+                if isVisible {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        demandFreshness(at: context.date)
+                    }
+                } else {
+                    demandFreshness(at: Date())
+                }
                 if let refreshDemand {
                     Button { Task { await refreshDemand() } } label: {
                         Image(systemName: "arrow.clockwise")
@@ -615,7 +638,7 @@ struct ModelManagerView: View {
             GeometryReader { geometry in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 18) {
-                        let grouping = currentGrouping
+                        let grouping = presentation.grouping
                         if store.snapshot == nil && store.operation == .refreshing {
                             HStack { ProgressView().controlSize(.small); Text("Reading your model catalog…") }
                                 .foregroundStyle(.secondary).padding(.vertical, 20)
@@ -626,10 +649,10 @@ struct ModelManagerView: View {
                         } else {
                             modelGroup(.enabled, items: grouping.enabled,
                                 collapsed: $enabledGroupCollapsed, gridWidth: geometry.size.width,
-                                currentTime: currentTime)
+                                presentation: presentation)
                             modelGroup(.available, items: grouping.available,
                                 collapsed: $availableGroupCollapsed, gridWidth: geometry.size.width,
-                                currentTime: currentTime)
+                                presentation: presentation)
                         }
                         capacityGroup
                         if let issues = store.snapshot?.inventory.issues, !issues.isEmpty {
@@ -675,7 +698,7 @@ struct ModelManagerView: View {
         items: [ModelInventoryItem],
         collapsed: Binding<Bool>,
         gridWidth: CGFloat,
-        currentTime: Date
+        presentation: ModelManagerPreparedPresentation
     ) -> some View {
         DisclosureGroup(isExpanded: groupExpansion(collapsed, matches: items.count)) {
             if items.isEmpty {
@@ -686,7 +709,7 @@ struct ModelManagerView: View {
                 LazyVGrid(columns: ModelCardLayout.columns(for: gridWidth),
                           alignment: .leading, spacing: ModelCardLayout.rowSpacing) {
                     ForEach(items) { item in
-                        modelCard(item, at: currentTime)
+                        modelCard(item, at: Date(), presentation: presentation)
                     }
                 }
             }
@@ -794,43 +817,15 @@ struct ModelManagerView: View {
         whatIfRunPercent[item.catalogID] = min(100, max(0, value))
     }
 
-    private func tokenRate(for item: ModelInventoryItem) -> ModelTokenRateAverage? {
-        telemetry.tokenRates.first { $0.model == item.catalogID || $0.model == item.localID }
-    }
-
-    private func servingAverage(for item: ModelInventoryItem) -> ModelServingProfitAverage? {
-        telemetry.servingAverages.first { $0.model == item.catalogID || $0.model == item.localID }
-    }
-
-    private func demand(for item: ModelInventoryItem, at date: Date) -> NetworkModelCapacity? {
-        guard telemetry.networkSourceAvailable, let capacity = telemetry.networkCapacity, capacity.isFresh(at: date) else { return nil }
-        return capacity.models.first { $0.id == item.catalogID }
-    }
-
-    private func opportunitySignals(at date: Date) -> [ModelOpportunitySignal] {
-        (store.snapshot?.inventory.myCatalog ?? []).filter(isEffectivelyEnabled).compactMap { item in
-            let rate = tokenRate(for: item)
-            let serving = servingAverage(for: item)
-            return ModelOpportunitySignal(
-                modelID: item.catalogID,
-                tokensPerSecond: rate?.tokensPerSecond,
-                activeHours: serving?.activeHours ?? 0,
-                demand: demand(for: item, at: date)?.demandBand,
-                netProfitUSDPerActiveHour: serving?.profitUSDPerActiveHour
-            )
-        }
-    }
-
     @ViewBuilder
-    private func modelCard(_ item: ModelInventoryItem, at date: Date, expanded: Bool = false) -> some View {
-        let rate = tokenRate(for: item)
-        let serving = servingAverage(for: item)
+    private func modelCard(_ item: ModelInventoryItem, at date: Date, presentation: ModelManagerPreparedPresentation, expanded: Bool = false) -> some View {
+        let rate = presentation.tokenRate(for: item)
+        let serving = presentation.servingAverage(for: item)
         let calibratedServing = serving.flatMap { $0.activeHours >= 2 ? $0 : nil }
-        let capacity = demand(for: item, at: date)
+        let capacity = presentation.capacity(for: item)
         let runPercent = whatIfRunPercent[item.catalogID] ?? 0
         let forecast = ModelRunForecast.calculate(runPercent: runPercent, serving: calibratedServing, tokenRate: rate)
-        let peers = opportunitySignals(at: date)
-        let grade = ModelManagerPresentation.opportunityGrade(modelID: item.catalogID, peers: peers)
+        let grade = presentation.grades[item.catalogID]
         VStack(alignment: .leading, spacing: 12) {
             ModelCardSummary(
                 item: item,
@@ -843,7 +838,7 @@ struct ModelManagerView: View {
                 runPercent: runPercent,
                 setRunPercent: { setWhatIfRunPercent($0, for: item) },
                 showsDetails: expanded,
-                demandPresentation: telemetry.demand(modelID: item.catalogID, at: date)
+                demandPresentation: presentation.demand(for: item)
             )
             if expanded {
                 if item.isDownloaded, let snapshot = store.snapshot {

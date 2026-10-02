@@ -5,6 +5,7 @@ import SwiftUI
 struct PopupFanSummary: View {
     @ObservedObject var store: ProviderExtrasStore
     let now: Date
+    var isVisible: Bool = true
     let open: () -> Void
 
     private var status: ProviderFanStatus? {
@@ -72,12 +73,9 @@ struct PopupFanSummary: View {
         .buttonStyle(.plain)
         .help("Fan helper and live cooling readings")
         .accessibilityIdentifier("popup.fans")
-        .task {
-            while !Task.isCancelled {
-                await store.refreshFan()
-                do { try await Task.sleep(for: .seconds(2)) }
-                catch { return }
-            }
+        .task(id: isVisible) {
+            guard isVisible else { return }
+            await store.observeVisibleFan()
         }
     }
 }

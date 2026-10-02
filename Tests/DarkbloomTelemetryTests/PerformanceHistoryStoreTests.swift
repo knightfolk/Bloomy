@@ -23,6 +23,44 @@ struct PerformanceHistoryStoreTests {
         #expect(samples.map(\.requestsServed) == [4, 5])
     }
 
+    @Test("inventory waiting records phase boundaries and retains ordinary serving activity")
+    func waitingInventoryRecording() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("performance-inventory-wait-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("metrics.sqlite3")
+        let now = Date()
+        let store = PerformanceHistoryStore(url: url)
+        let observations: [(Double, String, Bool)] = [
+            (0, "active", true), (1, "waiting_inventory", true),
+            (2, "waiting_inventory", false), (3, "active", true), (33, "active", true)
+        ]
+        for (offset, phase, active) in observations {
+            let date = now.addingTimeInterval(offset)
+            let telemetry = try snapshot(now: date, active: active, phase: phase)
+            #expect(telemetry.state.value?.autopilotPhase == phase)
+            let sample = PerformanceSample.capture(telemetry, at: date)
+            #expect(sample.isValid)
+            #expect(sample.autopilotPhase == phase)
+            #expect(sample.inferenceActive == active)
+            #expect(sample.tokensPerSecond == (active ? 12 : nil))
+            await store.observe(sample)
+            #expect(store.storageError == nil)
+        }
+        let interval = DateInterval(start: now.addingTimeInterval(-1), end: now.addingTimeInterval(34))
+        let samples = try await store.samples(in: interval)
+        #expect(samples.map(\.autopilotPhase) == observations.map { $0.1 })
+        #expect(samples.map(\.requestsServed) == Array(repeating: 2, count: 5))
+        #expect(store.revision == 5)
+        #expect(try await PerformanceHistoryStore(url: url).samples(in: interval) == samples)
+        let summary = PerformanceSummary(samples: samples)
+        #expect(summary.coveredSeconds == 33)
+        #expect(summary.activeCoveredSeconds == 33)
+        #expect(summary.activeSeconds == 31)
+        #expect(summary.averageTokenRate == 12)
+        #expect(summary.completedRequests == 0)
+        #expect(summary.generatedTokens == 0)
+    }
+
     @Test("periodic cadence records state boundaries and survives reopening")
     func cadenceAndReopen() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("performance-store-\(UUID())")
@@ -109,15 +147,19 @@ struct PerformanceHistoryStoreTests {
 
     @Test("malformed optional Autopilot phase does not break old daemon decoding")
     func optionalAutopilotPhase() throws {
-        for phase: Any in ["active", "SECRET provider prose", 42, NSNull()] {
+        for phase: Any in ["active", "waiting_inventory", "waiting_inventory_SECRET", "SECRET provider prose", 42, NSNull()] {
             let state = try state(now: Date(), active: false, phase: phase)
-            #expect(state.autopilotPhase == ((phase as? String) == "active" ? "active" : nil))
+            let expected = (phase as? String).flatMap { ["active", "waiting_inventory"].contains($0) ? $0 : nil }
+            #expect(state.autopilotPhase == expected)
             #expect(state.currentModel == "gemma")
+            let text = String(decoding: try JSONEncoder().encode(PerformanceSample.capture(
+                try snapshot(now: Date(), active: false, phase: phase), at: Date())), as: UTF8.self)
+            #expect(!text.contains("SECRET"))
         }
     }
 
-    private func snapshot(now: Date, active: Bool) throws -> TelemetrySnapshot {
-        TelemetrySnapshot(state: .available(value: try state(now: now, active: active, phase: "shadow"), capturedAt: now),
+    private func snapshot(now: Date, active: Bool, phase: Any = "shadow") throws -> TelemetrySnapshot {
+        TelemetrySnapshot(state: .available(value: try state(now: now, active: active, phase: phase), capturedAt: now),
                           loadedModels: .unavailable(reason: "SECRET"), status: .unavailable(reason: "SECRET"),
                           eventFeed: .unavailable(reason: "SECRET"), tokenRate: .available(tokensPerSecond: 12, label: "SECRET"),
                           diagnostics: [], capturedAt: now, menuStatus: .online)

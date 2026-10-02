@@ -8,6 +8,81 @@ import Testing
 @Suite("Performance metrics presentation", .serialized)
 @MainActor
 struct PerformanceMetricsViewTests {
+    @Test("hidden metrics do not schedule minute updates")
+    func hiddenMetricsClock() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        var hidden = MetricsTimelineSchedule(isVisible: false).entries(from: start, mode: .normal)
+        #expect(hidden.next() == start)
+        #expect(hidden.next() == nil)
+        var visible = MetricsTimelineSchedule(isVisible: true).entries(from: start, mode: .normal)
+        #expect(visible.next() == start)
+        #expect(visible.next() == start.addingTimeInterval(60))
+    }
+
+    @Test("cancelled history reads preserve storage health and later reads")
+    func cancelledReadIsNotStorageFailure() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let history = PerformanceHistoryStore(url: directory.appendingPathComponent("metrics.sqlite3"))
+        let now = Date()
+        await history.observe(metricSample(at: now))
+        let range = DateInterval(start: now.addingTimeInterval(-60), end: now.addingTimeInterval(60))
+        let task = Task {
+            try? await Task.sleep(for: .seconds(60))
+            return try await history.samples(in: range)
+        }
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("Cancelled read should throw cancellation")
+        } catch is CancellationError {} catch { Issue.record("Unexpected storage failure: \(error)") }
+        #expect(history.storageError == nil)
+        #expect(try await history.samples(in: range).count == 1)
+    }
+
+    @Test("cancelled metrics tasks discard analysis instead of publishing obsolete results")
+    func cancelledAnalysis() async {
+        let now = Date()
+        let samples = metricsFixture(now: now)
+        let task = Task {
+            try? await Task.sleep(for: .seconds(60))
+            return await PerformanceMetricsAnalysis.make(
+                samples: samples, range: DateInterval(start: now.addingTimeInterval(-86_400), end: now), model: nil
+            )
+        }
+        task.cancel()
+        #expect(await task.value == nil)
+    }
+
+    @Test("cooperative cancellation stops between analysis passes")
+    func cancelsAnalysisPasses() {
+        let now = Date()
+        let checks = MetricsCancellationChecks()
+        let result = PerformanceMetricsSnapshot(
+            samples: metricsFixture(now: now),
+            range: DateInterval(start: now.addingTimeInterval(-86_400), end: now), model: nil,
+            cancellationRequested: { checks.reachedLimit() }
+        )
+        #expect(checks.count == 4)
+        #expect(result.sampleCount == 0)
+        #expect(result.ratePoints.isEmpty)
+        #expect(result.visits.isEmpty)
+    }
+
+    @Test("background analysis preserves recorded measurements and model filtering")
+    func backgroundAnalysis() async throws {
+        let now = Date()
+        let samples = metricsFixture(now: now)
+        let range = DateInterval(start: now.addingTimeInterval(-86_400), end: now)
+        let expected = PerformanceMetricsSnapshot(samples: samples, range: range, model: "google/gemma-4-26b")
+        let result = try #require(await PerformanceMetricsAnalysis.make(samples: samples, range: range, model: "google/gemma-4-26b"))
+        #expect(result.sampleCount == expected.sampleCount)
+        #expect(result.summary.coveredSeconds == expected.summary.coveredSeconds)
+        #expect(result.summary.generatedTokens == expected.summary.generatedTokens)
+        #expect(result.visits.map(\.id) == expected.visits.map(\.id))
+        #expect(result.ratePoints.map(\.id) == expected.ratePoints.map(\.id))
+    }
+
     @Test("synthetic metrics fit narrow and wide dashboard columns", arguments: [420.0, 780.0, 1_080.0])
     func rendersMetrics(width: Double) async throws {
         let now = Date()
@@ -103,6 +178,15 @@ struct PerformanceMetricsViewTests {
         #expect(transitions[1].autopilotPhase == "transitioning")
         #expect(transitions[3].model == nil)
         #expect(transitions[4].model == "google/gemma-4-26b")
+    }
+}
+
+private final class MetricsCancellationChecks: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.withLock { value } }
+    func reachedLimit() -> Bool {
+        lock.withLock { value += 1; return value >= 4 }
     }
 }
 

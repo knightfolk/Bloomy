@@ -385,13 +385,34 @@ private struct PopupAvailableDisclosureStyle: DisclosureGroupStyle {
     }
 }
 
+/// A hidden popup retains its view state, but schedules no recurring updates.
+struct PopoverTimelineSchedule: TimelineSchedule {
+    let isVisible: Bool
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> Entries {
+        Entries(nextDate: startDate, repeats: isVisible)
+    }
+
+    struct Entries: Sequence, IteratorProtocol {
+        var nextDate: Date?
+        let repeats: Bool
+
+        mutating func next() -> Date? {
+            guard let date = nextDate else { return nil }
+            nextDate = repeats ? date.addingTimeInterval(1) : nil
+            return date
+        }
+    }
+}
+
 struct MonitorPopover: View {
     private static let popupWidth: CGFloat = 560
     private static let modelCardWidth: CGFloat = (popupWidth - 32 - 2 - 16) / 3
     @ObservedObject var cliUpdates = CLIUpdateStatusStore.shared
     @ObservedObject var store: MonitorStore
     @EnvironmentObject private var controlStore: ProviderControlStore
-    let openSettings: () -> Void
+    let isVisible: Bool
+    let openSettings: (SettingsPage?) -> Void
     let openDashboard: () -> Void
     let openModels: () -> Void
     let openHosting: () -> Void
@@ -403,12 +424,14 @@ struct MonitorPopover: View {
 
     init(
         store: MonitorStore,
-        openSettings: @escaping () -> Void = {},
+        isVisible: Bool = true,
+        openSettings: @escaping (SettingsPage?) -> Void = { _ in },
         openDashboard: @escaping () -> Void = {},
         openModels: @escaping () -> Void = {},
         openHosting: @escaping () -> Void = {}
     ) {
         self.store = store
+        self.isVisible = isVisible
         self.openSettings = openSettings
         self.openDashboard = openDashboard
         self.openModels = openModels
@@ -416,7 +439,7 @@ struct MonitorPopover: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
+        TimelineView(PopoverTimelineSchedule(isVisible: isVisible)) { _ in
             // Published samples can arrive between timeline ticks. Evaluate
             // freshness at render time, not against the previous tick.
             content(currentTime: Date())
@@ -431,7 +454,7 @@ struct MonitorPopover: View {
                 CompactGPUGauge(usage: store.gpuUsage, now: currentTime)
                 Divider().frame(height: 38)
                 if let extras = store.providerExtras {
-                    PopupFanSummary(store: extras, now: currentTime) { showsFans = true }
+                    PopupFanSummary(store: extras, now: currentTime, isVisible: isVisible) { showsFans = true }
                 } else {
                     Label("Fan readings unavailable", systemImage: "fan")
                         .font(.caption).foregroundStyle(.secondary)
@@ -451,7 +474,7 @@ struct MonitorPopover: View {
             }
             if case .available(.updateAvailable(_, let latest), let checkedAt) = cliUpdates.status,
                currentTime.timeIntervalSince(checkedAt) < 6 * 60 * 60 {
-                Button("CLI \(latest) available", action: openSettings).font(.caption)
+                Button("CLI \(latest) available") { openSettings(.updates) }.font(.caption)
             }
             if let error = controlStore.errorMessage {
                 Label(error, systemImage: "exclamationmark.circle")
@@ -494,7 +517,7 @@ struct MonitorPopover: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showsFans) {
             if let extras = store.providerExtras {
-                PopupFanPanel(extras: extras) { label, mutation in
+                PopupFanPanel(extras: extras, isVisible: isVisible) { label, mutation in
                     await controlStore.performSettingsMutation(label, mutation: mutation)
                 }
             }
@@ -707,7 +730,7 @@ struct MonitorPopover: View {
                                   earnings: store.currentEnergyEarnings, now: currentTime,
                                   waitingMessage: store.energy?.issue ?? "Collecting matched earnings data")
             } else {
-                Button(action: openSettings) {
+                Button { openSettings(.electricity) } label: {
                     Label("Set up electricity estimate", systemImage: "bolt")
                 }.font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
             }
@@ -779,7 +802,7 @@ struct MonitorPopover: View {
 
             Button(action: openDashboard) { Image(systemName: "rectangle.grid.2x2") }
                 .help("Open dashboard").accessibilityLabel("Open dashboard")
-            Button(action: openSettings) {
+            Button { openSettings(nil) } label: {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.bordered)
@@ -1343,6 +1366,7 @@ enum PopupModelName {
 
 struct PopupFanPanel: View {
     @ObservedObject var extras: ProviderExtrasStore
+    var isVisible: Bool = true
     let performMutation: ProviderExtrasMutationExecutor
     @Environment(\.dismiss) private var dismiss
 
@@ -1354,7 +1378,7 @@ struct PopupFanPanel: View {
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }.padding()
             Form {
-                ProviderFanControlSettingsView(store: extras, performMutation: performMutation, compactPresentation: true)
+                ProviderFanControlSettingsView(store: extras, performMutation: performMutation, isVisible: isVisible, compactPresentation: true)
             }.formStyle(.grouped)
         }
         .frame(width: 560, height: 520)

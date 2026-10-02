@@ -16,6 +16,13 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var energy: EnergyRecordingSnapshot?
     @Published private(set) var energyEarnings: EnergyEarnings?
     private var energyEarningsDay: Date?
+    private struct EnergyActivityKey: Equatable {
+        let day: DateInterval
+        let accountCapturedAt: Date?
+        let activityRevision: UInt64
+    }
+    private var energyActivityKey: EnergyActivityKey?
+    private var energyActivityBuckets: [ActivityBucket]?
 
     var currentEnergyReading: EnergyReading? {
         guard energyPreferences.bool(forKey: "electricity.enabled"),
@@ -84,6 +91,15 @@ final class MonitorStore: ObservableObject {
     private var pendingAlertTransitions: [AlertTransition] = []
     private var alertPersistenceInFlight = false
     private let tokenRateRecorder: (any ModelTokenRateRecording)?
+    private struct RecordedTokenRate: Equatable {
+        let processIdentity: ProcessIdentity
+        let writtenAt: TimeInterval
+        let model: String
+        let tokensPerSecond: Double
+    }
+    private var lastRecordedTokenRate: RecordedTokenRate?
+    private var tokenRateAveragesDay: Date?
+    private var tokenRateAveragesNeedRefresh = true
     private let networkCapacityClient: (any NetworkCapacityFetching)?
     private let recommendationJournal: RecommendationJournal?
     private var recommendationControlSnapshot: (@MainActor () -> ProviderControlSnapshot?)?
@@ -228,7 +244,7 @@ final class MonitorStore: ObservableObject {
         if providerExtras != nil {
             providerExtrasTask = Task { [weak self] in
                 while !Task.isCancelled {
-                    await self?.providerExtras?.refresh()
+                    await self?.providerExtras?.refreshBackground()
                     do { try await Task.sleep(for: .seconds(30)) }
                     catch { return }
                 }
@@ -249,23 +265,7 @@ final class MonitorStore: ObservableObject {
                 )
                 guard !Task.isCancelled else { return }
                 self.energy = enabled ? result : nil
-                self.energyEarnings = nil
-                if enabled, result.issue == nil, !result.intervals.isEmpty {
-                    let sampleTime = Date()
-                    let calendar = Calendar.current
-                    if let day = calendar.dateInterval(of: .day, for: sampleTime) {
-                        do {
-                            if let buckets = try await self.earningsClient.activity(in: day, unit: .hour, calendar: calendar) {
-                                guard !Task.isCancelled else { return }
-                                self.energyEarnings = EnergyEarnings.matching(buckets: buckets,
-                                    energy: result.intervals, day: day, now: sampleTime)
-                                self.energyEarningsDay = day.start
-                            }
-                        } catch {
-                            self.energyEarnings = nil
-                        }
-                    }
-                }
+                await self.updateEnergyEarnings(using: result, enabled: enabled, at: Date())
                 do { try await Task.sleep(for: .seconds(10)) }
                 catch { return }
             }
@@ -894,40 +894,11 @@ final class MonitorStore: ObservableObject {
                 processIdentity: state.processIdentity,
                 writtenAt: state.writtenAt
             )
-            averageTokenRate = tokenRateAccumulator.value
-
-            if let tokenRateRecorder {
-                if case .available(let tokensPerSecond, _) = snapshot.tokenRate {
-                    try? await tokenRateRecorder.record(
-                        model: state.currentModel,
-                        tokensPerSecond: tokensPerSecond,
-                        capturedAt: snapshot.capturedAt,
-                        processIdentity: state.processIdentity,
-                        writtenAt: state.writtenAt
-                    )
-                }
-                if let averages = try? await tokenRateRecorder.averages(
-                    from: Calendar.current.startOfDay(for: snapshot.capturedAt),
-                    through: snapshot.capturedAt
-                ) {
-                    modelTokenRateAverages = averages
-                    let sampleCount = averages.reduce(0) { $0 + $1.sampleCount }
-                    if sampleCount > 0 {
-                        let weightedTotal = averages.reduce(0.0) {
-                            $0 + ($1.tokensPerSecond * Double($1.sampleCount))
-                        }
-                        averageTokenRate = .available(
-                            tokensPerSecond: weightedTotal / Double(sampleCount),
-                            label: "today's average"
-                        )
-                    } else {
-                        averageTokenRate = .unavailable(
-                            reason: "No measured token rates today"
-                        )
-                    }
-                }
+            if tokenRateRecorder == nil {
+                averageTokenRate = tokenRateAccumulator.value
             }
         }
+        await refreshTokenRateAveragesIfNeeded(from: snapshot)
         let previousCurrentModel = self.snapshot.state.value?.currentModel
         let attentionThreshold = menuAttentionThreshold
         if attentionThreshold != observedMenuAttentionThreshold {
@@ -946,6 +917,104 @@ final class MonitorStore: ObservableObject {
         await recordOperationalAlertTransitions(from: snapshot)
         if previousCurrentModel != snapshot.state.value?.currentModel {
             await refreshRecommendation()
+        }
+    }
+
+    private func refreshTokenRateAveragesIfNeeded(from snapshot: TelemetrySnapshot) async {
+        guard let tokenRateRecorder else { return }
+        let day = Calendar.current.startOfDay(for: snapshot.capturedAt)
+        if let state = snapshot.state.value,
+           case .available(let tokensPerSecond, _) = snapshot.tokenRate {
+            let sample = RecordedTokenRate(processIdentity: state.processIdentity,
+                                           writtenAt: state.writtenAt, model: state.currentModel,
+                                           tokensPerSecond: tokensPerSecond)
+            if sample != lastRecordedTokenRate {
+                do {
+                    let inserted = try await tokenRateRecorder.recordIfNew(
+                        model: sample.model, tokensPerSecond: sample.tokensPerSecond,
+                        capturedAt: snapshot.capturedAt, processIdentity: sample.processIdentity,
+                        writtenAt: sample.writtenAt
+                    )
+                    lastRecordedTokenRate = sample
+                    if inserted { tokenRateAveragesNeedRefresh = true }
+                } catch {
+                    // Do not remember failed writes: the same observation must
+                    // be retried even when the next tick has unchanged telemetry.
+                    tokenRateAveragesNeedRefresh = true
+                }
+            }
+        }
+
+        if tokenRateAveragesNeedRefresh || tokenRateAveragesDay != day {
+            do {
+                let averages = try await tokenRateRecorder.averages(from: day, through: snapshot.capturedAt)
+                if modelTokenRateAverages != averages { modelTokenRateAverages = averages }
+                tokenRateAveragesDay = day
+                tokenRateAveragesNeedRefresh = false
+            } catch {
+                // Preserve the last successful read and retry on the next tick.
+                tokenRateAveragesNeedRefresh = true
+            }
+        }
+
+        // With no pending insertion or failed read, the cached values cover
+        // this accepted snapshot too. Advance only the range metadata, never
+        // sample counts or measured rates, so current-day displays stay valid.
+        if !tokenRateAveragesNeedRefresh, tokenRateAveragesDay == day {
+            let period = DateInterval(start: day, end: snapshot.capturedAt)
+            let current = modelTokenRateAverages.map { value in
+                // A recorder without a qualified period remains unqualified.
+                guard value.queryPeriod?.start == day else { return value }
+                return ModelTokenRateAverage(model: value.model, tokensPerSecond: value.tokensPerSecond,
+                                             sampleCount: value.sampleCount, queryPeriod: period)
+            }
+            if modelTokenRateAverages != current { modelTokenRateAverages = current }
+        }
+
+        let rate: TokenRate
+        if tokenRateAveragesDay == day {
+            if let value = CalendarTokenRates.weightedAverage(modelTokenRateAverages) {
+                rate = .available(tokensPerSecond: value, label: "today's average")
+            } else {
+                rate = .unavailable(reason: "No measured token rates today")
+            }
+        } else {
+            rate = .unavailable(reason: "Today's measured token rates are unavailable")
+        }
+        if averageTokenRate != rate { averageTokenRate = rate }
+    }
+
+    func updateEnergyEarnings(using result: EnergyRecordingSnapshot, enabled: Bool, at date: Date) async {
+        let calendar = Calendar.current
+        guard enabled, result.issue == nil, !result.intervals.isEmpty,
+              let day = calendar.dateInterval(of: .day, for: date) else {
+            if energyEarnings != nil { energyEarnings = nil }
+            return
+        }
+        let key = EnergyActivityKey(day: day, accountCapturedAt: accountEarningsCapturedAt,
+                                    activityRevision: activityRevision)
+        do {
+            let buckets: [ActivityBucket]
+            if energyActivityKey == key, let cached = energyActivityBuckets {
+                buckets = cached
+            } else {
+                guard let fetched = try await earningsClient.activity(in: day, unit: .hour, calendar: calendar) else {
+                    if energyEarnings != nil { energyEarnings = nil }
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                energyActivityKey = key
+                energyActivityBuckets = fetched
+                buckets = fetched
+            }
+            let value = EnergyEarnings.matching(buckets: buckets,
+                energy: EnergyHistory.overlapping(result.intervals, with: day), day: day, now: date)
+            if energyEarnings != value { energyEarnings = value }
+            energyEarningsDay = day.start
+        } catch {
+            // Failed activity reads do not become cache hits; retry with the
+            // next fresh energy reading instead of displaying stale profit.
+            if energyEarnings != nil { energyEarnings = nil }
         }
     }
 

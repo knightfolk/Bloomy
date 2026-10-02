@@ -136,14 +136,7 @@ struct ProviderFanControlSettingsView: View {
         .onChange(of: store.snapshot?.fanStatus) { _, _ in syncDraft() }
         .task(id: isVisible) {
             guard isVisible else { return }
-            while !Task.isCancelled {
-                await store.refreshFan()
-                do {
-                    try await Task.sleep(for: .seconds(2))
-                } catch {
-                    return
-                }
-            }
+            await store.observeVisibleFan()
         }
         .alert(item: $pendingAction) { action in
             Alert(

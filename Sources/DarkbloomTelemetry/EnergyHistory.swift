@@ -98,20 +98,21 @@ public struct EnergyHistory: Sendable {
         previousActivity = nil
     }
 
+    @discardableResult
     public mutating func append(
         _ reading: EnergyReading,
         usdPerKWh: Double,
         modelActivity: ModelPowerActivity? = nil
-    ) {
+    ) -> EnergyInterval? {
         guard reading.date.timeIntervalSince1970.isFinite, reading.watts.isFinite,
               reading.watts >= 0, usdPerKWh.isFinite, usdPerKWh >= 0,
-              !reading.source.isEmpty else { breakContinuity(); return }
+              !reading.source.isEmpty else { breakContinuity(); return nil }
         // A clock correction must not charge for time already recorded. Drop
         // the chain until the clock catches up, including after restoration.
         guard intervals.last.map({ reading.date >= $0.end }) ?? true,
               previous.map({ reading.date > $0.date }) ?? true else {
             breakContinuity()
-            return
+            return nil
         }
         defer {
             previous = reading
@@ -122,8 +123,8 @@ public struct EnergyHistory: Sendable {
               last.source == reading.source, last.estimated == reading.estimated,
               let energy = ElectricityCost.kilowattHours(startWatts: last.watts,
                   endWatts: reading.watts, seconds: reading.date.timeIntervalSince(last.date)),
-              (energy * usdPerKWh).isFinite else { return }
-        intervals.append(EnergyInterval(
+              (energy * usdPerKWh).isFinite else { return nil }
+        let interval = EnergyInterval(
             start: last.date,
             end: reading.date,
             kWh: energy,
@@ -132,15 +133,37 @@ public struct EnergyHistory: Sendable {
             estimated: reading.estimated,
             activeModelID: previousActivity?.modelID,
             inferenceActive: previousActivity?.inferenceActive
-        ))
+        )
+        intervals.append(interval)
         if intervals.count > Self.maximumIntervals {
             intervals.removeFirst(intervals.count - Self.maximumIntervals)
         }
+        return interval
     }
 
     /// Entirely covered intervals only; no invented allocation at day boundaries.
     public func intervals(in period: DateInterval) -> [EnergyInterval] {
         intervals.filter { $0.start >= period.start && $0.end <= period.end }
+    }
+
+    /// Select from the validated chronological sequence without scanning older
+    /// history. Include boundary fragments for proportional electricity cost.
+    public static func overlapping(_ intervals: [EnergyInterval], with period: DateInterval) -> [EnergyInterval] {
+        var lower = 0
+        var upper = intervals.count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if intervals[middle].end <= period.start { lower = middle + 1 }
+            else { upper = middle }
+        }
+        let start = lower
+        upper = intervals.count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if intervals[middle].start < period.end { lower = middle + 1 }
+            else { upper = middle }
+        }
+        return Array(intervals[start..<lower])
     }
 }
 

@@ -35,6 +35,21 @@ struct MonitorSettingsView: View {
                 }
             }
         }
+        .task(id: "\((selection ?? standaloneSelection).rawValue):\(monitorStore?.dashboardVisible ?? true)") {
+            let selected = selection ?? standaloneSelection
+            guard monitorStore?.dashboardVisible ?? true, let extrasStore,
+                  selected == .provider || selected == .updates || selected == .fans else { return }
+            await extrasStore.refresh()
+            // Editable static settings keep their existing 45-second freshness
+            // guarantee only while their page is visible.
+            guard selected == .provider || selected == .updates else { return }
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(30)) }
+                catch { return }
+                guard !extrasStore.mutationInFlight else { continue }
+                await extrasStore.refresh()
+            }
+        }
         .sheet(item: $supportPacketPreview) { presentation in
             SupportPacketPreviewView(snapshot: presentation.snapshot)
         }
@@ -45,7 +60,7 @@ struct MonitorSettingsView: View {
     private func pages(selected: SettingsPage) -> some View {
         ZStack {
             ForEach(SettingsPage.allCases) { page in
-                pageForm(page, isVisible: selected == page)
+                pageForm(page, isVisible: selected == page && (monitorStore?.dashboardVisible ?? true))
                     .opacity(selected == page ? 1 : 0)
                     .allowsHitTesting(selected == page)
                     .disabled(selected != page)

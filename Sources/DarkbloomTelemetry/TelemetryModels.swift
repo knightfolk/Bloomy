@@ -1,5 +1,15 @@
 import Foundation
 
+/// Shared by live telemetry and its private measurement journal. Keep this an
+/// exact whitelist so an unknown provider value cannot persist arbitrary text.
+enum KnownAutopilotPhase {
+    static let values: Set<String> = [
+        "off", "waiting", "waiting_inventory", "shadow", "active", "paused", "transitioning", "recovering"
+    ]
+
+    static func contains(_ value: String) -> Bool { values.contains(value) }
+}
+
 public struct DaemonState: Equatable, Sendable {
     public let schema: Int
     public let version: String
@@ -93,8 +103,7 @@ public struct DaemonState: Equatable, Sendable {
         self.availability = availability
         self.configPath = configPath
         self.runtimeCapabilities = runtimeCapabilities
-        let phases = ["off", "waiting", "shadow", "active", "paused", "transitioning", "recovering"]
-        self.autopilotPhase = autopilotPhase.flatMap { phases.contains($0) ? $0 : nil }
+        self.autopilotPhase = autopilotPhase.flatMap { KnownAutopilotPhase.contains($0) ? $0 : nil }
     }
 }
 

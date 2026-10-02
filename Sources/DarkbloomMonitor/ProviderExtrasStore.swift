@@ -20,9 +20,16 @@ final class ProviderExtrasStore: ObservableObject {
 
     private let client: any ProviderExtrasProviding
     private let pollingInterval: Duration
+    private let staticVerificationInterval: TimeInterval
+    private let visibleFanPollingInterval: Duration
+    private let now: @Sendable () -> Date
+    private var lastStaticRefreshAt: Date?
+    private var visibleFanSubscribers: Set<UUID> = []
+    private var visibleFanPollingTask: Task<Void, Never>?
     private var pollingTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var refreshGeneration: UInt64 = 0
+    private var refreshIncludesStatic = false
 
     /// Production initializer. It resolves only the approved Darkbloom CLI
     /// candidates from the shared source policy and performs read-only polling
@@ -30,31 +37,94 @@ final class ProviderExtrasStore: ObservableObject {
     init(
         policy: DarkbloomSourcePolicy = .currentUser,
         runner: any ProcessExecuting = CappedProcessRunner(),
-        pollingInterval: Duration = .seconds(30)
+        pollingInterval: Duration = .seconds(30),
+        staticVerificationInterval: TimeInterval = 300,
+        visibleFanPollingInterval: Duration = .seconds(2),
+        now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.client = ProviderExtrasClient(policy: policy, runner: runner)
         self.pollingInterval = pollingInterval
+        self.staticVerificationInterval = staticVerificationInterval
+        self.visibleFanPollingInterval = visibleFanPollingInterval
+        self.now = now
     }
 
     init(
         client: any ProviderExtrasProviding,
-        pollingInterval: Duration = .seconds(30)
+        pollingInterval: Duration = .seconds(30),
+        staticVerificationInterval: TimeInterval = 300,
+        visibleFanPollingInterval: Duration = .seconds(2),
+        now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.client = client
         self.pollingInterval = pollingInterval
+        self.staticVerificationInterval = staticVerificationInterval
+        self.visibleFanPollingInterval = visibleFanPollingInterval
+        self.now = now
     }
 
     func refresh() async {
         await refresh(force: false)
     }
 
-    /// Shares the refresh gate with full polling and mutations. Leaving the fan
-    /// page cancels this read; no policy is written by live readings.
+    /// Fan sensors stay fresh for the menu bar while static configuration is
+    /// verified less often. An explicit refresh or mutation still reads all sources.
+    func refreshBackground() async {
+        guard !mutationInFlight else { return }
+        let age = lastStaticRefreshAt.map { now().timeIntervalSince($0) }
+        let verificationDue = age.map { !$0.isFinite || $0 < 0 || $0 >= staticVerificationInterval } ?? true
+        if snapshot == nil || verificationDue || staticSourcesNeedRetry {
+            await refresh()
+        } else if visibleFanSubscribers.isEmpty {
+            await refreshFan()
+        }
+    }
+
+    private var staticSourcesNeedRetry: Bool {
+        guard let snapshot else { return true }
+        guard case .available = snapshot.idlePolicy,
+              case .available = snapshot.betaFeatures,
+              case .available = snapshot.autoUpdateStatus else { return true }
+        return false
+    }
+
+    /// Each visible surface owns a subscription for the lifetime of its task.
+    /// Opening a second surface shares the existing cadence, and closing the
+    /// last surface cancels the owned poller and its read.
+    func observeVisibleFan() async {
+        let token = UUID()
+        visibleFanSubscribers.insert(token)
+        if visibleFanPollingTask == nil {
+            visibleFanPollingTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                while !Task.isCancelled {
+                    await self.refreshFan()
+                    do { try await Task.sleep(for: self.visibleFanPollingInterval) }
+                    catch { return }
+                }
+            }
+        }
+        defer {
+            visibleFanSubscribers.remove(token)
+            if visibleFanSubscribers.isEmpty {
+                visibleFanPollingTask?.cancel()
+                visibleFanPollingTask = nil
+            }
+        }
+        while !Task.isCancelled {
+            do { try await Task.sleep(for: .seconds(31_536_000)) }
+            catch { return }
+        }
+    }
+
+    /// Shares the refresh gate with full polling and mutations. No policy is
+    /// written by live readings.
     func refreshFan() async {
         guard !mutationInFlight else { return }
         guard snapshot != nil else { await refresh(); return }
         if let previous = refreshTask { await previous.value; return }
         isRefreshing = true
+        refreshIncludesStatic = false
         refreshGeneration &+= 1
         let generation = refreshGeneration
         let client = self.client
@@ -81,19 +151,29 @@ final class ProviderExtrasStore: ObservableObject {
 
     private func refresh(force: Bool) async {
         if let previous = refreshTask {
+            let previousIncludedStatic = refreshIncludesStatic
+            let previousGeneration = refreshGeneration
             if force { previous.cancel() }
             await previous.value
-            if !force { return }
+            if !force && previousIncludedStatic { return }
+            // A full settings refresh must follow a fan-only read. Another
+            // waiter may already have started that full read while we resumed.
+            if refreshTask != nil && refreshGeneration != previousGeneration {
+                await refresh(force: force)
+                return
+            }
         }
         let client = self.client
         isRefreshing = true
         errorMessage = nil
+        refreshIncludesStatic = true
         refreshGeneration &+= 1
         let generation = refreshGeneration
         let task = Task { @MainActor [weak self] in
             let refreshed = await client.refresh()
             guard let self, !Task.isCancelled, self.refreshGeneration == generation else { return }
             self.snapshot = Self.merge(refreshed, with: self.snapshot)
+            self.lastStaticRefreshAt = self.now()
         }
         refreshTask = task
         await withTaskCancellationHandler {
@@ -112,25 +192,29 @@ final class ProviderExtrasStore: ObservableObject {
         guard pollingTask == nil else { return }
         pollingTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.refresh()
+            await self.refreshBackground()
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(for: self.pollingInterval)
                 } catch {
                     return
                 }
-                await self.refresh()
+                await self.refreshBackground()
             }
         }
     }
 
     func stop() async {
+        let visiblePolling = visibleFanPollingTask
+        visiblePolling?.cancel()
         let polling = pollingTask
         polling?.cancel()
         let refresh = refreshTask
         refresh?.cancel()
+        await visiblePolling?.value
         await polling?.value
         await refresh?.value
+        visibleFanPollingTask = nil
         pollingTask = nil
         refreshTask = nil
         isRefreshing = false

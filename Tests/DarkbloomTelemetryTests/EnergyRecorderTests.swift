@@ -18,6 +18,8 @@ struct EnergyRecorderTests {
         #expect(disabled.intervals.isEmpty)
         let resumed = await recorder.sample(enabled: true, rate: 0.15, now: Date(timeIntervalSince1970: 130))
         #expect(resumed.intervals.count == 1)
-        #expect(try EnergyHistoryFile.read(from: file).intervals.count == 1)
+        let database = try EnergyHistoryDatabase(url: EnergyHistoryDatabase.databaseURL(forLegacyFile: file))
+        #expect(try database.history().intervals.count == 1)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
     }
 }

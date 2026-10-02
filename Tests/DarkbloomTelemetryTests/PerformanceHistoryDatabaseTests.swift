@@ -7,6 +7,21 @@ import Testing
 struct PerformanceHistoryDatabaseTests {
     private let fixedNow = Date(timeIntervalSince1970: 2_000_000_000)
 
+    @Test("inventory waiting remains a valid private measurement through reopen")
+    func waitingInventory() throws {
+        let url = temporaryURL()
+        defer { removeFiles(url) }
+        let sample = PerformanceSample(
+            observedAt: fixedNow, sourceCapturedAt: fixedNow.addingTimeInterval(-1), quality: .current,
+            providerSession: "123:100", model: "gemma", inferenceActive: true,
+            tokensPerSecond: 12, tokensGenerated: 40, requestsServed: 2,
+            autopilotPhase: "waiting_inventory"
+        )
+        #expect(sample.isValid)
+        do { try database(url).record(sample) }
+        #expect(try database(url).recent() == [sample])
+    }
+
     @Test("all structured metrics survive reopen and exact replay")
     func reopenAndReplay() throws {
         let url = temporaryURL()

@@ -64,7 +64,7 @@ struct ActivityView: View {
             .padding(.top, 20)
             .padding(.bottom, 8)
             if tab == .metrics {
-                PerformanceMetricsView(history: store.performanceHistory)
+                PerformanceMetricsView(history: store.performanceHistory, isVisible: store.dashboardVisible)
             } else {
                 TimelineView(.everyMinute) { context in
                     content(query: ActivityQuery(

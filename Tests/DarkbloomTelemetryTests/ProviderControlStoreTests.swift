@@ -97,6 +97,48 @@ struct ProviderControlStoreTests {
         #expect(control.canSave)
     }
 
+    @Test("contextual Settings links reuse the dashboard and preserve the provider draft")
+    func contextualSettingsKeepsDraftAndWindow() async throws {
+        let suite = "ContextualSettingsTest-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(SettingsPage.fans.rawValue, forKey: "dashboard.settingsPage")
+        let provider = FakeProviderController.fixture()
+        let control = ProviderControlStore(controller: provider)
+        await control.refresh()
+        control.setEnabled(true, modelID: "second-model")
+        control.setMaxModelSlots(2)
+        let staged = try #require(control.draft)
+        let snapshot = control.snapshot
+        let monitor = MonitorStore(service: TelemetryService(source: InertStoreTelemetrySource()), initial: .unavailable(now: providerControlTestNow))
+        let status = StatusItemController(store: monitor, controlStore: control, defaults: defaults)
+        defer { status.invalidate() }
+
+        status.showSettings(activate: false)
+        let dashboard = try #require(status.dashboardWindowController)
+        let window = try #require(dashboard.window)
+        #expect(dashboard.navigation.selected == .settings)
+        #expect(dashboard.navigation.settingsPage == .fans)
+        let frame = window.frame
+
+        for page in [SettingsPage.updates, .electricity] {
+            status.showDashboard(section: .models, activate: false)
+            status.showSettings(page: page, activate: false)
+            #expect(status.dashboardWindowController === dashboard)
+            #expect(dashboard.window === window)
+            #expect(dashboard.navigation.selected == .settings)
+            #expect(dashboard.navigation.settingsPage == page)
+            #expect(DashboardNavigation(defaults: defaults).settingsPage == page)
+            #expect(window.frame == frame)
+        }
+        status.showSettings(activate: false)
+        #expect(dashboard.navigation.settingsPage == .electricity)
+        #expect(control.draft == staged)
+        #expect(control.snapshot == snapshot)
+        #expect(control.draft?.hasChanges == true)
+        #expect(await provider.executedActions.isEmpty)
+    }
+
     @Test("draft toggles are independent stable and valid only when saved")
     func stagesIndependentSelections() async throws {
         let controller = FakeProviderController.fixture()
@@ -1539,99 +1581,7 @@ struct ProviderControlStoreTests {
         #expect(statusController.controlStore === controlStore)
     }
 
-    @Test("app Settings waits for and then retains the exact shared store")
-    func appSettingsUsesSharedStore() async throws {
-        let controlStore = ProviderControlStore(controller: FakeProviderController.fixture())
-        let waitingRoot = AppSettingsSceneRoot(controlStore: nil)
-        let readyRoot = AppSettingsSceneRoot(controlStore: controlStore)
-        let settingsRoot = ProviderSettingsRoot(controlStore: controlStore)
-        let waitingHost = NSHostingController(rootView: waitingRoot)
-        let waitingSize = waitingHost.sizeThatFits(in: NSSize(width: 800, height: 800))
 
-        #expect(waitingRoot.controlStore == nil)
-        #expect(waitingSize == NSSize(width: 420, height: 180))
-        #expect(readyRoot.controlStore === controlStore)
-        #expect(settingsRoot.controlStore === controlStore)
-    }
-
-    @Test("app and status-item Settings roots share one store identity")
-    func allSettingsRootsShareIdentity() async throws {
-        let telemetryService = TelemetryService(source: InertStoreTelemetrySource())
-        let monitorStore = MonitorStore(
-            service: telemetryService,
-            initial: .unavailable(now: Date(timeIntervalSince1970: 1_750_000_000))
-        )
-        let controlStore = ProviderControlStore(controller: FakeProviderController.fixture())
-        let appRoot = AppSettingsSceneRoot(controlStore: controlStore)
-        let statusController = StatusItemController(
-            store: monitorStore,
-            controlStore: controlStore
-        )
-
-        let appIdentity = try #require(appRoot.controlStore.map(ObjectIdentifier.init))
-        let statusIdentity = try #require(
-            statusController.controlStore.map(ObjectIdentifier.init)
-        )
-        #expect(appIdentity == ObjectIdentifier(controlStore))
-        #expect(statusIdentity == appIdentity)
-    }
-
-    @Test("native Settings scene renders the full shared settings view")
-    func nativeSettingsSceneUsesSharedStores() async throws {
-        let monitorStore = MonitorStore(
-            service: TelemetryService(source: InertStoreTelemetrySource()),
-            initial: .unavailable(now: Date(timeIntervalSince1970: 1_750_000_000))
-        )
-        let controlStore = ProviderControlStore(controller: FakeProviderController.fixture())
-        let root = AppSettingsSceneRoot(
-            controlStore: controlStore,
-            monitorStore: monitorStore
-        )
-        let settings = ProviderSettingsRoot(
-            controlStore: controlStore,
-            monitorStore: monitorStore
-        )
-        let host = NSHostingController(rootView: root)
-        let window = NSWindow(contentViewController: host)
-        window.isReleasedWhenClosed = false
-        window.orderBack(nil)
-        defer { window.close() }
-        let size = host.sizeThatFits(in: NSSize(width: 1_200, height: 900))
-
-        #expect(root.controlStore === controlStore)
-        #expect(root.monitorStore === monitorStore)
-        #expect(settings.controlStore === controlStore)
-        #expect(settings.monitorStore === monitorStore)
-        #expect(settings.extrasStore === monitorStore.providerExtras)
-        #expect(size == NSSize(width: 900, height: 650))
-    }
-
-    @Test("native Settings scene leaves startup view when delegate publishes stores")
-    func nativeSettingsSceneObservesStartup() async throws {
-        let delegate = DarkbloomMonitorAppDelegate()
-        let host = NSHostingController(rootView: AppSettingsObservedSceneRoot(delegate: delegate))
-        let window = NSWindow(contentViewController: host)
-        window.isReleasedWhenClosed = false
-        window.orderBack(nil)
-        defer { window.close() }
-
-        #expect(host.sizeThatFits(in: NSSize(width: 1_200, height: 900))
-            == NSSize(width: 420, height: 180))
-
-        let monitorStore = MonitorStore(
-            service: TelemetryService(source: InertStoreTelemetrySource()),
-            initial: .unavailable(now: Date(timeIntervalSince1970: 1_750_000_000))
-        )
-        let controlStore = ProviderControlStore(controller: FakeProviderController.fixture())
-        delegate.attachStores(monitor: monitorStore, control: controlStore)
-        try await Task.sleep(for: .milliseconds(150))
-        host.view.layoutSubtreeIfNeeded()
-
-        #expect(delegate.monitorStore === monitorStore)
-        #expect(delegate.controlStore === controlStore)
-        #expect(host.sizeThatFits(in: NSSize(width: 1_200, height: 900))
-            == NSSize(width: 900, height: 650))
-    }
 }
 
 enum PostExitProviderMutation: String, CaseIterable, Sendable {

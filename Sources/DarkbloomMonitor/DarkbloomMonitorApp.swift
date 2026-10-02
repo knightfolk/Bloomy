@@ -2,34 +2,23 @@ import AppKit
 import DarkbloomTelemetry
 import SwiftUI
 
+/// SwiftUI content is hosted by the existing AppKit window controllers. A native
+/// application entry avoids registering a second Settings window scene.
 @main
-struct DarkbloomMonitorApp: App {
-    @NSApplicationDelegateAdaptor(DarkbloomMonitorAppDelegate.self) private var appDelegate
-
-    var body: some Scene {
-        Settings {
-            AppSettingsObservedSceneRoot(delegate: appDelegate)
-        }
-        .commands {
-            CommandGroup(after: .appInfo) {
-                ControlAppUpdateMenuItem()
-            }
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings…") {
-                    appDelegate.showSettings()
-                }
-                .keyboardShortcut(",", modifiers: .command)
-                Button("Open Dashboard") { appDelegate.showDashboard() }
-                    .keyboardShortcut("d", modifiers: [.command, .shift])
-                Button("Open Chat Window") { appDelegate.showChat() }
-                    .keyboardShortcut("c", modifiers: [.command, .shift])
-            }
+@MainActor
+enum DarkbloomMonitorApp {
+    static func main() {
+        let application = NSApplication.shared
+        let delegate = DarkbloomMonitorAppDelegate()
+        application.delegate = delegate
+        withExtendedLifetime(delegate) {
+            application.run()
         }
     }
 }
 
 @MainActor
-final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, ObservableObject, NSMenuItemValidation {
     private let instanceGuard: SingleInstanceGuard
     @Published private(set) var monitorStore: MonitorStore?
     @Published private(set) var controlStore: ProviderControlStore?
@@ -40,21 +29,104 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         super.init()
     }
 
-    init(instanceGuard: SingleInstanceGuard) {
+    init(instanceGuard: SingleInstanceGuard, statusItemController: StatusItemController? = nil) {
         self.instanceGuard = instanceGuard
+        self.statusItemController = statusItemController
         super.init()
     }
 
-    func showSettings() {
+    @objc func showSettings() {
         statusItemController?.showSettings()
     }
 
-    func showDashboard() {
+    @objc func showDashboard() {
         statusItemController?.showDashboard()
     }
 
-    func showChat() {
+    @objc func showChat() {
         statusItemController?.showChatWindow()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showDashboard()
+        return false
+    }
+
+    @objc func checkForAppUpdates() {
+        ControlAppUpdater.shared.check()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(checkForAppUpdates) {
+            return ControlAppUpdater.shared.canCheck
+        }
+        return true
+    }
+
+    func installApplicationMenus(application: NSApplication = .shared) {
+        let menu = makeMainMenu(application: application)
+        application.mainMenu = menu
+        application.servicesMenu = menu.items.first?.submenu?.items
+            .first(where: { $0.title == "Services" })?.submenu
+        application.windowsMenu = menu.items.first(where: { $0.title == "Window" })?.submenu
+    }
+
+    func makeMainMenu(application: NSApplication = .shared) -> NSMenu {
+        let mainMenu = NSMenu()
+        let appMenu = NSMenu(title: MonitorApplicationIdentity.displayName)
+        let appItem = NSMenuItem(title: appMenu.title, action: nil, keyEquivalent: "")
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+
+        func add(_ title: String, action: Selector, key: String = "",
+                 modifiers: NSEvent.ModifierFlags = .command,
+                 target: AnyObject? = nil, to menu: NSMenu) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            item.target = target
+            menu.addItem(item)
+        }
+
+        add("About \(MonitorApplicationIdentity.displayName)",
+            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), target: application, to: appMenu)
+        add("Check for Updates…", action: #selector(checkForAppUpdates), target: self, to: appMenu)
+        appMenu.addItem(.separator())
+        add("Settings…", action: #selector(showSettings), key: ",", target: self, to: appMenu)
+        add("Open Dashboard", action: #selector(showDashboard), key: "d", modifiers: [.command, .shift], target: self, to: appMenu)
+        add("Open Chat Window", action: #selector(showChat), key: "c", modifiers: [.command, .shift], target: self, to: appMenu)
+        appMenu.addItem(.separator())
+        let services = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
+        services.submenu = NSMenu(title: "Services")
+        appMenu.addItem(services)
+        appMenu.addItem(.separator())
+        add("Hide \(MonitorApplicationIdentity.displayName)", action: #selector(NSApplication.hide(_:)), key: "h", target: application, to: appMenu)
+        add("Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), key: "h", modifiers: [.command, .option], target: application, to: appMenu)
+        add("Show All", action: #selector(NSApplication.unhideAllApplications(_:)), target: application, to: appMenu)
+        appMenu.addItem(.separator())
+        add("Quit \(MonitorApplicationIdentity.displayName)", action: #selector(NSApplication.terminate(_:)), key: "q", target: application, to: appMenu)
+
+        let editMenu = NSMenu(title: "Edit")
+        let editItem = NSMenuItem(title: editMenu.title, action: nil, keyEquivalent: "")
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+        add("Undo", action: NSSelectorFromString("undo:"), key: "z", to: editMenu)
+        add("Redo", action: NSSelectorFromString("redo:"), key: "z", modifiers: [.command, .shift], to: editMenu)
+        editMenu.addItem(.separator())
+        add("Cut", action: #selector(NSText.cut(_:)), key: "x", to: editMenu)
+        add("Copy", action: #selector(NSText.copy(_:)), key: "c", to: editMenu)
+        add("Paste", action: #selector(NSText.paste(_:)), key: "v", to: editMenu)
+        add("Select All", action: #selector(NSText.selectAll(_:)), key: "a", to: editMenu)
+
+        let windowMenu = NSMenu(title: "Window")
+        let windowItem = NSMenuItem(title: windowMenu.title, action: nil, keyEquivalent: "")
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
+        add("Close", action: #selector(NSWindow.performClose(_:)), key: "w", to: windowMenu)
+        add("Minimize", action: #selector(NSWindow.performMiniaturize(_:)), key: "m", to: windowMenu)
+        add("Zoom", action: #selector(NSWindow.performZoom(_:)), to: windowMenu)
+        windowMenu.addItem(.separator())
+        add("Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), target: application, to: windowMenu)
+        return mainMenu
     }
 
     func attachStores(monitor: MonitorStore, control: ProviderControlStore) {
@@ -72,6 +144,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             return
         }
 
+        installApplicationMenus()
         ApplicationAppearance.applyStored()
         NSApplication.shared.setActivationPolicy(.accessory)
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -264,54 +337,6 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             await CLIUpdateStatusStore.shared.stop()
             await monitorStore.stop()
         }
-    }
-}
-
-struct AppSettingsObservedSceneRoot: View {
-    @ObservedObject var delegate: DarkbloomMonitorAppDelegate
-
-    var body: some View {
-        AppSettingsSceneRoot(
-            controlStore: delegate.controlStore,
-            monitorStore: delegate.monitorStore
-        )
-    }
-}
-
-struct AppSettingsSceneRoot: View {
-    let controlStore: ProviderControlStore?
-    var monitorStore: MonitorStore? = nil
-
-    @ViewBuilder
-    var body: some View {
-        if let controlStore, let monitorStore {
-            ProviderSettingsRoot(controlStore: controlStore, monitorStore: monitorStore)
-        } else {
-            ProgressView("Starting \(MonitorApplicationIdentity.displayName)…")
-                .frame(width: 420, height: 180)
-        }
-    }
-}
-
-struct ProviderSettingsRoot: View {
-    @ObservedObject var controlStore: ProviderControlStore
-    var monitorStore: MonitorStore? = nil
-    var extrasStore: ProviderExtrasStore? { monitorStore?.providerExtras }
-
-    var body: some View {
-        MonitorSettingsView(
-            extrasStore: extrasStore,
-            controlStore: controlStore,
-            monitorStore: monitorStore
-        )
-        .frame(width: 900, height: 650)
-    }
-}
-
-private struct ControlAppUpdateMenuItem: View {
-    @ObservedObject var updater = ControlAppUpdater.shared
-    var body: some View {
-        Button("Check for Updates…", action: updater.check).disabled(!updater.canCheck)
     }
 }
 

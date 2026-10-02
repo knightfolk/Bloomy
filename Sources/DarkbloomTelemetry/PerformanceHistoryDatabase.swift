@@ -60,13 +60,18 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
             )
             """)
         try Self.execute(pointer, """
-            CREATE INDEX IF NOT EXISTS performance_history_observed_at
-            ON performance_history (observed_at, id)
+            CREATE INDEX IF NOT EXISTS performance_history_time_order
+            ON performance_history (observed_at)
             """)
         try Self.execute(pointer, """
-            CREATE INDEX IF NOT EXISTS performance_history_model_observed_at
-            ON performance_history (model, observed_at, id)
+            CREATE INDEX IF NOT EXISTS performance_history_model_time_order
+            ON performance_history (model, observed_at)
             """)
+        // SQLite appends rowid to these indexes, matching chronological
+        // insertion order without sorting tied timestamps. Create replacements
+        // before removing the older indexes; measurements remain untouched.
+        try Self.execute(pointer, "DROP INDEX IF EXISTS performance_history_observed_at")
+        try Self.execute(pointer, "DROP INDEX IF EXISTS performance_history_model_observed_at")
         try makePrivateFiles()
         try prune()
     }
@@ -115,6 +120,7 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
     /// Chronological order, including unavailable/stale rows so callers can
     /// show gaps. Model filters refer only to the serving model on the sample.
     public func samples(in interval: DateInterval, model: String? = nil) throws -> [PerformanceSample] {
+        try Task.checkCancellation()
         guard PerformanceSample.validTimestamp(interval.start), PerformanceSample.validTimestamp(interval.end),
               interval.duration.isFinite, interval.duration >= 0 else { throw PerformanceHistoryDatabaseError.invalidInterval }
         if let model, !PerformanceSample(model: model).isValid { throw PerformanceHistoryDatabaseError.invalidSample }
@@ -160,6 +166,8 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
     private func rows(_ statement: OpaquePointer) throws -> [PerformanceSample] {
         var result: [PerformanceSample] = []
         while true {
+            // Bound obsolete decoding work when a view's read task is cancelled.
+            if result.count.isMultiple(of: 64) { try Task.checkCancellation() }
             switch sqlite3_step(statement) {
             case SQLITE_DONE: return result
             case SQLITE_ROW: result.append(try decode(statement))
@@ -196,8 +204,13 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
         defer { sqlite3_finalize(statement) }
         try checked(sqlite3_bind_double(statement, 1, time.addingTimeInterval(-Double(retentionDays) * 86_400).timeIntervalSince1970))
         guard sqlite3_step(statement) == SQLITE_DONE else { throw PerformanceHistoryDatabaseError.unavailable }
-        // Select only overflow rows, instead of rebuilding a 100k-ID membership
-        // set and scanning every payload on each periodic write.
+        // COUNT(*) uses SQLite's compact b-tree count. Below the cap there is
+        // no reason to walk every retained index entry with OFFSET on each tick.
+        let count = try prepare("SELECT COUNT(*) FROM performance_history")
+        defer { sqlite3_finalize(count) }
+        guard sqlite3_step(count) == SQLITE_ROW else { throw PerformanceHistoryDatabaseError.unavailable }
+        guard sqlite3_column_int64(count, 0) > Int64(historyLimit) else { return }
+        // Only actual overflow needs a chronological index walk.
         let overflow = try prepare("""
             DELETE FROM performance_history WHERE rowid IN (
                 SELECT rowid FROM performance_history

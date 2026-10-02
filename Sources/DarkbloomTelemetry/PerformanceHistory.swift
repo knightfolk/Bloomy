@@ -70,7 +70,7 @@ public struct PerformanceSample: Codable, Equatable, Identifiable, Sendable {
               residentModels.count <= 256, advertisedModels.count <= 256,
               residentModels.allSatisfy(Self.validModel), advertisedModels.allSatisfy(Self.validModel),
               providerSession.map(Self.validSession) ?? true,
-              autopilotPhase.map({ ["off", "waiting", "shadow", "active", "paused", "transitioning", "recovering"].contains($0) }) ?? true,
+              autopilotPhase.map(KnownAutopilotPhase.contains) ?? true,
               activeRequests.map({ (0...1_000_000).contains($0) }) ?? true,
               tokensGenerated.map({ $0 >= 0 }) ?? true,
               requestsServed.map({ $0 >= 0 }) ?? true else { return false }
