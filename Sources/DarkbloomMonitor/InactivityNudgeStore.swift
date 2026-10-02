@@ -12,7 +12,17 @@ final class InactivityNudgeStore: ObservableObject {
     @Published private(set) var enabled: Bool
     @Published private(set) var inactivityMinutes: Int
     @Published private(set) var status = "Automatic nudge is off."
-    @Published private(set) var keyPresent: Bool
+    /// Nil means the metadata lookup is still in progress. Presence never
+    /// reads the secret and does not promise that a later request can use it.
+    @Published private(set) var keyPresence: ConsumerKeyPresence?
+    var keyPresent: Bool { keyPresence == .configured }
+    var keyStatusNotice: String? {
+        switch keyPresence {
+        case nil: "Checking saved key…"
+        case .unavailable: "Keychain status is unavailable. Try again."
+        case .configured, .missing: nil
+        }
+    }
     @Published private(set) var lastAttempt: Date?
     @Published private(set) var isManuallyNudging = false
     @Published private(set) var manualStatus: String?
@@ -32,13 +42,16 @@ final class InactivityNudgeStore: ObservableObject {
     private var lastCheck: Date?
     private var attempts: [Double]
     private var invalidLedger = false
+    private var keyStatusTask: Task<Void, Never>?
+    private var keyStatusGeneration = 0
     private static let prefix = "inactivityNudge."
 
     /// A manual request still needs fresh, idle evidence and an exclusive
     /// self-route key, but it does not consume the automatic watcher's budget.
     var manualUnavailableReason: String? {
         if isManuallyNudging || task != nil { return "A nudge is already in progress." }
-        if !keyStore.hasKey { return "Add a nudge key below." }
+        if let keyStatusNotice { return keyStatusNotice }
+        if !keyPresent { return "Add a nudge key below." }
         if !canAct() { return "Finish the current provider action before nudging." }
         if Self.manualEligibleState(latestState, at: now()) == nil {
             return "Wait for fresh idle state with exactly one warm model."
@@ -66,12 +79,54 @@ final class InactivityNudgeStore: ObservableObject {
         enabled = defaults.bool(forKey: Self.prefix + "enabled")
         let savedMinutes = defaults.integer(forKey: Self.prefix + "minutes")
         inactivityMinutes = [15, 30, 60].contains(savedMinutes) ? savedMinutes : 15
-        keyPresent = keyStore.hasKey
+        keyPresence = nil
         let saved = defaults.object(forKey: Self.prefix + "attempts")
         attempts = saved as? [Double] ?? []
         invalidLedger = saved != nil && saved as? [Double] == nil
         lastAttempt = attempts.filter { $0.isFinite }.max().map(Date.init(timeIntervalSince1970:))
-        if enabled { status = "Waiting for fresh idle evidence." }
+        if enabled { status = "Checking saved key…" }
+        beginKeyStatusCheck()
+    }
+
+    /// Joins an in-flight metadata check or retries an unavailable status.
+    /// The synchronous Security call runs outside the main actor.
+    func refreshKeyStatus() async {
+        if keyStatusTask == nil { beginKeyStatusCheck() }
+        await keyStatusTask?.value
+    }
+
+    private func invalidateKeyStatus() {
+        keyStatusGeneration += 1
+        keyStatusTask?.cancel()
+        keyStatusTask = nil
+    }
+
+    private func beginKeyStatusCheck(reportRemoval: Bool = false) {
+        keyPresence = nil
+        let ticket = keyStatusGeneration
+        let keyStore = keyStore
+        keyStatusTask = Task { [weak self] in
+            let result = await keyStore.keyPresenceInBackground()
+            guard !Task.isCancelled, let self, self.keyStatusGeneration == ticket else { return }
+            self.keyPresence = result
+            self.keyStatusTask = nil
+            if reportRemoval {
+                let removed = result == .missing
+                self.actionHistory?.record(action: .nudgeKey, trigger: .manual,
+                    outcome: removed ? .succeeded : .failed,
+                    reason: removed ? .disabled : .requestFailed)
+                let message = switch result {
+                case .missing: "Add a nudge key below."
+                case .configured: "Keychain could not remove the nudge key."
+                case .unavailable: "Could not verify key removal. Refresh key status."
+                }
+                self.manualStatus = message
+                self.status = message
+            } else if self.enabled {
+                self.status = self.keyStatusNotice
+                    ?? (self.keyPresent ? "Waiting for fresh idle evidence." : "Add a nudge key in Settings.")
+            }
+        }
     }
 
     func setEnabled(_ value: Bool) {
@@ -79,7 +134,9 @@ final class InactivityNudgeStore: ObservableObject {
         actionHistory?.record(action: .nudgeSettings, trigger: .manual, outcome: .succeeded, reason: value ? .completed : .disabled)
         defaults.set(value, forKey: Self.prefix + "enabled")
         resetPending()
-        status = value ? "Waiting for fresh idle evidence." : "Automatic nudge is off."
+        status = value ? (keyStatusNotice
+            ?? (keyPresent ? "Waiting for fresh idle evidence." : "Add a nudge key in Settings."))
+            : "Automatic nudge is off."
     }
 
     func setInactivityMinutes(_ value: Int) {
@@ -93,7 +150,8 @@ final class InactivityNudgeStore: ObservableObject {
     func saveKey(_ key: String) -> String? {
         do {
             try keyStore.store(key)
-            keyPresent = keyStore.hasKey
+            invalidateKeyStatus()
+            keyPresence = .configured
             resetPending()
             actionHistory?.record(action: .nudgeKey, trigger: .manual, outcome: .succeeded)
             manualStatus = "Nudge key saved securely."
@@ -105,12 +163,11 @@ final class InactivityNudgeStore: ObservableObject {
 
     func removeKey() {
         resetPending()
+        invalidateKeyStatus()
         keyStore.remove()
-        keyPresent = keyStore.hasKey
-        actionHistory?.record(action: .nudgeKey, trigger: .manual, outcome: keyPresent ? .failed : .succeeded, reason: keyPresent ? .requestFailed : .disabled)
-        status = keyPresent ? "Keychain could not remove the key." : "Add a nudge key in Settings."
-        manualStatus = keyPresent ? "Keychain could not remove the nudge key."
-            : "Add a nudge key below."
+        manualStatus = "Checking saved key…"
+        status = "Checking saved key…"
+        beginKeyStatusCheck(reportRemoval: true)
     }
 
     func stop() async {
@@ -149,8 +206,8 @@ final class InactivityNudgeStore: ObservableObject {
         guard enabled, keyPresent else {
             policy.reset()
             eligibleSince = nil
-            status = enabled ? "Add a nudge key in Settings." : "Automatic nudge is off."
-            recordWatcherPause(enabled ? .keyMissing : .disabled)
+            status = enabled ? (keyStatusNotice ?? "Add a nudge key in Settings.") : "Automatic nudge is off."
+            recordWatcherPause(enabled ? (keyPresence == .missing ? .keyMissing : .providerNotReady) : .disabled)
             return
         }
         // While our task owns the control gate, keep consuming telemetry so
@@ -248,8 +305,9 @@ final class InactivityNudgeStore: ObservableObject {
                     self.manualStatus = "Self-test responded. Public work is not guaranteed."
                     return true
                 case .missingKey:
-                    self.keyPresent = self.keyStore.hasKey
-                    self.manualStatus = "Nudge key is unavailable. Add it below."
+                    self.invalidateKeyStatus()
+                    self.beginKeyStatusCheck()
+                    self.manualStatus = "Nudge key is unavailable. Check Keychain access or replace it in Settings."
                 case .keyRejected:
                     self.manualStatus = "Nudge key was rejected. Update it below."
                 case .modelUnavailable:
@@ -316,7 +374,7 @@ final class InactivityNudgeStore: ObservableObject {
 
     private func manualCandidateValid(ticket: Int, candidate: ManualCandidate) -> Bool {
         guard !Task.isCancelled, generation == ticket, isManuallyNudging,
-              keyStore.hasKey,
+              keyPresent,
               let state = Self.manualEligibleState(latestState, at: now()) else { return false }
         return state.processIdentity == candidate.processIdentity
             && state.currentModel == candidate.model

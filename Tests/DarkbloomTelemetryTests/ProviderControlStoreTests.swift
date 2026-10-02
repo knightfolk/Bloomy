@@ -10,6 +10,93 @@ private let providerControlTestNow = Date(timeIntervalSince1970: 1_750_000_000)
 @Suite("Provider control store")
 @MainActor
 struct ProviderControlStoreTests {
+    @Test("first catalog failure keeps saved limits visible without enabling model actions")
+    func savedCapacitySurvivesCatalogFailure() async throws {
+        let controller = FakeProviderController.fixture()
+        await controller.failRefresh(with: ProviderControlError.inventoryUnavailable("Model catalog is unavailable"))
+        let store = ProviderControlStore(controller: controller, now: { providerControlTestNow })
+        await store.refresh()
+
+        #expect(store.savedCapacity.value?.enabledModelCount == 1)
+        #expect(store.snapshot == nil)
+        #expect(store.draft == nil)
+        #expect(!store.canSave)
+        #expect(!store.canApplyLive)
+        #expect(!store.canDownload("saved-model"))
+        #expect(store.swapModelUnavailableReason(for: "saved-model") != nil)
+        #expect(store.draftValidationMessage == "Refresh the model catalog before changing provider settings")
+        #expect(store.applyLiveUnavailableReason == "Refresh model controls before applying live")
+        let presentation = ProviderLifecyclePresentation.make(
+            providerKnownRunning: false, operation: store.operation,
+            enabledModels: store.draft?.original.enabled ?? []
+        )
+        #expect(!presentation.canStart)
+        #expect(!presentation.canRestart)
+        #expect(await controller.executedActions.isEmpty)
+        #expect(await controller.saveCount == 0)
+    }
+
+    @Test("saved capacity uses original values and cannot replace staged edits")
+    func savedCapacityPreservesDraft() async throws {
+        let controller = FakeProviderController.fixture()
+        let store = ProviderControlStore(controller: controller, now: { providerControlTestNow })
+        await store.refresh()
+        store.setMaxModelSlots(2)
+        store.setEnabled(true, modelID: "second-model")
+        let staged = try #require(store.draft)
+        await controller.failRefresh(with: ProviderControlError.inventoryUnavailable("Model catalog is unavailable"))
+        await store.refreshPreservingDraft()
+
+        #expect(store.draft == staged)
+        #expect(store.savedCapacity.value?.maxModelSlots == staged.originalMaxModelSlots)
+        #expect(store.savedCapacity.value?.enabledModelCount == staged.original.enabled.count)
+        #expect(store.savedCapacity.value?.enabledModelCount != staged.selection.enabled.count)
+    }
+
+    @Test("failed saved-capacity reads retain a labeled stale value and hide raw errors")
+    func savedCapacityFailureIsStale() async throws {
+        let controller = FakeProviderController.fixture()
+        let store = ProviderControlStore(controller: controller, now: { providerControlTestNow })
+        await controller.failRefresh(with: ProviderControlError.inventoryUnavailable("Model catalog is unavailable"))
+        await store.refresh()
+        let original = try #require(store.savedCapacity.value)
+        await controller.failSavedCapacity()
+        await store.refresh()
+
+        #expect(store.draft == nil)
+        #expect(store.snapshot == nil)
+        #expect(store.savedCapacity == .stale(value: original, capturedAt: providerControlTestNow,
+            reason: "Saved capacity settings could not be read."))
+        #expect(store.errorMessage == "Model catalog is unavailable")
+    }
+
+    @Test("first saved-capacity failure exposes a safe read failure rather than inventing defaults")
+    func initialSavedCapacityFailure() async throws {
+        let controller = FakeProviderController.fixture()
+        await controller.failSavedCapacity()
+        await controller.failRefresh(with: ProviderControlError.inventoryUnavailable("Model catalog is unavailable"))
+        let store = ProviderControlStore(controller: controller)
+        await store.refresh()
+        #expect(store.savedCapacity == .unavailable(reason: "Saved capacity settings could not be read."))
+        #expect(store.draft == nil)
+        #expect(!store.canSave)
+        #expect(store.errorMessage == "Model catalog is unavailable")
+    }
+
+    @Test("saved-capacity cancellation ends refresh without launching catalog work or showing an error")
+    func savedCapacityCancellationStopsRefresh() async throws {
+        let controller = FakeProviderController.fixture()
+        await controller.cancelSavedCapacityRead()
+        let store = ProviderControlStore(controller: controller)
+        await store.refresh()
+
+        #expect(await controller.refreshCount == 0)
+        #expect(store.savedCapacity.value == nil)
+        #expect(store.snapshot == nil)
+        #expect(store.errorMessage == nil)
+        #expect(store.operation == .idle)
+    }
+
     @Test("idle restart still confirms a different advertised set and rechecks changes")
     func restartConfirmsSelectionChanges() async throws {
         // Selection confirmation is the subject here, not wall-clock expiry.
@@ -2253,7 +2340,7 @@ private func swapFixture(
     )
 }
 
-private actor FakeProviderController: ProviderControlling {
+private actor FakeProviderController: ProviderControlling, ProviderSavedCapacityReading {
     enum Failure: Error, Sendable {
         case secret(String)
         case nonzero
@@ -2268,6 +2355,8 @@ private actor FakeProviderController: ProviderControlling {
     private var currentSnapshot: ProviderControlSnapshot
     private var refreshFailure: Failure?
     private var refreshControlFailure: ProviderControlError?
+    private var savedCapacityShouldFail = false
+    private var savedCapacityShouldCancel = false
     private var activityRisks: [ProviderActivityRisk]
     private let blockDownload: Bool
     private let downloadChunks: [ProcessOutputChunk]
@@ -2393,6 +2482,15 @@ private actor FakeProviderController: ProviderControlling {
         self.failRefreshAfterExecute = failRefreshAfterExecute
         self.reconciliationRefreshGate = reconciliationRefreshGate
     }
+
+    func readSavedCapacity() async throws -> ProviderSavedCapacity {
+        if savedCapacityShouldCancel { throw CancellationError() }
+        if savedCapacityShouldFail { throw Failure.secret("Authorization: Bearer capacity-secret") }
+        return ProviderSavedCapacity(draft: currentSnapshot.draft)
+    }
+
+    func failSavedCapacity() { savedCapacityShouldFail = true }
+    func cancelSavedCapacityRead() { savedCapacityShouldCancel = true }
 
     func refresh() async throws -> ProviderControlSnapshot {
         refreshCount += 1

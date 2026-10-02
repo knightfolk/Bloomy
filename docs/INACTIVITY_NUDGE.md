@@ -6,9 +6,11 @@ Automatic nudge is an opt-in watcher for a provider that appears idle. It runs o
 
 In **Settings → Provider**, find **Automatic nudge**. Supply a Darkbloom consumer key restricted to **“my machine only”** in **Nudge setup**. Bloomy stores this as a dedicated watcher credential in the macOS Keychain, separate from provider credentials and local API tokens. The entry is masked; the saved key is never displayed. Remove it from the same section when you no longer want the watcher to use it. Choose an idle interval and turn on Automatic nudge. Disabling the toggle stops new attempts without removing the saved key.
 
+Manual and automatic nudges use the same saved nudge key. On opening Bloomy, a background metadata check shows **Checking saved key…** until macOS responds. An unavailable Keychain status has a **Check again** action; it does not send you through setup or ask for another key. Presence establishes only that a key is saved. The request client still reads and validates it before sending.
+
 ## When an attempt is allowed
 
-The watcher needs fresh account evidence that covers the observation interval: fetched account earnings rows must show positive base rewards and zero work rows during that interval. It also needs exactly one advertised warm model. It pauses when the provider is busy, evidence is stale or missing, the model is switching, or more than one model is warm. It does not use a paid fallback.
+The watcher needs fresh account evidence that covers the observation interval: fetched account earnings rows must show positive base rewards and zero work rows during that interval. It also needs exactly one warm model that is advertised. Other models may stay advertised. It pauses when the provider is busy, evidence is stale or missing, a model switch is in progress, or more than one model is warm. It does not use a paid fallback.
 
 An attempt starts a one-hour cooldown. At most three attempts can be made in a rolling 24-hour period, including failed attempts. These limits prevent a keep-alive traffic loop; they are not a schedule for guaranteed requests. The status and last-attempt time in Settings show what the watcher currently knows.
 

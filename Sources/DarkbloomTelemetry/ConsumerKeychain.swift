@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 /// Format validation for a consumer API key pasted by the user. Validation is
@@ -40,6 +41,14 @@ extension ConsumerKeyStoreError: LocalizedError {
     }
 }
 
+/// Configuration presence does not establish that a stored key is readable,
+/// structurally valid, or accepted by the API. Those checks happen on use.
+public enum ConsumerKeyPresence: Equatable, Sendable {
+    case configured
+    case missing
+    case unavailable
+}
+
 /// Read access to the stored consumer API key. The key is observable only
 /// inside the closure, mirroring `LocalEndpointTokenFile`, so it is never
 /// held as a loggable property. The consumer key is a distinct credential
@@ -49,6 +58,26 @@ public protocol ConsumerKeyReading: Sendable {
     @discardableResult
     func withConsumerKey<R>(_ body: (String) throws -> R) rethrows -> R?
     var hasKey: Bool { get }
+    func keyPresence() -> ConsumerKeyPresence
+}
+
+public extension ConsumerKeyReading {
+    /// Preserves compatibility with existing in-memory key-store conformers.
+    func keyPresence() -> ConsumerKeyPresence {
+        hasKey ? .configured : .missing
+    }
+
+    /// Keychain queries are synchronous even when no secret data is requested.
+    /// Use this helper for UI status so they cannot block the main actor.
+    func keyPresenceInBackground() async -> ConsumerKeyPresence {
+        guard !Task.isCancelled else { return .unavailable }
+        let presence = await Task.detached(priority: .utility) {
+            self.keyPresence()
+        }.value
+        // A synchronous Keychain operation cannot be interrupted once entered.
+        // Do not report a successful result to a caller that canceled its check.
+        return Task.isCancelled ? .unavailable : presence
+    }
 }
 
 /// Key management on top of read access. Implemented by the Keychain store
@@ -66,10 +95,22 @@ public struct KeychainConsumerKeyStore: ConsumerKeyManaging, Sendable {
 
     private let service: String
     private let account: String
+    private let presenceLookup: @Sendable ([String: Any]) -> OSStatus
 
     public init(service: String = KeychainConsumerKeyStore.defaultService, account: String = "default") {
         self.service = service
         self.account = account
+        self.presenceLookup = { query in
+            SecItemCopyMatching(query as CFDictionary, nil)
+        }
+    }
+
+    /// Allows presence-query tests without reading or changing the Keychain.
+    init(service: String, account: String = "default",
+         presenceLookup: @escaping @Sendable ([String: Any]) -> OSStatus) {
+        self.service = service
+        self.account = account
+        self.presenceLookup = presenceLookup
     }
 
     public func store(_ key: String) throws {
@@ -118,6 +159,22 @@ public struct KeychainConsumerKeyStore: ConsumerKeyManaging, Sendable {
 
     public var hasKey: Bool {
         withConsumerKey { _ in true } ?? false
+    }
+
+    public func keyPresence() -> ConsumerKeyPresence {
+        var query = baseQuery()
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        query[kSecUseAuthenticationContext as String] = context
+        // Keep the existing backend and search scope. In particular, requesting
+        // attributes avoids the legacy Keychain's secret-decryption/ACL path.
+        switch presenceLookup(query) {
+        case errSecSuccess: return .configured
+        case errSecItemNotFound: return .missing
+        default: return .unavailable
+        }
     }
 
     private func baseQuery() -> [String: Any] {

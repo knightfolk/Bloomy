@@ -98,7 +98,15 @@ final class ChatStore: ObservableObject {
     @Published private(set) var balanceCheckFailed = false
     @Published private(set) var pricing: PublicPricingSnapshot?
     @Published private(set) var pricingUnavailable = false
-    @Published private(set) var consumerKeyPresent: Bool
+    @Published private(set) var keyPresence: ConsumerKeyPresence?
+    var consumerKeyPresent: Bool { keyPresence == .configured }
+    var keyStatusNotice: String? {
+        switch keyPresence {
+        case nil: "Checking saved key…"
+        case .unavailable: "Keychain status is unavailable. Try again."
+        case .configured, .missing: nil
+        }
+    }
     /// Fixed-string transient status for the composer area.
     @Published private(set) var notice: String?
 
@@ -114,6 +122,8 @@ final class ChatStore: ObservableObject {
     /// discarded against this generation so they cannot repopulate state the
     /// new key has not vouched for.
     private var networkCredentialGeneration = 0
+    private var keyStatusTask: Task<Void, Never>?
+    private var keyStatusGeneration = 0
 
     init(
         localClient: LocalChatRouteClient,
@@ -129,7 +139,8 @@ final class ChatStore: ObservableObject {
         self.pricingClient = pricingClient
         self.keyStore = keyStore
         self.now = now
-        consumerKeyPresent = keyStore.hasKey
+        keyPresence = nil
+        beginKeyStatusCheck()
     }
 
     // MARK: Conversation lifecycle
@@ -310,6 +321,30 @@ final class ChatStore: ObservableObject {
 
     // MARK: Consumer key
 
+    /// Presence checks do not decrypt the key or wait on the main actor.
+    func refreshKeyStatus() async {
+        if keyStatusTask == nil { beginKeyStatusCheck() }
+        await keyStatusTask?.value
+    }
+
+    private func invalidateKeyStatus() {
+        keyStatusGeneration += 1
+        keyStatusTask?.cancel()
+        keyStatusTask = nil
+    }
+
+    private func beginKeyStatusCheck() {
+        keyPresence = nil
+        let ticket = keyStatusGeneration
+        let keyStore = keyStore
+        keyStatusTask = Task { [weak self] in
+            let result = await keyStore.keyPresenceInBackground()
+            guard !Task.isCancelled, let self, self.keyStatusGeneration == ticket else { return }
+            self.keyPresence = result
+            self.keyStatusTask = nil
+        }
+    }
+
     /// Stores the pasted consumer API key in the macOS Keychain. Returns a
     /// fixed error message on failure; never the key. Network model
     /// verification is credential-scoped: the verified list and readiness
@@ -324,14 +359,16 @@ final class ChatStore: ObservableObject {
         } catch {
             return "The key could not be stored."
         }
-        consumerKeyPresent = keyStore.hasKey
+        invalidateKeyStatus()
+        keyPresence = .configured
         invalidateNetworkReadiness()
         return nil
     }
 
     func removeConsumerKey() {
+        invalidateKeyStatus()
         keyStore.remove()
-        consumerKeyPresent = keyStore.hasKey
+        beginKeyStatusCheck()
         invalidateNetworkReadiness()
     }
 
@@ -522,8 +559,15 @@ final class ChatStore: ObservableObject {
             throw ChatSendBlocked.needsPaidAcknowledgement
         }
         // Re-read the keychain at send time; a removed key stops the send.
-        guard keyStore.hasKey else {
-            consumerKeyPresent = false
+        let presence = await keyStore.keyPresenceInBackground()
+        try Task.checkCancellation()
+        guard credentialGeneration == networkCredentialGeneration,
+              conversation?.id == conversationID else {
+            throw ChatSendBlocked.credentialChanged
+        }
+        guard presence == .configured else {
+            keyPresence = presence
+            if presence == .unavailable { throw ChatSendBlocked.keyStatusUnavailable }
             throw ChatClientError.missingConsumerKey
         }
         if !pricingIsFresh {
@@ -692,6 +736,7 @@ enum ChatSendBlocked: Error {
     case noAvailableCredit
     case balanceCheckFailed(String)
     case credentialChanged
+    case keyStatusUnavailable
 
     var message: String {
         switch self {
@@ -707,6 +752,8 @@ enum ChatSendBlocked: Error {
             "The balance could not be verified, so the send was stopped. \(detail)"
         case .credentialChanged:
             "The consumer API key changed before the request was sent, so the send was stopped. Send again after the new key's verification."
+        case .keyStatusUnavailable:
+            "Keychain status could not be checked, so the send was stopped. Check key access in Chat settings."
         }
     }
 }

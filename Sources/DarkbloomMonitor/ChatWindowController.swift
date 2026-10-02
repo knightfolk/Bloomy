@@ -8,6 +8,7 @@ import SwiftUI
 final class ChatWindowController: NSWindowController, NSWindowDelegate {
     private let store: ChatStore
     private let frameAutosaveName: String?
+    private var isTransitioningFullScreen = false
 
     init(
         store: ChatStore,
@@ -20,6 +21,7 @@ final class ChatWindowController: NSWindowController, NSWindowDelegate {
         let window = NSWindow(contentViewController: content)
         window.title = "\(MonitorApplicationIdentity.displayName) — Chat"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.collectionBehavior.insert(.fullScreenPrimary)
         window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 560, height: 680))
         window.contentMinSize = NSSize(width: 460, height: 520)
@@ -49,8 +51,38 @@ final class ChatWindowController: NSWindowController, NSWindowDelegate {
         constrainToVisibleScreen()
     }
 
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        isTransitioningFullScreen = true
+    }
+
+    func windowWillExitFullScreen(_ notification: Notification) {
+        isTransitioningFullScreen = true
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        isTransitioningFullScreen = false
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        finishFullScreenTransition()
+    }
+
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        finishFullScreenTransition()
+    }
+
+    func windowDidFailToExitFullScreen(_ window: NSWindow) {
+        finishFullScreenTransition()
+    }
+
+    private func finishFullScreenTransition() {
+        isTransitioningFullScreen = false
+        constrainToVisibleScreen()
+    }
+
     private func constrainToVisibleScreen() {
-        guard let window,
+        guard !isTransitioningFullScreen,
+              let window, !window.styleMask.contains(.fullScreen),
               let screen = window.screen ?? NSScreen.main ?? NSScreen.screens.first
         else { return }
         let visibleFrame = screen.visibleFrame

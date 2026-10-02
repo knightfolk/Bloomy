@@ -409,11 +409,13 @@ struct ChatView: View {
             showsKeyEditor = true
         } label: {
             Label(
-                store.consumerKeyPresent ? "Key saved" : "Add key",
+                store.consumerKeyPresent ? "Key saved"
+                    : store.keyPresence == nil ? "Checking key…"
+                    : store.keyPresence == .unavailable ? "Check key" : "Add key",
                 systemImage: "key"
             )
         }
-        .foregroundStyle(store.consumerKeyPresent ? Color.primary : Color.orange)
+        .foregroundStyle(store.keyPresence == .missing ? Color.orange : Color.primary)
         .help("Manage the Darkbloom consumer API key used for the paid network route. It is stored only in the macOS Keychain.")
         .sheet(isPresented: $showsKeyEditor) {
             ConsumerKeyEditor(store: store, draft: $keyDraft, errorMessage: $keyError)
@@ -599,13 +601,17 @@ private struct ConsumerKeyEditor: View {
             Text("The Darkbloom network route requires a consumer API key — a separate credential from this app's provider device token and from the local endpoint token. It is stored only in the macOS Keychain, never in preferences or logs, and is never used for the local route.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            if store.consumerKeyPresent {
+            if let notice = store.keyStatusNotice {
+                KeychainPresenceStatusView(notice: notice, isChecking: store.keyPresence == nil) {
+                    Task { await store.refreshKeyStatus() }
+                }
+            } else if store.consumerKeyPresent {
                 Label("A key is saved in the Keychain.", systemImage: "checkmark.circle")
                     .foregroundStyle(.green)
                     .font(.callout)
             }
             SecureField("dk-…", text: $draft)
-                .disabled(store.consumerKeyPresent)
+                .disabled(store.keyPresence != .missing)
             if let errorMessage {
                 Text(errorMessage).font(.caption).foregroundStyle(.red)
             }
@@ -628,7 +634,7 @@ private struct ConsumerKeyEditor: View {
                     dismiss()
                 }
                     .keyboardShortcut(.cancelAction)
-                if !store.consumerKeyPresent {
+                if store.keyPresence == .missing {
                     Button("Save to Keychain") {
                         if let failure = store.storeConsumerKey(draft) {
                             errorMessage = failure

@@ -26,7 +26,12 @@ struct PopupNudgeControl: View {
                     .accessibilityIdentifier("popup.nudge.close")
             }
 
-            if !store.keyPresent {
+            if let notice = store.keyStatusNotice {
+                KeychainPresenceStatusView(notice: notice, isChecking: store.keyPresence == nil) {
+                    Task { await store.refreshKeyStatus() }
+                }
+                Spacer()
+            } else if !store.keyPresent {
                 ScrollView { NudgeSetupGuide(store: store).padding(.vertical, 4) }
             } else {
             Label("Setup complete · Key saved", systemImage: "checkmark.circle.fill")

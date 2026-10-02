@@ -15,6 +15,7 @@ struct InactivityNudgeSettingsViewTests {
             keyStore: RenderNudgeKey(), defaults: defaults,
             evidence: { _ in .unavailable }, canAct: { false }, send: { _, _ in nil }
         )
+        await store.refreshKeyStatus()
         let host = NSHostingController(rootView: Form {
             InactivityNudgeSettingsView(store: store)
         }.formStyle(.grouped))

@@ -47,7 +47,13 @@ struct InactivityNudgeSettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
 
-        if !store.keyPresent {
+        if let notice = store.keyStatusNotice {
+            Section("Saved nudge key") {
+                KeychainPresenceStatusView(notice: notice, isChecking: store.keyPresence == nil) {
+                    Task { await store.refreshKeyStatus() }
+                }
+            }
+        } else if !store.keyPresent {
             Section { NudgeSetupGuide(store: store) }
         } else {
             Section("Saved nudge key") {

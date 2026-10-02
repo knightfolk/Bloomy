@@ -17,8 +17,8 @@ struct ChatStoreTests {
         balance: FakeBalanceClient = FakeBalanceClient(),
         pricing: FakePricingClient = FakePricingClient(),
         keys: FakeConsumerKeyStore = FakeConsumerKeyStore()
-    ) -> ChatStore {
-        ChatStore(
+    ) async -> ChatStore {
+        let store = ChatStore(
             localClient: local,
             networkClient: network,
             balanceClient: balance,
@@ -26,6 +26,8 @@ struct ChatStoreTests {
             keyStore: keys,
             now: { [clock] in clock.date }
         )
+        await store.refreshKeyStatus()
+        return store
     }
 
     /// Polls the main actor until the condition holds. The budget is
@@ -46,7 +48,7 @@ struct ChatStoreTests {
     @Test("model verification expiring by time rejects the send and reports it")
     func staleVerificationRejectsSend() async {
         let local = FakeChatRouteClient()
-        let store = makeStore(local: local)
+        let store = await makeStore(local: local)
         store.startConversation(route: .local)
         await waitUntil { store.selectedModelID != nil }
 
@@ -80,7 +82,7 @@ struct ChatStoreTests {
         let network = FakeChatRouteClient()
         let keys = FakeConsumerKeyStore()
         keys.inject("dk-synthetic-consumer")
-        let store = makeStore(local: local, network: network, keys: keys)
+        let store = await makeStore(local: local, network: network, keys: keys)
 
         store.startConversation(route: .local)
         await waitUntil { !store.verifiedModelIDs.isEmpty }
@@ -108,7 +110,7 @@ struct ChatStoreTests {
         let local = FakeChatRouteClient()
         local.modelsResult = .failure(ChatClientError.localEndpointUnavailable)
         let network = FakeChatRouteClient()
-        let store = makeStore(local: local, network: network)
+        let store = await makeStore(local: local, network: network)
 
         store.startConversation(route: .local)
         await waitUntil { store.modelsNotice != nil }
@@ -124,7 +126,7 @@ struct ChatStoreTests {
     @Test("switching from paid network to local also requires an explicit new empty chat")
     func noFallbackFromNetwork() async {
         let network = FakeChatRouteClient()
-        let store = makeStore(network: network)
+        let store = await makeStore(network: network)
         network.modelsResult = .failure(ChatClientError.missingConsumerKey)
 
         store.startConversation(route: .network)
@@ -141,7 +143,7 @@ struct ChatStoreTests {
         let keys = FakeConsumerKeyStore()
         keys.inject("dk-synthetic-consumer")
         let network = FakeChatRouteClient()
-        let store = makeStore(network: network, keys: keys)
+        let store = await makeStore(network: network, keys: keys)
 
         store.startConversation(route: .network)
         await waitUntil { !store.verifiedModelIDs.isEmpty }
@@ -158,7 +160,7 @@ struct ChatStoreTests {
     @Test("missing consumer key keeps the network send disabled at the button")
     func missingKeyGate() async {
         let network = FakeChatRouteClient()
-        let store = makeStore(network: network)
+        let store = await makeStore(network: network)
 
         store.startConversation(route: .network)
         await waitUntil { !store.verifiedModelIDs.isEmpty }
@@ -186,7 +188,7 @@ struct ChatStoreTests {
                 balanceClient.result = .failure(URLError(.notConnectedToInternet))
             }
             let network = FakeChatRouteClient()
-            let store = makeStore(network: network, balance: balanceClient, keys: keys)
+            let store = await makeStore(network: network, balance: balanceClient, keys: keys)
 
             store.startConversation(route: .network)
             await waitUntil { !store.verifiedModelIDs.isEmpty }
@@ -205,7 +207,7 @@ struct ChatStoreTests {
         let balance = FakeBalanceClient()
         balance.capturedAtOffset = ConsumerBalanceSnapshot.maximumAge + 10
         let network = FakeChatRouteClient()
-        let store = makeStore(network: network, balance: balance, keys: keys)
+        let store = await makeStore(network: network, balance: balance, keys: keys)
 
         store.startConversation(route: .network)
         await waitUntil { !store.verifiedModelIDs.isEmpty }
@@ -225,7 +227,7 @@ struct ChatStoreTests {
             let pricing = FakePricingClient()
             pricing.result = .failure(PublicPricingError.httpStatus(503))
             let network = FakeChatRouteClient()
-            let store = makeStore(network: network, pricing: pricing, keys: keys)
+            let store = await makeStore(network: network, pricing: pricing, keys: keys)
             store.startConversation(route: .network)
             await waitUntil { !store.verifiedModelIDs.isEmpty }
             store.acknowledgePaidRoute()
@@ -241,7 +243,7 @@ struct ChatStoreTests {
             keys.inject("dk-synthetic-consumer")
             let pricing = FakePricingClient(prices: ["some-other-model"])
             let network = FakeChatRouteClient()
-            let store = makeStore(network: network, pricing: pricing, keys: keys)
+            let store = await makeStore(network: network, pricing: pricing, keys: keys)
             store.startConversation(route: .network)
             await waitUntil { !store.verifiedModelIDs.isEmpty }
             store.acknowledgePaidRoute()
@@ -258,7 +260,7 @@ struct ChatStoreTests {
         keys.inject("dk-synthetic-consumer")
         let network = FakeChatRouteClient()
         network.completeResult = .failure(ChatClientError.paymentRequired)
-        let store = makeStore(network: network, keys: keys)
+        let store = await makeStore(network: network, keys: keys)
 
         store.startConversation(route: .network)
         await waitUntil { !store.verifiedModelIDs.isEmpty }
@@ -276,7 +278,7 @@ struct ChatStoreTests {
         keys.inject("dk-synthetic-consumer")
         let network = FakeChatRouteClient()
         network.completeResult = .failure(ChatClientError.consumerKeyRejected)
-        let store = makeStore(network: network, keys: keys)
+        let store = await makeStore(network: network, keys: keys)
 
         store.startConversation(route: .network)
         await waitUntil { !store.verifiedModelIDs.isEmpty }
@@ -297,7 +299,7 @@ struct ChatStoreTests {
             model: "gemma-4-26b-qat-4bit",
             finishReason: "stop"
         ))
-        let store = makeStore(local: local)
+        let store = await makeStore(local: local)
         store.startConversation(route: .local)
         await waitUntil { store.selectedModelID == "gpt-oss-20b" }
         store.send("which model are you?")
@@ -317,7 +319,7 @@ struct ChatStoreTests {
         let network = FakeChatRouteClient()
         let balance = FakeBalanceClient()
         balance.suspend = true
-        let store = makeStore(network: network, balance: balance, keys: keys)
+        let store = await makeStore(network: network, balance: balance, keys: keys)
 
         store.startConversation(route: .network)
         await waitUntil { balance.pendingReleases > 0 }
@@ -338,7 +340,7 @@ struct ChatStoreTests {
     @Test("multi-turn history accumulates on the fixed route")
     func multiTurnHistory() async {
         let local = FakeChatRouteClient()
-        let store = makeStore(local: local)
+        let store = await makeStore(local: local)
         store.startConversation(route: .local)
         await waitUntil { store.selectedModelID != nil }
         store.send("first")
@@ -356,7 +358,7 @@ struct ChatStoreTests {
     func duplicateSendIgnored() async {
         let local = FakeChatRouteClient()
         local.suspendComplete = true
-        let store = makeStore(local: local)
+        let store = await makeStore(local: local)
         store.startConversation(route: .local)
         await waitUntil { !store.verifiedModelIDs.isEmpty }
         store.send("first")
@@ -373,7 +375,7 @@ struct ChatStoreTests {
     func cancelHonesty() async {
         let local = FakeChatRouteClient()
         local.suspendComplete = true
-        let store = makeStore(local: local)
+        let store = await makeStore(local: local)
         store.startConversation(route: .local)
         await waitUntil { store.selectedModelID != nil }
         store.send("cancel me")
@@ -388,7 +390,7 @@ struct ChatStoreTests {
     func cancelThenSendRace() async {
         let local = FakeChatRouteClient()
         local.suspendComplete = true
-        let store = makeStore(local: local)
+        let store = await makeStore(local: local)
         store.startConversation(route: .local)
         await waitUntil { store.selectedModelID != nil }
         store.send("old")
@@ -418,7 +420,7 @@ struct ChatStoreTests {
     func immediateCancelFinalizes() async {
         let local = FakeChatRouteClient()
         local.suspendComplete = true
-        let store = makeStore(local: local)
+        let store = await makeStore(local: local)
         store.startConversation(route: .local)
         await waitUntil { store.selectedModelID != nil }
         store.send("immediate")
@@ -438,7 +440,7 @@ struct ChatStoreTests {
     func newChatDuringInFlightSend() async {
         let local = FakeChatRouteClient()
         local.suspendComplete = true
-        let store = makeStore(local: local)
+        let store = await makeStore(local: local)
         store.startConversation(route: .local)
         await waitUntil { !store.verifiedModelIDs.isEmpty }
         store.send("old chat")
@@ -461,7 +463,7 @@ struct ChatStoreTests {
         let balance = FakeBalanceClient()
         balance.suspend = true
         let network = FakeChatRouteClient()
-        let store = makeStore(network: network, balance: balance, keys: keys)
+        let store = await makeStore(network: network, balance: balance, keys: keys)
 
         store.startConversation(route: .network)
         await waitUntil { !store.verifiedModelIDs.isEmpty }
@@ -480,7 +482,7 @@ struct ChatStoreTests {
     func staleRefreshDoesNotReselect() async {
         let local = FakeChatRouteClient()
         local.suspendModels = true
-        let store = makeStore(local: local)
+        let store = await makeStore(local: local)
         store.startConversation(route: .local)
         await waitUntil { local.pendingModelReleases > 0 }
 
@@ -505,7 +507,7 @@ struct ChatStoreTests {
     @Test("only verified models are selectable and the first is auto-selected")
     func modelSelection() async {
         let local = FakeChatRouteClient()
-        let store = makeStore(local: local)
+        let store = await makeStore(local: local)
         store.startConversation(route: .local)
         await waitUntil { store.selectedModelID == "gpt-oss-20b" }
         store.selectModel("not-verified")
@@ -539,7 +541,7 @@ struct ChatStoreTests {
         let keys = FakeConsumerKeyStore()
         keys.inject("dk-synthetic-consumer")
         let local = FakeChatRouteClient()
-        let store = makeStore(local: local, keys: keys)
+        let store = await makeStore(local: local, keys: keys)
         store.startConversation(route: .local)
         await waitUntil { store.selectedModelID != nil }
 
@@ -570,7 +572,7 @@ struct ChatStoreTests {
         keys.inject("dk-synthetic-consumer-old")
         let balance = FakeBalanceClient()
         let network = FakeChatRouteClient()
-        let store = makeStore(network: network, balance: balance, keys: keys)
+        let store = await makeStore(network: network, balance: balance, keys: keys)
 
         store.startConversation(route: .network)
         // Complete startup's display-only readiness reads before suspending
@@ -598,7 +600,7 @@ struct ChatStoreTests {
         let pricing = FakePricingClient()
         pricing.capturedAtOffset = ChatStore.pricingFreshnessWindow + 60
         let network = FakeChatRouteClient()
-        let store = makeStore(network: network, pricing: pricing, keys: keys)
+        let store = await makeStore(network: network, pricing: pricing, keys: keys)
 
         store.startConversation(route: .network)
         await waitUntil { store.selectedModelID != nil }
@@ -612,7 +614,7 @@ struct ChatStoreTests {
     @Test("history cap trims whole pairs and never starts with an orphan assistant")
     func historyCapTrimsPairs() async {
         let local = FakeChatRouteClient()
-        let store = makeStore(local: local)
+        let store = await makeStore(local: local)
         store.startConversation(route: .local)
         await waitUntil { store.selectedModelID != nil }
 
@@ -641,7 +643,7 @@ struct ChatStoreTests {
         let keys = FakeConsumerKeyStore()
         keys.inject("dk-synthetic-consumer-old")
         let balance = FakeBalanceClient()
-        let store = makeStore(balance: balance, keys: keys)
+        let store = await makeStore(balance: balance, keys: keys)
 
         store.startConversation(route: .network)
         await waitUntil { store.selectedModelID != nil }
@@ -660,15 +662,16 @@ struct ChatStoreTests {
         await store.refreshModels()
         await waitUntil { store.selectedModelID != nil }
         store.removeConsumerKey()
+        await store.refreshKeyStatus()
         #expect(store.networkModels == nil)
         #expect(store.selectedModelID == nil)
         #expect(store.consumerKeyPresent == false)
     }
 
     @Test("invalid key material is refused with a fixed message and never stored")
-    func invalidKeyRefused() {
+    func invalidKeyRefused() async {
         let keys = FakeConsumerKeyStore()
-        let store = makeStore(keys: keys)
+        let store = await makeStore(keys: keys)
         let message = store.storeConsumerKey("has spaces")
         #expect(message == ConsumerKeyStoreError.invalidKey.errorDescription)
         #expect(store.consumerKeyPresent == false)

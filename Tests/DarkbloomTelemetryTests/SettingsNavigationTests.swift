@@ -59,6 +59,18 @@ struct SettingsNavigationTests {
         }
     }
 
+    @Test("the View menu uses the native full-screen responder action and standard shortcut")
+    func fullScreenResponderCommand() throws {
+        let menu = DarkbloomMonitorAppDelegate().makeMainMenu()
+        let view = try #require(menu.items.first { $0.title == "View" }?.submenu)
+        #expect(view.autoenablesItems)
+        let fullScreen = try #require(view.items.first { $0.action == #selector(NSWindow.toggleFullScreen(_:)) })
+        #expect(fullScreen.title == "Enter Full Screen")
+        #expect(fullScreen.target == nil)
+        #expect(fullScreen.keyEquivalent == "f")
+        #expect(fullScreen.keyEquivalentModifierMask == [.command, .control])
+    }
+
     @Test("native Edit selectors perform Undo, Redo and Select All in a native editor")
     func nativeTextEditing() throws {
         let editor = NSTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 160))
@@ -89,21 +101,49 @@ struct SettingsNavigationTests {
         #expect(editor.selectedRange() == NSRange(location: 0, length: 6))
     }
 
-    @Test("native Services and Window menus are registered with the application")
+    @Test("native Services, Window and Help menus are registered with the application")
     func registersApplicationMenus() throws {
         let application = NSApplication.shared
-        let original = (application.mainMenu, application.servicesMenu, application.windowsMenu)
+        let original = (application.mainMenu, application.servicesMenu, application.windowsMenu, application.helpMenu)
         defer {
             application.mainMenu = original.0
             application.servicesMenu = original.1
             application.windowsMenu = original.2
+            application.helpMenu = original.3
         }
         let delegate = DarkbloomMonitorAppDelegate()
         delegate.installApplicationMenus()
         let main = try #require(application.mainMenu)
-        #expect(main.items.map(\.title) == [MonitorApplicationIdentity.displayName, "Edit", "Window"])
+        #expect(main.items.map(\.title) == [MonitorApplicationIdentity.displayName, "Edit", "View", "Window", "Help"])
         #expect(application.servicesMenu === main.items.first?.submenu?.items.first { $0.title == "Services" }?.submenu)
         #expect(application.windowsMenu === main.items.first { $0.title == "Window" }?.submenu)
+        #expect(application.helpMenu === main.items.first { $0.title == "Help" }?.submenu)
+    }
+
+    @Test("Bloomy Help opens Support in the existing dashboard")
+    func helpMenuReusesDashboard() throws {
+        let suite = "MenuHelpRouting-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(SettingsPage.electricity.rawValue, forKey: "dashboard.settingsPage")
+        let monitor = MonitorStore(service: TelemetryService(source: NavigationUnusedSource()), initial: .unavailable(now: Date()))
+        let status = StatusItemController(store: monitor, defaults: defaults)
+        defer { status.invalidate() }
+        status.showDashboard(section: .models, activate: false)
+        let dashboard = try #require(status.dashboardWindowController)
+        let window = try #require(dashboard.window)
+        let frame = window.frame
+        let delegate = DarkbloomMonitorAppDelegate(instanceGuard: SingleInstanceGuard(), statusItemController: status)
+        let help = try #require(delegate.makeMainMenu().items.first { $0.title == "Help" }?.submenu)
+        let item = try #require(help.items.first { $0.title == "\(MonitorApplicationIdentity.displayName) Help" })
+        #expect(item.target === delegate)
+        #expect(item.action == #selector(DarkbloomMonitorAppDelegate.showSupport))
+        #expect(NSApplication.shared.sendAction(try #require(item.action), to: item.target, from: item))
+        #expect(status.dashboardWindowController === dashboard)
+        #expect(dashboard.window === window)
+        #expect(dashboard.navigation.selected == .settings)
+        #expect(dashboard.navigation.settingsPage == .support)
+        #expect(window.frame == frame)
     }
 
     @Test("the menu Settings action reuses the existing dashboard and selected Settings page")

@@ -14,10 +14,10 @@ struct ChatViewTests {
     private func makeStore(
         local: FakeChatRouteClient = FakeChatRouteClient(),
         network: FakeChatRouteClient = FakeChatRouteClient()
-    ) -> ChatStore {
+    ) async -> ChatStore {
         let keys = FakeConsumerKeyStore()
         keys.inject("dk-synthetic-consumer")
-        return ChatStore(
+        let store = ChatStore(
             localClient: local,
             networkClient: network,
             balanceClient: FakeBalanceClient(),
@@ -25,6 +25,8 @@ struct ChatViewTests {
             keyStore: keys,
             now: { Date(timeIntervalSince1970: 1_800_000_000) }
         )
+        await store.refreshKeyStatus()
+        return store
     }
 
     @Test("empty state and local-unavailable banner render at dashboard size", arguments: ["light", "dark"])
@@ -35,7 +37,7 @@ struct ChatViewTests {
 
         let local = FakeChatRouteClient()
         local.modelsResult = .failure(ChatClientError.localEndpointUnavailable)
-        let store = makeStore(local: local)
+        let store = await makeStore(local: local)
         store.startConversation(route: .local)
 
         let content = NSHostingController(rootView: ChatView(store: store))
@@ -64,7 +66,7 @@ struct ChatViewTests {
         }
 
         // The true empty state: a fresh store with no conversation yet.
-        let emptyStore = makeStore(local: local)
+        let emptyStore = await makeStore(local: local)
         #expect(emptyStore.conversation == nil)
         content.rootView = ChatView(store: emptyStore)
         try await Task.sleep(for: .milliseconds(120))
@@ -84,7 +86,7 @@ struct ChatViewTests {
             promptTokens: 12,
             completionTokens: 34
         ))
-        let store = makeStore(network: network)
+        let store = await makeStore(network: network)
         store.startConversation(route: .network)
         try await waitForModels(store: store)
 
@@ -125,7 +127,7 @@ struct ChatViewTests {
 
     @Test("the paid acknowledgement stays fully readable at the pop-out minimum size", arguments: ["light", "dark"])
     func rendersAckPanelAtMinimumSize(appearance: String) async throws {
-        let store = makeStore()
+        let store = await makeStore()
         store.startConversation(route: .network)
         try await waitForModels(store: store)
         #expect(store.conversation?.paidRouteAcknowledged == false)
@@ -147,8 +149,8 @@ struct ChatViewTests {
     }
 
     @Test("the pop-out window is resizable with a sane minimum and shares the store")
-    func popOutWindowProperties() throws {
-        let store = makeStore()
+    func popOutWindowProperties() async throws {
+        let store = await makeStore()
         let controller = ChatWindowController(store: store)
         let window = try #require(controller.window)
         #expect(window.styleMask.contains(.resizable))

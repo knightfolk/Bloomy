@@ -6,6 +6,39 @@ private let serviceNow = Date(timeIntervalSince1970: 1_788_282_000)
 
 @Suite("Provider control service")
 struct ProviderControlServiceTests {
+    @Test("saved capacity can be read without model scanning or provider mutations")
+    func readsSavedCapacityIndependently() async throws {
+        let harness = try ServiceHarness.make(maxModelSlots: 2)
+        defer { harness.cleanup() }
+        let capacity = try await harness.service.readSavedCapacity()
+        #expect(capacity.maxModelSlots == 2)
+        #expect(capacity.engineV2MaxConcurrent == nil)
+        #expect(capacity.enabledModelCount == 1)
+        #expect(capacity.preloadedModelCount == 0)
+        #expect(await harness.runner.invocations.isEmpty)
+        #expect(await harness.configStore.saveCount == 0)
+
+        await harness.runner.failNextCatalog()
+        await #expect(throws: ProviderControlError.self) {
+            _ = try await harness.service.refresh()
+        }
+        #expect(try await harness.service.readSavedCapacity() == capacity)
+        #expect(await harness.configStore.saveCount == 0)
+    }
+
+    @Test("display-only saved limits exclude draft edits and preserve unspecified CLI defaults")
+    func capacityUsesSavedValues() {
+        let original = ProviderModelSelection(enabled: ["saved-model"], preloaded: [])
+        let draft = ProviderConfigDraft(sourceRevision: "fixture", original: original,
+            selection: ProviderModelSelection(enabled: ["saved-model", "another-model"], preloaded: ["another-model"]),
+            maxModelSlots: 2, engineV2MaxConcurrent: 4)
+        let capacity = ProviderSavedCapacity(draft: draft)
+        #expect(capacity.maxModelSlots == nil)
+        #expect(capacity.engineV2MaxConcurrent == nil)
+        #expect(capacity.enabledModelCount == 1)
+        #expect(capacity.preloadedModelCount == 0)
+    }
+
     @Test("refresh combines catalog local config and live telemetry")
     func refreshesInventory() async throws {
         let harness = try ServiceHarness.make()

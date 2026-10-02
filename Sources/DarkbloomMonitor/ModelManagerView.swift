@@ -978,10 +978,17 @@ struct ModelManagerView: View {
                       systemImage: "info.circle")
                     .font(.callout).foregroundStyle(.secondary)
             }.disabled(store.operation != .idle)
+        } else if let capacity = store.savedCapacity.value {
+            SavedProviderCapacityView(capacity: capacity, availability: store.savedCapacity)
         } else {
             ContentUnavailableView("Capacity settings unavailable", systemImage: "slider.horizontal.3",
-                description: Text("Refresh to read the provider configuration."))
+                description: Text(capacityUnavailableDescription))
         }
+    }
+
+    private var capacityUnavailableDescription: String {
+        if case .unavailable(let reason) = store.savedCapacity { return reason }
+        return "Refresh to read saved capacity settings."
     }
 
     private func capacityCard(_ title: String, icon: String, value: Int?, defaultValue: Int, effectiveMaximum: Int? = nil, selectableMaximum: Int = 8,
@@ -1054,6 +1061,53 @@ struct ModelManagerView: View {
     }
 
 
+}
+
+/// Saved configuration remains useful when model discovery is blocked, but it
+/// cannot make provider controls actionable without their inventory evidence.
+struct SavedProviderCapacityView: View {
+    let capacity: ProviderSavedCapacity
+    let availability: SourceAvailability<ProviderSavedCapacity>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Saved provider limits", systemImage: "doc.text")
+                .font(.headline)
+            Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 12) {
+                GridRow {
+                    Label("Models kept in memory", systemImage: "memorychip")
+                    Text(capacity.maxModelSlots.map(String.init) ?? "CLI default")
+                        .monospacedDigit()
+                }
+                GridRow {
+                    Label("Simultaneous requests", systemImage: "arrow.triangle.branch")
+                    Text(capacity.engineV2MaxConcurrent.map(String.init) ?? "CLI default")
+                        .monospacedDigit()
+                }
+                GridRow {
+                    Label("Enabled models", systemImage: "cpu")
+                    Text(String(capacity.enabledModelCount)).monospacedDigit()
+                }
+                GridRow {
+                    Label("Preload selection", systemImage: "play.circle")
+                    Text(String(capacity.preloadedModelCount)).monospacedDigit()
+                }
+            }
+            .font(.callout)
+            if case .stale(_, let capturedAt, _) = availability {
+                Label("Last read \(capturedAt.formatted(date: .abbreviated, time: .shortened)) · refresh unavailable",
+                      systemImage: "clock")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            Text("Saved choices, not running limits. Refresh the model catalog to edit or apply them.")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityIdentifier("models.capacity.saved")
+    }
 }
 
 enum ModelCardLayout {

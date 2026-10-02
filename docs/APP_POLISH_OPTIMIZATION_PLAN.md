@@ -14,6 +14,9 @@ Changes prepared for 1.9.15:
 - Performance-history indices match chronological ordering. Retention avoids walking the entire capped history when it is below the cap.
 - Aggregate Metrics display reads are coalesced to 30 seconds while visible; reopening, period changes and manual Refresh are immediate. Recording of switches and request-counter changes stays immediate. Continuous visit analysis releases duplicate array ownership before appending.
 - Settings, menu shortcuts, and contextual settings links share the existing dashboard window. Native application menus retain Edit/Window responder behavior.
+- Native View and Help menus provide full-screen responder behavior and open the existing Support settings page.
+- Model capacity display can read saved limits independently of live CLI inventory. This is read-only evidence and cannot authorize configuration or provider actions.
+- Chat and Nudge startup presence checks request Keychain metadata in the background. Pending, missing, and unavailable status remain distinct; repeated UI checks do not query or decrypt a key.
 - Darkbloom 0.9.17 `waiting_inventory` is recognized in local metrics and presented as a model-inventory refresh state.
 
 ## Evidence and limits
@@ -41,4 +44,6 @@ Review the popup, Overview, Activity (Earnings and Metrics), Opportunity, Models
 
 For each route check light/dark appearance, narrow/wide windows, keyboard focus and shortcuts, accessibility names, Reduce Motion, tooltip usefulness, consistent card/pill sizing, missing/stale/offline states, retained unsaved drafts, and normal-speed updates without flashing or layout shifts. Inspect actual rendered screens; builds and fixtures alone are insufficient to claim complete visual polish.
 
-Provider state is preserved during app verification. Never start/stop/swap/nudge the real provider merely to produce visual evidence; use isolated fixtures for those states.
+The provider and recovery watcher are deliberately stopped while Kevin uses the Mac for other work. Kevin authorizes a temporary provider start only if needed for a test; stop it again afterward. Use isolated fixtures for visual states that do not require a real provider, and do not swap or nudge merely to produce visual evidence.
+
+The current production catalog fails at the external Sol cache boundary. A scoped production removable-drive permission reset remains pending human approval. Do not reset privacy permissions or grant Keychain access as an implicit part of a launch or release test. Release publication is held until required native behavior is verified.

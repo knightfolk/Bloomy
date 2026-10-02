@@ -15,7 +15,7 @@ struct InactivityNudgeStoreTests {
         let key = FakeConsumerKeyStore()
         key.inject("watcher-test-key")
         let spy = NudgeTestSpy()
-        let store = makeStore(defaults: defaults, clock: clock, key: key, spy: spy)
+        let store = await makeStore(defaults: defaults, clock: clock, key: key, spy: spy)
         #expect(!store.enabled)
         #expect(store.inactivityMinutes == 15)
         #expect(store.keyPresent)
@@ -33,7 +33,7 @@ struct InactivityNudgeStoreTests {
         let key = FakeConsumerKeyStore()
         key.inject("watcher-test-key")
         let spy = NudgeTestSpy()
-        let store = makeStore(defaults: defaults, clock: clock, key: key, spy: spy)
+        let store = await makeStore(defaults: defaults, clock: clock, key: key, spy: spy)
         store.setEnabled(true)
         driveIdle(store, clock: clock, minutes: 15)
         #expect(await eventually { spy.preflightAllowed })
@@ -54,7 +54,7 @@ struct InactivityNudgeStoreTests {
         let key = FakeConsumerKeyStore()
         key.inject("watcher-test-key")
         let spy = NudgeTestSpy()
-        let store = makeStore(defaults: makeDefaults(), clock: clock, key: key, spy: spy)
+        let store = await makeStore(defaults: makeDefaults(), clock: clock, key: key, spy: spy)
         store.setEnabled(true)
         driveIdle(store, clock: clock, minutes: 15,
                   modelSwitch: .init(outcome: .switched, models: ["model-a"], remainingRequests: 0))
@@ -70,7 +70,7 @@ struct InactivityNudgeStoreTests {
         let key = FakeConsumerKeyStore()
         key.inject("watcher-test-key")
         let spy = NudgeTestSpy()
-        let store = makeStore(defaults: makeDefaults(), clock: clock, key: key, spy: spy)
+        let store = await makeStore(defaults: makeDefaults(), clock: clock, key: key, spy: spy)
         store.setEnabled(true)
         for outcome in [ProviderModelSwitchOutcome.switching, .failed, .timedOut] {
             store.observe(state(at: epoch,
@@ -92,7 +92,7 @@ struct InactivityNudgeStoreTests {
             let key = FakeConsumerKeyStore()
             key.inject("watcher-test-key")
             let spy = NudgeTestSpy(evidence: evidence)
-            let store = makeStore(defaults: makeDefaults(), clock: clock, key: key, spy: spy)
+            let store = await makeStore(defaults: makeDefaults(), clock: clock, key: key, spy: spy)
             store.setEnabled(true)
             driveIdle(store, clock: clock)
             #expect(await eventually { spy.earningsChecks == 1 })
@@ -122,6 +122,7 @@ struct InactivityNudgeStoreTests {
                 return spy.outcome
             }
         )
+        await store.refreshKeyStatus()
         store.setEnabled(true)
         driveIdle(store, clock: clock)
         #expect(await eventually { await gate.hasRequest })
@@ -147,6 +148,7 @@ struct InactivityNudgeStoreTests {
             canAct: { true },
             send: { _, _ in spy.sends += 1; return .sent }
         )
+        await store.refreshKeyStatus()
         store.setEnabled(true)
         driveIdle(store, clock: clock)
         #expect(await eventually { await gate.hasRequest })
@@ -165,7 +167,7 @@ struct InactivityNudgeStoreTests {
         key.inject("watcher-test-key")
         let clock = NudgeTestClock(epoch)
         let firstSpy = NudgeTestSpy()
-        let first = makeStore(defaults: defaults, clock: clock, key: key, spy: firstSpy)
+        let first = await makeStore(defaults: defaults, clock: clock, key: key, spy: firstSpy)
         first.setEnabled(true)
         driveIdle(first, clock: clock)
         #expect(await eventually { firstSpy.preflightAllowed })
@@ -173,7 +175,7 @@ struct InactivityNudgeStoreTests {
 
         // A new store gets a fresh idle window but must honor the prior attempt.
         let secondSpy = NudgeTestSpy()
-        let second = makeStore(defaults: defaults, clock: clock, key: key, spy: secondSpy)
+        let second = await makeStore(defaults: defaults, clock: clock, key: key, spy: secondSpy)
         driveIdle(second, clock: clock, from: epoch + 1_810)
         await Task.yield()
         #expect(secondSpy.sends == 0)
@@ -185,7 +187,7 @@ struct InactivityNudgeStoreTests {
         defaults.set([epoch + 1_800, epoch + 5_400, epoch + 9_000],
                      forKey: "inactivityNudge.attempts")
         let thirdSpy = NudgeTestSpy()
-        let third = makeStore(defaults: defaults, clock: clock, key: key, spy: thirdSpy)
+        let third = await makeStore(defaults: defaults, clock: clock, key: key, spy: thirdSpy)
         driveIdle(third, clock: clock, from: epoch + 12_000)
         await Task.yield()
         #expect(thirdSpy.sends == 0)
@@ -201,7 +203,7 @@ struct InactivityNudgeStoreTests {
         key.inject("watcher-test-key")
         let spy = NudgeTestSpy()
         spy.outcome = .keyRejected
-        let store = makeStore(defaults: makeDefaults(), clock: clock, key: key, spy: spy)
+        let store = await makeStore(defaults: makeDefaults(), clock: clock, key: key, spy: spy)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("watcher-history-\(UUID())/actions.sqlite3")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let history = ActionHistoryStore(url: url)
@@ -225,8 +227,8 @@ struct InactivityNudgeStoreTests {
         clock: NudgeTestClock,
         key: FakeConsumerKeyStore,
         spy: NudgeTestSpy
-    ) -> InactivityNudgeStore {
-        InactivityNudgeStore(
+    ) async -> InactivityNudgeStore {
+        let store = InactivityNudgeStore(
             keyStore: key, defaults: defaults, now: { clock.now },
             evidence: { since in
                 await MainActor.run {
@@ -243,6 +245,8 @@ struct InactivityNudgeStoreTests {
                 return spy.outcome
             }
         )
+        await store.refreshKeyStatus()
+        return store
     }
 
     private func driveIdle(_ store: InactivityNudgeStore, clock: NudgeTestClock,

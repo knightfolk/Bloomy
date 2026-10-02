@@ -287,7 +287,7 @@ public enum ProviderControlError: Error, Equatable, Sendable {
     case liveSwitchUnavailable(String)
 }
 
-public actor ProviderControlService: ProviderControlling {
+public actor ProviderControlService: ProviderControlling, ProviderSavedCapacityReading {
     private enum FreshResidencyRequirement {
         case deletion
     }
@@ -340,6 +340,13 @@ public actor ProviderControlService: ProviderControlling {
         self.now = now
         self.lifecycleConfirmationTimeout = lifecycleConfirmationTimeout
         self.lifecycleConfirmationSleep = lifecycleConfirmationSleep
+    }
+
+    public func readSavedCapacity() async throws -> ProviderSavedCapacity {
+        try Task.checkCancellation()
+        let draft = try await configStore.load()
+        try Task.checkCancellation()
+        return ProviderSavedCapacity(draft: draft)
     }
 
     public func refresh() async throws -> ProviderControlSnapshot {

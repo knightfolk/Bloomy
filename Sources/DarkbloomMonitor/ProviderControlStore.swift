@@ -59,6 +59,8 @@ final class ProviderControlStore: ObservableObject {
     private var historyCancelled = false
     @Published private(set) var snapshot: ProviderControlSnapshot?
     @Published private(set) var draft: ProviderConfigDraft?
+    @Published private(set) var savedCapacity: SourceAvailability<ProviderSavedCapacity> =
+        .unavailable(reason: "Refresh to read saved capacity settings.")
     @Published private(set) var operation: ProviderOperation = .idle
     @Published private(set) var operationPhase: ProviderMutationPhase?
     @Published private(set) var pendingConfirmation: LifecycleConfirmation?
@@ -450,7 +452,10 @@ final class ProviderControlStore: ObservableObject {
 
     var applyLiveUnavailableReason: String? {
         guard operation == .idle else { return "Another provider action is in progress" }
-        guard let draft, let snapshot else { return "Provider configuration is unavailable" }
+        guard let draft, let snapshot else {
+            return savedCapacity.value == nil ? "Provider configuration is unavailable"
+                : "Refresh model controls before applying live"
+        }
         guard !draft.hasChanges else {
             return "Save or discard pending changes before applying live"
         }
@@ -499,7 +504,10 @@ final class ProviderControlStore: ObservableObject {
     }
 
     var draftValidationMessage: String? {
-        guard let draft else { return "Provider configuration is unavailable" }
+        guard let draft else {
+            return savedCapacity.value == nil ? "Provider configuration is unavailable"
+                : "Refresh the model catalog before changing provider settings"
+        }
         guard let snapshot else { return "Model inventory is unavailable" }
         guard snapshot.sources.catalog.isMarkedFresh else {
             return "Refresh the model catalog before changing provider settings"
@@ -555,6 +563,9 @@ final class ProviderControlStore: ObservableObject {
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
+                if let reader = controller as? any ProviderSavedCapacityReading {
+                    try await refreshSavedCapacity(using: reader)
+                }
                 let refreshed = try await controller.refresh()
                 try Task.checkCancellation()
                 accept(refreshed, preserving: stagedDraft)
@@ -571,6 +582,25 @@ final class ProviderControlStore: ObservableObject {
         }
         currentTask = task
         await awaitTask(task)
+    }
+
+    private func refreshSavedCapacity(using reader: any ProviderSavedCapacityReading) async throws {
+        do {
+            let value = try await reader.readSavedCapacity()
+            try Task.checkCancellation()
+            savedCapacity = .available(value: value, capturedAt: now())
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            try Task.checkCancellation()
+            let reason = "Saved capacity settings could not be read."
+            switch savedCapacity {
+            case .available(let value, let capturedAt), .stale(let value, let capturedAt, _):
+                savedCapacity = .stale(value: value, capturedAt: capturedAt, reason: reason)
+            case .unavailable:
+                savedCapacity = .unavailable(reason: reason)
+            }
+        }
     }
 
     func setEnabled(_ enabled: Bool, modelID: String) {
@@ -1322,6 +1352,10 @@ final class ProviderControlStore: ObservableObject {
     ) {
         snapshot = refreshed
         draft = stagedDraft ?? refreshed.draft
+        savedCapacity = .available(
+            value: ProviderSavedCapacity(draft: refreshed.draft),
+            capturedAt: refreshed.capturedAt
+        )
     }
 
     private static func resolvedCatalogID(

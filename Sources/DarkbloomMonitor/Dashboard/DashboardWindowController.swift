@@ -5,6 +5,8 @@ import SwiftUI
 final class DashboardWindowController: NSWindowController, NSWindowDelegate {
     private let store: MonitorStore
     private let frameAutosaveName: String?
+    private let unconstrainedContentMaxSize: NSSize
+    private var isTransitioningFullScreen = false
     let navigation: DashboardNavigation
     init(
         store: MonitorStore,
@@ -25,6 +27,8 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
         let window = NSWindow(contentViewController: content)
         window.title = MonitorApplicationIdentity.displayName
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.collectionBehavior.insert(.fullScreenPrimary)
+        unconstrainedContentMaxSize = window.contentMaxSize
         window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 1280, height: 900))
         window.contentMinSize = NSSize(width: 800, height: 560)
@@ -58,8 +62,39 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
         constrainToVisibleScreen()
     }
 
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        isTransitioningFullScreen = true
+        window?.contentMaxSize = unconstrainedContentMaxSize
+    }
+
+    func windowWillExitFullScreen(_ notification: Notification) {
+        isTransitioningFullScreen = true
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        isTransitioningFullScreen = false
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        finishFullScreenTransition()
+    }
+
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        finishFullScreenTransition()
+    }
+
+    func windowDidFailToExitFullScreen(_ window: NSWindow) {
+        finishFullScreenTransition()
+    }
+
+    private func finishFullScreenTransition() {
+        isTransitioningFullScreen = false
+        constrainToVisibleScreen()
+    }
+
     private func constrainToVisibleScreen() {
-        guard let window,
+        guard !isTransitioningFullScreen,
+              let window, !window.styleMask.contains(.fullScreen),
               let screen = window.screen ?? NSScreen.main ?? NSScreen.screens.first
         else { return }
 

@@ -47,6 +47,10 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         statusItemController?.showChatWindow()
     }
 
+    @objc func showSupport() {
+        statusItemController?.showSettings(page: .support)
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showDashboard()
         return false
@@ -69,6 +73,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         application.servicesMenu = menu.items.first?.submenu?.items
             .first(where: { $0.title == "Services" })?.submenu
         application.windowsMenu = menu.items.first(where: { $0.title == "Window" })?.submenu
+        application.helpMenu = menu.items.first(where: { $0.title == "Help" })?.submenu
     }
 
     func makeMainMenu(application: NSApplication = .shared) -> NSMenu {
@@ -117,6 +122,14 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         add("Paste", action: #selector(NSText.paste(_:)), key: "v", to: editMenu)
         add("Select All", action: #selector(NSText.selectAll(_:)), key: "a", to: editMenu)
 
+        let viewMenu = NSMenu(title: "View")
+        let viewItem = NSMenuItem(title: viewMenu.title, action: nil, keyEquivalent: "")
+        viewItem.submenu = viewMenu
+        mainMenu.addItem(viewItem)
+        // AppKit validates and updates the title for the responding window.
+        add("Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)),
+            key: "f", modifiers: [.command, .control], to: viewMenu)
+
         let windowMenu = NSMenu(title: "Window")
         let windowItem = NSMenuItem(title: windowMenu.title, action: nil, keyEquivalent: "")
         windowItem.submenu = windowMenu
@@ -126,6 +139,12 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         add("Zoom", action: #selector(NSWindow.performZoom(_:)), to: windowMenu)
         windowMenu.addItem(.separator())
         add("Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), target: application, to: windowMenu)
+
+        let helpMenu = NSMenu(title: "Help")
+        let helpItem = NSMenuItem(title: helpMenu.title, action: nil, keyEquivalent: "")
+        helpItem.submenu = helpMenu
+        mainMenu.addItem(helpItem)
+        add("\(MonitorApplicationIdentity.displayName) Help", action: #selector(showSupport), target: self, to: helpMenu)
         return mainMenu
     }
 
