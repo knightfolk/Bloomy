@@ -11,12 +11,13 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case aliasStartup = "Aliased startup", liveHosting = "Reported local endpoint"
     case frozenSettings = "Frozen settings"
     case fanConfirmation = "Fan confirmation"
+    case noLANAddresses = "No LAN addresses"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
     func availability<T: Equatable & Sendable>(_ value: T, at date: Date) -> SourceAvailability<T> {
         switch self {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses:
             .available(value: value, capturedAt: date)
         case .stale: .stale(value: value, capturedAt: date, reason: "Synthetic source stopped refreshing")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic source unavailable")
@@ -126,7 +127,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
     func setLimitedModels(_ value: Bool) { limitedModels = value }
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -638,7 +639,7 @@ private final class FixtureModel: ObservableObject {
         }
         let hosting = HostingSettingsStore(controlStore: control, endpointClient: FixtureEndpoint(reportsEndpoint: scenario == .liveHosting), tokenFile: tokens,
             cliVersionProvider: { scenario == .offline ? nil : "0.9.17" }, defaults: defaults,
-            lanScanner: { ["192.168.50.20"] }, copyToken: { _ in true }, copyCommand: { _ in true })
+            lanScanner: { scenario == .noLANAddresses ? [] : ["192.168.50.20"] }, copyToken: { _ in true }, copyCommand: { _ in true })
         let chat = ChatStore(localClient: FixtureChat(scenario: scenario), networkClient: FixtureChat(scenario: scenario),
             balanceClient: FixtureBalance(), pricingClient: FixturePricing(scenario: scenario), keyStore: tokens)
         monitor.attachRecommendationInventory { control.snapshot }
@@ -1565,7 +1566,9 @@ private struct FixtureReviewView: View {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("SYNTHETIC REVIEW · no live API calls").font(.headline)
-                        Text("CPU/GPU off · Mac name and thermal are actual").font(.caption).foregroundStyle(.secondary)
+                        Text("CPU/GPU off · Mac identity and thermal state actual; fan/°C samples synthetic")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 4)
                     Picker("Scenario", selection: $model.scenario) {

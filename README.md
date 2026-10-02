@@ -134,6 +134,8 @@ explicit, off-by-default setting with its own evidence and timing checks.
 
 The menu bar uses three fixed-size circles. The model ring spins during fresh inference and uses the existing green/yellow/red temperature colors. The GPU ring shows whole-Mac utilization; the thermometer ring shows the highest measured fan speed as a percentage of its reported maximum RPM. Hover for numeric readings, freshness and attention details. Missing readings remain neutral, retained readings fade, and Reduce Motion uses a static activity arc. The popup retains earnings and explicitly labeled model-average throughput.
 
+Temperature colors use the GPU reading: green below 70°C, yellow from 70°C to below 85°C, and red at 85°C or above. These are Bloomy's display thresholds, separate from macOS thermal-pressure status and fan-control policy. The thermometer ring's fullness represents measured fan speed, so it can stay full while temperature changes. Readings refresh about every 30 seconds in the background, or every 2 seconds while Fans or Cooling is open.
+
 ## Screenshots
 
 Settings from an earlier local review build. Values vary by provider.

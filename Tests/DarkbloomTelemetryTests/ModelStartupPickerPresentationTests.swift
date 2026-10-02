@@ -22,7 +22,7 @@ struct ModelStartupPickerPresentationTests {
         let mounted = ModelStartupPickerPresentation.make(selection: original.selection, inventory: inventory)
         #expect(mounted.selectedTag == enabled)
         #expect(store.draft == original)
-        mounted.select(enabled, using: store.setPreferredStartupModel)
+        mounted.select(enabled, selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft == original)
         #expect(store.draft?.hasChanges == false)
 
@@ -30,10 +30,10 @@ struct ModelStartupPickerPresentationTests {
         let refreshed = try #require(store.draft)
         let picker = ModelStartupPickerPresentation.make(selection: refreshed.selection, inventory: store.snapshot?.inventory)
         #expect(picker.selectedTag == enabled)
-        picker.select(enabled, using: store.setPreferredStartupModel)
+        picker.select(enabled, selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft == original)
 
-        picker.select("other-model", using: store.setPreferredStartupModel)
+        picker.select("other-model", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         let changed = try #require(store.draft)
         #expect(changed.selection.preloaded == ["other-model"])
         #expect(changed.selection.enabled == original.selection.enabled)
@@ -62,10 +62,10 @@ struct ModelStartupPickerPresentationTests {
         let picker = ModelStartupPickerPresentation.make(selection: original.selection,
             inventory: kind == "missing-inventory" ? nil : inventory)
         #expect(picker.selectedTag == nil)
-        picker.select(selection.enabled[0], using: store.setPreferredStartupModel)
+        picker.select(selection.enabled[0], selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft == original)
         #expect(store.draft?.hasChanges == false)
-        picker.select("", using: store.setPreferredStartupModel)
+        picker.select("", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft?.selection.preloaded.isEmpty == true)
         #expect(store.draft?.selection.enabled == original.selection.enabled)
         #expect(store.draft?.original == original.original)
@@ -81,13 +81,13 @@ struct ModelStartupPickerPresentationTests {
         let original = try #require(store.draft)
         let initial = ModelStartupPickerPresentation.make(selection: original.selection, inventory: inventory)
         #expect(initial.selectedTag == "")
-        initial.select("", using: store.setPreferredStartupModel)
-        initial.select("unlisted", using: store.setPreferredStartupModel)
+        initial.select("", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
+        initial.select("unlisted", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft == original)
-        initial.select("first", using: store.setPreferredStartupModel)
+        initial.select("first", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft?.selection.preloaded == ["first"])
         let chosen = ModelStartupPickerPresentation.make(selection: try #require(store.draft).selection, inventory: inventory)
-        chosen.select("", using: store.setPreferredStartupModel)
+        chosen.select("", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft == original)
     }
 
@@ -102,7 +102,7 @@ struct ModelStartupPickerPresentationTests {
         let picker = ModelStartupPickerPresentation.make(selection: original.selection, inventory: inventory)
         #expect(picker.selectedTag == "")
         #expect(store.draft == original)
-        picker.select("", using: store.setPreferredStartupModel)
+        picker.select("", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft?.selection.preloaded.isEmpty == true)
         #expect(store.draft?.selection.enabled == selection.enabled)
         #expect(store.draft?.hasChanges == true)
@@ -130,9 +130,9 @@ struct ModelStartupPickerPresentationTests {
         #expect(picker.selectedTag == (preloadState == "single" ? "gpt-oss" : ""))
         #expect(store.draft == original)
         // A duplicate raw spelling is not a second menu option.
-        picker.select("gpt-oss-20b", using: store.setPreferredStartupModel)
+        picker.select("gpt-oss-20b", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft == original)
-        picker.select("gpt-oss", using: store.setPreferredStartupModel)
+        picker.select("gpt-oss", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         if preloadState == "single" {
             #expect(store.draft == original)
             #expect(store.draft?.hasChanges == false)
@@ -157,9 +157,9 @@ struct ModelStartupPickerPresentationTests {
         let picker = ModelStartupPickerPresentation.make(selection: original.selection, inventory: inventory)
         #expect(picker.options.map(\.selector) == ["first", "second"])
         #expect(picker.selectedTag == "first")
-        picker.select("missing", using: store.setPreferredStartupModel)
+        picker.select("missing", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft == original)
-        picker.select("second", using: store.setPreferredStartupModel)
+        picker.select("second", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft?.selection.preloaded == ["second"])
     }
 
@@ -174,12 +174,114 @@ struct ModelStartupPickerPresentationTests {
         let picker = ModelStartupPickerPresentation.make(selection: original.selection, inventory: nil)
         #expect(picker.options.isEmpty)
         #expect(picker.selectedTag == "")
-        picker.select("first", using: store.setPreferredStartupModel)
+        picker.select("first", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft == original)
-        picker.select("", using: store.setPreferredStartupModel)
+        picker.select("", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft?.selection.preloaded.isEmpty == true)
         #expect(store.draft?.selection.enabled == enabled)
         #expect(store.draft?.hasChanges == (preloadCount > 0))
+    }
+
+    @Test("captured options reject refreshed identity changes without staging",
+          arguments: ["exact-shadow", "ambiguous", "removed", "disabled"])
+    func staleOptionCannotStageDifferentIdentity(change: String) async throws {
+        let selection = ProviderModelSelection(enabled: ["gpt-oss", "gpt-oss-20b", "other-model"], preloaded: [])
+        let model = item("gpt-oss-20b", enabled: "gpt-oss")
+        let other = item("other-model", enabled: "other-model")
+        let inventory = ModelInventory(myCatalog: [model, other], available: [], issues: [])
+        let currentSelection: ProviderModelSelection
+        let currentInventory: ModelInventory
+        let freshSelector: String
+        let freshCatalogID: String
+        switch change {
+        case "exact-shadow":
+            currentSelection = selection
+            currentInventory = .init(myCatalog: [model, item("gpt-oss", enabled: "gpt-oss"), other], available: [], issues: [])
+            freshSelector = "gpt-oss"
+            freshCatalogID = "gpt-oss"
+        case "ambiguous":
+            currentSelection = selection
+            currentInventory = .init(myCatalog: [model, item("gpt-oss-120b", enabled: "gpt-oss"), other], available: [], issues: [])
+            freshSelector = "gpt-oss-20b"
+            freshCatalogID = "gpt-oss-20b"
+        case "removed":
+            currentSelection = selection
+            currentInventory = .init(myCatalog: [other], available: [], issues: [])
+            freshSelector = "other-model"
+            freshCatalogID = "other-model"
+        default:
+            currentSelection = .init(enabled: ["gpt-oss-20b", "other-model"], preloaded: [])
+            currentInventory = inventory
+            freshSelector = "gpt-oss-20b"
+            freshCatalogID = "gpt-oss-20b"
+        }
+        let controller = StartupPickerRefreshingFixtureController(snapshots: [
+            fixtureSnapshot(selection: selection, inventory: inventory),
+            fixtureSnapshot(selection: currentSelection, inventory: currentInventory)
+        ])
+        let store = ProviderControlStore(controller: controller)
+        await store.refresh()
+        let captured = ModelStartupPickerPresentation.make(selection: try #require(store.draft).selection,
+            inventory: store.snapshot?.inventory)
+        #expect(captured.options.first?.selector == "gpt-oss")
+        #expect(captured.options.first?.catalogID == "gpt-oss-20b")
+        await store.refresh()
+        let beforeCallback = try #require(store.draft)
+        var stagedCount = 0
+        let accepted = captured.select("gpt-oss", selection: store.draft?.selection,
+            inventory: store.snapshot?.inventory) { selector in
+                stagedCount += 1
+                store.setPreferredStartupModel(selector)
+            }
+        #expect(!accepted)
+        #expect(stagedCount == 0)
+        #expect(store.draft == beforeCallback)
+        #expect(store.draft?.hasChanges == false)
+
+        let fresh = ModelStartupPickerPresentation.make(selection: beforeCallback.selection,
+            inventory: store.snapshot?.inventory)
+        #expect(fresh.options.first { $0.selector == freshSelector }?.catalogID == freshCatalogID)
+        #expect(fresh.select(freshSelector, selection: store.draft?.selection,
+            inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel))
+        #expect(store.draft?.selection.preloaded == [freshSelector])
+        #expect(store.draft?.selection.enabled == beforeCallback.selection.enabled)
+        #expect(store.draft?.original == beforeCallback.original)
+        #expect(store.draft?.sourceRevision == beforeCallback.sourceRevision)
+    }
+
+    @Test("captured callbacks compare against later edits and preserve a current raw alias no-op")
+    func capturedCallbackUsesCurrentPreference() async throws {
+        let selection = ProviderModelSelection(enabled: ["gpt-oss", "gpt-oss-20b", "other-model"], preloaded: [])
+        let inventory = ModelInventory(myCatalog: [item("gpt-oss-20b", enabled: "gpt-oss"),
+            item("other-model", enabled: "other-model")], available: [], issues: [])
+        let store = fixtureStore(selection: selection, inventory: inventory)
+        await store.refresh()
+        let captured = ModelStartupPickerPresentation.make(selection: selection, inventory: inventory)
+        store.setPreferredStartupModel("gpt-oss-20b")
+        let laterAlias = try #require(store.draft)
+        var stagedCount = 0
+        #expect(!captured.select("gpt-oss", selection: store.draft?.selection,
+            inventory: store.snapshot?.inventory) { selector in
+                stagedCount += 1
+                store.setPreferredStartupModel(selector)
+            })
+        #expect(stagedCount == 0)
+        #expect(store.draft == laterAlias)
+        #expect(store.draft?.selection.preloaded == ["gpt-oss-20b"])
+
+        // Clear uses the current preload even though the captured menu had none.
+        #expect(captured.select("", selection: store.draft?.selection,
+            inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel))
+        #expect(store.draft?.selection == selection)
+
+        store.setPreferredStartupModel("gpt-oss-20b")
+        let selected = ModelStartupPickerPresentation.make(selection: try #require(store.draft).selection,
+            inventory: inventory)
+        store.setPreferredStartupModel("other-model")
+        // A formerly selected option is now an explicit change back to that model.
+        #expect(selected.select("gpt-oss", selection: store.draft?.selection,
+            inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel))
+        #expect(store.draft?.selection.preloaded == ["gpt-oss"])
     }
 
     private func item(_ id: String, enabled: String?, preloaded: String? = nil) -> ModelInventoryItem {
@@ -190,14 +292,34 @@ struct ModelStartupPickerPresentationTests {
     }
 
     private func fixtureStore(selection: ProviderModelSelection, inventory: ModelInventory) -> ProviderControlStore {
+        ProviderControlStore(controller: StartupPickerFixtureController(
+            snapshot: fixtureSnapshot(selection: selection, inventory: inventory)))
+    }
+
+    private func fixtureSnapshot(selection: ProviderModelSelection, inventory: ModelInventory) -> ProviderControlSnapshot {
         let now = Date()
         let draft = ProviderConfigDraft(sourceRevision: "startup-picker-fixture", original: selection,
             selection: selection, originalMaxModelSlots: 1, maxModelSlots: 1)
         let source = ProviderControlSourceState.fresh(evidenceAt: now)
-        let snapshot = ProviderControlSnapshot(inventory: inventory, draft: draft, capturedAt: now,
+        return ProviderControlSnapshot(inventory: inventory, draft: draft, capturedAt: now,
             sources: .init(catalog: source, localModels: source, daemon: source, loadedModels: source))
-        return ProviderControlStore(controller: StartupPickerFixtureController(snapshot: snapshot))
     }
+}
+
+private actor StartupPickerRefreshingFixtureController: ProviderControlling {
+    let snapshots: [ProviderControlSnapshot]
+    private var refreshCount = 0
+    init(snapshots: [ProviderControlSnapshot]) { self.snapshots = snapshots }
+    func refresh() async throws -> ProviderControlSnapshot {
+        let snapshot = snapshots[min(refreshCount, snapshots.count - 1)]
+        refreshCount += 1
+        return snapshot
+    }
+    func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult { throw CancellationError() }
+    func download(_ modelID: String, onOutput: (@Sendable (ProcessOutputChunk) -> Void)?) async throws { throw CancellationError() }
+    func delete(_ localModelID: String) async throws { throw CancellationError() }
+    func activityRisk() async -> ProviderActivityRisk { .idle }
+    func execute(_ action: ProviderLifecycleAction, enabledModels: [String]) async throws { throw CancellationError() }
 }
 
 private struct StartupPickerFixtureController: ProviderControlling {

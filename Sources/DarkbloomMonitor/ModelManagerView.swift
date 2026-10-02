@@ -160,16 +160,28 @@ struct ModelStartupPickerPresentation: Equatable {
     }
 
     @MainActor
-    func select(_ selector: String, using stage: @MainActor (String?) -> Void) {
+    @discardableResult
+    func select(_ selector: String, selection: ProviderModelSelection?, inventory: ModelInventory?,
+                using stage: @MainActor (String?) -> Void) -> Bool {
+        guard let selection else { return false }
         if selector.isEmpty {
             // An explicit clear remains reachable even for unresolved evidence.
-            if preloadCount > 0 { stage(nil) }
-            return
+            guard !selection.preloaded.isEmpty else { return false }
+            stage(nil)
+            return true
         }
-        guard let selectedTag, options.contains(where: { $0.selector == selector }) else { return }
+        guard selectedTag != nil, let option = options.first(where: { $0.selector == selector }),
+              selection.enabled.contains(selector) else { return false }
+        let current = Self.make(selection: selection, inventory: inventory)
+        guard current.selectedTag != nil,
+              current.options.contains(where: { $0.catalogID == option.catalogID }) else { return false }
         // Preserve both the raw alias and the draft baseline on a no-op pick.
-        guard preloadCount > 1 || selector != selectedTag else { return }
-        stage(selector)
+        let preferredID = current.options.first { $0.selector == current.selectedTag }?.catalogID
+        guard current.preloadCount > 1 || option.catalogID != preferredID else { return false }
+        // The callback can outlive this menu. Resolve its captured spelling
+        // again so a refreshed exact ID cannot shadow it onto another model.
+        return ModelManagerSheetPresentation.editDownloaded(catalogID: option.catalogID,
+            selector: selector, inventory: inventory) { stage(selector) }
     }
 }
 
@@ -759,35 +771,40 @@ struct ModelManagerView: View {
             )
         }
         .sheet(item: $inspectedModel) { item in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack {
-                        Text("Model settings & forecast").font(.title2.bold())
-                        Spacer()
-                        Button("Done") { inspectedModel = nil }.keyboardShortcut(.cancelAction)
-                            .accessibilityIdentifier("models.manage.done")
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Text("Model settings & forecast").font(.title2.bold())
+                            Spacer()
+                            Button("Done") { inspectedModel = nil }.keyboardShortcut(.cancelAction)
+                                .accessibilityIdentifier("models.manage.done")
+                        }
+                        switch ModelManagerSheetPresentation.make(catalogID: item.catalogID, inventory: store.snapshot?.inventory) {
+                        case .current(let current):
+                            modelCard(current, at: Date(), presentation: currentPresentation(at: Date()), expanded: true)
+                        case .unavailable:
+                            ContentUnavailableView("Model unavailable", systemImage: "cpu",
+                                description: Text("This model cannot be matched to one current catalog entry. Refresh model controls to check again. Your staged edits are retained."))
+                                .accessibilityIdentifier("models.manage.unavailable")
+                            Button("Refresh model controls") { Task { await store.refreshPreservingDraft() } }
+                                .disabled(store.operation != .idle)
+                        }
                     }
-                    switch ModelManagerSheetPresentation.make(catalogID: item.catalogID, inventory: store.snapshot?.inventory) {
-                    case .current(let current):
-                        modelCard(current, at: Date(), presentation: currentPresentation(at: Date()), expanded: true)
-                    case .unavailable:
-                        ContentUnavailableView("Model unavailable", systemImage: "cpu",
-                            description: Text("This model cannot be matched to one current catalog entry. Refresh model controls to check again. Your staged edits are retained."))
-                            .accessibilityIdentifier("models.manage.unavailable")
-                        Button("Refresh model controls") { Task { await store.refreshPreservingDraft() } }
-                            .disabled(store.operation != .idle)
-                    }
-                    HStack {
-                        Spacer()
-                        Button("Done") { inspectedModel = nil }
-                            .accessibilityIdentifier("models.manage.footerDone")
-                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("models.manage.scroll")
+                Divider()
+                HStack {
+                    Spacer()
+                    Button("Done") { inspectedModel = nil }
+                        .accessibilityIdentifier("models.manage.footerDone")
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
             }
-            .accessibilityIdentifier("models.manage.scroll")
             .frame(width: ModelManagerSheetHeightPolicy.width,
                 height: ModelManagerSheetHeightPolicy.height(screenBudget: modelSheetScreenBudget,
                     hostMaximum: modelSheetMaximumHeight))
@@ -1180,7 +1197,8 @@ struct ModelManagerView: View {
                         if let selected = startup.selectedTag {
                             Picker("Start with", selection: Binding(
                                 get: { selected },
-                                set: { startup.select($0, using: store.setPreferredStartupModel) }
+                                set: { startup.select($0, selection: store.draft?.selection,
+                                    inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel) }
                             )) {
                                 Text("No preference").tag("")
                                 ForEach(startup.options) { option in
@@ -1198,7 +1216,8 @@ struct ModelManagerView: View {
                         if !draft.selection.preloaded.isEmpty,
                            startup.selectedTag == nil || draft.selection.preloaded.count > 1 {
                             Button("Clear preference") {
-                                startup.select("", using: store.setPreferredStartupModel)
+                                startup.select("", selection: store.draft?.selection,
+                                    inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
                             }
                             .accessibilityLabel("Clear startup model preference")
                         }
@@ -2612,12 +2631,16 @@ private struct ModelIdentityDetails: View {
     let item: ModelInventoryItem
 
     var body: some View {
-        Text(item.catalogID)
-            .font(.caption.monospaced())
-            .foregroundStyle(.secondary)
-            .lineLimit(2)
-            .textSelection(.enabled)
-            .help(item.catalogID)
-            .accessibilityLabel("Canonical model ID: \(item.catalogID)")
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Canonical model ID")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(item.catalogID)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .textSelection(.enabled)
+                .help(item.catalogID)
+        }
     }
 }

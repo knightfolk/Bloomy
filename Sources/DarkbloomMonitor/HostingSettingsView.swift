@@ -10,6 +10,7 @@ struct HostingSettingsView: View {
     @StateObject private var draft: HostingSettingsDraftState
     private let updateProtection: AppUpdateEditorProtection?
     @State private var tokenEditorOwner = UUID()
+    @State private var bindSelection = HostingBindSelectionState()
     @State private var customAddressError: String?
     @State private var bearerTokenText = ""
 
@@ -327,12 +328,16 @@ struct HostingSettingsView: View {
                         )
                     }
 
-                    if store.options.bindScope == .specificInterface {
+                    if bindSelection.showsAddressEditor(for: store.options) {
                         VStack(alignment: .leading, spacing: 10) {
                             if store.lanAddresses.isEmpty {
-                                Text("No active private LAN or tailnet IPv4 address was detected.")
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
+                                HostingNotice(
+                                    title: "No active address detected",
+                                    message: "Connect to a LAN or tailnet, then refresh. An address entered below must be active on this Mac before applying.",
+                                    style: .information,
+                                    symbol: "network.slash"
+                                )
+                                .accessibilityIdentifier("hosting.bind.noActiveAddresses")
                             } else {
                                 Text("Active addresses on this Mac")
                                     .font(.subheadline.weight(.medium))
@@ -366,7 +371,8 @@ struct HostingSettingsView: View {
                                 Text(customAddressError)
                                     .font(.caption)
                                     .foregroundStyle(.red)
-                            } else if !canUseSelectedAddress {
+                                    .accessibilityIdentifier("hosting.bind.customAddressError")
+                            } else if store.options.bindScope == .specificInterface && !canUseSelectedAddress {
                                 Label(
                                     "This saved address is no longer active. Select a current address before applying.",
                                     systemImage: "exclamationmark.triangle.fill"
@@ -743,14 +749,7 @@ struct HostingSettingsView: View {
         let selected = preset.isSelected(for: store.options)
         Button {
             customAddressError = nil
-            guard let address = preset.address(for: store.options, activeAddresses: store.lanAddresses) else {
-                customAddressError = "Enter an active LAN or tailnet IPv4 address below."
-                return
-            }
-            _ = store.setBindAddress(address)
-            if preset == .specificInterface {
-                draft.customAddressText = address
-            }
+            bindSelection.choose(preset, store: store, draft: draft)
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: symbol)
@@ -802,6 +801,30 @@ struct HostingSettingsView: View {
         }
         _ = store.setBindAddress(draft.customAddressText)
         customAddressError = nil
+    }
+}
+
+/// Keeps an address-selection attempt visible without turning it into a saved
+/// preference when this Mac has no active LAN or tailnet address.
+@MainActor
+struct HostingBindSelectionState {
+    private(set) var requestsAddressEditor = false
+
+    func showsAddressEditor(for options: HostingOptions) -> Bool {
+        requestsAddressEditor || options.bindScope == .specificInterface
+    }
+
+    mutating func choose(
+        _ preset: HostingBindPreset,
+        store: HostingSettingsStore,
+        draft: HostingSettingsDraftState
+    ) {
+        requestsAddressEditor = preset == .specificInterface
+        guard let address = preset.address(for: store.options, activeAddresses: store.lanAddresses) else { return }
+        _ = store.setBindAddress(address)
+        if preset == .specificInterface {
+            draft.customAddressText = address
+        }
     }
 }
 
