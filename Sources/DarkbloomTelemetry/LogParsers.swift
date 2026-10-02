@@ -3,11 +3,22 @@ import Foundation
 public enum LegacyLogParser {
     public static func parse(_ text: String, limit: Int) -> [LogEvent] {
         guard limit > 0 else { return [] }
-        let events = text.split(whereSeparator: \.isNewline).compactMap(parseLine)
-        return Array(events.suffix(limit))
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+        var events: [LogEvent] = []
+        // The caller needs the last matching events, not every event in the tail.
+        // Work backward so older messages never pay for date parsing or allocation.
+        for line in text.split(whereSeparator: \.isNewline).reversed() {
+            if let event = parseLine(line, formatter: formatter) {
+                events.append(event)
+                if events.count == limit { break }
+            }
+        }
+        return events.reversed()
     }
 
-    private static func parseLine(_ line: Substring) -> LogEvent? {
+    private static func parseLine(_ line: Substring, formatter: DateFormatter) -> LogEvent? {
         let fields = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
         guard fields.count == 4, let severity = severity(String(fields[1])) else { return nil }
 
@@ -16,9 +27,6 @@ public enum LegacyLogParser {
         let message = String(fields[3])
         guard severity == .warning || severity == .error || isLifecycle(message) else { return nil }
 
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
         return LogEvent(
             timestamp: formatter.date(from: String(fields[0])),
             severity: severity,
@@ -91,14 +99,15 @@ private struct UnifiedLogRecord: Decodable {
     let eventMessage: String
 }
 
+private let lifecycleKeywords: Set<String> = [
+    "started", "starting", "stopped", "stopping", "loaded", "loading",
+    "unloaded", "unloading", "connected", "connecting", "disconnected",
+]
+
 private func lifecycleMessage(_ message: String) -> Bool {
-    let keywords = Set([
-        "started", "starting", "stopped", "stopping", "loaded", "loading",
-        "unloaded", "unloading", "connected", "connecting", "disconnected",
-    ])
     return message.lowercased()
         .split { !$0.isLetter && !$0.isNumber }
-        .contains { keywords.contains(String($0)) }
+        .contains { lifecycleKeywords.contains(String($0)) }
 }
 
 private func unifiedLogDate(_ timestamp: String) -> Date? {

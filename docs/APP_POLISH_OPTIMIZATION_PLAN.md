@@ -17,6 +17,8 @@ Changes prepared for 1.9.15:
 - Native View and Help menus provide full-screen responder behavior and open the existing Support settings page.
 - Model capacity display can read saved limits independently of live CLI inventory. This is read-only evidence and cannot authorize configuration or provider actions.
 - Chat and Nudge startup presence checks request Keychain metadata in the background. Pending, missing, and unavailable status remain distinct; repeated UI checks do not query or decrypt a key.
+- Observed uptime keeps cached interval totals and clips the rolling window with binary searches. Every observation still persists; reopening, older timestamps and external writes rebuild the aggregate. Unknown gaps and the ten-second carry limit remain unchanged.
+- Legacy log parsing scans backward to the requested matching-event limit and reuses one date parser per read. The resulting events retain their original file order.
 - Darkbloom 0.9.17 `waiting_inventory` is recognized in local metrics and presented as a model-inventory refresh state.
 
 ## Evidence and limits
@@ -30,6 +32,10 @@ A synthetic 60,000-interval energy history measured a 117.78 ms median full JSON
 Live after-build measurements and the complete native verification result belong in the release evidence. Do not infer them from synthetic benchmarks.
 
 A release-mode 100,000-sample visit benchmark measured continuous idle analysis at 3.884 s before / 0.286 s after and continuous active analysis at 5.379 s before / 0.258 s after. Frequent switches and a gap remained about 0.30 s. Existing attribution, clipping and gap tests passed. This isolates visit analysis, rather than total Metrics refresh time.
+
+The October 2 uptime benchmark used real SQLite storage with synthetic persisted observations. At 106,000 rows, median chronological record time fell from 18.427 ms to 0.019 ms in the same debug configuration. The first aggregate load remains about 15.5 ms; the cache retains approximately 3.2 MiB of entries plus array capacity. Randomized parity, rollback, external writes and bounded-cache tests preserve the original interval semantics. This measures one storage operation, not whole-app CPU or battery use.
+
+A release-optimized parser benchmark with a synthetic 129,789-byte warning-heavy log tail and a 100-event limit measured 127.07 ms before / 5.34 ms after. Both selected the same events. Ordinary quieter logs may show a smaller benefit. Detailed evidence and limitations are in `docs/BACKGROUND_HISTORY_OPTIMIZATION_20261002.md`.
 
 ## Remaining optimization review
 

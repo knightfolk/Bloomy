@@ -74,8 +74,20 @@ public actor ObservedUptimeDatabase: ObservedUptimeRecording {
 
     private struct Observation {
         let timestamp: TimeInterval
-        let state: ObservationState
+        var state: ObservationState
+        var onlineBefore: TimeInterval = 0
+        var offlineBefore: TimeInterval = 0
     }
+
+    // Prefix durations close only the preceding observation's interval. The last
+    // interval remains open and is clipped to the snapshot time and carry limit.
+    // Chronological emissions append one entry and binary-search two endpoints;
+    // they never fetch, allocate, or fold the rolling history again.
+    private var cachedObservations: [Observation]?
+    private var cacheStart = 0
+    private var cacheDataVersion: Int64?
+    private(set) var aggregationRebuildCount = 0
+    var aggregationStorageCount: Int { cachedObservations?.count ?? 0 }
 
     private let connection: ObservedUptimeSQLiteConnection
     private let window: TimeInterval
@@ -162,7 +174,18 @@ public actor ObservedUptimeDatabase: ObservedUptimeRecording {
         sqlite3_bind_int(statement, 2, ObservationState(status).rawValue)
         guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
 
-        try prune(at: timestamp)
+        let observation = Observation(timestamp: timestamp, state: ObservationState(status))
+        if let last = cachedObservations?.last, timestamp < last.timestamp {
+            // Replacement/insertion in the middle changes both neighboring
+            // intervals. Rebuild from the persisted ordering on this rare path.
+            cachedObservations = nil
+        } else if cachedObservations != nil {
+            if cachedObservations?.last?.timestamp == timestamp {
+                cachedObservations![cachedObservations!.count - 1].state = observation.state
+            } else {
+                appendToCache(observation)
+            }
+        }
         return try snapshot(at: date)
     }
 
@@ -171,27 +194,28 @@ public actor ObservedUptimeDatabase: ObservedUptimeRecording {
         guard now.isFinite else {
             throw ObservedUptimeDatabaseError.sqlite(message: "snapshot timestamp is not finite")
         }
-        try prune(at: now)
-
-        let cutoff = now - window
-        let observations = try observations(from: cutoff - maximumCarry, through: now)
-        var onlineSeconds: TimeInterval = 0
-        var offlineSeconds: TimeInterval = 0
-
-        for (index, observation) in observations.enumerated() {
-            let nextTimestamp = index + 1 < observations.count
-                ? observations[index + 1].timestamp
-                : now
-            let start = max(observation.timestamp, cutoff)
-            let end = min(nextTimestamp, observation.timestamp + maximumCarry, now)
-            guard end > start else { continue }
-
-            switch observation.state {
-            case .online: onlineSeconds += end - start
-            case .offline: offlineSeconds += end - start
-            case .unknown: break
+        do {
+            try prune(at: now)
+            // Other actors/processes can reopen the same file. SQLite increments
+            // this connection-local version for their commits, not our writes.
+            let version = try dataVersion()
+            if cachedObservations == nil || cacheDataVersion != version {
+                try rebuildCache(from: now - window - maximumCarry)
+                cacheDataVersion = version
             }
+            evictCache(before: now - window - maximumCarry)
+        } catch {
+            // A write can have succeeded before a later SQLite operation fails.
+            // Never publish a partially updated or stale aggregate on retry.
+            cachedObservations = nil
+            cacheDataVersion = nil
+            throw error
         }
+
+        let end = accumulatedDuration(through: now)
+        let start = accumulatedDuration(through: now - window)
+        let onlineSeconds = max(0, end.online - start.online)
+        let offlineSeconds = max(0, end.offline - start.offline)
 
         let observedSeconds = onlineSeconds + offlineSeconds
         guard observedSeconds >= minimumObservedDuration else {
@@ -201,36 +225,103 @@ public actor ObservedUptimeDatabase: ObservedUptimeRecording {
         return .available(percent: percent, observedSeconds: observedSeconds)
     }
 
-    private func observations(
-        from start: TimeInterval,
-        through end: TimeInterval
-    ) throws -> [Observation] {
+    private func appendToCache(_ observation: Observation) {
+        var entry = observation
+        if let previous = cachedObservations?.last {
+            entry.onlineBefore = previous.onlineBefore
+            entry.offlineBefore = previous.offlineBefore
+            let duration = max(0, min(entry.timestamp, previous.timestamp + maximumCarry) - previous.timestamp)
+            switch previous.state {
+            case .online: entry.onlineBefore += duration
+            case .offline: entry.offlineBefore += duration
+            case .unknown: break
+            }
+        }
+        cachedObservations!.append(entry)
+    }
+
+    private func accumulatedDuration(through timestamp: TimeInterval) -> (online: TimeInterval, offline: TimeInterval) {
+        guard let observations = cachedObservations, cacheStart < observations.count else { return (0, 0) }
+        var low = cacheStart
+        var high = observations.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if observations[middle].timestamp <= timestamp { low = middle + 1 } else { high = middle }
+        }
+        guard low > cacheStart else {
+            let first = observations[cacheStart]
+            return (first.onlineBefore, first.offlineBefore)
+        }
+        let entry = observations[low - 1]
+        let next = low < observations.count ? observations[low].timestamp : timestamp
+        let duration = max(0, min(timestamp, next, entry.timestamp + maximumCarry) - entry.timestamp)
+        return (
+            entry.onlineBefore + (entry.state == .online ? duration : 0),
+            entry.offlineBefore + (entry.state == .offline ? duration : 0)
+        )
+    }
+
+    private func evictCache(before timestamp: TimeInterval) {
+        guard cachedObservations != nil else { return }
+        var low = cacheStart
+        var high = cachedObservations!.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if cachedObservations![middle].timestamp < timestamp { low = middle + 1 } else { high = middle }
+        }
+        cacheStart = low
+        guard cacheStart > 0 else { return }
+        if cacheStart == cachedObservations!.count {
+            cachedObservations!.removeAll(keepingCapacity: false)
+            cacheStart = 0
+        } else if cacheStart >= 4_096 || cacheStart * 2 >= cachedObservations!.count {
+            // Amortize allocation/compaction and rebase the prefix totals so
+            // years of operation cannot accumulate cancellation error.
+            cachedObservations!.removeFirst(cacheStart)
+            cacheStart = 0
+            let onlineBase = cachedObservations![0].onlineBefore
+            let offlineBase = cachedObservations![0].offlineBefore
+            for index in cachedObservations!.indices {
+                cachedObservations![index].onlineBefore -= onlineBase
+                cachedObservations![index].offlineBefore -= offlineBase
+            }
+        }
+    }
+
+    private func rebuildCache(from start: TimeInterval) throws {
         let database = connection.pointer
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(
             database,
-            "SELECT observed_at, state FROM uptime_observations WHERE observed_at >= ? AND observed_at <= ? ORDER BY observed_at",
+            "SELECT observed_at, state FROM uptime_observations WHERE observed_at >= ? ORDER BY observed_at",
             -1,
             &statement,
             nil
-        ) == SQLITE_OK, let statement else {
-            throw lastError()
-        }
+        ) == SQLITE_OK, let statement else { throw lastError() }
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_double(statement, 1, start)
-        sqlite3_bind_double(statement, 2, end)
 
-        var result: [Observation] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            guard let state = ObservationState(rawValue: sqlite3_column_int(statement, 1)) else {
-                continue
-            }
-            result.append(Observation(
-                timestamp: sqlite3_column_double(statement, 0),
-                state: state
-            ))
+        cachedObservations = []
+        cacheStart = 0
+        while true {
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE { break }
+            guard result == SQLITE_ROW else { throw lastError() }
+            guard let state = ObservationState(rawValue: sqlite3_column_int(statement, 1)) else { continue }
+            appendToCache(Observation(timestamp: sqlite3_column_double(statement, 0), state: state))
         }
-        return result
+        aggregationRebuildCount += 1
+    }
+
+    private func dataVersion() throws -> Int64 {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(connection.pointer, "PRAGMA data_version", -1, &statement, nil) == SQLITE_OK,
+              let statement else { throw lastError() }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw lastError() }
+        let version = sqlite3_column_int64(statement, 0)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
+        return version
     }
 
     private func prune(at now: TimeInterval) throws {
