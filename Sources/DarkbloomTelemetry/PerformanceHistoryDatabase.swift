@@ -191,14 +191,22 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
     private func prune(at time: Date) throws {
         guard PerformanceSample.validTimestamp(time) else { throw PerformanceHistoryDatabaseError.unavailable }
         let statement = try prepare("""
-            DELETE FROM performance_history WHERE observed_at < ? OR id NOT IN (
-                SELECT id FROM performance_history ORDER BY observed_at DESC, rowid DESC LIMIT ?
-            )
+            DELETE FROM performance_history WHERE observed_at < ?
             """)
         defer { sqlite3_finalize(statement) }
         try checked(sqlite3_bind_double(statement, 1, time.addingTimeInterval(-Double(retentionDays) * 86_400).timeIntervalSince1970))
-        try checked(sqlite3_bind_int64(statement, 2, Int64(historyLimit)))
         guard sqlite3_step(statement) == SQLITE_DONE else { throw PerformanceHistoryDatabaseError.unavailable }
+        // Select only overflow rows, instead of rebuilding a 100k-ID membership
+        // set and scanning every payload on each periodic write.
+        let overflow = try prepare("""
+            DELETE FROM performance_history WHERE rowid IN (
+                SELECT rowid FROM performance_history
+                ORDER BY observed_at DESC, rowid DESC LIMIT -1 OFFSET ?
+            )
+            """)
+        defer { sqlite3_finalize(overflow) }
+        try checked(sqlite3_bind_int64(overflow, 1, Int64(historyLimit)))
+        guard sqlite3_step(overflow) == SQLITE_DONE else { throw PerformanceHistoryDatabaseError.unavailable }
     }
 
     private func transaction(_ operation: () throws -> Void) throws {

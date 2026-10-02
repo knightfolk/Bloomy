@@ -112,7 +112,9 @@ struct PerformanceHistoryStoreTests {
             "advertised_models": ["gemma", "qwen"], "pid": 1,
             "stats": ["tokens_generated": 40, "requests_served": 2, "usage_gaps": 0],
             "inference_active": active, "started_at": now.timeIntervalSince1970 - 60,
-            "written_at": now.timeIntervalSince1970,
+            // A persisted provider observation precedes its app capture. Avoid
+            // epoch roundtrip precision making an exact-equality fixture future.
+            "written_at": now.timeIntervalSince1970 - 1,
             "process_identity": ["pid": 1, "start_time_micros": 100],
             "autopilot_phase": phase, "config_path": "SECRET", "coordinator_url": "SECRET"
         ]
