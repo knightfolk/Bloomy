@@ -517,14 +517,35 @@ public struct UnifiedLogStreamer: Sendable {
     }
 
     public func events() -> AsyncThrowingStream<LogEvent, Error> {
+        eventSource().events
+    }
+
+    /// Retains an explicit shutdown capability even when no iterator is
+    /// waiting, or a consumer exits between two events.
+    public func eventSource() -> UnifiedLogEventSource {
         let session = UnifiedLogStreamSession(
             command: command,
             testOnlyReadChunkLimit: testOnlyReadChunkLimit,
             testOnlyCleanupObserver: testOnlyCleanupObserver
         )
-        return AsyncThrowingStream(unfolding: {
-            try await session.next()
-        })
+        return UnifiedLogEventSource(session: session)
+    }
+}
+
+public struct UnifiedLogEventSource: Sendable {
+    public let events: AsyncThrowingStream<LogEvent, Error>
+    private let session: UnifiedLogStreamSession
+
+    fileprivate init(session: UnifiedLogStreamSession) {
+        self.session = session
+        events = AsyncThrowingStream(unfolding: { try await session.next() })
+    }
+
+    /// Joins process termination and handle cleanup without blocking the
+    /// caller's actor. Shutdown also completes for an already-cancelled caller.
+    public func stop() async {
+        let session = session
+        await Task.detached { session.cancelAndWaitForCleanup() }.value
     }
 }
 
@@ -540,7 +561,7 @@ struct UnifiedLogStreamCleanupState: Equatable, Sendable {
     let standardErrorWriteHandleClosed: Bool
 }
 
-private final class UnifiedLogStreamSession: @unchecked Sendable {
+fileprivate final class UnifiedLogStreamSession: @unchecked Sendable {
     private enum Reader {
         case standardOutput
         case standardError
@@ -560,6 +581,9 @@ private final class UnifiedLogStreamSession: @unchecked Sendable {
     private let testOnlyCleanupObserver: (@Sendable (UnifiedLogStreamCleanupState) -> Void)?
     private let lineLimit = DarkbloomSourcePolicy.processOutputByteLimit
     private let lock = NSLock()
+    private let cancellationLock = NSLock()
+    private let cleanupCondition = NSCondition()
+    private var cleanupCompleted = false
     private var queuedEvents = EventBuffer(capacity: 100)
     private var waiter: CheckedContinuation<LogEvent?, Error>?
     private var standardOutputBuffer = Data()
@@ -764,8 +788,21 @@ private final class UnifiedLogStreamSession: @unchecked Sendable {
         }
     }
 
-    private func cancel() {
-        complete(with: .cancelled, terminateProcess: true)
+    func cancel() {
+        // Concurrent explicit shutdown and iterator cancellation must both
+        // return after the same owned process has been reaped.
+        cancellationLock.withLock {
+            complete(with: .cancelled, terminateProcess: true)
+        }
+    }
+
+    func cancelAndWaitForCleanup() {
+        cancel()
+        // Natural EOF can already own cleanup. Join its completion without
+        // making a process termination callback wait on cancellation's lock.
+        cleanupCondition.lock()
+        while !cleanupCompleted { cleanupCondition.wait() }
+        cleanupCondition.unlock()
     }
 
     private func complete(with state: TerminalState, terminateProcess: Bool = false) {
@@ -832,6 +869,12 @@ private final class UnifiedLogStreamSession: @unchecked Sendable {
             return true
         }
         guard shouldCleanup else { return }
+        defer {
+            cleanupCondition.lock()
+            cleanupCompleted = true
+            cleanupCondition.broadcast()
+            cleanupCondition.unlock()
+        }
 
         let processID = process.processIdentifier
         let shouldTerminateNow = terminateProcess && process.isRunning

@@ -28,6 +28,7 @@ public actor TelemetryService {
     private let source: any TelemetrySource
     private let now: @Sendable () -> Date
     private let unifiedEvents: AsyncThrowingStream<LogEvent, Error>?
+    private let stopUnifiedEventSource: (@Sendable () async -> Void)?
     private let freshnessTicks: AsyncStream<Void>?
 
     private var lastState: LastGood<DaemonState>?
@@ -75,6 +76,19 @@ public actor TelemetryService {
         self.source = source
         self.now = now
         self.unifiedEvents = unifiedEvents
+        stopUnifiedEventSource = nil
+        freshnessTicks = nil
+    }
+
+    public init(
+        source: any TelemetrySource,
+        now: @escaping @Sendable () -> Date = { Date() },
+        unifiedEventSource: UnifiedLogEventSource
+    ) {
+        self.source = source
+        self.now = now
+        unifiedEvents = unifiedEventSource.events
+        stopUnifiedEventSource = { await unifiedEventSource.stop() }
         freshnessTicks = nil
     }
 
@@ -87,6 +101,7 @@ public actor TelemetryService {
         self.source = source
         self.now = now
         self.unifiedEvents = unifiedEvents
+        stopUnifiedEventSource = nil
         freshnessTicks = testOnlyFreshnessTicks
     }
 
@@ -252,6 +267,7 @@ public actor TelemetryService {
             legacyRefreshTask,
         ].compactMap { $0 }
         let activeRefreshTask = activeRefreshTask
+        let stopUnifiedEventSource = stopUnifiedEventSource
 
         statePollingTask = nil
         loadedModelsPollingTask = nil
@@ -265,6 +281,10 @@ public actor TelemetryService {
         continuations.removeAll()
 
         let shutdownTask = Task {
+            // Iterator cancellation only owns the child while next() is
+            // active. Explicit ownership also covers never-started readers
+            // and consumers that exit between events while retaining a stream.
+            await stopUnifiedEventSource?()
             for task in pollingTasks {
                 await task.value
             }

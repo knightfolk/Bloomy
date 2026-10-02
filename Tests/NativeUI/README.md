@@ -218,6 +218,14 @@ after sample is synchronous with `sendEvent`; a deferred SwiftUI change may
 first appear in the next before sample. Diagnostic sampling adds work to key
 handling and is evidence about focus membership, not interaction performance.
 
+This trace samples only the owned dashboard window, not SwiftUI sheets or native
+export panels. It excludes Return and Escape. Do not infer sheet key delivery
+from the main window's responder or `isKeyWindow` flag. In computer-use checks,
+target the current sheet/panel and use its exposed native Raise action before
+keyboard input, then inspect actual checkbox/focus/dialog changes. A fresh
+native 22 session verified Support's Space, Tab cycle, Return review gate, and
+Escape cancellation this way without changing production focus code.
+
 To diagnose a skipped sidebar, preserve the same manifest, scenario, appearance,
 window size, and initial selection. The diagnostic checkbox is an additional
 banner focus stop. Traverse from the banner controls using Tab through a full
@@ -271,12 +279,16 @@ preparation task, captures the requested scenario/generation, cancels and joins
 the previous preparation, and publishes completed stores only for the current
 request. Rapid scenario changes cannot start two history seeders or let an older
 request mark newer work ready. Termination also cancels and joins pending loading.
-The fixture cancels the first native Quit request, starts one owned cleanup task,
+The fixture uses production's `ApplicationTerminationGate` to cancel the first
+native Quit request and start one owned cleanup task,
 then retries termination after cleanup has completed. Repeated Quit requests
 reuse that task. This avoids a nested AppKit termination wait blocking cleanup
 on the main actor when Quit originated in the popup's asynchronous action.
 Native clean-quit behavior must be verified against the newly built fixture;
 the previous fixture's hanging Quit is not proof of production behavior.
+Shared-gate native proof still uses synthetic stores. Owned subprocess shutdown
+and production delegate integration have separate regression evidence; this
+fixture does not start a live log reader or provider.
 
 Hosting token-copy actions use an inert success sink; neither the fixture nor
 its store regression tests write synthetic credentials to the user's clipboard.

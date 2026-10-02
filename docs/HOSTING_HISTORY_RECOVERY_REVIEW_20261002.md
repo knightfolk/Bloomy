@@ -82,6 +82,13 @@ Escape in the native export dialog also produced no observed dismissal. Those
 keyboard paths remain unverified, rather than counted as passed or attributed
 to a production defect without causal evidence. Actual VoiceOver remains pending.
 
+Subsequent fresh-session review targeted the actual sheet/panel with its native
+Raise action. Space, the checkbox/Close/Save Tab cycle, Return review gating,
+and Escape export/preview cancellation then passed in wide light and compact
+dark checks without changing Support focus code. See
+[Quit cleanup and keyboard review](QUIT_CLEANUP_KEYBOARD_REVIEW_20261002.md).
+The earlier inconclusive observations remain recorded above.
+
 The fixture quit through its popup, completed owned cleanup, and process absence
 was checked. No production app was quit or replaced.
 

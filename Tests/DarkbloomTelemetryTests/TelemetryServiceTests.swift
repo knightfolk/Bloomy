@@ -529,6 +529,55 @@ struct TelemetryServiceTests {
         #expect(reason.contains("Unified log stream ended unexpectedly"))
     }
 
+    @Test("stop reaps an owned unified reader even before service start")
+    func stopsUnstartedUnifiedReader() async throws {
+        let pidFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("darkbloom-unstarted-log-\(UUID().uuidString).pid")
+        try Data().write(to: pidFile)
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let logs = UnifiedLogStreamer(testOnlyCommand: .testOnly(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf '%s' $$ > \"$1\"; exec /bin/sleep 30", "sh", pidFile.path]
+        )).eventSource()
+        let service = TelemetryService(source: ScriptedTelemetrySource.successful(), unifiedEventSource: logs)
+        let pid = try #require(await waitForPID(at: pidFile))
+        defer { if processExists(pid) { kill(pid, SIGKILL) } }
+
+        await service.stop()
+        #expect(!processExists(pid))
+        // Retain both owners: process cleanup cannot depend on deallocation.
+        withExtendedLifetime((service, logs)) {}
+    }
+
+    @Test("active owned unified shutdown awaits a TERM-resistant reader exit")
+    func stopsActiveResistantUnifiedReader() async throws {
+        let pidFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("darkbloom-active-log-\(UUID().uuidString).pid")
+        try Data().write(to: pidFile)
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let line = #"{"timestamp":"2026-08-31 17:45:00.000000-0700","messageType":"Info","category":"coordinator","eventMessage":"Connected before resisted shutdown"}"#
+        let logs = UnifiedLogStreamer(testOnlyCommand: .testOnly(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "trap '' TERM; printf '%s\\n' \"$1\"; printf '%s' $$ > \"$2\"; exec /bin/sleep 30", "sh", line, pidFile.path]
+        )).eventSource()
+        let service = TelemetryService(source: ScriptedTelemetrySource.successful(), unifiedEventSource: logs)
+        guard let pid = await waitForPID(at: pidFile) else {
+            await service.stop()
+            Issue.record("The owned unified reader did not publish its PID")
+            return
+        }
+        defer { if processExists(pid) { kill(pid, SIGKILL) } }
+        let snapshots = await service.snapshots()
+        await service.start()
+        let received = await firstSnapshot(in: snapshots) { snapshot in
+            snapshot.eventFeed.value?.events.contains { $0.message == "Connected before resisted shutdown" } == true
+        }
+        #expect(received != nil)
+        await service.stop()
+        #expect(!processExists(pid))
+        withExtendedLifetime((service, logs)) {}
+    }
+
     @Test("stop waits for unified iterator cleanup acknowledgment")
     func stopWaitsForUnifiedIteratorCleanup() async {
         let probe = BlockingUnifiedIterator()

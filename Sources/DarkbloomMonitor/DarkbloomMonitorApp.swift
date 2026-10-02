@@ -23,6 +23,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
     @Published private(set) var monitorStore: MonitorStore?
     @Published private(set) var controlStore: ProviderControlStore?
     private var statusItemController: StatusItemController?
+    private let terminationGate = ApplicationTerminationGate()
 
     override init() {
         self.instanceGuard = SingleInstanceGuard()
@@ -175,7 +176,7 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         let source = LocalTelemetrySource(policy: policy, runner: runner)
         let service = TelemetryService(
             source: source,
-            unifiedEvents: UnifiedLogStreamer().events()
+            unifiedEventSource: UnifiedLogStreamer().eventSource()
         )
         let applicationSupport = MonitorApplicationIdentity.applicationSupportDirectory()
         let actionHistory = ActionHistoryStore(url: applicationSupport.appendingPathComponent("actions.sqlite3"))
@@ -348,14 +349,17 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        statusItemController?.invalidate()
-        controlStore?.cancelCurrentOperation()
-        guard let monitorStore else { return }
-        Task {
-            await CLIUpdateStatusStore.shared.stop()
-            await monitorStore.stop()
-        }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        terminationGate.requestTermination(
+            cleanup: { [self] in
+                statusItemController?.invalidate()
+                controlStore?.cancelCurrentOperation()
+                await CLIUpdateStatusStore.shared.stop()
+                await monitorStore?.stop()
+                await controlStore?.cancelCurrentOperationAndWait()
+            },
+            retryTermination: { sender.terminate(nil) }
+        )
     }
 }
 

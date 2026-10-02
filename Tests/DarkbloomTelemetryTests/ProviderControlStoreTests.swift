@@ -639,6 +639,85 @@ struct ProviderControlStoreTests {
         #expect(store.operation == .idle)
     }
 
+    @Test("termination joins owned cancellation cleanup and overlapping joins")
+    func terminationJoinsCancellationCleanup() async {
+        let cleanup = TelemetryRefreshGate()
+        let controller = FakeProviderController.fixture(
+            blockDownload: true, downloadCancellationGate: cleanup
+        )
+        let store = ProviderControlStore(controller: controller)
+        await store.refresh()
+
+        let download = Task { await store.download("available-model") }
+        await controller.waitUntilDownloadStarts()
+        var firstFinished = false
+        let firstJoin = Task {
+            await store.cancelCurrentOperationAndWait()
+            firstFinished = true
+        }
+        let cleanupStarted = await cleanup.waitUntilStarted()
+        #expect(cleanupStarted)
+        #expect(!firstFinished)
+        #expect(store.operation == .downloading("available-model"))
+
+        var secondStarted = false
+        var secondFinished = false
+        let secondJoin = Task {
+            secondStarted = true
+            await store.cancelCurrentOperationAndWait()
+            secondFinished = true
+        }
+        while !secondStarted { await Task.yield() }
+        #expect(!secondFinished)
+
+        await cleanup.release()
+        await firstJoin.value
+        await secondJoin.value
+        await download.value
+        #expect(firstFinished)
+        #expect(secondFinished)
+        #expect(store.operation == .idle)
+        #expect(await controller.downloadCancellationCount == 1)
+        #expect(store.errorMessage == nil)
+    }
+
+    @Test("termination waits for completed lifecycle reconciliation")
+    func terminationJoinsCompletedLifecycleReconciliation() async {
+        let telemetry = TelemetryRefreshGate()
+        let changedSources = unavailableLifecycleSources()
+        let controller = FakeProviderController.fixture(
+            lifecycleSnapshotAfterExecute: fixtureSnapshot(sources: changedSources)
+        )
+        let store = ProviderControlStore(
+            controller: controller, refreshTelemetry: { await telemetry.refresh() }
+        )
+        await store.refresh()
+
+        let operation = Task { await store.request(.start) }
+        let reconciliationStarted = await telemetry.waitUntilStarted()
+        #expect(reconciliationStarted)
+        var joinStarted = false
+        var joinFinished = false
+        let join = Task {
+            joinStarted = true
+            await store.cancelCurrentOperationAndWait()
+            joinFinished = true
+        }
+        while !joinStarted { await Task.yield() }
+        #expect(!joinFinished)
+        #expect(store.operation == .lifecycle(.start))
+
+        await telemetry.release()
+        await join.value
+        await operation.value
+        #expect(joinFinished)
+        #expect(store.operation == .idle)
+        #expect(store.snapshot?.sources == changedSources)
+        #expect(store.errorMessage == nil)
+        #expect(await telemetry.callCount == 1)
+        #expect(await controller.refreshCount == 2)
+    }
+
     @Test("completed download reconciles after caller cancellation and removes Cancel")
     func completedDownloadIgnoresLateCancellation() async throws {
         let completionGate = TelemetryRefreshGate()
@@ -2363,6 +2442,7 @@ private actor FakeProviderController: ProviderControlling, ProviderSavedCapacity
     private let downloadFailure: Failure?
     private let snapshotAfterDownload: ProviderControlSnapshot?
     private let downloadCompletionGate: TelemetryRefreshGate?
+    private let downloadCancellationGate: TelemetryRefreshGate?
     private let saveFailure: ProviderConfigError?
     private let saveCancellation: Bool
     private let saveControlFailure: ProviderControlError?
@@ -2397,6 +2477,7 @@ private actor FakeProviderController: ProviderControlling, ProviderSavedCapacity
         downloadFailure: Failure? = nil,
         snapshotAfterDownload: ProviderControlSnapshot? = nil,
         downloadCompletionGate: TelemetryRefreshGate? = nil,
+        downloadCancellationGate: TelemetryRefreshGate? = nil,
         saveFailure: ProviderConfigError? = nil,
         saveCancellation: Bool = false,
         saveControlFailure: ProviderControlError? = nil,
@@ -2420,6 +2501,7 @@ private actor FakeProviderController: ProviderControlling, ProviderSavedCapacity
             downloadFailure: downloadFailure,
             snapshotAfterDownload: snapshotAfterDownload,
             downloadCompletionGate: downloadCompletionGate,
+            downloadCancellationGate: downloadCancellationGate,
             saveFailure: saveFailure,
             saveCancellation: saveCancellation,
             saveControlFailure: saveControlFailure,
@@ -2445,6 +2527,7 @@ private actor FakeProviderController: ProviderControlling, ProviderSavedCapacity
         downloadFailure: Failure?,
         snapshotAfterDownload: ProviderControlSnapshot?,
         downloadCompletionGate: TelemetryRefreshGate?,
+        downloadCancellationGate: TelemetryRefreshGate?,
         saveFailure: ProviderConfigError?,
         saveCancellation: Bool,
         saveControlFailure: ProviderControlError?,
@@ -2467,6 +2550,7 @@ private actor FakeProviderController: ProviderControlling, ProviderSavedCapacity
         self.downloadFailure = downloadFailure
         self.snapshotAfterDownload = snapshotAfterDownload
         self.downloadCompletionGate = downloadCompletionGate
+        self.downloadCancellationGate = downloadCancellationGate
         self.saveFailure = saveFailure
         self.saveCancellation = saveCancellation
         self.saveControlFailure = saveControlFailure
@@ -2563,6 +2647,7 @@ private actor FakeProviderController: ProviderControlling, ProviderSavedCapacity
                 try await Task.sleep(for: .seconds(60))
             } catch is CancellationError {
                 downloadCancellationCount += 1
+                await downloadCancellationGate?.refresh()
                 throw CancellationError()
             }
         }

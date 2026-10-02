@@ -958,8 +958,8 @@ private struct FixtureReviewView: View {
 private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let model = FixtureModel()
     private var window: NSWindow?
-    private var shutdownTask: Task<Void, Never>?
-    private var shutdownApproved = false
+    private let terminationGate = ApplicationTerminationGate()
+    private var terminationRequested = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installApplicationMenus()
@@ -1027,7 +1027,7 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
     }
 
     private func presentDashboard(section: DashboardDestination? = nil, settingsPage: SettingsPage? = nil) {
-        guard shutdownTask == nil, !shutdownApproved, let window else { return }
+        guard !terminationRequested, let window else { return }
         if let settingsPage { model.navigation.settingsPage = settingsPage }
         if let section { model.navigation.selected = section }
         if section != nil || settingsPage != nil { model.navigation.revealSelectedSection() }
@@ -1058,19 +1058,12 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if shutdownApproved { return .terminateNow }
-        guard shutdownTask == nil else { return .terminateCancel }
-        // Cancel this request so the invoking MainActor job can return. A
-        // terminateLater nested AppKit loop can prevent our cleanup job from
-        // running when Quit originated in MonitorStore's async task.
+        terminationRequested = true
         model.ready = false
-        shutdownTask = Task { @MainActor in
-            await model.stopForTermination()
-            shutdownApproved = true
-            shutdownTask = nil
-            sender.terminate(nil)
-        }
-        return .terminateCancel
+        return terminationGate.requestTermination(
+            cleanup: { await self.model.stopForTermination() },
+            retryTermination: { sender.terminate(nil) }
+        )
     }
 }
 

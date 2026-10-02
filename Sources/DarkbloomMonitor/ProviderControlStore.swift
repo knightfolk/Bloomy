@@ -1141,6 +1141,14 @@ final class ProviderControlStore: ObservableObject {
         currentTask?.cancel()
     }
 
+    func cancelCurrentOperationAndWait() async {
+        // Keep the owned task even if its finish() clears currentTask while
+        // cancellation or completed-mutation reconciliation is running.
+        let task = currentTask
+        cancelCurrentOperation()
+        await task?.value
+    }
+
     private func executeLifecycle(
         _ action: ProviderLifecycleAction,
         enabledModels: [String],

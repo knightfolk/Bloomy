@@ -266,6 +266,84 @@ struct UnifiedLogTests {
         #expect(!processExists(state.processID))
     }
 
+    @Test("explicit shutdown reaps a retained reader after cancellation between events")
+    func stopsRetainedSourceBetweenEvents() async throws {
+        let line = String(decoding: unifiedLine(message: "Connected before consumer exit"), as: UTF8.self)
+            .trimmingCharacters(in: .newlines)
+        let recorder = UnifiedLogCleanupRecorder()
+        let source = UnifiedLogStreamer(
+            testOnlyCommand: .testOnly(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "printf '%s\\n' \"$1\"; exec /bin/sleep 30", "sh", line]
+            ),
+            testOnlyCleanupObserver: recorder.record
+        ).eventSource()
+        let retainedStream = source.events
+        let consumer = Task {
+            var iterator = retainedStream.makeAsyncIterator()
+            let event = try await iterator.next()
+            #expect(event?.message == "Connected before consumer exit")
+            withUnsafeCurrentTask { $0?.cancel() }
+            try Task.checkCancellation()
+        }
+        do {
+            try await consumer.value
+            Issue.record("Expected cancellation after the first event")
+        } catch is CancellationError {
+            // No second next() installs an iterator cancellation handler.
+        }
+
+        let firstStop = Task { await source.stop() }
+        let cancelledStop = Task { await source.stop() }
+        cancelledStop.cancel()
+        await source.stop()
+        await firstStop.value
+        await cancelledStop.value
+        let state = try #require(await recorder.wait())
+        #expect(!processExists(state.processID))
+        #expect(state.terminationHandlerCleared)
+        #expect(state.standardOutputHandlerCleared)
+        #expect(state.standardErrorHandlerCleared)
+        #expect(state.standardOutputReadHandleClosed)
+        #expect(state.standardErrorReadHandleClosed)
+        #expect(state.standardOutputWriteHandleClosed)
+        #expect(state.standardErrorWriteHandleClosed)
+        withExtendedLifetime((source, retainedStream)) {}
+    }
+
+    @Test("explicit stop joins natural EOF cleanup already in progress")
+    func joinsNaturalCompletionCleanup() async throws {
+        let probe = UnifiedLogCompletionProbe()
+        defer { probe.releaseCleanup() }
+        let source = UnifiedLogStreamer(
+            testOnlyCommand: .testOnly(
+                executable: URL(fileURLWithPath: "/usr/bin/printf"), arguments: [""]
+            ),
+            testOnlyCleanupObserver: probe.holdCleanup
+        ).eventSource()
+        await probe.waitUntilCleanupStarts()
+        let (stopping, started) = AsyncStream<Void>.makeStream()
+        let stopTask = Task {
+            started.yield()
+            await source.stop()
+            probe.markStopReturned()
+        }
+        var iterator = stopping.makeAsyncIterator()
+        _ = await iterator.next()
+        for _ in 0..<50 {
+            try await Task.sleep(for: .milliseconds(10))
+            if probe.stopReturned {
+                Issue.record("Stop returned before in-flight natural cleanup completed")
+                break
+            }
+        }
+        probe.releaseCleanup()
+        await stopTask.value
+        #expect(probe.stopReturned)
+        await source.stop()
+        withExtendedLifetime(source) {}
+    }
+
     private func fixtureLine(_ name: String) throws -> Data {
         let url = try #require(Bundle.module.url(
             forResource: name,
@@ -302,6 +380,32 @@ struct UnifiedLogTests {
         if kill(processID, 0) == 0 { return true }
         return errno != ESRCH
     }
+}
+
+private final class UnifiedLogCompletionProbe: @unchecked Sendable {
+    private let entered: AsyncStream<Void>
+    private let continuation: AsyncStream<Void>.Continuation
+    private let finish = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var returned = false
+
+    init() {
+        (entered, continuation) = AsyncStream<Void>.makeStream()
+    }
+
+    func holdCleanup(_ state: UnifiedLogStreamCleanupState) {
+        continuation.yield()
+        _ = finish.wait(timeout: .now() + 5)
+    }
+
+    func waitUntilCleanupStarts() async {
+        var iterator = entered.makeAsyncIterator()
+        _ = await iterator.next()
+    }
+
+    func releaseCleanup() { finish.signal() }
+    func markStopReturned() { lock.withLock { returned = true } }
+    var stopReturned: Bool { lock.withLock { returned } }
 }
 
 private final class UnifiedLogCleanupRecorder: @unchecked Sendable {
