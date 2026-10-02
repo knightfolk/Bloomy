@@ -134,7 +134,11 @@ The Window > Minimize action was invoked, but subsequent window/menu automation
 timed out. Cached window captures and popup navigation do not prove that native
 minimize/restore completed correctly. That check remains pending; neither a
 shortcut attempt nor the popup's Open dashboard action is counted as a passed
-restore test. The optional native launch API was unavailable in this Mac CUA
+restore test in this checkpoint. Subsequent native 22 review repaired the
+fixture's popup presentation route and recorded actual native window flags,
+same-window restoration, and exact draft recovery; see
+[Hosting and history recovery review](HOSTING_HISTORY_RECOVERY_REVIEW_20261002.md).
+The optional native launch API was unavailable in this Mac CUA
 session. The automated ownership/lifecycle tests remain separate evidence.
 
 Artifacts are retained locally in `/tmp/bloomy-efficiency-20261001/` and are not
@@ -188,7 +192,8 @@ an active periodic task is running.
 
 ## Remaining proof and release boundaries
 
-- [ ] Actual native Chat minimize/restore proof after the automation timeouts.
+- [x] Subsequent native 22 Chat minimize/restore proof is recorded in
+  [Hosting and history recovery review](HOSTING_HISTORY_RECOVERY_REVIEW_20261002.md).
 - [ ] Full route/appearance/size/source-state native matrix, actual VoiceOver,
   controlled Reduce Motion, and comparable current production CPU/energy and
   allocation measurements.

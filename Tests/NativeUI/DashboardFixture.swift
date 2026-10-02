@@ -358,6 +358,7 @@ private final class FixtureModel: ObservableObject {
     let directory: URL
     let focusDiagnostics: FixtureFocusDiagnostics
     let navigation: DashboardNavigation
+    var presentDashboard: ((DashboardDestination?, SettingsPage?) -> Void)?
     lazy var popup = FixturePopoverController(model: self)
     @Published var monitor: MonitorStore
     @Published var control: ProviderControlStore
@@ -401,7 +402,8 @@ private final class FixtureModel: ObservableObject {
             evidence: { _ in .unavailable }, canAct: { false }, send: { _, _ in nil })
         monitor.profitSwitch = ProfitSwitchStore(control: control, defaults: defaults, installedMemoryGB: 64, availableMemoryGB: { 24 })
         let hosting = HostingSettingsStore(controlStore: control, endpointClient: FixtureEndpoint(), tokenFile: tokens,
-            cliVersionProvider: { scenario == .offline ? nil : "0.9.17" }, defaults: defaults, lanScanner: { ["192.168.50.20"] })
+            cliVersionProvider: { scenario == .offline ? nil : "0.9.17" }, defaults: defaults,
+            lanScanner: { ["192.168.50.20"] }, copyToken: { _ in true })
         let chat = ChatStore(localClient: FixtureChat(scenario: scenario), networkClient: FixtureChat(scenario: scenario),
             balanceClient: FixtureBalance(), pricingClient: FixturePricing(scenario: scenario), keyStore: tokens)
         monitor.attachRecommendationInventory { control.snapshot }
@@ -574,7 +576,7 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
             let content = FixturePopoverContent(store: model.monitor, control: model.control,
                 visibility: visibility, defaults: model.defaults,
                 openSettings: { [weak self] page in self?.navigate(.settings, settingsPage: page) },
-                openDashboard: { [weak self] in self?.navigate(.overview) },
+                openDashboard: { [weak self] in self?.navigate() },
                 openModels: { [weak self] in self?.navigate(.models) },
                 openHosting: { [weak self] in self?.navigate(.hosting) })
             popover.contentViewController = NSHostingController(rootView: content)
@@ -652,14 +654,12 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
         }
     }
 
-    private func navigate(_ destination: DashboardDestination, settingsPage: SettingsPage? = nil) {
+    private func navigate(_ destination: DashboardDestination? = nil, settingsPage: SettingsPage? = nil) {
         Task { @MainActor [weak self] in
             guard let self else { return }
             await closeAndWait()
             guard let model else { return }
-            if let settingsPage { model.navigation.settingsPage = settingsPage }
-            model.navigation.selected = destination
-            model.navigation.revealSelectedSection()
+            model.presentDashboard?(destination, settingsPage)
         }
     }
 }
@@ -724,6 +724,8 @@ private final class FixtureFocusDiagnostics {
     let outputURL: URL
     private var capturedReady = false
     private var navigationKeys = 0
+    private var capturedRecords = 0
+    private let maximumRecords = 49
     private let maximumNavigationKeys = 24
     private let maximumViews = 384
     private let maximumLoopLength = 64
@@ -741,7 +743,8 @@ private final class FixtureFocusDiagnostics {
     func begin(_ event: NSEvent, window: NSWindow) -> Int? {
         guard isEnabled, capturedReady, event.type == .keyDown,
               [48, 49, 123, 124, 125, 126].contains(Int(event.keyCode)),
-              navigationKeys < maximumNavigationKeys else { return nil }
+              navigationKeys < maximumNavigationKeys,
+              capturedRecords < maximumRecords else { return nil }
         navigationKeys += 1
         capture(window, phase: "before", eventNumber: navigationKeys)
         return navigationKeys
@@ -751,7 +754,16 @@ private final class FixtureFocusDiagnostics {
         capture(window, phase: "after", eventNumber: eventNumber)
     }
 
+    func captureWindowState(_ window: NSWindow, phase: String) {
+        // Preparation creates the isolated output directory before ready.
+        guard capturedReady else { return }
+        capture(window, phase: phase)
+    }
+
     private func capture(_ window: NSWindow, phase: String, eventNumber: Int? = nil) {
+        // Lifecycle and key-event evidence share the original overall limit.
+        guard isEnabled, capturedRecords < maximumRecords else { return }
+        capturedRecords += 1
         var views: [NSView] = []
         var treeTruncated = false
         func visit(_ view: NSView, depth: Int) {
@@ -805,6 +817,10 @@ private final class FixtureFocusDiagnostics {
             "fullKeyboardAccess": NSApplication.shared.isFullKeyboardAccessEnabled,
             "autorecalculatesKeyViewLoop": window.autorecalculatesKeyViewLoop,
             "isKeyWindow": window.isKeyWindow,
+            "isMiniaturized": window.isMiniaturized,
+            "isVisible": window.isVisible,
+            "windowNumber": window.windowNumber,
+            "windowFrame": [window.frame.origin.x, window.frame.origin.y, window.frame.width, window.frame.height],
             "firstResponder": reference(window.firstResponder),
             "initialFirstResponder": reference(window.initialFirstResponder),
             "treeTruncated": treeTruncated, "nodes": nodes,
@@ -959,9 +975,10 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
         window.contentMinSize = NSSize(width: 800, height: 560)
         window.center()
         self.window = window
-        window.makeKeyAndOrderFront(nil)
-        model.setDashboardVisible(true)
-        NSApplication.shared.activate()
+        model.presentDashboard = { [weak self] section, settingsPage in
+            self?.presentDashboard(section: section, settingsPage: settingsPage)
+        }
+        presentDashboard()
     }
 
     private func installApplicationMenus(application: NSApplication = .shared) {
@@ -1006,11 +1023,19 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
     }
 
     @objc private func showDashboard() {
+        presentDashboard()
+    }
+
+    private func presentDashboard(section: DashboardDestination? = nil, settingsPage: SettingsPage? = nil) {
         guard shutdownTask == nil, !shutdownApproved, let window else { return }
+        if let settingsPage { model.navigation.settingsPage = settingsPage }
+        if let section { model.navigation.selected = section }
+        if section != nil || settingsPage != nil { model.navigation.revealSelectedSection() }
         window.deminiaturize(nil)
-        window.makeKeyAndOrderFront(nil)
         model.setDashboardVisible(true)
         NSApplication.shared.activate()
+        window.makeKeyAndOrderFront(nil)
+        model.focusDiagnostics.captureWindowState(window, phase: "window.presented")
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -1021,8 +1046,14 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
     // Mirror DashboardWindowController's visibility forwarding. Store.start()
     // remains unused, so these events cannot start its autonomous collectors.
     func windowWillClose(_ notification: Notification) { model.setDashboardVisible(false) }
-    func windowDidMiniaturize(_ notification: Notification) { model.setDashboardVisible(false) }
-    func windowDidDeminiaturize(_ notification: Notification) { model.setDashboardVisible(true) }
+    func windowDidMiniaturize(_ notification: Notification) {
+        model.setDashboardVisible(false)
+        if let window { model.focusDiagnostics.captureWindowState(window, phase: "window.didMiniaturize") }
+    }
+    func windowDidDeminiaturize(_ notification: Notification) {
+        model.setDashboardVisible(true)
+        if let window { model.focusDiagnostics.captureWindowState(window, phase: "window.didDeminiaturize") }
+    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 

@@ -57,8 +57,9 @@ sources = []
 for source in sorted((ROOT / "Sources/DarkbloomMonitor").rglob("*.swift")):
     if source.name == "DarkbloomMonitorApp.swift":
         continue  # Production app entry point owns all live start-up wiring.
-    text = source.read_text()
-    hashes[str(source.relative_to(ROOT))] = hashlib.sha256(source.read_bytes()).hexdigest()
+    source_bytes = source.read_bytes()
+    text = source_bytes.decode("utf-8")
+    hashes[str(source.relative_to(ROOT))] = hashlib.sha256(source_bytes).hexdigest()
     if source.name in substitutions:
         before, after = substitutions[source.name]
         if text.count(before) != 1:
@@ -83,11 +84,18 @@ extension Bundle {
 ''')
 sources.append(accessor)
 fixture = ROOT / "Tests/NativeUI/DashboardFixture.swift"
-hashes[str(fixture.relative_to(ROOT))] = hashlib.sha256(fixture.read_bytes()).hexdigest()
+fixture_bytes = fixture.read_bytes()
+hashes[str(fixture.relative_to(ROOT))] = hashlib.sha256(fixture_bytes).hexdigest()
+staged_fixture = stage / fixture.name
+staged_fixture.write_bytes(fixture_bytes)
+# Link the same immutable bytes that the manifest identifies, even if an
+# independent debug build refreshes the original products during compilation.
+staged_telemetry = stage / telemetry.name
+shutil.copy2(telemetry, staged_telemetry)
 arch = "arm64" if platform.machine() == "arm64" else "x86_64"
 command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6",
            "-parse-as-library", "-D", "DEBUG", "-I", str(products), "-F", str(products),
-           str(fixture), *map(str, sources), str(telemetry), "-framework", "Sparkle", "-lsqlite3",
+           str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle", "-lsqlite3",
            "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks", "-o", str(binary)]
 subprocess.run(command, cwd=ROOT, check=True)
 subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], check=True)
@@ -96,7 +104,7 @@ manifest = {
     "source_sha256": hashes,
     "dependency_substitutions": {name: {"before": pair[0], "after": pair[1]}
                                  for name, pair in substitutions.items()},
-    "telemetry_library_sha256": hashlib.sha256(telemetry.read_bytes()).hexdigest(),
+    "telemetry_library_sha256": hashlib.sha256(staged_telemetry.read_bytes()).hexdigest(),
     "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
     "compiler_command": command,
 }

@@ -92,9 +92,12 @@ The fixture's native Edit menu uses production's responder-chain commands and
 shortcuts for Undo, Redo, Cut, Copy, Paste, and Select All. Focus a synthetic text
 field before testing Command-A and typing; these actions edit that field through
 AppKit rather than assigning its accessibility value. Window > Minimize uses the
-native window responder. Window > Show Dashboard and Dock reopen restore the
+native window responder. Window > Show Dashboard, Dock reopen, and the popup's
+Open dashboard action restore the
 same owned window and visibility without reconstructing the stores or starting
-collectors. These fixture menus contain only editing, native-window, and Quit
+collectors. Generic dashboard presentation preserves the selected page; explicit
+Settings, Models, and Hosting routes still select their requested page.
+These fixture menus contain only editing, native-window, and Quit
 commands; production update/provider handlers are not installed. Use the menu
 minimize/restore route for Metrics lifecycle review, with tracing disabled for
 normal timing proof.
@@ -103,7 +106,11 @@ The standalone compiler does not invoke SwiftPM or its build lock. Its small
 output stays under `.build/native-dashboard-fixture`; `--output /absolute/path`
 can select another task-owned output directory. The builder records original
 production source hashes, the linked telemetry library hash, the fixture binary
-hash, and the exact compiler command in `fixture-manifest.json`. Rebuild after
+hash, and the exact compiler command in `fixture-manifest.json`. Production
+source hashes describe the same bytes staged before dependency substitutions.
+The fixture source and linked telemetry library are also copied into the staging
+directory before compilation, so the manifest identifies the compiled snapshot
+even if their original paths change afterward. Rebuild after
 source changes and identify this manifest when recording native proof.
 Existing output directories are rejected before copying or compiling; use a
 fresh `--output` path for each retry/rebuild and preserve failed outputs until
@@ -185,7 +192,10 @@ path. Trace records stay in the session's task-owned temporary directory as
 When disabled the diagnostic writes nothing. It captures one ready-view sample
 after first enabling, then immediate before/after samples
 for the first **24** Tab, Space, or arrow key-down events delivered to the fixture
-window. Turning the checkbox off/on does not reset the per-process event budget.
+window. Ready, key, presentation, minimize, and restore samples share a maximum
+of **49 records**. Lifecycle samples require the trace to be enabled and ready;
+they can use part of the key-event budget. Turning the checkbox off/on does not
+reset either per-process budget.
 Only a sample event ordinal is stored; key codes, modifiers, typed characters,
 control labels/values, accessibility contents, credentials, and user data are
 omitted. Record the controlled action sequence separately to match ordinals to
@@ -193,7 +203,8 @@ the tested keys. The diagnostic consumes no events, moves no focus,
 and changes no key-view or OS keyboard settings. It has no timer or observer.
 
 Each sample includes the native first and initial responders, the existing
-Full Keyboard Access and automatic key-view-loop recalculation states, and up to
+Full Keyboard Access and automatic key-view-loop recalculation states, native
+window identity/frame and minimized/visible flags, and up to
 384 native views with class, parent,
 window-relative geometry, hidden/enabled state, `acceptsFirstResponder`,
 `canBecomeKeyView`, and `nextKeyView`/`nextValidKeyView` edges. Native table/outline
@@ -267,6 +278,8 @@ on the main actor when Quit originated in the popup's asynchronous action.
 Native clean-quit behavior must be verified against the newly built fixture;
 the previous fixture's hanging Quit is not proof of production behavior.
 
+Hosting token-copy actions use an inert success sink; neither the fixture nor
+its store regression tests write synthetic credentials to the user's clipboard.
 Popup model actions use the in-memory provider actor; fan mutations remain
 unsupported/rejected; Nudge uses in-memory credentials with actions disabled.
 The actor initially enables startup preload for its two saved preload models and

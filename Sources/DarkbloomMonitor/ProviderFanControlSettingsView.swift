@@ -28,6 +28,7 @@ struct ProviderAutoUpdateSettingsView: View {
                             setEnabled(!status.enabled)
                         }
                         .disabled(saveInFlight || store.mutationInFlight)
+                        .accessibilityLabel(saveInFlight ? "Saving automatic provider updates" : (status.enabled ? "Disable automatic provider updates" : "Enable automatic provider updates"))
                         .accessibilityIdentifier("settings.provider.autoupdate")
                     }
                 }

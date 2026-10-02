@@ -34,6 +34,9 @@ final class HostingSettingsStore: ObservableObject {
     private let tokenFile: any LocalEndpointTokenManaging
     private let cliVersionProvider: () -> String?
     private let lanScanner: @Sendable () -> [String]
+    private let copyToken: (String) -> Bool
+    private var localTokenRevision: UInt64 = 0
+    private var endpointDetailsGeneration: UInt64 = 0
 
     init(
         controlStore: ProviderControlStore?,
@@ -41,7 +44,11 @@ final class HostingSettingsStore: ObservableObject {
         tokenFile: any LocalEndpointTokenManaging,
         cliVersionProvider: @escaping () -> String?,
         defaults: UserDefaults = .standard,
-        lanScanner: @escaping @Sendable () -> [String] = LANAddressScanner.activePrivateIPv4Addresses
+        lanScanner: @escaping @Sendable () -> [String] = LANAddressScanner.activePrivateIPv4Addresses,
+        copyToken: @escaping (String) -> Bool = { token in
+            NSPasteboard.general.clearContents()
+            return NSPasteboard.general.setString(token, forType: .string)
+        }
     ) {
         self.controlStore = controlStore
         self.endpointClient = endpointClient
@@ -49,6 +56,7 @@ final class HostingSettingsStore: ObservableObject {
         self.cliVersionProvider = cliVersionProvider
         self.defaults = defaults
         self.lanScanner = lanScanner
+        self.copyToken = copyToken
         options = Self.loadOptions(from: defaults)
     }
 
@@ -91,7 +99,7 @@ final class HostingSettingsStore: ObservableObject {
 
     func setMode(_ mode: HostingEndpointMode) {
         if options.mode != mode {
-            endpointDetails = nil
+            invalidateEndpointDetails()
         }
         update(\.mode, to: mode)
         if localTokenNeedsRestart {
@@ -166,9 +174,26 @@ final class HostingSettingsStore: ObservableObject {
     /// On-demand standalone-mode `darkbloom local --json` read. Unified mode
     /// has no discovery record; its address comes from these settings.
     func fetchEndpointDetails() async {
+        _ = await refreshedEndpointDetails()
+    }
+
+    private func refreshedEndpointDetails() async -> LocalEndpointAvailability? {
+        endpointDetailsGeneration &+= 1
+        let generation = endpointDetailsGeneration
         isFetchingEndpointDetails = true
-        defer { isFetchingEndpointDetails = false }
-        endpointDetails = await endpointClient.fetch()
+        defer {
+            if generation == endpointDetailsGeneration { isFetchingEndpointDetails = false }
+        }
+        let availability = await endpointClient.fetch()
+        guard generation == endpointDetailsGeneration else { return nil }
+        endpointDetails = availability
+        return availability
+    }
+
+    private func invalidateEndpointDetails() {
+        endpointDetailsGeneration &+= 1
+        endpointDetails = nil
+        isFetchingEndpointDetails = false
     }
 
     /// Writes the custom key to the exact protected file read by `darkbloom
@@ -187,13 +212,16 @@ final class HostingSettingsStore: ObservableObject {
             return false
         }
 
+        localTokenRevision &+= 1
         localTokenNeedsRestart = options.mode == .unified
         localTokenStatusMessage = tokenStatusMessage(for: options.mode)
         return true
     }
 
     var canCopyBearerToken: Bool {
-        if case .live(let record) = endpointDetails { return record.hasBearerToken }
+        // Discovery is a snapshot. Keep the explicit retry available even if
+        // that endpoint previously advertised disabled authentication.
+        if case .live = endpointDetails { return true }
         var available = false
         _ = tokenFile.withBearerToken { _ in available = true }
         return available
@@ -275,23 +303,22 @@ final class HostingSettingsStore: ObservableObject {
     /// custom token staged on disk cannot be confused with a running server's
     /// still-active key. The secret is never displayed, logged, or persisted.
     func copyBearerTokenToPasteboard() async -> Bool {
+        errorMessage = nil
         var copied = false
-        await fetchEndpointDetails()
-        if case .live(let record) = endpointDetails, record.hasBearerToken {
+        guard let availability = await refreshedEndpointDetails() else { return false }
+        if case .live(let record) = availability, record.hasBearerToken {
             record.withBearerToken { token in
-                NSPasteboard.general.clearContents()
-                copied = NSPasteboard.general.setString(token, forType: .string)
+                copied = copyToken(token)
             }
             return copied
         }
-        if case .live = endpointDetails {
+        if case .live = availability {
             errorMessage = "The running local endpoint has bearer-token authentication disabled."
             return false
         }
 
         let found = tokenFile.withBearerToken { token in
-            NSPasteboard.general.clearContents()
-            copied = NSPasteboard.general.setString(token, forType: .string)
+            copied = copyToken(token)
         }
         if !found {
             errorMessage = "The bearer token is not available yet. Start local hosting first, or save a custom token."
@@ -309,16 +336,20 @@ final class HostingSettingsStore: ObservableObject {
             errorMessage = "Hosting controls are unavailable."
             return
         }
+        let tokenRevision = localTokenRevision
         let succeeded = await controlStore.applyHosting(options)
         if !succeeded {
             errorMessage = "Hosting settings could not be applied. Refresh before trying again."
             return
         }
-        if localTokenNeedsRestart {
+        invalidateEndpointDetails()
+        if localTokenNeedsRestart, tokenRevision == localTokenRevision {
             localTokenNeedsRestart = false
-            localTokenStatusMessage = options.mode == .off
-                ? "Hosting changes applied. The saved token will be used next time you enable a local endpoint."
-                : "Hosting changes applied. The running endpoint has restarted with the saved token."
+            if options.mode == .off || !options.requiresAuthentication {
+                localTokenStatusMessage = "Hosting changes applied. The saved token will be used next time you enable an authenticated local endpoint."
+            } else {
+                localTokenStatusMessage = "Hosting changes applied. The running endpoint has restarted with the saved token."
+            }
         }
     }
 

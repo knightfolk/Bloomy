@@ -88,6 +88,18 @@ struct OpportunityView: View {
                 Text("Network activity").tag(true)
             }.pickerStyle(.segmented)
             if showsHistory {
+                HStack {
+                    Spacer()
+                    Button {
+                        Task { await store.manuallyRefreshNetworkSeries() }
+                    } label: {
+                        Label(store.networkSeriesRefreshing ? "Refreshing…" : "Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(!store.canRefreshNetworkSeries)
+                    .accessibilityLabel("Refresh network history")
+                    .accessibilityIdentifier("opportunity.history.refresh")
+                    .help("Read network activity now, without waiting for the next automatic attempt")
+                }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         NetworkHistoryView(source: store.networkSeries, isVisible: store.dashboardVisible)

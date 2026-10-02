@@ -78,6 +78,7 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var publicCatalog: SourceAvailability<PublicCatalogSnapshot> = .unavailable(reason: "Waiting for public catalog")
     @Published private(set) var publicPricing: SourceAvailability<PublicPricingSnapshot> = .unavailable(reason: "Waiting for customer pricing")
     @Published private(set) var networkSeries: SourceAvailability<NetworkSeriesSnapshot> = .unavailable(reason: "Open the dashboard to load network history")
+    @Published private(set) var networkSeriesRefreshing = false
     @Published private(set) var activityRevision: UInt64 = 0
 
     private let service: TelemetryService
@@ -113,7 +114,6 @@ final class MonitorStore: ObservableObject {
     private var publicPricingFailures = 0
     private let networkSeriesClient: (any NetworkSeriesFetching)?
     private var networkSeriesPollingTask: Task<Void, Never>?
-    private var networkSeriesRefreshing = false
     private var networkSeriesFailures = 0
     private var nextNetworkSeriesAttempt = Date.distantPast
     private let now: @Sendable () -> Date
@@ -605,6 +605,21 @@ final class MonitorStore: ObservableObject {
                 await self?.refreshNetworkSeries()
             }
         }
+    }
+
+    var canRefreshNetworkSeries: Bool {
+        networkSeriesClient != nil && dashboardVisible && !networkSeriesRefreshing && shutdownTask == nil
+    }
+
+    func manuallyRefreshNetworkSeries() async {
+        guard canRefreshNetworkSeries, !Task.isCancelled else { return }
+        await refreshNetworkSeries()
+        guard hasStarted, dashboardVisible, shutdownTask == nil, !Task.isCancelled else { return }
+        // A manual success shortens an old failure delay; another failure can
+        // lengthen it. Replace the owned sleep so both honor the new deadline.
+        let previous = networkSeriesPollingTask
+        previous?.cancel()
+        startNetworkSeriesPolling(after: previous)
     }
 
     func refreshNetworkSeries() async {

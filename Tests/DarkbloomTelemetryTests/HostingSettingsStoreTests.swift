@@ -19,21 +19,23 @@ struct HostingSettingsStoreTests {
         cliVersion: String? = "0.9.7",
         lanAddresses: [String] = ["192.168.1.20"],
         endpointAvailability: LocalEndpointAvailability = .none("fixture"),
-        tokenFile: any LocalEndpointTokenManaging = HostingTokenFileFake()
+        tokenFile: any LocalEndpointTokenManaging = HostingTokenFileFake(),
+        controller: HostingSpyController = HostingSpyController(),
+        endpointClient: (any LocalEndpointFetching)? = nil,
+        copyToken: @escaping (String) -> Bool = { _ in false }
     ) throws -> (HostingSettingsStore, HostingSpyController) {
-        let controller = HostingSpyController()
         let controlStore = ProviderControlStore(
             controller: controller,
             hostingOptions: { .default }
         )
-        let endpointClient = EndpointFetchFake(availability: endpointAvailability)
         let store = HostingSettingsStore(
             controlStore: controlStore,
-            endpointClient: endpointClient,
+            endpointClient: endpointClient ?? EndpointFetchFake(availability: endpointAvailability),
             tokenFile: tokenFile,
             cliVersionProvider: { cliVersion },
             defaults: defaults,
-            lanScanner: { lanAddresses }
+            lanScanner: { lanAddresses },
+            copyToken: copyToken
         )
         store.attachControlStore(controlStore)
         store.refreshEnvironment()
@@ -163,6 +165,243 @@ struct HostingSettingsStoreTests {
         #expect(executions.first?.hosting == HostingOptions(mode: .unified, port: 8123, bindAddress: "127.0.0.1"))
         #expect(store.pendingExposureConfirmation == nil)
         #expect(store.errorMessage == nil)
+    }
+
+    @Test("a token saved after restart stays pending when the older apply finishes")
+    func newerSavedTokenRemainsPendingAfterApply() async throws {
+        let controller = HostingSpyController(delaysHostingCompletion: true)
+        let (store, _) = try makeStore(defaults: makeDefaults(), controller: controller)
+        store.setMode(.unified)
+        #expect(store.saveBearerToken("synthetic-first-key-12345"))
+
+        let apply = Task { await store.requestApply() }
+        await controller.waitForHostingRestart()
+        #expect(store.saveBearerToken("synthetic-newer-key-12345"))
+        await controller.completeHostingRestart()
+        await apply.value
+
+        #expect(store.localTokenNeedsRestart)
+        #expect(store.localTokenStatusMessage?.contains("Apply changes") == true)
+        #expect(store.localTokenStatusMessage?.contains("has restarted") == false)
+    }
+
+    @Test("apply clears the restart notice when its saved token has not changed")
+    func appliedSavedTokenClearsRestartNotice() async throws {
+        let (store, _) = try makeStore(defaults: makeDefaults())
+        store.setMode(.unified)
+        #expect(store.saveBearerToken("synthetic-first-key-12345"))
+
+        await store.requestApply()
+
+        #expect(!store.localTokenNeedsRestart)
+        #expect(store.localTokenStatusMessage?.contains("has restarted") == true)
+    }
+
+    @Test("applying restored authentication invalidates old unauthenticated discovery")
+    func applyInvalidatesUnauthenticatedEndpointDetails() async throws {
+        let record = LocalEndpointRecord(
+            baseURL: "http://127.0.0.1:8000/v1", apiKey: "",
+            host: "127.0.0.1", port: 8000, processID: 4242
+        )
+        let (store, _) = try makeStore(
+            defaults: makeDefaults(), endpointAvailability: .live(record),
+            tokenFile: HostingTokenFileFake(token: "synthetic-saved-key-12345")
+        )
+        store.setMode(.unified)
+        store.setRequiresAuthentication(false)
+        await store.fetchEndpointDetails()
+        store.setRequiresAuthentication(true)
+
+        await store.requestApply()
+
+        #expect(store.endpointDetails == nil)
+        #expect(store.canCopyBearerToken)
+    }
+
+    @Test("an unauthenticated cached record permits an explicit fresh copy attempt")
+    func unauthenticatedCacheDoesNotDisableCopyRetry() async throws {
+        let record = LocalEndpointRecord(
+            baseURL: "http://127.0.0.1:8000/v1", apiKey: "",
+            host: "127.0.0.1", port: 8000, processID: 4242
+        )
+        let (store, _) = try makeStore(defaults: makeDefaults(), endpointAvailability: .live(record))
+        await store.fetchEndpointDetails()
+
+        #expect(store.canCopyBearerToken)
+    }
+
+    @Test("copy retries discovery and uses the fresh active key rather than a cached or saved key")
+    func copyUsesFreshEndpointToken() async throws {
+        let unauthenticated = LocalEndpointRecord(
+            baseURL: "http://127.0.0.1:8000/v1", apiKey: "",
+            host: "127.0.0.1", port: 8000, processID: 4242
+        )
+        let authenticated = LocalEndpointRecord(
+            baseURL: "http://127.0.0.1:8000/v1", apiKey: "synthetic-active-key-12345",
+            host: "127.0.0.1", port: 8000, processID: 4243
+        )
+        var copiedToken: String?
+        let (store, _) = try makeStore(
+            defaults: makeDefaults(),
+            tokenFile: HostingTokenFileFake(token: "synthetic-saved-key-12345"),
+            endpointClient: EndpointSequenceFake([.live(unauthenticated), .live(authenticated)]),
+            copyToken: { copiedToken = $0; return true }
+        )
+        await store.fetchEndpointDetails()
+
+        #expect(store.canCopyBearerToken)
+        #expect(await store.copyBearerTokenToPasteboard())
+        #expect(copiedToken == "synthetic-active-key-12345")
+        #expect(store.errorMessage == nil)
+    }
+
+    @Test("copy refuses a freshly unauthenticated endpoint even when a saved key exists")
+    func copyRejectsUnauthenticatedEndpoint() async throws {
+        let record = LocalEndpointRecord(
+            baseURL: "http://127.0.0.1:8000/v1", apiKey: "",
+            host: "127.0.0.1", port: 8000, processID: 4242
+        )
+        var copied = false
+        let (store, _) = try makeStore(
+            defaults: makeDefaults(), endpointAvailability: .live(record),
+            tokenFile: HostingTokenFileFake(token: "synthetic-saved-key-12345"),
+            copyToken: { _ in copied = true; return true }
+        )
+
+        #expect(!(await store.copyBearerTokenToPasteboard()))
+        #expect(!copied)
+        #expect(store.errorMessage?.contains("authentication disabled") == true)
+    }
+
+    @Test("copy falls back to the saved key only when no live endpoint is advertised")
+    func copyUsesSavedKeyWithoutEndpoint() async throws {
+        var copiedToken: String?
+        let (store, _) = try makeStore(
+            defaults: makeDefaults(),
+            tokenFile: HostingTokenFileFake(token: "synthetic-saved-key-12345"),
+            copyToken: { copiedToken = $0; return true }
+        )
+
+        #expect(await store.copyBearerTokenToPasteboard())
+        #expect(copiedToken == "synthetic-saved-key-12345")
+    }
+
+    @Test("copy reports an unavailable key without writing anything")
+    func copyWithoutAnyKey() async throws {
+        var copied = false
+        let (store, _) = try makeStore(
+            defaults: makeDefaults(), copyToken: { _ in copied = true; return true }
+        )
+
+        #expect(!store.canCopyBearerToken)
+        #expect(!(await store.copyBearerTokenToPasteboard()))
+        #expect(!copied)
+        #expect(store.errorMessage?.contains("not available yet") == true)
+    }
+
+    @Test("a failed apply retains the restart warning and existing discovery")
+    func failedApplyPreservesTokenAndDiscovery() async throws {
+        let record = LocalEndpointRecord(
+            baseURL: "http://127.0.0.1:8000/v1", apiKey: "synthetic-active-key-12345",
+            host: "127.0.0.1", port: 8000, processID: 4242
+        )
+        let (store, _) = try makeStore(
+            defaults: makeDefaults(), endpointAvailability: .live(record),
+            controller: HostingSpyController(failsHosting: true)
+        )
+        store.setMode(.unified)
+        await store.fetchEndpointDetails()
+        #expect(store.saveBearerToken("synthetic-newer-key-12345"))
+
+        await store.requestApply()
+
+        #expect(store.localTokenNeedsRestart)
+        #expect(store.endpointDetails == .live(record))
+        #expect(store.localTokenStatusMessage?.contains("Apply changes") == true)
+        #expect(store.errorMessage != nil)
+    }
+
+    @Test("an unauthenticated apply does not claim the endpoint is using the saved token")
+    func unauthenticatedApplyKeepsTokenNoticeTruthful() async throws {
+        let (store, _) = try makeStore(defaults: makeDefaults())
+        store.setMode(.unified)
+        #expect(store.saveBearerToken("synthetic-saved-key-12345"))
+        store.setRequiresAuthentication(false)
+
+        await store.requestApply()
+        await store.confirmPendingExposureConfirmation()
+
+        #expect(!store.localTokenNeedsRestart)
+        #expect(store.localTokenStatusMessage?.contains("has restarted with the saved token") == false)
+        #expect(store.localTokenStatusMessage?.contains("next time") == true)
+    }
+
+    @Test("a discovery read started before apply cannot restore the old endpoint cache")
+    func oldDiscoveryCannotReturnAfterApply() async throws {
+        let oldRecord = LocalEndpointRecord(
+            baseURL: "http://127.0.0.1:8000/v1", apiKey: "",
+            host: "127.0.0.1", port: 8000, processID: 4242
+        )
+        let endpointClient = DelayedEndpointFake(first: .live(oldRecord))
+        let (store, _) = try makeStore(defaults: makeDefaults(), endpointClient: endpointClient)
+        store.setMode(.unified)
+        let discovery = Task { await store.fetchEndpointDetails() }
+        await endpointClient.waitForFirstFetch()
+
+        await store.requestApply()
+        await endpointClient.completeFirstFetch()
+        await discovery.value
+
+        #expect(store.endpointDetails == nil)
+        #expect(!store.isFetchingEndpointDetails)
+    }
+
+    @Test("an older overlapping copy cannot copy a superseded endpoint credential")
+    func overlappingCopiesDiscardOlderDiscovery() async throws {
+        let oldRecord = LocalEndpointRecord(
+            baseURL: "http://127.0.0.1:8000/v1", apiKey: "synthetic-old-key-12345",
+            host: "127.0.0.1", port: 8000, processID: 4242
+        )
+        let newRecord = LocalEndpointRecord(
+            baseURL: "http://127.0.0.1:8000/v1", apiKey: "synthetic-new-key-12345",
+            host: "127.0.0.1", port: 8000, processID: 4243
+        )
+        let endpointClient = DelayedEndpointFake(first: .live(oldRecord), next: .live(newRecord))
+        var copiedTokens: [String] = []
+        let (store, _) = try makeStore(
+            defaults: makeDefaults(), endpointClient: endpointClient,
+            copyToken: { copiedTokens.append($0); return true }
+        )
+        let olderCopy = Task { await store.copyBearerTokenToPasteboard() }
+        await endpointClient.waitForFirstFetch()
+
+        #expect(await store.copyBearerTokenToPasteboard())
+        await endpointClient.completeFirstFetch()
+        #expect(!(await olderCopy.value))
+
+        #expect(copiedTokens == ["synthetic-new-key-12345"])
+        #expect(store.endpointDetails == .live(newRecord))
+        #expect(!store.isFetchingEndpointDetails)
+    }
+
+    @Test("a rejected overlapping apply cannot clear a newer token's restart warning")
+    func overlappingApplyRetainsPendingToken() async throws {
+        let controller = HostingSpyController(delaysHostingCompletion: true)
+        let (store, _) = try makeStore(defaults: makeDefaults(), controller: controller)
+        store.setMode(.unified)
+        #expect(store.saveBearerToken("synthetic-first-key-12345"))
+        let olderApply = Task { await store.requestApply() }
+        await controller.waitForHostingRestart()
+        #expect(store.saveBearerToken("synthetic-newer-key-12345"))
+
+        await store.requestApply()
+        #expect(store.errorMessage != nil)
+        #expect(store.localTokenNeedsRestart)
+        await controller.completeHostingRestart()
+        await olderApply.value
+
+        #expect(store.localTokenNeedsRestart)
+        #expect(store.localTokenStatusMessage?.contains("has restarted") == false)
     }
 
     @Test("a LAN bind never dispatches without explicit confirmation")
@@ -325,8 +564,14 @@ private actor HostingSpyController: ProviderControlling {
 
     private let snapshot: ProviderControlSnapshot
     private(set) var hostingExecutions: [HostingExecution] = []
+    private let delaysHostingCompletion: Bool
+    private let failsHosting: Bool
+    private var hostingCompletion: CheckedContinuation<Void, Never>?
+    private var hostingStarted: CheckedContinuation<Void, Never>?
 
-    init() {
+    init(delaysHostingCompletion: Bool = false, failsHosting: Bool = false) {
+        self.delaysHostingCompletion = delaysHostingCompletion
+        self.failsHosting = failsHosting
         let draft = ProviderConfigDraft(
             sourceRevision: "fixture",
             original: ProviderModelSelection(enabled: ["model-a"], preloaded: []),
@@ -362,6 +607,16 @@ private actor HostingSpyController: ProviderControlling {
 
     func activityRisk() async -> ProviderActivityRisk { .idle }
 
+    func waitForHostingRestart() async {
+        guard hostingExecutions.isEmpty else { return }
+        await withCheckedContinuation { hostingStarted = $0 }
+    }
+
+    func completeHostingRestart() {
+        hostingCompletion?.resume()
+        hostingCompletion = nil
+    }
+
     func execute(
         _ action: ProviderLifecycleAction,
         enabledModels: [String]
@@ -374,6 +629,14 @@ private actor HostingSpyController: ProviderControlling {
         onPhase: ProviderMutationPhaseObserver?
     ) async throws -> ProviderMutationCompletion {
         hostingExecutions.append(HostingExecution(action: action, hosting: hosting))
+        if failsHosting { throw ProviderControlError.invalidOutput("fixture") }
+        if delaysHostingCompletion {
+            await withCheckedContinuation {
+                hostingCompletion = $0
+                hostingStarted?.resume()
+                hostingStarted = nil
+            }
+        }
         return .refreshUncertain
     }
 }
@@ -383,7 +646,51 @@ private struct EndpointFetchFake: LocalEndpointFetching {
     func fetch() async -> LocalEndpointAvailability { availability }
 }
 
+private actor EndpointSequenceFake: LocalEndpointFetching {
+    private var results: [LocalEndpointAvailability]
+    init(_ results: [LocalEndpointAvailability]) { self.results = results }
+    func fetch() async -> LocalEndpointAvailability { results.removeFirst() }
+}
+
+private actor DelayedEndpointFake: LocalEndpointFetching {
+    private let first: LocalEndpointAvailability
+    private let next: LocalEndpointAvailability
+    private var firstStarted = false
+    private var firstCompletion: CheckedContinuation<LocalEndpointAvailability, Never>?
+    private var startWaiter: CheckedContinuation<Void, Never>?
+
+    init(first: LocalEndpointAvailability, next: LocalEndpointAvailability = .none("fixture")) {
+        self.first = first
+        self.next = next
+    }
+
+    func fetch() async -> LocalEndpointAvailability {
+        guard !firstStarted else { return next }
+        firstStarted = true
+        return await withCheckedContinuation {
+            firstCompletion = $0
+            startWaiter?.resume()
+            startWaiter = nil
+        }
+    }
+
+    func waitForFirstFetch() async {
+        guard !firstStarted else { return }
+        await withCheckedContinuation { startWaiter = $0 }
+    }
+
+    func completeFirstFetch() {
+        firstCompletion?.resume(returning: first)
+        firstCompletion = nil
+    }
+}
+
 private struct HostingTokenFileFake: LocalEndpointTokenManaging {
-    func withBearerToken(_ action: (String) -> Void) -> Bool { false }
+    var token: String? = nil
+    func withBearerToken(_ action: (String) -> Void) -> Bool {
+        guard let token else { return false }
+        action(token)
+        return true
+    }
     func saveBearerToken(_ token: String) throws {}
 }

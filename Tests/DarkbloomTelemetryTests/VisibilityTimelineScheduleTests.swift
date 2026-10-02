@@ -77,9 +77,12 @@ struct VisibilityTimelineScheduleTests {
         defer { window.close() }
         try await waitUntil { recorder.dates.count >= 3 }
 
+        let hiddenAt = Date()
         visibility.isVisible = false
-        // Allow the mounted tree to replace its old schedule before measuring.
-        try await Task.sleep(for: .milliseconds(150))
+        // The hidden schedule emits one current date when SwiftUI applies it.
+        // Observe that render before measuring; concurrent native tests can
+        // delay the mounted tree's update beyond a fixed transition sleep.
+        try await waitUntil { recorder.hiddenDates.contains(where: { $0 >= hiddenAt }) }
         let hiddenDates = recorder.dates
         try await Task.sleep(for: .milliseconds(250))
         #expect(recorder.dates == hiddenDates)
@@ -109,8 +112,10 @@ private final class DisplayClockVisibility: ObservableObject {
 @MainActor
 private final class DisplayClockRecorder {
     var dates: Set<Date> = []
-    func record(_ date: Date) -> String {
+    var hiddenDates: Set<Date> = []
+    func record(_ date: Date, isVisible: Bool) -> String {
         dates.insert(date)
+        if !isVisible { hiddenDates.insert(date) }
         return date.formatted(date: .omitted, time: .standard)
     }
 }
@@ -120,10 +125,11 @@ private struct DisplayClockProbe: View {
     let recorder: DisplayClockRecorder
 
     var body: some View {
+        let isVisible = visibility.isVisible
         TimelineView(VisibilityTimelineSchedule(
-            base: .periodic(from: .now, by: 0.05), isVisible: visibility.isVisible
+            base: .periodic(from: .now, by: 0.05), isVisible: isVisible
         )) { context in
-            Text(recorder.record(context.date))
+            Text(recorder.record(context.date, isVisible: isVisible))
         }
     }
 }
