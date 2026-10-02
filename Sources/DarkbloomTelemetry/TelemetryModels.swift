@@ -41,6 +41,8 @@ public struct DaemonState: Equatable, Sendable {
     public let configPath: String?
     /// Open capability values reported by the current provider runtime.
     public let runtimeCapabilities: [String]?
+    /// Canonical read-only native Autopilot phase. Absence is unknown.
+    public let autopilotPhase: String?
 
     public var loadFailures: [ModelLoadFailure] { modelLoadFailures }
 
@@ -66,7 +68,8 @@ public struct DaemonState: Equatable, Sendable {
         modelSwitch: ProviderModelSwitchState? = nil,
         availability: ProviderAvailabilityState? = nil,
         configPath: String? = nil,
-        runtimeCapabilities: [String]? = nil
+        runtimeCapabilities: [String]? = nil,
+        autopilotPhase: String? = nil
     ) {
         self.schema = schema
         self.version = version
@@ -90,6 +93,8 @@ public struct DaemonState: Equatable, Sendable {
         self.availability = availability
         self.configPath = configPath
         self.runtimeCapabilities = runtimeCapabilities
+        let phases = ["off", "waiting", "shadow", "active", "paused", "transitioning", "recovering"]
+        self.autopilotPhase = autopilotPhase.flatMap { phases.contains($0) ? $0 : nil }
     }
 }
 

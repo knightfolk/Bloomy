@@ -24,6 +24,12 @@ and model actions, and reported account-wide jobs and base rewards. History is
 kept locally for up to 30 days or 5,000 entries, without credentials or prompt
 contents. Earning IDs identify account records, not individual serving requests.
 
+Open **Activity → Metrics** for measured serving speed, observed active time,
+provider counters, GPU use, model transitions, and native Autopilot phases.
+Structured observations stay on this Mac for up to 30 days / 100,000 samples;
+recording continues while Bloomy runs, with explicit gaps and visible storage
+errors. See [local performance history](docs/PERFORMANCE_HISTORY.md).
+
 ## Download
 
 Download the Apple Silicon build from [Releases](https://github.com/knightfolk/Bloomy/releases/latest),
@@ -66,6 +72,8 @@ explicit, off-by-default setting with its own evidence and timing checks.
   observed-hour count; this does not subtract electricity
 - Activity charts with readable per-model company color families, clickable
   model filters, bar/line/area styles, and stacked or side-by-side bars
+- Separate Activity Metrics with bounded private recording, consistent controls,
+  measured coverage and model transitions
 - Estimated per-model profit per earning-hour, with whole-Mac electricity
   shared evenly among models that earned in that fully measured hour
 - Completed jobs today and the prior seven-day daily average when enough local

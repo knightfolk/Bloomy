@@ -101,7 +101,8 @@ public enum DaemonStateParser {
             configPath: boundedPath(raw.configPath),
             runtimeCapabilities: raw.runtimeCapabilities.map {
                 Array($0.compactMap(safeCapability).prefix(64))
-            }
+            },
+            autopilotPhase: raw.autopilotPhase
         )
     }
 
@@ -166,6 +167,7 @@ private struct RawDaemonState: Decodable {
     let availability: RawAvailability?
     let configPath: String?
     let runtimeCapabilities: [String]?
+    let autopilotPhase: String?
 
     enum CodingKeys: String, CodingKey {
         case schema, stats, version, trust, pid, capacity, slots
@@ -180,6 +182,7 @@ private struct RawDaemonState: Decodable {
         case availability
         case configPath = "config_path"
         case runtimeCapabilities = "runtime_capabilities"
+        case autopilotPhase = "autopilot_phase"
         case inferenceActive = "inference_active"
         case startedAt = "started_at"
         case writtenAt = "written_at"
@@ -210,6 +213,7 @@ private struct RawDaemonState: Decodable {
         availability = try? values.decode(RawAvailability.self, forKey: .availability)
         configPath = try values.decodeIfPresent(String.self, forKey: .configPath)
         runtimeCapabilities = try values.decodeIfPresent([String].self, forKey: .runtimeCapabilities)
+        autopilotPhase = try? values.decode(String.self, forKey: .autopilotPhase)
     }
 }
 

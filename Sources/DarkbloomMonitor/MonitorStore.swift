@@ -5,6 +5,8 @@ import SwiftUI
 @MainActor
 final class MonitorStore: ObservableObject {
     var actionHistory: ActionHistoryStore?
+    var performanceHistory: PerformanceHistoryStore?
+    private var performanceSamplingTask: Task<Void, Never>?
     let providerExtras: ProviderExtrasStore?
     /// Whole-Mac GPU utilization sampler owned by the app lifecycle so the
     /// menu-bar ring keeps working with no dashboard open. Views observe it;
@@ -216,6 +218,13 @@ final class MonitorStore: ObservableObject {
         hasStarted = true
         observeThermalState()
         gpuUsage.start()
+        performanceSamplingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.recordPerformanceSample()
+                do { try await Task.sleep(for: .seconds(30)) }
+                catch { return }
+            }
+        }
         if providerExtras != nil {
             providerExtrasTask = Task { [weak self] in
                 while !Task.isCancelled {
@@ -782,6 +791,9 @@ final class MonitorStore: ObservableObject {
     }
 
     func stop() async {
+        performanceSamplingTask?.cancel()
+        await performanceSamplingTask?.value
+        performanceSamplingTask = nil
         await profitSwitch?.stop()
         await inactivityNudge?.stop()
         menuAttentionPolicy.reset()
@@ -928,12 +940,23 @@ final class MonitorStore: ObservableObject {
             menuAttentionPolicy.reset()
         }
         self.snapshot = snapshot
+        await recordPerformanceSample()
         inactivityNudge?.observe(snapshot)
         observeProfitSwitch()
         await recordOperationalAlertTransitions(from: snapshot)
         if previousCurrentModel != snapshot.state.value?.currentModel {
             await refreshRecommendation()
         }
+    }
+
+    private func recordPerformanceSample() async {
+        guard let performanceHistory else { return }
+        let date = now()
+        let gpu: Double?
+        if case .current(let value, _) = gpuUsage.reading(at: date) { gpu = value }
+        else { gpu = nil }
+        let power = currentEnergyReading.flatMap { $0.estimated ? nil : $0.watts }
+        await performanceHistory.observe(.capture(snapshot, at: date, gpuPercentage: gpu, powerWatts: power))
     }
 
     private func recordOperationalAlertTransitions(from snapshot: TelemetrySnapshot) async {

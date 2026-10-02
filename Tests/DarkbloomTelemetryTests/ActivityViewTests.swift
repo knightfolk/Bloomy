@@ -8,6 +8,28 @@ import Testing
 @Suite("Activity rendering", .serialized)
 @MainActor
 struct ActivityViewTests {
+    @Test("Metrics tab preserves Activity initializer options and renders without a history store")
+    func rendersMetricsTab() async throws {
+        let store = MonitorStore(
+            service: TelemetryService(source: ActivityUnusedSource()),
+            initial: .unavailable(now: Date()), earningsClient: ActivityFixtureClient()
+        )
+        let host = NSHostingController(rootView: ActivityView(
+            store: store, initialModelFilter: ActivityFixtureModel.gemma,
+            initialChartStyle: .lines, initialBarArrangement: .sideBySide,
+            initialChartMetric: .estimatedProfit, initialTab: .metrics
+        ))
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 420, height: 650))
+        window.orderBack(nil)
+        defer { window.close() }
+        try await Task.sleep(for: .milliseconds(150))
+        host.view.layoutSubtreeIfNeeded()
+        #expect(host.view.frame.width == 420)
+        #expect(host.view.frame.height >= 600)
+    }
+
     @Test("populated local activity fits narrow through wide dashboard detail columns", arguments: [1_080.0, 780.0, 570.0, 420.0])
     func rendersActivity(width: Double) async throws {
         let store = MonitorStore(

@@ -125,6 +125,9 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             networkSeriesClient: NetworkSeriesClient()
         )
         monitorStore.actionHistory = actionHistory
+        monitorStore.performanceHistory = PerformanceHistoryStore(
+            url: applicationSupport.appendingPathComponent("performance-history.sqlite3")
+        )
         let configExecutable = policy.cliCandidates.first(where: {
             FileManager.default.isExecutableFile(atPath: $0.path)
         }) ?? policy.cliCandidates[0]

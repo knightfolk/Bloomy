@@ -2,8 +2,15 @@ import Charts
 import DarkbloomTelemetry
 import SwiftUI
 
+enum ActivityTab: String, CaseIterable, Identifiable {
+    case earnings = "Earnings"
+    case metrics = "Metrics"
+    var id: Self { self }
+}
+
 struct ActivityView: View {
     @ObservedObject var store: MonitorStore
+    @State private var tab = ActivityTab.earnings
     @State private var period = ActivityPeriod.today
     @State private var selectedDate = Date()
     @State private var endDate = Date()
@@ -29,24 +36,56 @@ struct ActivityView: View {
         initialModelFilter: String? = nil,
         initialChartStyle: ActivityChartStyle = .bars,
         initialBarArrangement: ActivityBarArrangement = .stacked,
-        initialChartMetric: ActivityChartMetric = .earnings
+        initialChartMetric: ActivityChartMetric = .earnings,
+        initialTab: ActivityTab = .earnings
     ) {
         self.store = store
         _model = State(initialValue: initialModelFilter)
         _chartStyle = State(initialValue: initialChartStyle)
         _barArrangement = State(initialValue: initialBarArrangement)
         _chartMetric = State(initialValue: initialChartMetric)
+        _tab = State(initialValue: initialTab)
     }
 
     var body: some View {
-        TimelineView(.everyMinute) { context in
-            content(query: ActivityQuery(
-                period: period, selectedDate: selectedDate, endDate: endDate, now: context.date,
-                calendar: .current, model: model, revision: store.activityRevision, refreshID: refreshID,
-                metric: chartMetric,
-                energyRevision: chartMetric == .estimatedProfit ? store.energy?.reading?.date : nil
-            ))
+        VStack(alignment: .leading, spacing: 0) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) {
+                    Text("Activity").font(.largeTitle.bold())
+                    Spacer(minLength: 8)
+                    activityTabs
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Activity").font(.largeTitle.bold())
+                    activityTabs
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 8)
+            if tab == .metrics {
+                PerformanceMetricsView(history: store.performanceHistory)
+            } else {
+                TimelineView(.everyMinute) { context in
+                    content(query: ActivityQuery(
+                        period: period, selectedDate: selectedDate, endDate: endDate, now: context.date,
+                        calendar: .current, model: model, revision: store.activityRevision, refreshID: refreshID,
+                        metric: chartMetric,
+                        energyRevision: chartMetric == .estimatedProfit ? store.energy?.reading?.date : nil
+                    ))
+                }
+            }
         }
+    }
+
+    private var activityTabs: some View {
+        Picker("Activity section", selection: $tab) {
+            ForEach(ActivityTab.allCases) { Text($0.rawValue).tag($0) }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .controlSize(.regular)
+        .frame(width: 220)
     }
 
     private func content(query: ActivityQuery) -> some View {
@@ -97,22 +136,13 @@ struct ActivityView: View {
     }
 
     private var activityHeader: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
-                Text("Activity").font(.largeTitle.bold())
-                Spacer(minLength: 8)
-                periodPicker
-                refreshButton
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Activity").font(.largeTitle.bold())
-                    Spacer(minLength: 8)
-                    refreshButton
-                }
-                HStack { Spacer(minLength: 0); periodPicker }
-            }
+        HStack(spacing: 8) {
+            Label("Earnings history", systemImage: "chart.bar").font(.headline)
+            Spacer(minLength: 8)
+            periodPicker
+            refreshButton
         }
+        .controlSize(.regular)
     }
 
     private var periodPicker: some View {
@@ -147,10 +177,10 @@ struct ActivityView: View {
     @ViewBuilder
     private var modelFilters: some View {
         if !models.isEmpty || model != nil {
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Filter by model").font(.headline)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Models").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 8)],
+                    columns: [GridItem(.adaptive(minimum: 145, maximum: 190), spacing: 8)],
                     alignment: .leading,
                     spacing: 8
                 ) {
@@ -211,8 +241,7 @@ struct ActivityView: View {
             }
         }
         .frame(maxWidth: 520, alignment: .leading)
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
+        .controlSize(.regular)
     }
 
     private func chartControlRow<Control: View>(
@@ -221,10 +250,11 @@ struct ActivityView: View {
     ) -> some View {
         HStack(spacing: 12) {
             Text(title)
-                .font(.subheadline.weight(.medium))
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
                 .frame(width: 64, alignment: .leading)
             control()
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -389,16 +419,15 @@ struct ActivityView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 10)
-            .frame(height: 52)
+            .frame(height: 30)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                isSelected ? color.opacity(0.22) : Color(nsColor: .controlBackgroundColor),
-                in: RoundedRectangle(cornerRadius: 10)
+                isSelected ? color.opacity(0.15) : Color(nsColor: .controlBackgroundColor),
+                in: RoundedRectangle(cornerRadius: 6)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(isSelected ? color.opacity(0.95) : Color.secondary.opacity(0.24),
-                                  lineWidth: isSelected ? 1.4 : 0.8)
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(isSelected ? color.opacity(0.7) : Color.secondary.opacity(0.2), lineWidth: 1)
             }
         }
         .buttonStyle(.plain)

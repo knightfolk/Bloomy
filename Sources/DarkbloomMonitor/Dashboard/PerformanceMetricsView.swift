@@ -1,0 +1,474 @@
+import Charts
+import DarkbloomTelemetry
+import SwiftUI
+
+enum PerformanceMetricsPeriod: String, CaseIterable, Identifiable, Sendable {
+    case last24Hours = "24 hours"
+    case last7Days = "7 days"
+    case last30Days = "30 days"
+
+    var id: Self { self }
+    var seconds: TimeInterval {
+        switch self {
+        case .last24Hours: 86_400
+        case .last7Days: 7 * 86_400
+        case .last30Days: 30 * 86_400
+        }
+    }
+
+    func range(endingAt date: Date) -> DateInterval {
+        DateInterval(start: date.addingTimeInterval(-seconds), end: date)
+    }
+}
+
+struct PerformanceMetricsView: View {
+    let history: PerformanceHistoryStore?
+
+    var body: some View {
+        if let history {
+            RecordedPerformanceMetricsView(history: history)
+        } else {
+            PerformanceMetricsContent(samples: [], recordingStartedAt: nil)
+        }
+    }
+}
+
+private struct RecordedPerformanceMetricsView: View {
+    @ObservedObject var history: PerformanceHistoryStore
+    @State private var samples: [PerformanceSample] = []
+    @State private var loading = false
+    @State private var readError: String?
+    @State private var period = PerformanceMetricsPeriod.last24Hours
+    @State private var refreshID = 0
+
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            PerformanceMetricsContent(
+                samples: samples,
+                recordingStartedAt: history.recordingStartedAt,
+                storageError: history.storageError ?? readError,
+                loading: loading,
+                now: context.date,
+                onRefresh: { refreshID += 1 },
+                onPeriodChange: { period = $0 }
+            )
+        }
+        .task(id: PerformanceHistoryQuery(revision: history.revision, period: period, refreshID: refreshID)) {
+            loading = samples.isEmpty
+            do {
+                // Fetch the selected period with every model retained so model
+                // summaries cannot bridge intervening nonmatching observations.
+                let result = try await history.samples(in: period.range(endingAt: Date()))
+                guard !Task.isCancelled else { return }
+                samples = result
+                readError = nil
+            } catch {
+                guard !Task.isCancelled else { return }
+                readError = "Local metrics could not be read."
+            }
+            loading = false
+        }
+    }
+}
+
+/// Value-driven content also supports synthetic native rendering evidence.
+struct PerformanceMetricsContent: View {
+    let samples: [PerformanceSample]
+    let recordingStartedAt: Date?
+    var storageError: String? = nil
+    var loading = false
+    var now = Date()
+    var onRefresh: (() -> Void)? = nil
+    var onPeriodChange: (PerformanceMetricsPeriod) -> Void = { _ in }
+    @State private var period = PerformanceMetricsPeriod.last24Hours
+    @State private var model: String?
+    @State private var showsRecordingDetails = false
+    @State private var presentation = PerformanceMetricsSnapshot.empty
+
+    init(
+        samples: [PerformanceSample], recordingStartedAt: Date?, storageError: String? = nil,
+        loading: Bool = false, now: Date = Date(), onRefresh: (() -> Void)? = nil,
+        onPeriodChange: @escaping (PerformanceMetricsPeriod) -> Void = { _ in }
+    ) {
+        self.samples = samples
+        self.recordingStartedAt = recordingStartedAt
+        self.storageError = storageError
+        self.loading = loading
+        self.now = now
+        self.onRefresh = onRefresh
+        self.onPeriodChange = onPeriodChange
+    }
+
+    private var range: DateInterval { period.range(endingAt: now) }
+    private var summary: PerformanceSummary { presentation.summary }
+    private var models: [String] { presentation.models }
+    private var ratePoints: [PerformanceRatePoint] { presentation.ratePoints }
+    private var transitions: [PerformanceModelTransition] { presentation.transitions }
+
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 16) {
+                controls
+                recordingHealth
+                if loading {
+                    ProgressView("Reading local metrics…").font(.callout)
+                }
+                if presentation.sampleCount == 0 && !loading {
+                    ContentUnavailableView(
+                        "Metrics are accumulating",
+                        systemImage: "waveform.path.ecg",
+                        description: Text("Local recording runs while Bloomy is open. Covered time and model speed appear as fresh measurements arrive.")
+                    )
+                    .frame(minHeight: 160)
+                } else {
+                    summaryGrid
+                    speedChart
+                    modelTimeline
+                }
+                recordingDetails
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .scrollIndicators(.automatic)
+        .onChange(of: period) { _, value in onPeriodChange(value) }
+        .task(id: PerformanceMetricsQuery(period: period, model: model, count: samples.count, lastID: samples.last?.id, now: now)) {
+            let input = samples
+            let interval = range
+            let selectedModel = model
+            let result = await Task.detached(priority: .userInitiated) {
+                PerformanceMetricsSnapshot(samples: input, range: interval, model: selectedModel)
+            }.value
+            guard !Task.isCancelled else { return }
+            presentation = result
+        }
+    }
+
+    private var controls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                periodPicker
+                Spacer(minLength: 8)
+                modelPicker
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                periodPicker
+                modelPicker
+            }
+        }
+        .controlSize(.regular)
+    }
+
+    private var periodPicker: some View {
+        Picker("Metrics period", selection: $period) {
+            ForEach(PerformanceMetricsPeriod.allCases) { Text($0.rawValue).tag($0) }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .frame(width: 240)
+    }
+
+    private var modelPicker: some View {
+        Picker("Model", selection: $model) {
+            Text("All models").tag(String?.none)
+            ForEach(models, id: \.self) { name in
+                Text(ModelDisplayName.short(name)).tag(Optional(name))
+            }
+            if let model, !models.contains(model) {
+                Text(ModelDisplayName.short(model)).tag(Optional(model))
+            }
+        }
+        .frame(maxWidth: 230, alignment: .leading)
+        .help(model ?? "All observed models")
+    }
+
+    private var recordingHealth: some View {
+        let last = presentation.latest
+        let isCurrent = storageError == nil && last?.quality == .current
+            && last.map { now.timeIntervalSince($0.observedAt) <= 90 } == true
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: storageError != nil ? "exclamationmark.triangle" : isCurrent ? "record.circle" : "clock")
+                    .foregroundStyle(storageError != nil ? Color.orange : isCurrent ? Color.green : Color.secondary)
+                Text(storageError != nil ? "Recording needs attention" : isCurrent ? "Recording locally" : "Waiting for fresh measurements")
+                    .font(.callout.weight(.medium))
+                Spacer(minLength: 0)
+                Text("\(presentation.sampleCount.formatted()) samples")
+                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                if let onRefresh {
+                    Button(action: onRefresh) { Label("Refresh metrics", systemImage: "arrow.clockwise") }
+                        .labelStyle(.iconOnly)
+                        .controlSize(.regular)
+                        .help("Read local metrics again")
+                }
+            }
+            if let storageError {
+                Text(storageError).font(.caption).foregroundStyle(.secondary)
+            } else if let last {
+                Text("Latest observation \(last.observedAt.formatted(date: .abbreviated, time: .standard)) · \(last.quality.rawValue)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var summaryGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 10)], alignment: .leading, spacing: 10) {
+            metric("Covered time", symbol: "clock", value: duration(summary.coveredSeconds), detail: "\(coveragePercent) of this period")
+            metric("Active time", symbol: "bolt", value: activeTime, detail: "Observed inference intervals")
+            metric("Model speed", symbol: "speedometer", value: summary.averageTokenRate.map { "\(number($0)) tok/s" } ?? "Unknown", detail: "Average during measured work")
+            metric("GPU use", symbol: "cpu", value: summary.averageGPUUtilizationPercent.map { "\(number($0))%" } ?? "Unknown", detail: "Whole Mac · covered intervals")
+            metric("Requests completed", symbol: "checkmark.circle", value: summary.completedRequests.map { $0.formatted() } ?? "Unknown", detail: model == nil ? "Provider-wide counter increases" : "Provider-wide · choose All models")
+            metric("Tokens generated", symbol: "text.word.spacing", value: summary.generatedTokens.map { $0.formatted() } ?? "Unknown", detail: model == nil ? "Provider-wide counter increases" : "Provider-wide · choose All models")
+        }
+    }
+
+    private var coveragePercent: String {
+        (min(1, summary.coveredSeconds / range.duration)).formatted(.percent.precision(.fractionLength(1)))
+    }
+
+    private var activeTime: String {
+        guard summary.activeCoveredSeconds > 0 else { return "Unknown" }
+        return duration(summary.activeSeconds)
+    }
+
+    private func metric(_ title: String, symbol: String, value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Label(title, systemImage: symbol).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(value).font(.title3.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+            Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 78, alignment: .topLeading)
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var speedChart: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Measured model speed", systemImage: "waveform.path").font(.headline)
+            if ratePoints.isEmpty {
+                Text("No attributed speed measurements in this period.")
+                    .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 110)
+            } else {
+                Chart(ratePoints) { point in
+                    LineMark(x: .value("Observed", point.date), y: .value("Tokens per second", point.rate), series: .value("Measured run", point.run))
+                        .foregroundStyle(by: .value("Model", ModelDisplayName.short(point.model)))
+                        .interpolationMethod(.linear)
+                    PointMark(x: .value("Observed", point.date), y: .value("Tokens per second", point.rate))
+                        .foregroundStyle(by: .value("Model", ModelDisplayName.short(point.model)))
+                        .symbolSize(12)
+                }
+                .chartXScale(domain: range.start...range.end)
+                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+                .chartYAxis { AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) }
+                .chartYAxisLabel("tok/s")
+                .chartLegend(position: .bottom, alignment: .leading)
+                .frame(height: 190)
+            }
+            Text("Fresh observations only. Lines stop at unknown gaps, model changes, and provider restarts.")
+                .font(.caption).foregroundStyle(.secondary)
+            if presentation.chartWasReduced {
+                Text("Chart shows up to 600 measured observations. Totals use all saved measurements.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Measured model speed in tokens per second by observation time")
+    }
+
+    private var modelTimeline: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Model transitions", systemImage: "arrow.triangle.swap").font(.headline)
+                Spacer(minLength: 0)
+                if presentation.transitionCount > 8 {
+                    Text("Latest 8 of \(presentation.transitionCount)").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            ForEach(Array(transitions.suffix(8).reversed())) { transition in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(transition.date, format: .dateTime.month(.abbreviated).day().hour().minute())
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit().frame(width: 110, alignment: .leading)
+                    Text(transition.model.map(ModelDisplayName.short) ?? "Unknown model")
+                        .font(.callout).lineLimit(1).truncationMode(.middle)
+                        .help(transition.model ?? "No current model measurement")
+                    Spacer(minLength: 0)
+                    if let phase = transition.autopilotPhase {
+                        Text(phase).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            }
+            Text("Observed selections, including unknown intervals. A selection does not prove a request ran.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var recordingDetails: some View {
+        DisclosureGroup(isExpanded: $showsRecordingDetails) {
+            VStack(alignment: .leading, spacing: 8) {
+                if let recordingStartedAt {
+                    Text("Recording started \(recordingStartedAt.formatted(date: .abbreviated, time: .shortened)).")
+                }
+                Text("\(presentation.staleCount) stale · \(presentation.unavailableCount) unavailable observations. Unobserved time is unknown; it is not recorded as idle or zero.")
+                Text("Saved locally while Bloomy is open. Up to 30 days / 100,000 samples are retained. Counters use increasing readings within the same provider session; resets and gaps are excluded.")
+                Text("GPU use and power describe the whole Mac and include other apps. Model filtering does not isolate a model’s hardware consumption. GPU memory is reported by the provider.")
+                if let latest = presentation.latestForModel, latest.quality == .current,
+                   now.timeIntervalSince(latest.observedAt) <= 90 {
+                    let memory = latest.gpuMemoryGB.map { "\(number($0)) GB" } ?? "Unknown"
+                    let power = latest.powerWatts.map { "\(number($0)) W" } ?? "Unknown"
+                    Text("Latest provider GPU memory: \(memory) · whole-Mac power: \(power).")
+                }
+                Text("Only measurement fields are stored. Prompts, responses, credentials, and raw logs are excluded. Latency and time to first token are unavailable.")
+            }
+            .padding(.top, 6)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } label: {
+            Label("Recording, gaps & privacy", systemImage: "lock.shield").font(.callout)
+        }
+    }
+
+    private func number(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(1)))
+    }
+
+    private func duration(_ seconds: TimeInterval) -> String {
+        let minutes = Int(max(0, seconds) / 60)
+        if minutes >= 60 { return "\(minutes / 60)h \(minutes % 60)m" }
+        if minutes > 0 { return "\(minutes)m" }
+        return "\(Int(max(0, seconds)))s"
+    }
+}
+
+struct PerformanceRatePoint: Identifiable, Sendable {
+    let id: UUID
+    let date: Date
+    let rate: Double
+    let model: String
+    let run: Int
+}
+
+struct PerformanceModelTransition: Identifiable, Sendable {
+    let id: String
+    let date: Date
+    let model: String?
+    let autopilotPhase: String?
+}
+
+enum PerformanceMetricsPresentation {
+    static func ratePoints(samples: [PerformanceSample], model: String? = nil) -> [PerformanceRatePoint] {
+        var result: [PerformanceRatePoint] = []
+        var previous: PerformanceSample?
+        var run = 0
+        for sample in samples {
+            guard sample.quality == .current, let name = sample.model,
+                  model == nil || name == model,
+                  sample.inferenceActive == true || (sample.inferenceActive == nil && (sample.activeRequests ?? 0) > 0),
+                  sample.providerSession != nil,
+                  let rate = sample.tokensPerSecond, rate.isFinite, rate >= 0,
+                  let capture = sample.sourceCapturedAt,
+                  (0...90).contains(sample.observedAt.timeIntervalSince(capture)) else {
+                previous = nil
+                continue
+            }
+            let continuous = previous.map {
+                let delta = sample.observedAt.timeIntervalSince($0.observedAt)
+                return delta > 0 && delta <= 90 && $0.model == sample.model
+                    && $0.providerSession != nil && $0.providerSession == sample.providerSession
+                    && $0.sourceCapturedAt.map { capture > $0 && capture.timeIntervalSince($0) <= 90 } == true
+                    && !counterReset(before: $0.tokensGenerated, after: sample.tokensGenerated)
+                    && !counterReset(before: $0.requestsServed, after: sample.requestsServed)
+            } ?? false
+            if !continuous { run += 1 }
+            result.append(PerformanceRatePoint(id: sample.id, date: sample.observedAt, rate: rate, model: name, run: run))
+            previous = sample
+        }
+        return result
+    }
+
+    static func reducedRatePoints(_ points: [PerformanceRatePoint], limit: Int = 600) -> [PerformanceRatePoint] {
+        guard limit > 1, points.count > limit else { return points }
+        // Keep actual observations and their original run keys. Sampling never
+        // merges two runs separated by a missing/stale source or model change.
+        return (0..<limit).map { index in
+            points[Int(Double(index) * Double(points.count - 1) / Double(limit - 1))]
+        }
+    }
+
+    static func transitions(samples: [PerformanceSample]) -> [PerformanceModelTransition] {
+        var result: [PerformanceModelTransition] = []
+        var previous: PerformanceSample?
+        for sample in samples {
+            let model = sample.quality == .current ? sample.model : nil
+            let phase = sample.quality == .current ? sample.autopilotPhase : nil
+            let previousModel = previous.flatMap { $0.quality == .current ? $0.model : nil }
+            let previousPhase = previous.flatMap { $0.quality == .current ? $0.autopilotPhase : nil }
+            let gap = previous.map { sample.observedAt.timeIntervalSince($0.observedAt) > 90 } == true
+            if gap, let previous, previousModel != nil {
+                result.append(PerformanceModelTransition(id: previous.id.uuidString + "-gap", date: previous.observedAt.addingTimeInterval(90), model: nil, autopilotPhase: nil))
+            }
+            if previous == nil || previousModel != model || gap
+                || previous?.providerSession != sample.providerSession
+                || previousPhase != phase {
+                result.append(PerformanceModelTransition(id: sample.id.uuidString, date: sample.observedAt, model: model, autopilotPhase: phase))
+            }
+            previous = sample
+        }
+        return result
+    }
+
+    private static func counterReset(before: Int64?, after: Int64?) -> Bool {
+        guard let before, let after else { return false }
+        return after < before
+    }
+}
+
+private struct PerformanceMetricsQuery: Hashable {
+    let period: PerformanceMetricsPeriod
+    let model: String?
+    let count: Int
+    let lastID: UUID?
+    let now: Date
+}
+
+private struct PerformanceHistoryQuery: Hashable {
+    let revision: UInt64
+    let period: PerformanceMetricsPeriod
+    let refreshID: Int
+}
+
+private struct PerformanceMetricsSnapshot: Sendable {
+    let summary: PerformanceSummary
+    let sampleCount: Int
+    let staleCount: Int
+    let unavailableCount: Int
+    let models: [String]
+    let latest: PerformanceSample?
+    let latestForModel: PerformanceSample?
+    let ratePoints: [PerformanceRatePoint]
+    let chartWasReduced: Bool
+    let transitions: [PerformanceModelTransition]
+    let transitionCount: Int
+
+    static let empty = PerformanceMetricsSnapshot(samples: [], range: DateInterval(start: .distantPast, end: .distantFuture), model: nil)
+
+    init(samples: [PerformanceSample], range: DateInterval, model: String?) {
+        let inPeriod = samples.filter { $0.observedAt >= range.start && $0.observedAt <= range.end }
+        let visible = inPeriod.filter { model == nil || $0.model == model }
+        summary = PerformanceSummary(samples: inPeriod, model: model)
+        sampleCount = inPeriod.count
+        staleCount = inPeriod.filter { $0.quality == .stale }.count
+        unavailableCount = inPeriod.filter { $0.quality == .unavailable }.count
+        models = Array(Set(inPeriod.compactMap(\.model))).sorted()
+        latest = inPeriod.last
+        latestForModel = visible.last
+        let points = PerformanceMetricsPresentation.ratePoints(samples: inPeriod, model: model)
+        chartWasReduced = points.count > 600
+        ratePoints = PerformanceMetricsPresentation.reducedRatePoints(points)
+        let changes = PerformanceMetricsPresentation.transitions(samples: inPeriod)
+        transitionCount = changes.count
+        transitions = Array(changes.suffix(100))
+    }
+}
