@@ -68,6 +68,10 @@ enum ModelManagerPresentation {
         item.isDownloaded ? "Manage" : "Details"
     }
 
+    static func compactEntryAccessibilityLabel(for item: ModelInventoryItem) -> String {
+        item.isDownloaded ? "Manage \(item.displayName)" : "Details for \(item.displayName)"
+    }
+
     static func opportunityGrade(modelID: String, peers: [ModelOpportunitySignal]) -> String? {
         opportunityGrades(peers: peers)[modelID]
     }
@@ -911,6 +915,7 @@ struct ModelManagerView: View {
                     }, compact: true)
                 Spacer(minLength: 8)
                 Button(ModelManagerPresentation.compactEntryActionLabel(for: item)) { inspectedModel = item }
+                    .accessibilityLabel(ModelManagerPresentation.compactEntryAccessibilityLabel(for: item))
                     .help("Open the what-if forecast, model details, and additional controls for \(item.displayName).")
                     .buttonStyle(.bordered).controlSize(.small)
                     .fixedSize()
@@ -921,6 +926,7 @@ struct ModelManagerView: View {
                 AvailableModelRow(item: item, store: store, compact: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button(ModelManagerPresentation.compactEntryActionLabel(for: item)) { inspectedModel = item }
+                    .accessibilityLabel(ModelManagerPresentation.compactEntryAccessibilityLabel(for: item))
                     .help("Open model details, assumptions, and the what-if forecast for \(item.displayName).")
                     .buttonStyle(.bordered).controlSize(.small)
                     .fixedSize()
@@ -1927,36 +1933,28 @@ struct DownloadedModelRow: View {
     @ViewBuilder
     private func enableToggle(checkbox: Bool) -> some View {
         if presentation.showsEnableToggle {
-            ModelOptionToggle(title: "Enabled", isOn: enabledBinding, checkbox: checkbox)
+            ModelOptionToggle(title: "Enabled", isOn: enabledBinding, checkbox: checkbox,
+                accessibilityName: presentation.enableAction?.accessibilityLabel ?? "Enable \(item.displayName)",
+                accessibilityHintText: presentation.enableAction?.accessibilityHint ?? "",
+                accessibilityID: "model.\(item.catalogID).enable")
                 .disabled(presentation.enableAction?.isEnabled != true)
-                .accessibilityLabel(
-                    presentation.enableAction?.accessibilityLabel ?? "Enable \(item.displayName)"
-                )
-                .accessibilityHint(
-                    presentation.enableAction?.accessibilityHint ?? ""
-                )
                 .help(presentation.enableAction?.isEnabled == false
                       ? (presentation.enableAction?.accessibilityHint ?? "Unavailable")
                       : "Allow this model to receive work. This stages a setting change; use Save Changes to save it. Enabling does not guarantee it stays loaded in memory.")
-                .accessibilityIdentifier("model.\(item.catalogID).enable")
         }
     }
 
     @ViewBuilder
     private func preloadToggle(checkbox: Bool) -> some View {
         if presentation.showsPreloadToggle {
-            ModelOptionToggle(title: "Load at startup", isOn: preloadedBinding, checkbox: checkbox)
+            ModelOptionToggle(title: "Load at startup", isOn: preloadedBinding, checkbox: checkbox,
+                accessibilityName: presentation.preloadAction?.accessibilityLabel ?? "Preload \(item.displayName)",
+                accessibilityHintText: presentation.preloadAction?.accessibilityHint ?? "",
+                accessibilityID: "model.\(item.catalogID).preload")
                 .disabled(presentation.preloadAction?.isEnabled != true)
-                .accessibilityLabel(
-                    presentation.preloadAction?.accessibilityLabel ?? "Preload \(item.displayName)"
-                )
-                .accessibilityHint(
-                    presentation.preloadAction?.accessibilityHint ?? ""
-                )
                 .help(presentation.preloadAction?.isEnabled == false
                       ? (presentation.preloadAction?.accessibilityHint ?? "Unavailable")
                       : "Request that the provider load this model into memory at startup. Save changes, then restart the provider to apply. Loading remains subject to available memory.")
-                .accessibilityIdentifier("model.\(item.catalogID).preload")
         }
     }
 
@@ -2048,22 +2046,30 @@ struct ModelOptionToggle: View {
     /// Compact cards use checkboxes: fixed-size switches crowd out the card's
     /// single action button in narrow columns. The Manage sheet keeps switches.
     var checkbox = false
+    var accessibilityName: String? = nil
+    var accessibilityHintText = ""
+    var accessibilityID = ""
 
     var body: some View {
         if checkbox {
-            Toggle(title, isOn: $isOn)
+            Toggle(isOn: $isOn) {
+                Text(title).accessibilityHidden(true)
+            }
                 .toggleStyle(.checkbox)
                 .font(.caption.weight(.medium))
                 .fixedSize()
+                .accessibilityLabel(accessibilityName ?? title)
+                .accessibilityHint(accessibilityHintText)
+                .accessibilityIdentifier(accessibilityID)
         } else {
             HStack(spacing: Self.labelSpacing) {
                 switch Self.order {
                 case .labelThenSwitch:
-                    Text(title)
+                    Text(title).accessibilityHidden(true)
                     switchControl
                 case .switchThenLabel:
                     switchControl
-                    Text(title)
+                    Text(title).accessibilityHidden(true)
                 }
             }
             .fixedSize()
@@ -2071,9 +2077,12 @@ struct ModelOptionToggle: View {
     }
 
     private var switchControl: some View {
-        Toggle("", isOn: $isOn)
+        Toggle(title, isOn: $isOn)
             .labelsHidden()
             .toggleStyle(.switch)
+            .accessibilityLabel(accessibilityName ?? title)
+            .accessibilityHint(accessibilityHintText)
+            .accessibilityIdentifier(accessibilityID)
     }
 }
 

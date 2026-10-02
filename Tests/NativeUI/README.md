@@ -142,6 +142,54 @@ data; it does not imply an unsupported CLI. All three scenarios use inert client
 and their Refresh actions preserve the selected condition.
 The banner controls switch Light/Dark and window content sizes 800 × 560 and
 1280 × 900. Appearance settings share the same isolated preference suite.
+**Static menu-bar activity** asks the review label to retain a stationary active
+arc. The native arc also honors the Mac's own Reduce Motion preference; this
+control cannot force animation against that preference. SwiftUI's system
+accessibility environment values are read-only, so this is an explicit view
+input rather than a system-setting simulation. **Grayscale** desaturates the
+synthetic dashboard, popup, and review menu-bar label. Both controls last only
+for this fixture session and leave the Mac's preferences unchanged. They do not
+establish actual VoiceOver behavior or system preference delivery.
+
+The fixture owns a separate 80-point native status item, using the production
+three-ring label and freshness deadlines with synthetic provider/fan readings
+and unavailable GPU usage. The banner's **Popup** action opens from this genuine
+menu-bar anchor, rather than from a button near the dashboard's upper edge.
+It uses the production fitting controller to set the popup's preferred size
+before presentation and respond to later disclosure changes. Opening from a
+real menu-bar anchor alone does not prove correct sizing: inspect the bounded
+`popup-geometry.jsonl` records and the rendered header/body together. The current
+screen-fit proof does not establish fit on every smaller display.
+The production status item is untouched. Quit joins the fixture's popup and
+reader cleanup, then removes only its own item.
+
+The banner's **Native proof** button runs three finite helpers inside this app's
+normal `NSApplication` event loop: `MenuBarMotionProof.swift`,
+`ModelManagerAccessibilityProof.swift`, and `ChartAccessibilityProof.swift`.
+They create only synthetic, task-owned windows and controllers. The motion
+helper checks real compositor advancement and window lifecycle; model/chart
+helpers inspect and press actual accessibility controls. No helper pumps a
+private event loop, starts the provider, reads a key, changes a Mac preference,
+or performs network inference. Keep the dashboard anchor open and avoid
+interacting with proof windows until the button reports completion.
+The cover-occlusion case starts one child of the staged fixture executable in
+an inert cover-only mode, dispatched before dashboard dependencies are created.
+It validates the requested frame, owns one opaque window, and has an eight-second
+self-timeout. The parent checks actual window ordering, coverage, occlusion and
+animation removal, then requests closure and records the child's exit. It never
+uses another application as a cover or treats window geometry as occlusion proof.
+
+Each helper writes a bounded JSON report to the temporary directory shown in
+the button's help. `native-proof-result.json` records all three terminal results;
+an exit code or a partially written report is not a passing native proof. Review
+failures and missing cases rather than treating an attempted check as success.
+The build manifest hashes the staged helpers, production sources, telemetry
+library, and final binary. This normal app host is necessary because SwiftPM's
+rendering host does not reliably expose the SwiftUI accessibility tree.
+
+Quit only this fixture when finished and confirm its process has stopped.
+Do not request another automation snapshot of the closed fixture: the native
+automation adapter may relaunch an app while resolving a new observation.
 The fixture injects retained nonsecret dashboard Chat/Hosting/settings and popup
 fan drafts, plus the same boolean-only mounted-editor protection registry used
 by production. Use ordinary navigation, Refresh, sheet dismissal/reopening,
@@ -209,6 +257,13 @@ window. Ready, key, presentation, minimize, and restore samples share a maximum
 of **49 records**. Lifecycle samples require the trace to be enabled and ready;
 they can use part of the key-event budget. Turning the checkbox off/on does not
 reset either per-process budget.
+With the same opt-in control, `menu-bar-motion.jsonl` records up to 48 changed
+states of the fixture's own native status item: requested stationary activity,
+system Reduce Motion, actual window/view visibility, whether the active arc is
+visible, and whether its rotation is installed. It reads the native layer after
+rendering; it adds no clock, records no control text, and never inspects another
+application. Installed animation state is distinct from compositor advancement,
+which the finite native rendering test checks separately.
 Only a sample event ordinal is stored; key codes, modifiers, typed characters,
 control labels/values, accessibility contents, credentials, and user data are
 omitted. Record the controlled action sequence separately to match ordinals to

@@ -99,10 +99,17 @@ private struct ModelVisitRow: View {
 
     private var model: some View {
         HStack(spacing: 8) {
-            DarkbloomLogo(
-                image: DarkbloomLogoAsset.menuBarImage(tint: .secondaryLabelColor, family: ModelFamilyIcon.select(status: .online, activeModel: visit.model)),
-                tint: .secondary
-            ).frame(width: 20, height: 20)
+            Group {
+                if let image = DarkbloomLogoAsset.modelImage(family: ModelFamilyIcon.select(status: .online, activeModel: visit.model)) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .renderingMode(.template)
+                        .scaledToFit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 20, height: 20)
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(ModelDisplayName.short(visit.model)).font(.callout.weight(.medium))
                     .lineLimit(1).truncationMode(.middle)

@@ -79,8 +79,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
         popover.behavior = .transient
         popover.delegate = self
-        popover.contentSize = NSSize(width: 560, height: 430)
-        popover.contentViewController = NSHostingController(
+        let contentController = FittingPopoverHostingController(
             rootView: PopoverRootView(
                 store: store,
                 visibility: popoverVisibility,
@@ -91,8 +90,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                 openHosting: { [weak self] in self?.showDashboard(section: .hosting) },
                 updateProtection: updateProtection,
                 popupSettingsDraft: popupSettingsDraft
-            )
+            ),
+            popover: popover
         )
+        popover.contentViewController = contentController
+        contentController.prepareForPresentation()
     }
 
     func invalidate() {
@@ -118,6 +120,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         Task { @MainActor [weak controlStore] in
             await controlStore?.refreshPreservingDraft()
         }
+        (popover.contentViewController as? FittingPopoverHostingController<PopoverRootView>)?
+            .prepareForPresentation()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
@@ -263,7 +267,13 @@ private struct PopoverRootView: View {
             MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting, updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft)
                 .environmentObject(controlStore)
         } else {
-            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting, updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft)
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Model controls unavailable", systemImage: "exclamationmark.circle")
+                    .font(.headline)
+                Button("Open dashboard", action: openDashboard)
+            }
+            .padding(16)
+            .frame(width: 560, alignment: .leading)
         }
     }
 }

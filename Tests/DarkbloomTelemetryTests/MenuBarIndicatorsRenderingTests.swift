@@ -56,69 +56,42 @@ struct MenuBarIndicatorsRenderingTests {
         }
     }
 
-    @Test("native inference arc animates only active evidence and stops immediately")
-    func nativeArcLifecycle() async throws {
+    @Test("detached native activity evidence remains static and preserves the arc geometry")
+    func detachedArcStateAndGeometry() throws {
         let view = MenuBarActivityArc.ActivityArcView(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
-        // Other native suites render windows concurrently. A nonactivating
-        // fixture panel keeps this tiny compositor surface visible without
-        // changing the application's key window or relying on orderBack.
-        let window = NSPanel(contentRect: NSRect(x: 20, y: 20, width: 18, height: 18),
-                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.hidesOnDeactivate = false
-        window.level = .floating
-        window.contentView = view
-        window.orderFront(nil)
-        defer { window.close() }
-        #expect(window.isVisible)
-        #expect(view.window === window)
         view.needsLayout = true
         view.layoutSubtreeIfNeeded()
         let arc = try #require(view.layer?.sublayers?.first as? CAShapeLayer)
         #expect(arc.path != nil)
+        #expect(arc.lineWidth == 1.4)
+        #expect(arc.strokeStart == 0.08)
+        #expect(arc.strokeEnd == 0.34)
         view.configure(active: false, tint: .systemGreen)
         #expect(arc.isHidden)
         #expect(arc.animation(forKey: "inferenceRotation") == nil)
         view.configure(active: true, tint: .systemYellow)
         #expect(!arc.isHidden)
-        let animation = arc.animation(forKey: "inferenceRotation")
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            #expect(animation == nil)
-        } else {
-            #expect(animation?.duration == 1.4)
-            #expect(animation?.repeatCount == .infinity)
-            // Swift Testing can run other MainActor rendering tasks while a
-            // sleep yields. Explicitly commit instead of assuming the normal
-            // AppKit run-loop transaction has flushed after a fixed delay.
-            window.displayIfNeeded()
-            CATransaction.flush()
-            let initialAngle = try await presentationAngle(arc, in: window)
-            let first = try #require(initialAngle, "Visible fixture must acquire a compositor presentation layer")
-            let changedAngle = try await presentationAngle(arc, in: window, differingFrom: first)
-            let second = try #require(changedAngle, "Active compositor rotation must advance within three seconds")
-            #expect(abs(second - first) > 0.1)
-        }
-        view.configure(active: false, tint: .secondaryLabelColor)
         #expect(arc.animation(forKey: "inferenceRotation") == nil)
-        #expect(arc.isHidden)
+        view.configure(active: true, tint: .systemYellow, reduceMotion: true)
+        #expect(!arc.isHidden)
+        #expect(arc.animation(forKey: "inferenceRotation") == nil)
+        #expect(view.window == nil)
     }
 
-    /// A finite proof wait, used only by this test. Missing compositor state
-    /// remains a failure; it is never treated as permission to skip motion.
-    private func presentationAngle(_ arc: CAShapeLayer, in window: NSWindow,
-                                   differingFrom initial: Double? = nil) async throws -> Double? {
-        let deadline = CACurrentMediaTime() + 3
-        repeat {
-            if let presentation = arc.presentation() {
-                let transform = presentation.transform
-                let angle = atan2(transform.m12, transform.m11)
-                if angle.isFinite, initial.map({ abs(angle - $0) > 0.1 }) ?? true { return angle }
-            }
-            window.displayIfNeeded()
-            CATransaction.flush()
-            try await Task.sleep(for: .milliseconds(30))
-        } while CACurrentMediaTime() < deadline
-        return nil
+    @Test("dismantling immediately releases a compositor clock on a retained native view")
+    func dismantleRemovesRetainedClock() throws {
+        let view = MenuBarActivityArc.ActivityArcView(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
+        let arc = try #require(view.layer?.sublayers?.first as? CAShapeLayer)
+        view.configure(active: true, tint: .systemYellow)
+        // A synthetic installed clock isolates cleanup from WindowServer
+        // lifecycle proof, which runs in the native app fixture.
+        let animation = CABasicAnimation(keyPath: "transform.rotation.z")
+        animation.repeatCount = .infinity
+        arc.add(animation, forKey: "inferenceRotation")
+        #expect(arc.animation(forKey: "inferenceRotation") != nil)
+        MenuBarActivityArc.dismantleNSView(view, coordinator: ())
+        #expect(arc.animation(forKey: "inferenceRotation") == nil)
+        #expect(!arc.isHidden)
     }
 
     private func fixture(active: Bool = false, gpu: Double, fan: Double, temperature: Double,
@@ -127,13 +100,14 @@ struct MenuBarIndicatorsRenderingTests {
               fanSpeed: .init(value: fan, freshness: freshness), temperature: .init(value: temperature, freshness: freshness))
     }
 
-    private func label(_ indicators: MenuBarIndicators, alert: Bool) -> some View {
+    private func label(_ indicators: MenuBarIndicators, alert: Bool,
+                       forceStationaryActivity: Bool = false) -> some View {
         MenuBarLabel(presentation: .make(snapshot: .unavailable(now: .now), thermal: .nominal,
             earnings: .unavailable(reason: "fixture"), mode: .statusOnly),
             uptime: .available(percent: 100, observedSeconds: 600), family: .qwen,
             attention: alert ? .init(title: "Provider idle", detail: "No provider work observed for at least 5 minutes.",
                                      shortText: "Idle 5m", idleStartedAt: .now.addingTimeInterval(-300)) : nil,
-            indicators: indicators)
+            indicators: indicators, forceStationaryActivity: forceStationaryActivity)
     }
 
     private func render<Content: View>(_ view: Content, size: NSSize, dark: Bool) throws -> NSBitmapImageRep {

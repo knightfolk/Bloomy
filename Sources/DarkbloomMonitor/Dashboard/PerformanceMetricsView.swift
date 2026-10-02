@@ -230,30 +230,36 @@ struct PerformanceMetricsContent: View {
         let last = presentation.latest
         let isCurrent = storageError == nil && last?.quality == .current
             && last.map { now.timeIntervalSince($0.observedAt) <= 90 } == true
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: storageError != nil ? "exclamationmark.triangle" : isCurrent ? "record.circle" : "clock")
-                    .foregroundStyle(storageError != nil ? Color.orange : isCurrent ? Color.green : Color.secondary)
-                Text(storageError != nil ? "Recording needs attention" : isCurrent ? "Recording locally" : "Waiting for fresh measurements")
-                    .font(.callout.weight(.medium))
-                Spacer(minLength: 0)
-                Text("\(presentation.sampleCount.formatted()) samples")
-                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                if let onRefresh {
-                    Button(action: onRefresh) { Label("Refresh metrics", systemImage: "arrow.clockwise") }
-                        .labelStyle(.iconOnly)
-                        .controlSize(.regular)
-                        .help("Read local metrics again. This view also refreshes every 30 seconds while open.")
+        return HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: storageError != nil ? "exclamationmark.triangle" : isCurrent ? "record.circle" : "clock")
+                        .foregroundStyle(storageError != nil ? Color.orange : isCurrent ? Color.green : Color.secondary)
+                        .accessibilityHidden(true)
+                    Text(storageError != nil ? "Recording needs attention" : isCurrent ? "Recording locally" : "Waiting for fresh measurements")
+                        .font(.callout.weight(.medium))
+                    Spacer(minLength: 0)
+                    Text("\(presentation.sampleCount.formatted()) samples")
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                }
+                if let storageError {
+                    Text(storageError).font(.caption).foregroundStyle(.secondary)
+                } else if let last {
+                    Text("Latest observation \(last.observedAt.formatted(date: .abbreviated, time: .standard)) · \(last.quality.rawValue)")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if let storageError {
-                Text(storageError).font(.caption).foregroundStyle(.secondary)
-            } else if let last {
-                Text("Latest observation \(last.observedAt.formatted(date: .abbreviated, time: .standard)) · \(last.quality.rawValue)")
-                    .font(.caption).foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+            if let onRefresh {
+                Button(action: onRefresh) { Label("Refresh metrics", systemImage: "arrow.clockwise") }
+                    .labelStyle(.iconOnly)
+                    .controlSize(.regular)
+                    .accessibilityLabel("Refresh metrics")
+                    .accessibilityIdentifier("activity.metrics.refresh")
+                    .help("Read local metrics again. This view also refreshes every 30 seconds while open.")
             }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private var summaryGrid: some View {
@@ -289,7 +295,13 @@ struct PerformanceMetricsContent: View {
     }
 
     private var speedChart: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let styles = ChartSeriesStyles(domain: models)
+        let colors = models.map { model in
+            let components = ActivityChartPalette.components(for: model)
+            return Color(hue: components.hue, saturation: components.saturation, brightness: components.brightness)
+        }
+        let colorsByModel = Dictionary(uniqueKeysWithValues: zip(models, colors))
+        return VStack(alignment: .leading, spacing: 8) {
             Label("Measured model speed", systemImage: "waveform.path").font(.headline)
             if ratePoints.isEmpty {
                 Text("No attributed speed measurements in this period.")
@@ -297,18 +309,25 @@ struct PerformanceMetricsContent: View {
             } else {
                 Chart(ratePoints) { point in
                     LineMark(x: .value("Observed", point.date), y: .value("Tokens per second", point.rate), series: .value("Measured run", point.run))
-                        .foregroundStyle(by: .value("Model", ModelDisplayName.short(point.model)))
+                        .foregroundStyle(by: .value("Model", point.model))
+                        .lineStyle(by: .value("Model", point.model))
                         .interpolationMethod(.linear)
                     PointMark(x: .value("Observed", point.date), y: .value("Tokens per second", point.rate))
-                        .foregroundStyle(by: .value("Model", ModelDisplayName.short(point.model)))
-                        .symbolSize(12)
+                        .foregroundStyle(by: .value("Model", point.model))
+                        .symbol(by: .value("Model", point.model))
+                        .symbolSize(24)
                 }
                 .chartXScale(domain: range.start...range.end)
                 .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
                 .chartYAxis { AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) }
                 .chartYAxisLabel("tok/s")
-                .chartLegend(position: .bottom, alignment: .leading)
+                .chartSymbolScale(domain: styles.entries.map(\.series), range: styles.entries.map { $0.symbol.shape })
+                .chartLineStyleScale(domain: styles.entries.map(\.series), range: styles.entries.map(\.stroke))
+                .chartForegroundStyleScale(domain: models, range: colors)
+                .chartLegend(.hidden)
                 .frame(height: 190)
+                ChartSeriesLegend(entries: styles.visibleEntries(in: ratePoints.map(\.model)),
+                    showsLine: true, color: { colorsByModel[$0] ?? .secondary })
             }
             Text("Fresh observations only. Lines stop at unknown gaps, model changes, and provider restarts.")
                 .font(.caption).foregroundStyle(.secondary)

@@ -378,6 +378,7 @@ private final class FixtureModel: ObservableObject {
     let updateProtection = AppUpdateEditorProtection()
     let hostingDraft: HostingSettingsDraftState
     var presentDashboard: ((DashboardDestination?, SettingsPage?) -> Void)?
+    var presentMenuBarPopup: (() -> Void)?
     lazy var popup = FixturePopoverController(model: self)
     @Published var monitor: MonitorStore
     @Published var control: ProviderControlStore
@@ -387,6 +388,10 @@ private final class FixtureModel: ObservableObject {
     @Published var issue: String?
     @Published var scenario: FixtureScenario = .fresh
     @Published var focusTracing: Bool
+    @Published var staticActivity = false
+    @Published var grayscale = false
+    @Published private(set) var nativeProofStatus = "Native proof"
+    private var nativeProofTask: Task<Void, Never>?
     @Published private(set) var chatVerificationTest: FixtureChatVerification?
     private var chatVerificationClient: FixtureChatVerificationClient?
     private var loadTask: Task<Void, Never>?
@@ -550,6 +555,28 @@ private final class FixtureModel: ObservableObject {
         issue = preparationIssue
         ready = true
     }
+    func runNativeProof() {
+        guard nativeProofTask == nil, ready, !isTerminating else { return }
+        nativeProofStatus = "Proof running…"
+        nativeProofTask = Task { @MainActor in
+            let motion = await MenuBarMotionProof.run(outputDirectory: self.directory)
+            let models = await ModelManagerAccessibilityProof.run(outputDirectory: self.directory)
+            let charts = await ChartAccessibilityProof.run(outputDirectory: self.directory)
+            let passed = motion && models["success"] as? Bool == true && charts
+            let result: [String: Any] = ["synthetic": true, "terminal": "completed", "passed": passed,
+                "motion": motion, "models": models["success"] as? Bool == true, "charts": charts]
+            do {
+                let data = try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
+                try data.write(to: self.directory.appendingPathComponent("native-proof-result.json"), options: .atomic)
+                self.nativeProofStatus = passed ? "Proof passed" : "Proof failed"
+            } catch {
+                self.nativeProofStatus = "Proof write failed"
+                FileHandle.standardError.write(Data("Fixture native proof result write failed.\n".utf8))
+            }
+            self.nativeProofTask = nil
+        }
+    }
+
     func stopForTermination() async {
         isTerminating = true
         setDashboardVisible(false)
@@ -559,6 +586,10 @@ private final class FixtureModel: ObservableObject {
         loading?.cancel()
         await loading?.value
         loadTask = nil
+        let proof = nativeProofTask
+        proof?.cancel()
+        await proof?.value
+        nativeProofTask = nil
         await popup.closeAndWait(resetContent: true)
         await monitor.stop()
     }
@@ -575,12 +606,12 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
     private var fanCancellations: [UUID: Task<Void, Never>] = [:]
     private var isClosing = false
     private var closeWaiters: [CheckedContinuation<Void, Never>] = []
+    private var geometryRecords = 0
 
     init(model: FixtureModel) {
         self.model = model
         super.init()
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 560, height: 430)
         popover.delegate = self
     }
 
@@ -593,18 +624,24 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
         }
         if popover.contentViewController == nil {
             hostedMonitor = model.monitor
-            let content = FixturePopoverContent(store: model.monitor, control: model.control,
+            let content = FixturePopoverContent(model: model, store: model.monitor, control: model.control,
                 visibility: visibility, defaults: model.defaults,
                 openSettings: { [weak self] page in self?.navigate(.settings, settingsPage: page) },
                 openDashboard: { [weak self] in self?.navigate() },
                 openModels: { [weak self] in self?.navigate(.models) },
                 openHosting: { [weak self] in self?.navigate(.hosting) },
                 updateProtection: model.updateProtection, popupSettingsDraft: model.popupSettingsDraft)
-            popover.contentViewController = NSHostingController(rootView: content)
-            popover.contentSize = NSSize(width: 560, height: 430)
+            let contentController = FittingPopoverHostingController(rootView: content, popover: popover)
+            popover.contentViewController = contentController
+            contentController.view.postsFrameChangedNotifications = true
+            NotificationCenter.default.addObserver(self, selector: #selector(contentFrameChanged),
+                name: NSView.frameDidChangeNotification, object: contentController.view)
+            contentController.prepareForPresentation()
         }
         let control = model.control
         Task { @MainActor [weak control] in await control?.refreshPreservingDraft() }
+        (popover.contentViewController as? FittingPopoverHostingController<FixturePopoverContent>)?
+            .prepareForPresentation()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
@@ -615,6 +652,53 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
         }
         visibility.setVisible(true)
     }
+
+    func popoverDidShow(_ notification: Notification) {
+        captureGeometry(phase: "popover.didShow")
+    }
+
+    @objc private func contentFrameChanged(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.popover.isShown else { return }
+            self.captureGeometry(phase: "popover.contentFrameChanged")
+        }
+    }
+
+    private func captureGeometry(phase: String) {
+        guard let model, model.focusTracing, model.ready, geometryRecords < 6,
+              let view = popover.contentViewController?.view, let window = view.window else { return }
+        view.layoutSubtreeIfNeeded()
+        let contentScreenRect = window.convertToScreen(view.convert(view.bounds, to: nil))
+        let values: [String: Any] = [
+            "schema": 1, "phase": phase,
+            "popoverContentSize": NSStringFromSize(popover.contentSize),
+            "hostingFrame": NSStringFromRect(view.frame),
+            "hostingBounds": NSStringFromRect(view.bounds),
+            "hostingFittingSize": NSStringFromSize(view.fittingSize),
+            "windowFrame": NSStringFromRect(window.frame),
+            "contentScreenRect": NSStringFromRect(contentScreenRect),
+            "screenVisibleFrame": window.screen.map { NSStringFromRect($0.visibleFrame) } ?? "nil",
+            "contentFitsScreen": window.screen?.visibleFrame.contains(contentScreenRect) ?? false
+        ]
+        guard var data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]) else { return }
+        geometryRecords += 1
+        data.append(0x0A)
+        let output = model.directory.appendingPathComponent("popup-geometry.jsonl")
+        do {
+            if !FileManager.default.fileExists(atPath: output.path) {
+                try data.write(to: output, options: .atomic)
+            } else {
+                let file = try FileHandle(forWritingTo: output)
+                defer { try? file.close() }
+                try file.seekToEnd()
+                try file.write(contentsOf: data)
+            }
+        } catch {
+            FileHandle.standardError.write(Data("Fixture popup geometry diagnostic write failed.\n".utf8))
+        }
+    }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
 
     func popoverWillClose(_ notification: Notification) {
         isClosing = true
@@ -670,6 +754,9 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
             // Each close awaits its delegate event, leaving AppKit free to finish.
         } while popover.isShown || isClosing || !fanCancellations.isEmpty
         if resetContent {
+            if let view = popover.contentViewController?.view {
+                NotificationCenter.default.removeObserver(self, name: NSView.frameDidChangeNotification, object: view)
+            }
             popover.contentViewController = nil
             hostedMonitor = nil
         }
@@ -686,6 +773,7 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
 }
 
 private struct FixturePopoverContent: View {
+    @ObservedObject var model: FixtureModel
     @ObservedObject var store: MonitorStore
     let control: ProviderControlStore
     @ObservedObject var visibility: PopoverVisibility
@@ -698,12 +786,12 @@ private struct FixturePopoverContent: View {
     let updateProtection: AppUpdateEditorProtection
     let popupSettingsDraft: ProviderSettingsDraftState
 
-    init(store: MonitorStore, control: ProviderControlStore, visibility: PopoverVisibility,
+    init(model: FixtureModel, store: MonitorStore, control: ProviderControlStore, visibility: PopoverVisibility,
          defaults: UserDefaults, openSettings: @escaping (SettingsPage?) -> Void,
          openDashboard: @escaping () -> Void, openModels: @escaping () -> Void,
          openHosting: @escaping () -> Void, updateProtection: AppUpdateEditorProtection,
          popupSettingsDraft: ProviderSettingsDraftState) {
-        self.store = store; self.control = control; self.visibility = visibility
+        self.model = model; self.store = store; self.control = control; self.visibility = visibility
         self.defaults = defaults
         _appearance = AppStorage(wrappedValue: "light", ApplicationAppearance.defaultsKey, store: defaults)
         self.openSettings = openSettings; self.openDashboard = openDashboard
@@ -719,13 +807,14 @@ private struct FixturePopoverContent: View {
             .environmentObject(control)
             .defaultAppStorage(defaults)
             .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+            .saturation(model.grayscale ? 0 : 1)
     }
 }
 
 private struct FixturePopupButton: NSViewRepresentable {
-    let controller: FixturePopoverController
+    let show: () -> Void
     let enabled: Bool
-    func makeCoordinator() -> Coordinator { Coordinator(controller: controller) }
+    func makeCoordinator() -> Coordinator { Coordinator(show: show) }
     func makeNSView(context: Context) -> NSButton {
         let button = NSButton(title: "Popup", target: context.coordinator, action: #selector(Coordinator.show(_:)))
         button.bezelStyle = .rounded
@@ -733,12 +822,187 @@ private struct FixturePopupButton: NSViewRepresentable {
         button.setAccessibilityIdentifier("fixture.popup.open")
         return button
     }
-    func updateNSView(_ button: NSButton, context: Context) { button.isEnabled = enabled }
+    func updateNSView(_ button: NSButton, context: Context) {
+        button.isEnabled = enabled
+        context.coordinator.showPopup = show
+    }
     @MainActor
     final class Coordinator: NSObject {
-        let controller: FixturePopoverController
-        init(controller: FixturePopoverController) { self.controller = controller }
-        @objc func show(_ sender: NSButton) { controller.show(from: sender) }
+        var showPopup: () -> Void
+        init(show: @escaping () -> Void) { showPopup = show }
+        @objc func show(_ sender: NSButton) { showPopup() }
+    }
+}
+
+/// Only this inert review app owns the item. Its genuine menu-bar anchor avoids
+/// measuring a popup clipped by an unrelated dashboard banner button.
+@MainActor
+private final class FixtureStatusItemController: NSObject {
+    private let item = NSStatusBar.system.statusItem(withLength: StatusItemController.itemWidth)
+    private weak var model: FixtureModel?
+
+    init(model: FixtureModel) {
+        self.model = model
+        super.init()
+        guard let button = item.button else { return }
+        button.target = self
+        button.action = #selector(showPopup)
+        button.sendAction(on: [.leftMouseUp])
+        button.setAccessibilityLabel("Bloomy synthetic menu-bar review")
+        button.setAccessibilityIdentifier("fixture.menu-bar")
+        let host = FixtureStatusHostingView(rootView: FixtureMenuBarRoot(model: model))
+        host.translatesAutoresizingMaskIntoConstraints = false
+        button.addSubview(host)
+        NSLayoutConstraint.activate([
+            host.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 4),
+            host.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -4),
+            host.topAnchor.constraint(equalTo: button.topAnchor),
+            host.bottomAnchor.constraint(equalTo: button.bottomAnchor)
+        ])
+    }
+
+    @objc func showPopup() {
+        guard let model, let button = item.button else { return }
+        model.popup.show(from: button)
+    }
+
+    func invalidate() {
+        item.button?.subviews.forEach { $0.removeFromSuperview() }
+        NSStatusBar.system.removeStatusItem(item)
+    }
+}
+
+private final class FixtureStatusHostingView<Content: View>: NSHostingView<Content> {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private struct FixtureMenuBarRoot: View {
+    @ObservedObject var model: FixtureModel
+
+    var body: some View {
+        // Scenario changes replace the stores; bind to the current fake one.
+        FixtureMenuBarContent(model: model, store: model.monitor)
+    }
+}
+
+private struct FixtureMenuBarContent: View {
+    @ObservedObject var model: FixtureModel
+    @ObservedObject var store: MonitorStore
+
+    var body: some View {
+        if let extras = store.providerExtras {
+            FixtureExtrasMenuBarContent(model: model, store: store, extras: extras)
+        } else {
+            FixtureMenuBarLabel(model: model, store: store, fanStatus: nil)
+        }
+    }
+}
+
+private struct FixtureExtrasMenuBarContent: View {
+    let model: FixtureModel
+    let store: MonitorStore
+    @ObservedObject var extras: ProviderExtrasStore
+
+    var body: some View {
+        FixtureMenuBarLabel(model: model, store: store, fanStatus: extras.snapshot?.fanStatus)
+    }
+}
+
+private struct FixtureMenuBarLabel: View {
+    @ObservedObject var model: FixtureModel
+    @ObservedObject var store: MonitorStore
+    let fanStatus: SourceAvailability<ProviderFanStatus>?
+    @State private var freshnessCheckedAt = Date()
+
+    var body: some View {
+        let now = max(Date(), freshnessCheckedAt)
+        let values = MenuBarIndicators.make(snapshot: store.snapshot,
+            utilization: nil, sampledAt: nil, fanStatus: fanStatus, now: now)
+        MenuBarLabel(presentation: store.menuPresentation(mode: .statusOnly),
+            uptime: store.observedUptime,
+            family: MenuBarIndicators.modelFamily(snapshot: store.snapshot, now: now),
+            indicators: values, forceStationaryActivity: model.staticActivity)
+            .saturation(model.grayscale ? 0 : 1)
+            .background(FixtureMenuBarMotionCapture(enabled: model.focusTracing && model.ready,
+                stationary: model.staticActivity,
+                outputURL: model.directory.appendingPathComponent("menu-bar-motion.jsonl")))
+            .task(id: values.nextFreshnessChange) {
+                guard let deadline = values.nextFreshnessChange else { return }
+                do { try await Task.sleep(for: .seconds(max(0.01, deadline.timeIntervalSinceNow))) }
+                catch { return }
+                freshnessCheckedAt = Date()
+            }
+    }
+}
+
+/// Opt-in, bounded evidence from this fixture's own status item. It reads the
+/// actual native layer after a render and does not add a sampling clock.
+private struct FixtureMenuBarMotionCapture: NSViewRepresentable {
+    let enabled: Bool
+    let stationary: Bool
+    let outputURL: URL
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func updateNSView(_ view: NSView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.revision += 1
+        let revision = coordinator.revision
+        guard enabled else { return }
+        DispatchQueue.main.async {
+            guard coordinator.revision == revision else { return }
+            guard let window = view.window else { return }
+            var ancestor: NSView? = view
+            while let current = ancestor, !(current is NSStatusBarButton) { ancestor = current.superview }
+            guard let button = ancestor as? NSStatusBarButton else { return }
+            @MainActor func findArc(_ root: NSView) -> MenuBarActivityArc.ActivityArcView? {
+                if let arc = root as? MenuBarActivityArc.ActivityArcView { return arc }
+                for child in root.subviews {
+                    if let arc = findArc(child) { return arc }
+                }
+                return nil
+            }
+            guard let arc = findArc(button), let layer = arc.layer?.sublayers?.first else { return }
+            coordinator.record([
+                "schema": 1,
+                "stationaryRequested": stationary,
+                "systemReduceMotion": NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+                "windowVisible": window.isVisible,
+                "windowOccluded": !window.occlusionState.contains(.visible),
+                "viewHidden": arc.isHiddenOrHasHiddenAncestor,
+                "activeArcVisible": !layer.isHidden,
+                "rotationInstalled": layer.animation(forKey: "inferenceRotation") != nil
+            ], to: outputURL)
+        }
+    }
+
+    @MainActor
+    final class Coordinator {
+        var revision = 0
+        private var lastRecord: Data?
+        private var recordCount = 0
+
+        func record(_ values: [String: Any], to url: URL) {
+            guard recordCount < 48,
+                  var data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]),
+                  data != lastRecord else { return }
+            let record = data
+            data.append(0x0A)
+            do {
+                if !FileManager.default.fileExists(atPath: url.path) {
+                    try data.write(to: url, options: .atomic)
+                } else {
+                    let file = try FileHandle(forWritingTo: url)
+                    defer { try? file.close() }
+                    try file.seekToEnd()
+                    try file.write(contentsOf: data)
+                }
+                lastRecord = record
+                recordCount += 1
+            } catch {
+                FileHandle.standardError.write(Data("Fixture motion diagnostic write failed.\n".utf8))
+            }
+        }
     }
 }
 
@@ -949,7 +1213,7 @@ private struct FixtureReviewView: View {
                     }.frame(width: 150)
                     Toggle("Dark", isOn: Binding(get: { appearance == "dark" }, set: { appearance = $0 ? "dark" : "light" })).toggleStyle(.checkbox)
                     Toggle("800 × 560", isOn: $compact).toggleStyle(.checkbox)
-                    FixturePopupButton(controller: model.popup, enabled: model.ready).frame(width: 64, height: 24)
+                    FixturePopupButton(show: { model.presentMenuBarPopup?() }, enabled: model.ready).frame(width: 64, height: 24)
                     Button("Reload") { Task { await model.load() } }
                     Toggle("Focus trace", isOn: $model.focusTracing).toggleStyle(.checkbox)
                         .help("Bounded native focus diagnostic: \(model.focusDiagnostics.outputURL.path)")
@@ -957,10 +1221,23 @@ private struct FixtureReviewView: View {
                 // Observe the child store directly so a completed model read
                 // re-enables test controls without an unrelated fixture update.
                 FixtureChatVerificationControls(model: model, chat: model.chat)
+                HStack(spacing: 14) {
+                    Toggle("Static menu-bar activity", isOn: $model.staticActivity).toggleStyle(.checkbox)
+                    Toggle("Grayscale", isOn: $model.grayscale).toggleStyle(.checkbox)
+                    Text("Review overrides only · Mac preferences stay unchanged")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button(model.nativeProofStatus) { model.runNativeProof() }
+                        .disabled(!model.ready || model.nativeProofStatus == "Proof running…")
+                        .help("Run finite synthetic native checks; results: \(model.directory.path)")
+                }
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(Color.orange.opacity(0.08))
                 if let issue = model.issue { Text(issue).foregroundStyle(.red).padding(6) }
                 DashboardRootView(store: model.monitor, controlStore: model.control, hostingStore: model.hosting,
                     chatStore: model.chat, navigation: model.navigation, settingsDraft: model.settingsDraft,
                     chatDraft: model.chatDraft, hostingDraft: model.hostingDraft, updateProtection: model.updateProtection)
+                    .saturation(model.grayscale ? 0 : 1)
                     .overlay { if !model.ready { ProgressView("Preparing synthetic sources…").padding().background(.regularMaterial) } }
             }
             .defaultAppStorage(model.defaults)
@@ -985,6 +1262,7 @@ private struct FixtureReviewView: View {
 private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let model = FixtureModel()
     private var window: NSWindow?
+    private var statusItem: FixtureStatusItemController?
     private let terminationGate = ApplicationTerminationGate()
     private var terminationRequested = false
 
@@ -1005,6 +1283,8 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
         model.presentDashboard = { [weak self] section, settingsPage in
             self?.presentDashboard(section: section, settingsPage: settingsPage)
         }
+        statusItem = FixtureStatusItemController(model: model)
+        model.presentMenuBarPopup = { [weak self] in self?.statusItem?.showPopup() }
         presentDashboard()
     }
 
@@ -1088,7 +1368,11 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
         terminationRequested = true
         model.ready = false
         return terminationGate.requestTermination(
-            cleanup: { await self.model.stopForTermination() },
+            cleanup: {
+                await self.model.stopForTermination()
+                self.statusItem?.invalidate()
+                self.statusItem = nil
+            },
             retryTermination: { sender.terminate(nil) }
         )
     }
@@ -1098,6 +1382,7 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
 struct DashboardFixture {
     @MainActor
     static func main() {
+        if MotionCoverHost.runIfRequested(arguments: CommandLine.arguments) { return }
         let application = NSApplication.shared
         let delegate = FixtureApplicationDelegate()
         application.setActivationPolicy(.regular)

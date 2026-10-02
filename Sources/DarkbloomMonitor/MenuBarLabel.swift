@@ -140,6 +140,8 @@ struct MenuBarLabel: View {
     var ring: MenuBarGPURing? = nil
     var attention: MenuBarAttention? = nil
     var indicators: MenuBarIndicators? = nil
+    /// Hosts may request a stationary activity cue without changing Mac preferences.
+    var forceStationaryActivity = false
 
     var body: some View {
         HStack(spacing: 9) {
@@ -166,7 +168,8 @@ struct MenuBarLabel: View {
         ZStack {
             Circle().stroke(thermalColor.opacity(values.temperature.freshness == .current ? 0.55 : 0.2), lineWidth: 1)
                 .padding(0.75)
-            MenuBarActivityArc(isActive: values.modelIsActive, tint: thermalNSColor)
+            MenuBarActivityArc(isActive: values.modelIsActive, tint: thermalNSColor,
+                               forceStationary: forceStationaryActivity)
             DarkbloomLogo(
                 image: DarkbloomLogoAsset.menuBarImage(tint: statusNSColor, family: family),
                 tint: Color(nsColor: statusNSColor)
@@ -265,15 +268,27 @@ private struct MenuBarValueRing<Content: View>: View {
 /// Core Animation rotates only the small active arc. Idle labels have no
 /// display timer, and Reduced Motion leaves a stationary activity arc.
 struct MenuBarActivityArc: NSViewRepresentable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let isActive: Bool
     let tint: NSColor
+    var forceStationary = false
 
     func makeNSView(context: Context) -> ActivityArcView { ActivityArcView() }
-    func updateNSView(_ nsView: ActivityArcView, context: Context) { nsView.configure(active: isActive, tint: tint) }
+    func updateNSView(_ nsView: ActivityArcView, context: Context) {
+        nsView.configure(active: isActive, tint: tint, reduceMotion: reduceMotion || forceStationary)
+    }
+
+    static func dismantleNSView(_ nsView: ActivityArcView, coordinator: ()) {
+        nsView.stopObserving()
+    }
 
     final class ActivityArcView: NSView {
         private let arc = CAShapeLayer()
         private var active = false
+        private var reduceMotion = false
+        private var dismantled = false
+        private var closeReevaluationScheduled = false
+        private weak var closedWindowAwaitingReevaluation: NSWindow?
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
@@ -287,7 +302,56 @@ struct MenuBarActivityArc: NSViewRepresentable {
         }
 
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-        deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+        deinit {
+            NSWorkspace.shared.notificationCenter.removeObserver(self)
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            arc.removeAnimation(forKey: "inferenceRotation")
+            NotificationCenter.default.removeObserver(self)
+            super.viewWillMove(toWindow: newWindow)
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window, !dismantled {
+                let center = NotificationCenter.default
+                for name in [NSWindow.didChangeOcclusionStateNotification,
+                             NSWindow.didExposeNotification,
+                             NSWindow.didMiniaturizeNotification,
+                             NSWindow.didDeminiaturizeNotification] {
+                    center.addObserver(self, selector: #selector(windowVisibilityChanged), name: name, object: window)
+                }
+                center.addObserver(self, selector: #selector(windowWillClose),
+                                   name: NSWindow.willCloseNotification, object: window)
+            }
+            synchronizeAnimation()
+        }
+
+        override func viewDidMoveToSuperview() {
+            super.viewDidMoveToSuperview()
+            synchronizeAnimation()
+        }
+
+        override func viewDidHide() {
+            super.viewDidHide()
+            synchronizeAnimation()
+        }
+
+        override func viewDidUnhide() {
+            super.viewDidUnhide()
+            synchronizeAnimation()
+        }
+
+        /// A dismantled representable can briefly retain its native view.
+        /// Release both observers and its compositor clock immediately.
+        func stopObserving() {
+            dismantled = true
+            arc.removeAnimation(forKey: "inferenceRotation")
+            NSWorkspace.shared.notificationCenter.removeObserver(self)
+            NotificationCenter.default.removeObserver(self)
+        }
 
         override func layout() {
             super.layout()
@@ -300,8 +364,9 @@ struct MenuBarActivityArc: NSViewRepresentable {
             CATransaction.commit()
         }
 
-        func configure(active: Bool, tint: NSColor) {
+        func configure(active: Bool, tint: NSColor, reduceMotion: Bool = false) {
             self.active = active
+            self.reduceMotion = reduceMotion
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             arc.strokeColor = tint.cgColor
@@ -311,9 +376,32 @@ struct MenuBarActivityArc: NSViewRepresentable {
         }
 
         @objc private func motionPreferenceChanged() { synchronizeAnimation() }
+        @objc private func windowVisibilityChanged() { synchronizeAnimation() }
+        @objc private func windowWillClose() {
+            // Stop before AppKit orders the window out. A synchronous reopen
+            // can retain the visible occlusion bit without another notification,
+            // so reevaluate once after this close completes.
+            arc.removeAnimation(forKey: "inferenceRotation")
+            closedWindowAwaitingReevaluation = window
+            guard !closeReevaluationScheduled else { return }
+            closeReevaluationScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.closeReevaluationScheduled = false
+                let closedWindow = self.closedWindowAwaitingReevaluation
+                self.closedWindowAwaitingReevaluation = nil
+                guard !self.dismantled, let closedWindow,
+                      self.window === closedWindow else { return }
+                self.synchronizeAnimation()
+            }
+        }
 
         private func synchronizeAnimation() {
-            guard active, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            guard active, !dismantled,
+                  !isHiddenOrHasHiddenAncestor,
+                  let window, window.isVisible, !window.isMiniaturized,
+                  window.occlusionState.contains(.visible),
+                  !reduceMotion, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
                 arc.removeAnimation(forKey: "inferenceRotation")
                 return
             }

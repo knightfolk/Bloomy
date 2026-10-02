@@ -438,12 +438,23 @@ struct ActivityView: View {
 
     private func activityChart(query: ActivityQuery, range: DateInterval) -> some View {
         let stacked = chartStyle == .area || (chartStyle == .bars && barArrangement == .stacked)
+        let stackedBars = chartStyle == .bars && barArrangement == .stacked
+        let values = chartValues
+        let segments = stackedBars
+            ? (chartMetric == .estimatedProfit ? ActivityChartData.profitSegments(values: values) : chartSegments)
+            : []
+        let valueCues = chartStyle == .area || stackedBars ? [] : ChartSeriesCueSelection.values(values)
+        let segmentCues = stackedBars ? ChartSeriesCueSelection.segments(segments) : []
+        let areaCues = chartStyle == .area ? ChartSeriesCueSelection.areaCues(values) : []
+        let visibleSeries = stackedBars
+            ? segments.map(\.series) : values.map(\.series)
+        let styles = ChartSeriesStyles(domain: chartStyleDomain + visibleSeries)
         let yAxis: ActivityChartYAxis
         if chartMetric == .estimatedProfit {
-            let bounds = ActivityChartData.profitBounds(values: chartValues, stacked: stacked)
+            let bounds = ActivityChartData.profitBounds(values: values, stacked: stacked)
             yAxis = ActivityChartAxis.signedYAxis(minimum: bounds.minimum, maximum: bounds.maximum)
         } else {
-            let maximum = ActivityChartData.maximumUSD(values: chartValues, stacked: stacked)
+            let maximum = ActivityChartData.maximumUSD(values: values, stacked: stacked)
             yAxis = ActivityChartAxis.yAxis(maximum: maximum)
         }
 
@@ -453,7 +464,10 @@ struct ActivityView: View {
                  : "Gross recorded earnings · USD")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
-            Chart { chartMarks(query: query) }
+            Chart {
+                chartMarks(query: query, values: values, segments: segments,
+                    styles: styles, valueCues: valueCues, segmentCues: segmentCues)
+            }
                 .id(query.model)
                 .chartXScale(domain: range.start...range.end)
                 .chartYScale(domain: yAxis.lowerBound...yAxis.upperBound)
@@ -489,18 +503,40 @@ struct ActivityView: View {
                 }
                 .chartForegroundStyleScale(domain: chartStyleDomain, range: chartStyleRange)
                 .chartLegend(.hidden)
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        if let plotAnchor = proxy.plotFrame {
+                            let plot = geometry[plotAnchor]
+                            ForEach(areaCues) { segment in
+                                if let x = proxy.position(forX: segment.interval.start),
+                                   let y = proxy.position(forY: (segment.startUSD + segment.endUSD) / 2) {
+                                    ChartSeriesBadge(number: styles[segment.series].number)
+                                        .position(x: plot.minX + x, y: plot.minY + y)
+                                }
+                            }
+                        }
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
                 .frame(height: 242)
+            ChartSeriesLegend(entries: styles.visibleEntries(in: visibleSeries),
+                showsLine: chartStyle == .lines, color: chartColor(for:))
+                .padding(.top, 6)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(chartMetric == .estimatedProfit
-            ? "Estimated net profit per earning model-hour in US dollars by local time, with positive and negative values around zero. Model filter chips identify each series."
-            : "Recorded gross earnings in US dollars by local time. Filter chips identify the series. Full values and coverage are in the table below.")
+            ? "Estimated net profit per earning model-hour in US dollars by local time, with positive and negative values around zero. Numbered labels and the legend identify each series."
+            : "Recorded gross earnings in US dollars by local time. Numbered labels and the legend identify the series. Full values and coverage are in the table below.")
     }
 
     @ChartContentBuilder
-    private func chartMarks(query: ActivityQuery) -> some ChartContent {
+    private func chartMarks(
+        query: ActivityQuery, values: [ActivityChartValue], segments: [ActivityChartSegment],
+        styles: ChartSeriesStyles, valueCues: Set<String>, segmentCues: Set<String>
+    ) -> some ChartContent {
         if chartStyle == .bars && barArrangement == .stacked {
-            ForEach(displayedSegments) { segment in
+            ForEach(segments) { segment in
                 RectangleMark(
                     xStart: .value("Start", segment.interval.start.addingTimeInterval(segment.interval.duration * 0.08)),
                     xEnd: .value("End", segment.interval.end.addingTimeInterval(-segment.interval.duration * 0.08)),
@@ -508,10 +544,15 @@ struct ActivityView: View {
                     yEnd: .value("Recorded USD", segment.endUSD)
                 )
                 .foregroundStyle(by: .value("Series", segment.series))
+                .annotation(position: .overlay) {
+                    if segmentCues.contains(segment.id) {
+                        ChartSeriesBadge(number: styles[segment.series].number)
+                    }
+                }
             }
         } else {
-            ForEach(chartValues) { value in
-                chartMark(value, query: query)
+            ForEach(values) { value in
+                chartMark(value, query: query, style: styles[value.series], showsCue: valueCues.contains(value.id))
             }
         }
     }
@@ -526,17 +567,16 @@ struct ActivityView: View {
         )
     }
 
-    private var displayedSegments: [ActivityChartSegment] {
-        chartMetric == .estimatedProfit
-            ? ActivityChartData.profitSegments(values: chartValues)
-            : chartSegments
-    }
-
     @ChartContentBuilder
-    private func chartMark(_ value: ActivityChartValue, query: ActivityQuery) -> some ChartContent {
+    private func chartMark(
+        _ value: ActivityChartValue, query: ActivityQuery, style: ChartSeriesStyle, showsCue: Bool
+    ) -> some ChartContent {
         switch chartStyle {
         case .bars:
             barMark(value, query: query)
+                .annotation(position: .overlay) {
+                    if showsCue { ChartSeriesBadge(number: style.number) }
+                }
         case .lines:
             LineMark(
                 x: .value("Period", value.interval.start),
@@ -544,8 +584,13 @@ struct ActivityView: View {
                 series: .value("Series run", value.runKey)
             )
             .foregroundStyle(by: .value("Series", value.series))
-            .symbol(.circle)
+            .symbol(style.symbol.shape)
+            .symbolSize(32)
+            .lineStyle(style.stroke)
             .interpolationMethod(.linear)
+            .annotation(position: .top, spacing: 2) {
+                if showsCue { ChartSeriesBadge(number: style.number) }
+            }
         case .area:
             AreaMark(
                 x: .value("Period", value.interval.start),

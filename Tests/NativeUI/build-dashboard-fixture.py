@@ -88,6 +88,12 @@ fixture_bytes = fixture.read_bytes()
 hashes[str(fixture.relative_to(ROOT))] = hashlib.sha256(fixture_bytes).hexdigest()
 staged_fixture = stage / fixture.name
 staged_fixture.write_bytes(fixture_bytes)
+for helper in sorted((ROOT / "Tests/NativeUI").glob("*Proof.swift")):
+    helper_bytes = helper.read_bytes()
+    hashes[str(helper.relative_to(ROOT))] = hashlib.sha256(helper_bytes).hexdigest()
+    staged_helper = stage / helper.name
+    staged_helper.write_bytes(helper_bytes)
+    sources.append(staged_helper)
 # Link the same immutable bytes that the manifest identifies, even if an
 # independent debug build refreshes the original products during compilation.
 staged_telemetry = stage / telemetry.name

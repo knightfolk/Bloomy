@@ -412,7 +412,27 @@ struct MonitorPopoverLayoutTests {
         #expect(controller.dashboardWindowController?.window === firstWindow)
         #expect(controller.dashboardWindowController?.navigation.selected == .settings)
         controller.invalidate()
-        #expect(controller.popoverContentSize == NSSize(width: 560, height: 430))
+        #expect(controller.popoverContentSize.width == 560)
+        #expect(controller.popoverContentSize.height > 0)
+    }
+
+    @Test("popover placement uses its complete content height after content changes")
+    func fittingPopoverPlacementSize() {
+        let popover = NSPopover()
+        let host = FittingPopoverHostingController(
+            rootView: Color.clear.frame(width: 560, height: 605), popover: popover
+        )
+        popover.contentViewController = host
+        host.prepareForPresentation()
+        #expect(popover.contentSize == NSSize(width: 560, height: 605))
+        #expect(host.sizingOptions == .preferredContentSize)
+
+        host.rootView = Color.clear.frame(width: 560, height: 781.25)
+        host.prepareForPresentation()
+        #expect(popover.contentSize == NSSize(width: 560, height: 782))
+        host.rootView = Color.clear.frame(width: 560, height: 605)
+        host.prepareForPresentation()
+        #expect(popover.contentSize == NSSize(width: 560, height: 605))
     }
 
     @Test("fresh and stale model settings fit without horizontal growth")

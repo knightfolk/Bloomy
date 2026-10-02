@@ -102,40 +102,62 @@ struct ProviderResourcesViewTests {
         })
         let store = MonitorStore(service: TelemetryService(source: ResourcePanelUnusedSource()),
                                  initial: .unavailable(now: Date()), gpuUsage: SystemGPUUsageStore(read: { nil }))
-        let host = NSHostingController(rootView: AnyView(ProviderResourcesView(store: store, cpuUsage: cpu)))
+        var appeared = false
+        var disappeared = false
+        let host = NSHostingController(rootView: AnyView(
+            ProviderResourcesView(store: store, cpuUsage: cpu)
+                .onAppear { appeared = true }
+                .onDisappear { disappeared = true }
+        ))
         let window = NSWindow(contentViewController: host)
         window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 570, height: 370))
         window.orderBack(nil)
         defer { store.setDashboardVisible(false); cpu.stop(); window.close() }
 
-        try await Task.sleep(for: .milliseconds(100))
+        let state: @MainActor () -> String = {
+            "reads=\(readCount), percentage=\(cpu.percentage.map(String.init(describing:)) ?? "nil"), sampled=\(cpu.sampledAt != nil), dashboardVisible=\(store.dashboardVisible), windowVisible=\(window.isVisible), windowUnoccluded=\(window.occlusionState.contains(.visible)), appeared=\(appeared), disappeared=\(disappeared), hostAttached=\(host.view.window === window), viewSize=\(host.view.frame.size)"
+        }
+
+        // Background windows can be fully occluded by other parallel suites.
+        // A window alone does not prove its SwiftUI graph has appeared.
+        try await waitUntil("initial panel appearance", window: window, state: state) { appeared }
         #expect(readCount == 0)
         store.setDashboardVisible(true)
-        try await waitUntil { cpu.percentage != nil && readCount >= 2 }
+        try await waitUntil("first visible sampling", window: window, state: state) { cpu.percentage != nil && readCount >= 2 }
 
         store.setDashboardVisible(false)
-        try await waitUntil { cpu.percentage == nil && cpu.sampledAt == nil }
+        try await waitUntil("hidden clears sampling", window: window, state: state) { cpu.percentage == nil && cpu.sampledAt == nil }
         let hiddenCount = readCount
         try await Task.sleep(for: .milliseconds(100))
         #expect(readCount == hiddenCount)
 
         store.setDashboardVisible(true)
-        try await waitUntil { readCount >= hiddenCount + 2 && cpu.percentage != nil }
+        try await waitUntil("visible restarts interval", window: window, state: state) { readCount >= hiddenCount + 2 && cpu.percentage != nil }
         #expect(cpu.percentage == 50)
         host.rootView = AnyView(EmptyView())
-        try await waitUntil { cpu.percentage == nil }
+        try await waitUntil("removed panel stops sampling", window: window, state: state) { disappeared && cpu.percentage == nil }
         let removedCount = readCount
         try await Task.sleep(for: .milliseconds(100))
         #expect(readCount == removedCount)
     }
 
-    private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+    private func waitUntil(_ stage: String, window: NSWindow, state: @MainActor () -> String,
+                           _ condition: @MainActor () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(10)
-        while !condition(), Date() < deadline {
+        repeat {
+            // Drive only this test's hosted layout. NSApp retains ownership of
+            // event dispatch, and sampling still starts through the real view.
+            window.contentView?.needsLayout = true
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.contentView?.displayIfNeeded()
+            window.displayIfNeeded()
+            if condition() { return }
             try await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(condition())
+        } while Date() < deadline
+        // Stop here on a missing transition so later assertions do not
+        // confuse its cause with a second visibility or sampling failure.
+        try #require(condition(), "Stage \(stage) did not complete: \(state())")
     }
 }
 
