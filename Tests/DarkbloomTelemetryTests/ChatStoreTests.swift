@@ -569,14 +569,17 @@ struct ChatStoreTests {
         let keys = FakeConsumerKeyStore()
         keys.inject("dk-synthetic-consumer-old")
         let balance = FakeBalanceClient()
-        balance.suspend = true
         let network = FakeChatRouteClient()
         let store = makeStore(network: network, balance: balance, keys: keys)
 
         store.startConversation(route: .network)
-        await waitUntil { store.selectedModelID != nil }
+        // Complete startup's display-only readiness reads before suspending
+        // the send gate; otherwise pendingReleases can refer to startup while
+        // the send is still awaiting pricing and misses our one release.
+        await waitUntil { store.selectedModelID != nil && store.pricing != nil && store.balance != nil }
+        balance.suspend = true
         store.acknowledgePaidRoute()
-        store.send("paid")
+        #expect(store.send("paid"))
         await waitUntil { balance.pendingReleases > 0 }
 
         // The key is replaced while the balance gate is suspended.
