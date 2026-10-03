@@ -309,3 +309,15 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   and Release compilation pass; exact provenance and remaining large-catalog,
   VoiceOver, alias-callback and distribution gates are in
   `docs/MODEL_STARTUP_STATES_NATIVE_REVIEW_20261003.md`.
+
+- Models consolidates identical sanitized action explanations, preserves distinct
+  blockers, and shows read progress/failure in Manage. The recovery Refresh stays
+  beside Done; disappearance and new errors reveal the padded content top.
+  Native155 checks compact/wide light/dark footers, return-to-compact, compact
+  light/dark and full-height dark recovery, retained entire drafts/store/sheet,
+  and an explicit restored action with zero save/lifecycle calls. Five captures
+  each pass 11 bounded native geometry checks after rejecting an intermediate
+  sizing regression. The 1,552 reported tests, standalone geometry regression
+  and final Release compilation pass. Adjacent AX text remains grouped; spoken
+  VoiceOver, long reasons and wider live/distribution proof remain open. See
+  `docs/MODEL_FEEDBACK_RECOVERY_NATIVE_REVIEW_20261003.md`.

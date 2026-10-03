@@ -810,6 +810,16 @@ struct ModelManagerView: View {
                                     .accessibilityIdentifier("models.manage.done")
                                     .modifier(ModelManageKeyboardReveal(target: .header))
                             }
+                            if store.operation == .refreshing {
+                                ProgressView("Refreshing model controls…")
+                                    .controlSize(.small)
+                                    .accessibilityIdentifier("models.manage.refreshing")
+                            }
+                            if let error = ModelActionFeedback.error(store.errorMessage,
+                                sanitize: store.sanitizedDiagnostic) {
+                                ModelActionFeedbackRow(feedback: error)
+                                    .accessibilityIdentifier("models.manage.error")
+                            }
                             switch ModelManagerSheetPresentation.make(catalogID: item.catalogID, inventory: store.snapshot?.inventory) {
                             case .current(let current):
                                 modelCard(current, at: Date(), presentation: currentPresentation(at: Date()), expanded: true)
@@ -817,20 +827,31 @@ struct ModelManagerView: View {
                                 ContentUnavailableView("Model unavailable", systemImage: "cpu",
                                     description: Text("This model cannot be matched to one current catalog entry. Refresh model controls to check again. Your staged edits are retained."))
                                     .accessibilityIdentifier("models.manage.unavailable")
-                                Button("Refresh model controls") { Task { await store.refreshPreservingDraft() } }
-                                    .disabled(store.operation != .idle)
-                                    .modifier(ModelManageKeyboardReveal(target: .refresh))
                             }
                         }
                         .padding(24)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .fixedSize(horizontal: false, vertical: true)
+                        .id("models.manage.top")
                     }
                     .accessibilityIdentifier("models.manage.scroll")
                     .environment(\.modelManageFocusReveal, { target in reader.scrollTo(target, anchor: .center) })
+                    .onChange(of: ModelManagerSheetPresentation.make(catalogID: item.catalogID,
+                        inventory: store.snapshot?.inventory) == .unavailable) { _, unavailable in
+                        if unavailable { reader.scrollTo("models.manage.top", anchor: .top) }
+                    }
+                    .onChange(of: store.errorMessage) { _, error in
+                        if error != nil { reader.scrollTo("models.manage.top", anchor: .top) }
+                    }
                 }
                 Divider()
                 HStack {
+                    if ModelManagerSheetPresentation.make(catalogID: item.catalogID,
+                        inventory: store.snapshot?.inventory) == .unavailable {
+                        Button("Refresh model controls") { Task { await store.refreshPreservingDraft() } }
+                            .disabled(store.operation != .idle)
+                            .accessibilityIdentifier("models.manage.refresh")
+                    }
                     Spacer()
                     Button("Done") { inspectedModel = nil }
                         .accessibilityIdentifier("models.manage.footerDone")
@@ -2496,6 +2517,26 @@ private struct AvailableModelRow: View {
 }
 
 @MainActor
+private struct ModelActionFeedbackRow: View {
+    let feedback: ModelActionFeedback
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switch feedback.kind {
+            case .error:
+                Label(feedback.text, systemImage: "xmark.octagon")
+                    .foregroundStyle(.red).font(.callout)
+            case .validation:
+                Label(feedback.text, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange).font(.callout)
+            case .availability:
+                Text(feedback.text).foregroundStyle(.secondary).font(.caption)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct ModelManagerFooter: View {
     @ObservedObject var store: ProviderControlStore
 
@@ -2541,17 +2582,6 @@ private struct ModelManagerFooter: View {
                 .accessibilityIdentifier("models.apply-live")
             }
 
-            if let validation = store.draftValidationMessage, store.operation != .refreshing {
-                Label(
-                    ModelManagerPresentation.diagnostic(
-                        validation,
-                        sanitize: store.sanitizedDiagnostic
-                    ),
-                    systemImage: "exclamationmark.triangle"
-                )
-                    .foregroundStyle(.orange)
-                    .font(.callout)
-            }
             if let cacheDirectory = store.snapshot?.effectiveCacheDirectory {
                 LabeledContent(
                     store.snapshot?.sources.localModels.isMarkedFresh == true
@@ -2566,14 +2596,11 @@ private struct ModelManagerFooter: View {
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("models.effective-cache")
             }
-            Text(store.applyLiveUnavailableReason
-                ?? "Apply Live switches the running provider to the saved model selection without restarting it.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if let error = store.errorMessage {
-                Label(error, systemImage: "xmark.octagon")
-                    .foregroundStyle(.red)
-                    .font(.callout)
+            ForEach(ModelActionFeedback.messages(validation: store.draftValidationMessage,
+                applyLiveReason: store.applyLiveUnavailableReason, error: store.errorMessage,
+                isRefreshing: store.operation == .refreshing, sanitize: store.sanitizedDiagnostic)) { feedback in
+                ModelActionFeedbackRow(feedback: feedback)
+                    .accessibilityIdentifier("models.feedback.\(feedback.kind.rawValue)")
             }
         }
         .padding(12)

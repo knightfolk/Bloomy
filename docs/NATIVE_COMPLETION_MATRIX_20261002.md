@@ -185,3 +185,18 @@ source/native evidence; the wider Models, accessibility and distribution gates
 remain open. [ModelStates]
 
 [ModelStates]: MODEL_STARTUP_STATES_NATIVE_REVIEW_20261003.md
+
+## October 3 Models feedback and recovery checkpoint
+
+Native150–155 compares duplicated warnings, hidden Manage Refresh failure,
+heading inset and clipped recovery actions. The final Native155 keeps distinct
+blockers, fits compact/wide light/dark footers and return-to-compact, and passes
+11 bounds checks in each of five captures. Compact light/dark and full-height
+dark Manage recovery retains the draft, store and sheet; progress is visible
+and the restored action remains usable without save or lifecycle calls. The
+rejected ideal-height layout is explicitly recorded and covered by a standalone
+native regression. All 1,552 reported tests and final Release compilation pass.
+Adjacent native AX text remains grouped, so actual spoken semantics, longer
+reasons, broader states and distribution remain open. [ModelFeedback]
+
+[ModelFeedback]: MODEL_FEEDBACK_RECOVERY_NATIVE_REVIEW_20261003.md

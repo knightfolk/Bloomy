@@ -97,6 +97,8 @@ explicit, off-by-default setting with its own evidence and timing checks.
   same-session `switch` command when fresh runtime evidence says it is safe
 - Models organized into collapsible Enabled and Available groups, with search,
   expandable details, and a separate Provider capacity section
+- Model-control warnings appear once; Manage shows Refresh failures and keeps
+  its recovery action visible while preserving staged edits
 - Independent daily-runtime what-if sliders with estimates from observed data;
   they do not schedule or change provider runtime. Earnings inputs are account-level
   and assume this Mac produced the recorded work for that model

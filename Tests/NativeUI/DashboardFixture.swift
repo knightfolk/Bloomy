@@ -441,12 +441,53 @@ private struct FixtureModelControlProof: Codable, Sendable {
     let lifecycleCount: Int
 }
 
+/// Public draft fields only. This fixture constructs drafts without a source
+/// file state, and never reads a provider configuration or credential file.
+private struct FixtureModelDraftProof: Codable, Sendable {
+    let sourceRevision: String
+    let originalEnabled: [String]
+    let originalPreloaded: [String]
+    let enabled: [String]
+    let preloaded: [String]
+    let originalMaxModelSlots: Int?
+    let maxModelSlots: Int?
+    let originalStartupPreload: Bool?
+    let startupPreload: Bool?
+    let originalEngineV2MaxConcurrent: Int?
+    let engineV2MaxConcurrent: Int?
+    let hasChanges: Bool
+
+    init(_ draft: ProviderConfigDraft) {
+        sourceRevision = draft.sourceRevision
+        originalEnabled = draft.original.enabled; originalPreloaded = draft.original.preloaded
+        enabled = draft.selection.enabled; preloaded = draft.selection.preloaded
+        originalMaxModelSlots = draft.originalMaxModelSlots; maxModelSlots = draft.maxModelSlots
+        originalStartupPreload = draft.originalStartupPreload; startupPreload = draft.startupPreload
+        originalEngineV2MaxConcurrent = draft.originalEngineV2MaxConcurrent
+        engineV2MaxConcurrent = draft.engineV2MaxConcurrent
+        hasChanges = draft.hasChanges
+    }
+}
+
+private struct FixtureModelStateProof: Codable, Sendable {
+    let synthetic: Bool
+    let controlIdentity: String
+    let draft: FixtureModelDraftProof?
+    let saved: FixtureModelControlProof
+    let error: String?
+    let modelSheetWindowNumbers: [Int]
+}
+
 private actor FixtureController: ProviderControlling {
     let scenario: FixtureScenario
     let autopilot: FixtureAutopilot
     private var removedModels = Set<String>()
     private var delayNextRead = false
+    private var transientGemmaHidden = false
+    private var failNextRead = false
     func delayNextControlRead() { delayNextRead = true }
+    func hideGemmaTemporarily(_ hidden: Bool) { transientGemmaHidden = hidden }
+    func failNextControlRead() { failNextRead = true }
     var selection = ProviderModelSelection(enabled: Array(FixtureData.modelIDs.prefix(3)), preloaded: Array(FixtureData.modelIDs.prefix(2)))
     var slots = 3
     var startupPreload: Bool? = true
@@ -484,6 +525,7 @@ private actor FixtureController: ProviderControlling {
         selection.preloaded.removeAll { $0 == removed }
     }
     func refresh() async throws -> ProviderControlSnapshot {
+        if failNextRead { failNextRead = false; throw FixtureError.offline }
         if scenario == .unavailableCatalog { throw FixtureError.offline }
         if delayNextRead {
             delayNextRead = false
@@ -498,7 +540,9 @@ private actor FixtureController: ProviderControlling {
         let loadedModelIDs = scenario.hasCurrentRuntime ? Array(FixtureData.modelIDs.prefix(2)).filter { !removedModels.contains($0) } : []
         // Bonsai and Qwen 3 8B are downloaded but neither selected nor resident.
         // Keep the three advertised models and two saved preload models intact.
-        let catalog = scenario == .emptyCatalog ? [] : FixtureData.catalog.filter { !removedModels.contains($0.id) }
+        let catalog = scenario == .emptyCatalog ? [] : FixtureData.catalog.filter {
+            !removedModels.contains($0.id) && !(transientGemmaHidden && $0.id == FixtureData.modelIDs[1])
+        }
         let local = catalog.filter { scenario != .missingStartupModel || $0.id != FixtureData.modelIDs[0] }
             .map { LocalModel(id: $0.id, modelType: "text", sizeBytes: Int64($0.sizeGB * 1e9), estimatedMemoryGB: nil) }
         let runtimeSource: ProviderControlSourceState = scenario.hasCurrentRuntime
@@ -965,6 +1009,26 @@ private final class FixtureModel: ObservableObject {
         guard ready, !isTerminating else { return }
         if let data = try? JSONEncoder().encode(await controllerClient.modelControlProof()) {
             try? data.write(to: directory.appendingPathComponent("fixture-model-control-proof.json"), options: .atomic)
+        }
+    }
+    func setGemmaTemporarilyHidden(_ hidden: Bool) async {
+        guard ready, !isTerminating else { return }
+        await controllerClient.hideGemmaTemporarily(hidden)
+        await control.refreshPreservingDraft()
+    }
+    func failNextModelControlRead() async {
+        guard ready, !isTerminating else { return }
+        await controllerClient.failNextControlRead()
+    }
+    func saveModelStateProof() async {
+        guard ready, !isTerminating else { return }
+        let proof = FixtureModelStateProof(synthetic: true,
+            controlIdentity: String(describing: ObjectIdentifier(control)),
+            draft: control.draft.map(FixtureModelDraftProof.init),
+            saved: await controllerClient.modelControlProof(), error: control.errorMessage,
+            modelSheetWindowNumbers: NSApplication.shared.windows.filter(\.isSheet).map(\.windowNumber).sorted())
+        if let data = try? JSONEncoder().encode(proof) {
+            try? data.write(to: directory.appendingPathComponent("fixture-model-state-proof.json"), options: .atomic)
         }
     }
     func setAutopilotMode(_ value: FixtureAutopilotMode) async {
@@ -2309,6 +2373,11 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
         windowMenu.addItem(.separator())
         add("Remove Gemma from inventory (synthetic)", action: #selector(removeReviewGemma),
             key: "r", modifiers: [.command, .option, .control], target: self, to: windowMenu)
+        add("Hide Gemma temporarily (synthetic)", action: #selector(hideReviewGemma), target: self, to: windowMenu)
+        add("Restore Gemma (synthetic)", action: #selector(restoreReviewGemma), target: self, to: windowMenu)
+        add("Fail next model controls read (synthetic)", action: #selector(failNextReviewModelRead), target: self, to: windowMenu)
+        add("Save model draft state (synthetic)", action: #selector(saveReviewModelState), target: self, to: windowMenu)
+        add("Check model feedback layout (synthetic)", action: #selector(checkReviewModelLayout), target: self, to: windowMenu)
         application.mainMenu = mainMenu
         application.windowsMenu = windowMenu
     }
@@ -2323,6 +2392,17 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
 
     @objc private func removeReviewGemma() {
         Task { await model.removeGemmaFromInventory() }
+    }
+    @objc private func hideReviewGemma() { Task { await model.setGemmaTemporarilyHidden(true) } }
+    @objc private func restoreReviewGemma() { Task { await model.setGemmaTemporarilyHidden(false) } }
+    @objc private func failNextReviewModelRead() { Task { await model.failNextModelControlRead() } }
+    @objc private func saveReviewModelState() { Task { await model.saveModelStateProof() } }
+    @objc private func checkReviewModelLayout() {
+        guard let window, model.ready else { return }
+        let result = ModelFeedbackLayoutProof.run(window: window)
+        if let data = try? JSONEncoder().encode(result) {
+            try? data.write(to: model.directory.appendingPathComponent("fixture-model-layout-proof.json"), options: .atomic)
+        }
     }
 
     private func presentDashboard(section: DashboardDestination? = nil, settingsPage: SettingsPage? = nil) {
