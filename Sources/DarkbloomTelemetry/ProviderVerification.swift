@@ -91,7 +91,7 @@ public struct ProviderVerification: Equatable, Sendable {
         if !processMatches {
             resultState = .wrongProcess
             title = "Verification unavailable"
-            detail = "The state snapshot does not match the provider process currently running."
+            detail = "This snapshot could not be matched to a live provider process."
         } else if !coordinatorMatches {
             resultState = .wrongCoordinator
             title = "Verification unavailable"

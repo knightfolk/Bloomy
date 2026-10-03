@@ -20,7 +20,19 @@ struct ProviderVerificationView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } else {
-                Text("Waiting for current verification details").foregroundStyle(.secondary)
+                Text("Verification unavailable").font(.title3.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                switch snapshot.state {
+                case .stale(_, _, let reason):
+                    Text("Last snapshot retained · \(reason)")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .unavailable(let reason):
+                    Text(reason).font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .available:
+                    EmptyView()
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

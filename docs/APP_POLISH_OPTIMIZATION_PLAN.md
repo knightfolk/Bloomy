@@ -230,3 +230,13 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   fallback and zero/gaps. Full 1,467-test and Release checks pass; post-build Sol
   manifest readback stalled and remains unconfirmed. Details and limits are in
   `docs/EARNINGS_IDENTITY_PROFIT_EFFICIENCY_REVIEW_20261002.md`.
+
+- Health's daemon version is now labeled as snapshot evidence rather than
+  Running. Missing versions are explicit, and stale/unavailable verification
+  displays its reason inside the card; failed process matching no longer
+  assumes a live provider. Native134 checks compact light/dark stopped states,
+  expanded missing/stale states, wrapping and lower diagnostics, plus wide
+  light/dark layouts. All 101 source hashes and the actual binary match;
+  1,467 reported tests and final Release compilation pass. Bounded evidence and
+  remaining long-reason/VoiceOver/runtime gaps are recorded in
+  `docs/HEALTH_VERSION_NATIVE_REVIEW_20261002.md`.
