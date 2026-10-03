@@ -49,6 +49,7 @@ struct ModelVisitSection: View {
             if (withoutWorkOnly ? withoutWorkVisits.count : visits.count) > visibleLimit {
                 Button("Show more visits") { visibleLimit += 12 }
                     .controlSize(.small)
+                    .modifier(MetricsKeyboardReveal(target: .moreVisits))
             }
             Text("Observed time; gaps and shared residency stay uncertain. Short requests between readings may be missed.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -70,6 +71,7 @@ struct ModelVisitSection: View {
         }
         .labelsHidden().pickerStyle(.segmented).frame(width: 225)
         .onChange(of: withoutWorkOnly) { _, _ in visibleLimit = 8 }
+        .modifier(MetricsKeyboardReveal(target: .visitFilter))
     }
 
     static func duration(_ seconds: TimeInterval) -> String {
@@ -81,7 +83,7 @@ struct ModelVisitSection: View {
     }
 }
 
-private struct ModelVisitRow: View {
+struct ModelVisitRow: View {
     let visit: ModelVisit
 
     var body: some View {
@@ -133,12 +135,12 @@ private struct ModelVisitRow: View {
             .background(statusColor.opacity(0.1), in: Capsule())
             .fixedSize()
     }
-    private var statusText: String {
+    var statusText: String {
         switch visit.outcome {
         case .worked: "Work observed"
         case .noObservedWork: "No work observed"
         case .unknown: "Uncertain"
-        case .stillLoaded: visit.workEvidence == .observedWork ? "Loaded · work observed" : "Loaded at last reading"
+        case .stillLoaded: visit.workEvidence == .observedWork ? "Last loaded · worked" : "Loaded at last reading"
         }
     }
     private var statusSymbol: String {

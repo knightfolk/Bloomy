@@ -8,6 +8,78 @@ import Testing
 @Suite("Performance metrics presentation", .serialized)
 @MainActor
 struct PerformanceMetricsViewTests {
+    @Test("pending period and model analysis cannot change retained chart axes or coverage scope")
+    func renderedAnalysisKeepsItsQuery() async throws {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let read = try await PerformanceMetricsRead.empty.refreshing(endingAt: end, period: .last24Hours) {
+            [metricSample(at: end.addingTimeInterval(-30)), metricSample(at: end)]
+        }
+        let original = metricsQuery(read: read)
+        let snapshot = try #require(await PerformanceMetricsAnalysis.make(samples: read.samples, range: original.range, model: nil))
+        let shown = PerformanceMetricsRender(snapshot: snapshot, completedQuery: original)
+        let pending = metricsQuery(read: read, period: .last7Days, model: "google/gemma-4-26b")
+        #expect(shown.query(pending: pending) == original)
+        #expect(shown.query(pending: pending).range.duration == 86_400)
+        #expect(shown.query(pending: pending).model == nil)
+        #expect(shown.snapshot.summary.coveredSeconds == snapshot.summary.coveredSeconds)
+        let replacement = try #require(await PerformanceMetricsAnalysis.make(samples: read.samples, range: pending.range, model: pending.model))
+        let committed = PerformanceMetricsRender(snapshot: replacement, completedQuery: pending)
+        #expect(committed.query(pending: pending) == pending)
+        #expect(committed.query(pending: pending).range.duration == 7 * 86_400)
+        #expect(committed.query(pending: pending).model == "google/gemma-4-26b")
+    }
+
+    @Test("a requested wider period never relabels the last successful narrower read")
+    func retainedReadPeriod() async throws {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let samples = [metricSample(at: end.addingTimeInterval(-30)), metricSample(at: end)]
+        var read = try await PerformanceMetricsRead.empty.refreshing(endingAt: end, period: .last24Hours) { samples }
+        let originalToken = read.token
+        for loading in [true, false] {
+            let content = PerformanceMetricsContent(samples: read.samples, recordingStartedAt: nil,
+                loading: loading, now: end, readToken: read.token, readPeriod: read.period, initialPeriod: .last7Days)
+            #expect(content.analysisQuery.period == .last24Hours)
+            #expect(content.analysisQuery.range.duration == 86_400)
+            #expect(content.retainedPeriodNotice?.contains("last 24 hours") == true)
+            #expect(content.retainedPeriodNotice?.contains("7 days") == true)
+        }
+        do {
+            read = try await read.refreshing(endingAt: end.addingTimeInterval(30), period: .last7Days) {
+                throw MetricsReadFailure.synthetic
+            }
+            Issue.record("Failed period read unexpectedly replaced the result")
+        } catch MetricsReadFailure.synthetic {}
+        #expect(read.period == .last24Hours)
+        #expect(read.token == originalToken)
+        #expect(read.samples == samples)
+        let task = Task {
+            try await read.refreshing(endingAt: end.addingTimeInterval(30), period: .last7Days) { [] }
+        }
+        task.cancel()
+        do { read = try await task.value; Issue.record("Cancelled period read replaced the result") }
+        catch is CancellationError {}
+        #expect(read.period == .last24Hours)
+        read = try await read.refreshing(endingAt: end.addingTimeInterval(60), period: .last7Days) { samples }
+        let recovered = PerformanceMetricsContent(samples: read.samples, recordingStartedAt: nil,
+            now: end, readToken: read.token, readPeriod: read.period, initialPeriod: .last7Days)
+        #expect(recovered.analysisQuery.period == .last7Days)
+        #expect(recovered.analysisQuery.range.duration == 7 * 86_400)
+        #expect(recovered.retainedPeriodNotice == nil)
+        #expect(read.token?.generation == 2)
+    }
+
+    @Test("an open worked visit is qualified as last observed residency after recording expires")
+    func openWorkedVisitIsHistorical() throws {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let samples = [metricSample(at: end.addingTimeInterval(-30), counter: 0), metricSample(at: end, counter: 900)]
+        let visits = ModelVisitHistory(samples: samples).visits
+        let visit = try #require(visits.last)
+        #expect(visit.outcome == .stillLoaded)
+        #expect(visit.workEvidence == .observedWork)
+        #expect(!MetricsRecordingFreshness.isCurrent(samples.last, at: end.addingTimeInterval(180)))
+        #expect(ModelVisitRow(visit: visit).statusText == "Last loaded · worked")
+    }
+
     @Test("successful refreshes invalidate analysis when only a middle observation changes")
     func successfulReadGeneration() async throws {
         let end = Date(timeIntervalSince1970: 1_800_000_000)

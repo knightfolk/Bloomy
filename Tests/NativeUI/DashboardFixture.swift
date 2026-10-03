@@ -643,6 +643,8 @@ private final class FixtureModel: ObservableObject {
     private var chatFocusProofTask: Task<Void, Never>?
     @Published private(set) var modelKeyboardProofStatus = "Model keyboard proof"
     private var modelKeyboardProofTask: Task<Void, Never>?
+    @Published private(set) var metricsReview = false
+    private var metricsReads: FixtureMetricsReads?
     var proofRunning: Bool { nativeProofTask != nil || cacheProofTask != nil || chatFocusProofTask != nil || modelKeyboardProofTask != nil }
     @Published private(set) var chatVerificationTest: FixtureChatVerification?
     private var chatVerificationClient: FixtureChatVerificationClient?
@@ -756,7 +758,7 @@ private final class FixtureModel: ObservableObject {
         }
     }
     func tick() async {
-        guard ready, !isTerminating, !networkExpiryReview, scenario != .frozenSettings,
+        guard ready, !isTerminating, !networkExpiryReview, !metricsReview, scenario != .frozenSettings,
               scenario.hasCurrentRuntime || scenario == .offline else { return }
         let currentScenario = scenario
         let currentMonitor = monitor
@@ -773,10 +775,10 @@ private final class FixtureModel: ObservableObject {
             // the previous publication finishes so arrivals cannot roll back.
             await previous?.value
             guard let self, !Task.isCancelled, self.ready, !self.isTerminating,
-                  generation == self.loadGeneration else { return }
+                  !self.metricsReview, generation == self.loadGeneration else { return }
             let events = await logFeed.events()
             guard !Task.isCancelled, self.ready, !self.isTerminating,
-                  generation == self.loadGeneration else { return }
+                  !self.metricsReview, generation == self.loadGeneration else { return }
             await monitor.accept(FixtureData.snapshot(scenario, now: Date(), events: events))
         }
         telemetryPublicationID = publicationID
@@ -790,7 +792,44 @@ private final class FixtureModel: ObservableObject {
     }
     var canPrependLogEvent: Bool {
         ready && !isTerminating && !proofRunning && scenario.hasCurrentRuntime
-            && scenario != .frozenSettings && !networkExpiryReview
+            && scenario != .frozenSettings && !networkExpiryReview && !metricsReview
+    }
+    func setMetricsReview(_ enabled: Bool) async {
+        guard ready, !isTerminating, !proofRunning else { return }
+        metricsReview = enabled
+        if enabled {
+            let publication = telemetryPublicationTask
+            publication?.cancel()
+            await publication?.value
+        } else {
+            await metricsReads?.releaseHeld()
+            await tick()
+        }
+    }
+    func setNextMetricsRead(_ mode: FixtureMetricsReadMode) async {
+        guard ready, !isTerminating, metricsReview else { return }
+        await metricsReads?.setNext(mode)
+    }
+    func releaseMetricsRead(_ mode: FixtureMetricsReadMode) async {
+        guard ready, !isTerminating, metricsReview else { return }
+        await metricsReads?.releaseHeld(as: mode)
+    }
+    func appendMetricsObservation() async {
+        guard ready, !isTerminating, metricsReview, let history = monitor.performanceHistory else { return }
+        let date = Date()
+        let model = FixtureData.modelIDs[0]
+        await history.observe(PerformanceSample(observedAt: date, sourceCapturedAt: date,
+            quality: .current, providerSession: "4242:1800", model: model,
+            residentModels: [model], advertisedModels: [model], inferenceActive: true,
+            activeRequests: 1, tokensPerSecond: 42, tokensGenerated: 1_000,
+            requestsServed: 10, gpuUtilizationPercent: 35, gpuMemoryGB: 12,
+            powerWatts: 70, autopilotPhase: "shadow"))
+    }
+    func saveMetricsReadProof() async {
+        guard let metricsReads else { return }
+        if let data = try? JSONEncoder().encode(await metricsReads.snapshot()) {
+            try? data.write(to: directory.appendingPathComponent("fixture-metrics-read-proof.json"), options: .atomic)
+        }
     }
     func prependLogEvent() async {
         guard canPrependLogEvent else { return }
@@ -884,7 +923,10 @@ private final class FixtureModel: ObservableObject {
                     tokensGenerated: Int64(counterIndex * 300), requestsServed: Int64(counterIndex / 3),
                     gpuUtilizationPercent: Double(35 + index % 45), gpuMemoryGB: 32, powerWatts: 75 + Double(index % 20), autopilotPhase: index % 90 < 8 ? "waiting_inventory" : "shadow"))
             }
-            preparedMonitor.performanceHistory = PerformanceHistoryStore(url: performanceURL)
+            let reads = try FixtureMetricsReads(url: performanceURL)
+            metricsReads = reads
+            preparedMonitor.performanceHistory = PerformanceHistoryStore(url: performanceURL,
+                readSamples: { interval in try await reads.samples(in: interval) })
             let history = ActionHistoryStore(url: directory.appendingPathComponent("actions-\(requestedScenario.id).sqlite"))
             if history.events.isEmpty {
                 for index in 0..<48 {
@@ -985,6 +1027,7 @@ private final class FixtureModel: ObservableObject {
         modelKeyboardProof?.cancel()
         await modelKeyboardProof?.value
         modelKeyboardProofTask = nil
+        await metricsReads?.cancelHeld()
         await popup.closeAndWait(resetContent: true)
         retireChatWindow()
         chat.cancelSend()
@@ -1689,6 +1732,24 @@ private struct FixtureReviewView: View {
                             .disabled(model.proofRunning || !model.ready || navigation.selected != .overview)
                         Button(model.modelKeyboardProofStatus) { model.runModelKeyboardProof() }
                             .disabled(model.proofRunning || !model.ready || navigation.selected != .overview)
+                        Menu("Synthetic Metrics reads") {
+                            Button(model.metricsReview ? "Resume synthetic observations" : "Pause synthetic observations") {
+                                Task { await model.setMetricsReview(!model.metricsReview) }
+                            }
+                            ForEach([FixtureMetricsReadMode.normal, .hold, .fail, .empty], id: \.rawValue) { mode in
+                                Button("Next read: \(mode.rawValue)") { Task { await model.setNextMetricsRead(mode) } }
+                                    .disabled(!model.metricsReview)
+                            }
+                            Button("Release held read") { Task { await model.releaseMetricsRead(.normal) } }
+                                .disabled(!model.metricsReview)
+                            Button("Release held read as empty") { Task { await model.releaseMetricsRead(.empty) } }
+                                .disabled(!model.metricsReview)
+                            Button("Fail held read") { Task { await model.releaseMetricsRead(.fail) } }
+                                .disabled(!model.metricsReview)
+                            Button("Append current observation") { Task { await model.appendMetricsObservation() } }
+                                .disabled(!model.metricsReview)
+                            Button("Save read counts") { Task { await model.saveMetricsReadProof() } }
+                        }
                         Divider()
                         Button("Prepend one synthetic log event") {
                             Task { await model.prependLogEvent() }

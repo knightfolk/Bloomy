@@ -552,3 +552,22 @@ it does not establish SwiftUI's complete internal focus order, selected-text
 Escape, input-method composition or VoiceOver. Preserve rejected reports before
 retrying. See `docs/MODEL_KEYBOARD_NATIVE_REVIEW_20261002.md` for the accepted
 bounded observations and rejected activation candidates.
+
+### Controlled Metrics reads
+
+Data checks → Synthetic Metrics reads can pause synthetic observations without
+stopping Metrics' production display cadence. Set the next read to normal,
+hold, fail or empty, then use Metrics Refresh or a period change. Each choice
+is consumed once; the following read returns to normal. Release/empty/fail held
+actions resolve the single owned continuation. Leaving the route or quitting
+cancels it. These controls never alter production files or SQLite permissions.
+
+Append current observation records a valid synthetic sample at the actual
+current time, permitting arrival/freshness-expiry inspection without advancing
+a fake clock. Resume releases held work and resumes ordinary fake publication.
+Save read counts writes `fixture-metrics-read-proof.json` in the unique banner
+directory. Counts distinguish starts, completions, failures, cancellations and
+empty results. Copy stage evidence before saving over it. The inert reader has
+no live endpoint, credentials or provider mutations. Final bounded observations
+and the unresolved reverse key loop are in
+`docs/METRICS_SCOPE_KEYBOARD_NATIVE_REVIEW_20261002.md`.

@@ -71,22 +71,24 @@ private struct RecordedPerformanceMetricsView: View {
                 now: Date(),
                 timelineDate: context.date,
                 readToken: read.token,
+                readPeriod: read.period,
                 onRefresh: { refreshID += 1 },
                 onPeriodChange: { period = $0 }
             )
         }
         .task(id: PerformanceHistoryQuery(period: period, refreshID: refreshID, isVisible: isVisible)) {
             guard isVisible else { return }
+            let requestedPeriod = period
             // Capture stays immediate; aggregate display work is coalesced.
             // Period changes, reopening, and explicit refresh start a new task.
             await MetricsRefreshLoop.run(interval: .seconds(30)) {
-                loading = read.samples.isEmpty
+                loading = read.samples.isEmpty || read.period != requestedPeriod
                 do {
                     // Retain every model so summaries cannot bridge intervening
                     // nonmatching observations or uncertain boundaries.
                     let endingAt = Date()
-                    read = try await read.refreshing(endingAt: endingAt) {
-                        try await history.samples(in: period.range(endingAt: endingAt))
+                    read = try await read.refreshing(endingAt: endingAt, period: requestedPeriod) {
+                        try await history.samples(in: requestedPeriod.range(endingAt: endingAt))
                     }
                     readError = nil
                 } catch {
@@ -126,18 +128,20 @@ struct PerformanceMetricsContent: View {
     var now = Date()
     var timelineDate: Date?
     var readToken: PerformanceMetricsReadToken?
+    var readPeriod: PerformanceMetricsPeriod?
     var onRefresh: (() -> Void)? = nil
     var onPeriodChange: (PerformanceMetricsPeriod) -> Void = { _ in }
     @State private var period = PerformanceMetricsPeriod.last24Hours
     @State private var model: String?
     @State private var showsRecordingDetails = false
-    @State private var presentation = PerformanceMetricsSnapshot.empty
+    @State private var rendered = PerformanceMetricsRender.empty
     @State private var initialAnalysisEndingAt: Date
 
     init(
         samples: [PerformanceSample], recordingStartedAt: Date?, storageError: String? = nil,
         loading: Bool = false, isVisible: Bool = true, now: Date = Date(), timelineDate: Date? = nil,
-        readToken: PerformanceMetricsReadToken? = nil, onRefresh: (() -> Void)? = nil,
+        readToken: PerformanceMetricsReadToken? = nil, readPeriod: PerformanceMetricsPeriod? = nil,
+        initialPeriod: PerformanceMetricsPeriod = .last24Hours, onRefresh: (() -> Void)? = nil,
         onPeriodChange: @escaping (PerformanceMetricsPeriod) -> Void = { _ in }
     ) {
         self.samples = samples
@@ -148,6 +152,8 @@ struct PerformanceMetricsContent: View {
         self.now = now
         self.timelineDate = timelineDate
         self.readToken = readToken
+        self.readPeriod = readPeriod
+        _period = State(initialValue: initialPeriod)
         _initialAnalysisEndingAt = State(initialValue: now)
         self.onRefresh = onRefresh
         self.onPeriodChange = onPeriodChange
@@ -158,53 +164,86 @@ struct PerformanceMetricsContent: View {
         // advance their window, while freshness-label time alone must not.
         let inputEndingAt = max(initialAnalysisEndingAt, samples.last?.observedAt ?? initialAnalysisEndingAt)
         return PerformanceMetricsQuery(
-            period: period, model: model, count: samples.count, lastID: samples.last?.id,
+            period: readPeriod ?? period, model: model, count: samples.count, lastID: samples.last?.id,
             readToken: readToken ?? PerformanceMetricsReadToken(generation: 0, endingAt: inputEndingAt),
             isVisible: isVisible
         )
     }
-    private var range: DateInterval { analysisQuery.range }
+    private var presentation: PerformanceMetricsSnapshot { rendered.snapshot }
+    private var renderedQuery: PerformanceMetricsQuery { rendered.query(pending: analysisQuery) }
+    private var range: DateInterval { renderedQuery.range }
     private var summary: PerformanceSummary { presentation.summary }
     private var models: [String] { presentation.models }
     private var ratePoints: [PerformanceRatePoint] { presentation.ratePoints }
     private var transitions: [PerformanceModelTransition] { presentation.transitions }
 
+    var retainedPeriodNotice: String? {
+        let shownPeriod = rendered.completedQuery?.period ?? readPeriod
+        guard let shownPeriod, shownPeriod != period else { return nil }
+        return "Showing the last \(shownPeriod.rawValue) until results for \(period.rawValue) are available."
+    }
+
+    private var retainedModelNotice: String? {
+        guard let completed = rendered.completedQuery, completed.model != model else { return nil }
+        let previous = completed.model.map(ModelDisplayName.short) ?? "All models"
+        let requested = model.map(ModelDisplayName.short) ?? "All models"
+        return "Showing \(previous) until results for \(requested) are ready."
+    }
+
+    private var filterAnalysisPending: Bool {
+        guard let completed = rendered.completedQuery else { return true }
+        return completed.period != analysisQuery.period || completed.model != analysisQuery.model
+    }
+
     var body: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 16) {
-                controls
-                recordingHealth
-                if loading {
-                    ProgressView("Reading local metrics…").font(.callout)
+        ScrollViewReader { reader in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 16) {
+                    controls
+                    recordingHealth
+                    if let retainedPeriodNotice {
+                        Text(retainedPeriodNotice).font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("activity.metrics.retainedPeriod")
+                    }
+                    if let retainedModelNotice {
+                        Text(retainedModelNotice).font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if loading || filterAnalysisPending {
+                        ProgressView(loading ? "Reading local metrics…" : "Updating metrics…").font(.callout)
+                    }
+                    if presentation.sampleCount == 0 {
+                        if !loading && !filterAnalysisPending {
+                            ContentUnavailableView(
+                                "Metrics are accumulating",
+                                systemImage: "waveform.path.ecg",
+                                description: Text("Local recording runs while Bloomy is open. Covered time and model speed appear as fresh measurements arrive.")
+                            )
+                            .frame(minHeight: 160)
+                        }
+                    } else {
+                        summaryGrid
+                        ModelVisitSection(visits: presentation.visits, withoutWorkVisits: presentation.withoutWorkVisits, summary: presentation.visitSummary)
+                        speedChart
+                        modelTimeline
+                    }
+                    recordingDetails
                 }
-                if presentation.sampleCount == 0 && !loading {
-                    ContentUnavailableView(
-                        "Metrics are accumulating",
-                        systemImage: "waveform.path.ecg",
-                        description: Text("Local recording runs while Bloomy is open. Covered time and model speed appear as fresh measurements arrive.")
-                    )
-                    .frame(minHeight: 160)
-                } else {
-                    summaryGrid
-                    ModelVisitSection(visits: presentation.visits, withoutWorkVisits: presentation.withoutWorkVisits, summary: presentation.visitSummary)
-                    speedChart
-                    modelTimeline
-                }
-                recordingDetails
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .scrollIndicators(.automatic)
+            .environment(\.metricsFocusReveal, { target in reader.scrollTo(target, anchor: .center) })
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .scrollIndicators(.automatic)
         .onChange(of: period) { _, value in onPeriodChange(value) }
         .task(id: analysisQuery) {
             guard isVisible else { return }
             let input = samples
-            let interval = range
-            let selectedModel = model
-            guard let result = await PerformanceMetricsAnalysis.make(samples: input, range: interval, model: selectedModel), !Task.isCancelled else { return }
-            presentation = result
+            let query = analysisQuery
+            guard let result = await PerformanceMetricsAnalysis.make(samples: input, range: query.range, model: query.model), !Task.isCancelled else { return }
+            rendered = PerformanceMetricsRender(snapshot: result, completedQuery: query)
         }
     }
 
@@ -230,6 +269,7 @@ struct PerformanceMetricsContent: View {
         .labelsHidden()
         .pickerStyle(.segmented)
         .frame(width: 240)
+        .modifier(MetricsKeyboardReveal(target: .period))
     }
 
     private var modelPicker: some View {
@@ -244,6 +284,7 @@ struct PerformanceMetricsContent: View {
         }
         .frame(maxWidth: 230, alignment: .leading)
         .help(model ?? "All observed models")
+        .modifier(MetricsKeyboardReveal(target: .model))
     }
 
     private var recordingHealth: some View {
@@ -276,6 +317,7 @@ struct PerformanceMetricsContent: View {
                     .accessibilityLabel("Refresh metrics")
                     .accessibilityIdentifier("activity.metrics.refresh")
                     .help("Read local metrics again. This view also refreshes every 30 seconds while open.")
+                    .modifier(MetricsKeyboardReveal(target: .refresh))
             }
         }
         .accessibilityElement(children: .contain)
@@ -283,12 +325,12 @@ struct PerformanceMetricsContent: View {
 
     private var summaryGrid: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 10)], alignment: .leading, spacing: 10) {
-            metric("Covered time", symbol: "clock", value: duration(summary.coveredSeconds), detail: "\(coveragePercent) of this period")
+            metric("Covered time", symbol: "clock", value: duration(summary.coveredSeconds), detail: "\(coveragePercent) of \(renderedQuery.period.rawValue)")
             metric("Active time", symbol: "bolt", value: activeTime, detail: "Observed inference intervals")
             metric("Model speed", symbol: "speedometer", value: summary.averageTokenRate.map { "\(number($0)) tok/s" } ?? "Unknown", detail: "Average during measured work")
             metric("GPU use", symbol: "cpu", value: summary.averageGPUUtilizationPercent.map { "\(number($0))%" } ?? "Unknown", detail: "Whole Mac · covered intervals")
-            metric("Requests completed", symbol: "checkmark.circle", value: summary.completedRequests.map { $0.formatted() } ?? "Unknown", detail: model == nil ? "Provider-wide counter increases" : "Provider-wide · choose All models")
-            metric("Tokens generated", symbol: "text.word.spacing", value: summary.generatedTokens.map { $0.formatted() } ?? "Unknown", detail: model == nil ? "Provider-wide counter increases" : "Provider-wide · choose All models")
+            metric("Requests completed", symbol: "checkmark.circle", value: summary.completedRequests.map { $0.formatted() } ?? "Unknown", detail: renderedQuery.model == nil ? "Provider-wide counter increases" : "Provider-wide · choose All models")
+            metric("Tokens generated", symbol: "text.word.spacing", value: summary.generatedTokens.map { $0.formatted() } ?? "Unknown", detail: renderedQuery.model == nil ? "Provider-wide counter increases" : "Provider-wide · choose All models")
         }
     }
 
@@ -411,6 +453,7 @@ struct PerformanceMetricsContent: View {
         } label: {
             Label("Recording, gaps & privacy", systemImage: "lock.shield").font(.callout)
         }
+        .modifier(MetricsKeyboardReveal(target: .recordingDetails))
     }
 
     private func number(_ value: Double) -> String {
@@ -532,16 +575,24 @@ enum PerformanceMetricsPresentation {
 struct PerformanceMetricsRead: Sendable {
     let samples: [PerformanceSample]
     let token: PerformanceMetricsReadToken?
+    let period: PerformanceMetricsPeriod?
+
+    init(samples: [PerformanceSample], token: PerformanceMetricsReadToken?, period: PerformanceMetricsPeriod? = nil) {
+        self.samples = samples
+        self.token = token
+        self.period = period
+    }
 
     static let empty = PerformanceMetricsRead(samples: [], token: nil)
 
     @MainActor
-    func refreshing(endingAt: Date, load: () async throws -> [PerformanceSample]) async throws -> Self {
+    func refreshing(endingAt: Date, period: PerformanceMetricsPeriod? = nil,
+                    load: () async throws -> [PerformanceSample]) async throws -> Self {
         let samples = try await load()
         try Task.checkCancellation()
         return Self(samples: samples, token: PerformanceMetricsReadToken(
             generation: (token?.generation ?? 0) + 1, endingAt: endingAt
-        ))
+        ), period: period)
     }
 }
 
@@ -550,7 +601,7 @@ struct PerformanceMetricsReadToken: Hashable, Sendable {
     let endingAt: Date
 }
 
-struct PerformanceMetricsQuery: Hashable {
+struct PerformanceMetricsQuery: Hashable, Sendable {
     let period: PerformanceMetricsPeriod
     let model: String?
     let count: Int
@@ -559,6 +610,18 @@ struct PerformanceMetricsQuery: Hashable {
     let isVisible: Bool
 
     var range: DateInterval { period.range(endingAt: readToken.endingAt) }
+}
+
+/// Publish calculated rows and their range/filter together. New reads may finish
+/// before their analysis; retained results keep their own axes and denominator.
+struct PerformanceMetricsRender: Sendable {
+    let snapshot: PerformanceMetricsSnapshot
+    let completedQuery: PerformanceMetricsQuery?
+    static let empty = Self(snapshot: .empty, completedQuery: nil)
+
+    func query(pending: PerformanceMetricsQuery) -> PerformanceMetricsQuery {
+        completedQuery ?? pending
+    }
 }
 
 private struct PerformanceHistoryQuery: Hashable {

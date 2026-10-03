@@ -48,12 +48,16 @@ final class PerformanceHistoryStore: ObservableObject {
     @Published private(set) var storageError: String?
     @Published private(set) var recordingStartedAt: Date?
     private let journal: PerformanceJournal
+    private let readSamples: (@Sendable (DateInterval) async throws -> [PerformanceSample])?
     private var lastObserved: PerformanceSample?
     private var lastAttemptAt: Date?
     private var recordError: String?
     private var readError: String?
 
-    init(url: URL) { journal = PerformanceJournal(url: url) }
+    init(url: URL, readSamples: (@Sendable (DateInterval) async throws -> [PerformanceSample])? = nil) {
+        journal = PerformanceJournal(url: url)
+        self.readSamples = readSamples
+    }
 
     /// Called for every accepted observation. Persist every 30 seconds and at
     /// state boundaries, including activity changes and missing observations.
@@ -89,7 +93,9 @@ final class PerformanceHistoryStore: ObservableObject {
     func samples(in interval: DateInterval) async throws -> [PerformanceSample] {
         do {
             try Task.checkCancellation()
-            let samples = try await journal.samples(in: interval)
+            let samples: [PerformanceSample]
+            if let readSamples { samples = try await readSamples(interval) }
+            else { samples = try await journal.samples(in: interval) }
             try Task.checkCancellation()
             readError = nil
             storageError = recordError
@@ -98,6 +104,9 @@ final class PerformanceHistoryStore: ObservableObject {
             // Changing the filter or closing a window is not a storage fault.
             throw CancellationError()
         } catch {
+            // An obsolete dependency can finish with an ordinary error even
+            // after its caller cancels. It must not become a storage fault.
+            guard !Task.isCancelled else { throw CancellationError() }
             readError = "Performance history could not be read. Refresh to retry."
             storageError = recordError ?? readError
             throw error
