@@ -114,7 +114,9 @@ struct MonitorSettingsView: View {
             case .appearance, .menuBar, .electricity:
                 GeneralSettingsView(
                     page: page,
-                    appearanceModeRaw: $appearanceModeRaw
+                    appearanceModeRaw: $appearanceModeRaw,
+                    monitorStore: monitorStore,
+                    isVisible: isVisible
                 )
             case .updates:
                 ControlAppUpdateSettings()
@@ -167,7 +169,7 @@ struct MonitorSettingsView: View {
     private func pageDescription(_ page: SettingsPage) -> String {
         switch page {
         case .appearance: "Choose how Bloomy looks. Changes apply immediately."
-        case .menuBar: "Three circles show your model, GPU usage, and cooling. Changes apply immediately."
+        case .menuBar: "See your current indicators and choose when to flag an idle provider."
         case .electricity: "Track electricity estimates and set your local price."
         case .updates: "App, CLI, and provider update preferences."
         case .provider: "Saved idle-memory and experimental feature choices."
@@ -267,6 +269,8 @@ enum ElectricitySettingsRecordingState: Equatable {
 private struct GeneralSettingsView: View {
     let page: SettingsPage
     @Binding var appearanceModeRaw: String
+    var monitorStore: MonitorStore?
+    let isVisible: Bool
     @AppStorage("electricity.usdPerKWh") private var electricityRate = ""
     @AppStorage("electricity.enabled") private var electricityEnabled = false
     @AppStorage(MenuBarAttentionPolicy.defaultsKey) private var idleAlertMinutes = MenuBarAttentionPolicy.defaultIdleMinutes
@@ -319,12 +323,10 @@ private struct GeneralSettingsView: View {
                 }
             }
             if page == .menuBar {
-                Section("Menu bar · Applies immediately") {
-                    Label("Model · GPU · Cooling", systemImage: "circle.grid.3x1")
-                    Text("The model ring spins during work. The model and cooling rings use green, yellow, or red for GPU temperature. The GPU ring shows whole-Mac usage. The cooling ring shows the highest fan speed percentage of its reported maximum RPM. Hover for readings and details.")
-                        .font(.callout).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
+                Section("Indicators") {
+                    MenuBarSettingsLegend(store: monitorStore, isVisible: isVisible)
+                }
+                Section("Idle reminder · Applies immediately") {
                     Picker("Idle alert", selection: MenuBarIdleAlertSelection.binding(to: $idleAlertMinutes)) {
                         Text("Off").tag(0)
                         ForEach(MenuBarAttentionPolicy.supportedMinutes.filter { $0 > 0 }, id: \.self) { minutes in
@@ -332,13 +334,8 @@ private struct GeneralSettingsView: View {
                         }
                     }
                     .accessibilityIdentifier("settings.menuBar.idleAlert")
-                    Text("A ! appears on the model indicator when a warm provider stays idle. The alert clears when work resumes. This reminder does not send a nudge or change automatic nudge timing.")
+                    Text("A ! appears when a warm provider stays idle and clears when work resumes. This reminder does not send a nudge or change automatic nudge timing.")
                         .font(.callout).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text("Unavailable readings use a neutral ring. Motion follows your Mac’s Reduce Motion setting. Earnings and model averages remain available in the popup.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

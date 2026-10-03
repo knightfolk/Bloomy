@@ -103,8 +103,11 @@ enum ModelManagerAccessibilityProof {
         try require(draft.hasChanges, "Sheet switch did not retain a staged edit")
         let updated = try node(named: "Remove preload Qwen fixture", roles: ["AXCheckBox", "AXSwitch"], in: descendants(of: sheet))
         try require(state(updated) == true, "Sheet preload switch state did not reflect the draft change")
-        let done = try node(named: "Done", roles: ["AXButton"], in: descendants(of: sheet))
-        try press(done)
+        let sheetNodes = descendants(of: sheet)
+        let headerDone = try node(identifier: "models.manage.done", named: "Done", roles: ["AXButton"], in: sheetNodes)
+        let footerDone = try node(identifier: "models.manage.footerDone", named: "Done", roles: ["AXButton"], in: sheetNodes)
+        try require(headerDone !== footerDone, "Header and footer Done identifiers resolved to the same native control")
+        try press(footerDone)
         try await waitUntil { fixture.window.attachedSheet == nil }
         try require(fixture.store.draft?.selection.preloaded == [ModelAccessibilityController.secondID], "Closing Manage did not retain the staged Qwen draft")
     }
@@ -146,6 +149,25 @@ enum ModelManagerAccessibilityProof {
         }
         try require(matches.count == 1, "Expected exactly one native \(roles.joined(separator: "/")) named \(expectedName); found \(matches.count)")
         return matches[0]
+    }
+
+    private static func node(identifier expectedIdentifier: String, named expectedName: String,
+        roles: [String], in nodes: [NSObject]) throws -> NSObject {
+        let identified = nodes.filter {
+            attribute("accessibilityIdentifier", of: $0) as? String == expectedIdentifier
+        }
+        if identified.count != 1 {
+            print("ModelAXDiagnostics expectedIdentifier=\(expectedIdentifier) matches=\(identified.count): \(summary(nodes))")
+        }
+        try require(identified.count == 1,
+            "Expected exactly one native node with accessibility identifier \(expectedIdentifier); found \(identified.count)")
+
+        let control = identified[0]
+        try require(roles.contains(role(control)),
+            "Native control \(expectedIdentifier) has role \(role(control)); expected \(roles.joined(separator: "/"))")
+        try require(name(control) == expectedName,
+            "Native control \(expectedIdentifier) is named \(name(control)); expected \(expectedName)")
+        return control
     }
 
     private static func role(_ node: NSObject) -> String { attribute("accessibilityRole", of: node) as? String ?? "" }

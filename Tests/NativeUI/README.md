@@ -335,6 +335,17 @@ self-timeout. The parent checks actual window ordering, coverage, occlusion and
 animation removal, then requests closure and records the child's exit. It never
 uses another application as a cover or treats window geometry as occlusion proof.
 
+The motion helper now requires 15 cases, including eight reading changes with
+stable native view/layer identity, geometry, truthful combined accessibility
+labels and advancing eligible compositor angles. It explicitly orders its own
+normal-level targets into the display's visible area; visibility still requires
+the real occlusion bit. Bounded close/reopen traces and final-time diagnostics
+retain failed native transitions without changing the tested production callbacks.
+Model sheet proof separately requires the uniquely identified header and footer
+Done buttons, then dismisses using the footer. See the current bounded results
+in `docs/MENU_BAR_INDICATOR_PREVIEW_REVIEW_20261003.md`; a rendered screenshot
+of an occluded dashboard is not evidence of visible animation.
+
 Each helper writes a bounded JSON report to the temporary directory shown in
 the button's help. `native-proof-result.json` records all three terminal results;
 an exit code or a partially written report is not a passing native proof. Review

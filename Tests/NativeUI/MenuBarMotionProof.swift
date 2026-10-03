@@ -9,7 +9,13 @@ import SwiftUI
 /// normal NSApplication.run loop, keeping its dashboard anchor window alive.
 @MainActor
 enum MenuBarMotionProof {
+    private static weak var dashboardAnchorWindow: NSWindow?
+
     static func run(outputDirectory: URL) async -> Bool {
+        // Capture before creating proof windows: native proof must keep the
+        // existing inert dashboard anchor, and report its final visibility too.
+        dashboardAnchorWindow = NSApplication.shared.mainWindow ?? NSApplication.shared.keyWindow
+            ?? NSApplication.shared.windows.first { $0.isVisible && $0.canBecomeMain }
         let report = MotionProofReport(outputDirectory: outputDirectory)
         let fixture: MotionArcFixture
         do {
@@ -27,7 +33,7 @@ enum MenuBarMotionProof {
         await report.check("native_window_visible") {
             try require(NSApplication.shared.isRunning, "The native fixture must own a running NSApplication loop")
             view.configure(active: false, tint: .systemGreen)
-            window.orderFront(nil)
+            showOwnedProofWindow(window)
             try await waitForVisible(window)
             try require(arc.isHidden && arc.animation(forKey: "inferenceRotation") == nil,
                         "Inactive native evidence must have no compositor clock")
@@ -75,7 +81,7 @@ enum MenuBarMotionProof {
             try await waitUntil("Ordered-out window retained rotation") {
                 !window.isVisible && arc.animation(forKey: "inferenceRotation") == nil
             }
-            window.orderFront(nil)
+            showOwnedProofWindow(window)
             try await waitForVisible(window)
             try await waitForClock(arc)
             return ["restored": true]
@@ -141,41 +147,55 @@ enum MenuBarMotionProof {
         }
         await report.check("same_window_close_and_reopen") {
             try await fixture.restoreActive()
+            let lifecycle = MotionLifecycleTrace(view: view, window: window, arc: arc)
+            defer { lifecycle.stop() }
+            lifecycle.record("before_close")
             window.close()
+            lifecycle.record("after_close")
             try require(!window.isVisible && arc.animation(forKey: "inferenceRotation") == nil,
                         "Closing the window must immediately stop rotation")
             try require(window.contentView === fixture.container && view.window === window,
                         "Close/reopen proof must retain the same window and native view")
             try await waitUntil("Closed window remained compositor-visible") { !window.occlusionState.contains(.visible) }
-            window.orderFront(nil)
+            showOwnedProofWindow(window)
             try await waitForVisible(window)
-            try await waitForClock(arc)
-            return ["sameWindowAndView": view.window === window]
+            lifecycle.record("visibility_regained")
+            try await waitForClock(arc, context: "same_window_close_and_reopen; finalWindow=\(diagnostics(window)); "
+                + "finalNative=\(nativeDiagnostics(view: view, arc: arc, window: window)); lifecycle=\(lifecycle.events)")
+            return ["sameWindowAndView": view.window === window, "lifecycle": lifecycle.events,
+                    "finalWindow": diagnostics(window), "finalNative": nativeDiagnostics(view: view, arc: arc, window: window)]
         }
         await report.check("rapid_same_window_close_and_reopen") {
             try await fixture.restoreActive()
+            let lifecycle = MotionLifecycleTrace(view: view, window: window, arc: arc)
+            defer { lifecycle.stop() }
+            lifecycle.record("before_rapid_close")
             window.close()
+            lifecycle.record("after_rapid_close")
             try require(!window.isVisible && arc.animation(forKey: "inferenceRotation") == nil,
                         "Rapid close must stop before any yield")
             // Deliberately do not yield before reopening. Native notifications
             // may be coalesced within this single MainActor run-loop pass.
-            window.orderFront(nil)
+            showOwnedProofWindow(window)
             try await waitForVisible(window)
-            try await waitForClock(arc)
+            lifecycle.record("rapid_visibility_regained")
+            try await waitForClock(arc, context: "rapid_same_window_close_and_reopen; finalWindow=\(diagnostics(window)); "
+                + "finalNative=\(nativeDiagnostics(view: view, arc: arc, window: window)); lifecycle=\(lifecycle.events)")
             try require(window.contentView === fixture.container && view.window === window,
                         "Rapid reopen must retain the same window and native view")
             view.configure(active: true, tint: .systemYellow, reduceMotion: true)
             window.close()
             try require(arc.animation(forKey: "inferenceRotation") == nil,
                         "Stationary rapid close must stop immediately")
-            window.orderFront(nil)
+            showOwnedProofWindow(window)
             try await waitForVisible(window)
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 DispatchQueue.main.async { continuation.resume() }
             }
             try require(!arc.isHidden && arc.animation(forKey: "inferenceRotation") == nil,
                         "Deferred close reevaluation must preserve stationary active evidence")
-            return ["sameWindowAndView": true, "stationaryReopenStayedStatic": true]
+            return ["sameWindowAndView": true, "stationaryReopenStayedStatic": true, "lifecycle": lifecycle.events,
+                    "finalWindow": diagnostics(window), "finalNative": nativeDiagnostics(view: view, arc: arc, window: window)]
         }
         await report.check("native_stationary_true_false_true") {
             try await fixture.restoreActive()
@@ -208,7 +228,7 @@ enum MenuBarMotionProof {
             view.isHidden = false
             window.orderOut(nil)
             try await waitUntil("Dismantled test window did not hide") { !window.occlusionState.contains(.visible) }
-            window.orderFront(nil)
+            showOwnedProofWindow(window)
             try await waitForVisible(window)
             try require(arc.animation(forKey: "inferenceRotation") == nil,
                         "Later view/window updates must not restart a dismantled clock")
@@ -217,7 +237,7 @@ enum MenuBarMotionProof {
         await report.check("parent_stationary_activity_bridge") {
             let host = NSHostingController(rootView: AnyView(label(forceStationary: true)))
             let parentWindow = makeWindow(content: host.view)
-            parentWindow.orderFront(nil)
+            showOwnedProofWindow(parentWindow)
             defer { parentWindow.close() }
             try await waitForVisible(parentWindow)
             try await waitUntil("Parent label did not mount its native activity arc") { findArc(in: host.view) != nil }
@@ -238,7 +258,145 @@ enum MenuBarMotionProof {
             }
             return ["staticActivityArcRetained": true, "normalAngleAdvance": angularDistance(first, second)]
         }
+        await report.check("parent_reading_updates_preserve_native_identity") {
+            // Fixed synthetic readings make freshness transitions explicit;
+            // no provider, wall-clock expiry or production instrumentation.
+            let steps: [ParentReadingStep] = [
+                .init(name: "active_current_cool", active: true, gpu: .init(value: 12, freshness: .current),
+                      fan: .init(value: 27, freshness: .current), temperature: .init(value: 45, freshness: .current),
+                      expectedDetail: "Model inference active. Whole-Mac GPU use 12 percent. Fan speed 27 percent of reported maximum RPM. GPU temperature 45 degrees Celsius."),
+                .init(name: "active_current_hot", active: true, gpu: .init(value: 93, freshness: .current),
+                      fan: .init(value: 86, freshness: .current), temperature: .init(value: 91, freshness: .current),
+                      expectedDetail: "Model inference active. Whole-Mac GPU use 93 percent. Fan speed 86 percent of reported maximum RPM. GPU temperature 91 degrees Celsius."),
+                .init(name: "active_stale", active: true, gpu: .init(value: 38, freshness: .stale),
+                      fan: .init(value: 41, freshness: .stale), temperature: .init(value: 62, freshness: .stale),
+                      expectedDetail: "Model inference active. Whole-Mac GPU use, last sample 38 percent. Fan speed, last sample 41 percent of reported maximum RPM. GPU temperature, last sample 62 degrees Celsius."),
+                .init(name: "active_unavailable", active: true,
+                      expectedDetail: "Model inference active. Whole-Mac GPU use unavailable. Fan speed unavailable. GPU temperature unavailable."),
+                .init(name: "active_stationary", active: true, stationary: true,
+                      gpu: .init(value: 54, freshness: .current), fan: .init(value: 33, freshness: .current),
+                      temperature: .init(value: 73, freshness: .current),
+                      expectedDetail: "Model inference active. Whole-Mac GPU use 54 percent. Fan speed 33 percent of reported maximum RPM. GPU temperature 73 degrees Celsius."),
+                .init(name: "active_resumed", active: true, gpu: .init(value: 9, freshness: .current),
+                      fan: .init(value: 21, freshness: .current), temperature: .init(value: 48, freshness: .current),
+                      expectedDetail: "Model inference active. Whole-Mac GPU use 9 percent. Fan speed 21 percent of reported maximum RPM. GPU temperature 48 degrees Celsius."),
+                .init(name: "idle_stale", active: false, gpu: .init(value: 9, freshness: .stale),
+                      fan: .init(value: 21, freshness: .stale), temperature: .init(value: 48, freshness: .stale),
+                      expectedDetail: "Model inference idle or unavailable. Whole-Mac GPU use, last sample 9 percent. Fan speed, last sample 21 percent of reported maximum RPM. GPU temperature, last sample 48 degrees Celsius."),
+                .init(name: "idle_unavailable", active: false,
+                      expectedDetail: "Model inference idle or unavailable. Whole-Mac GPU use unavailable. Fan speed unavailable. GPU temperature unavailable.")
+            ]
+            let host = NSHostingController(rootView: AnyView(label(for: steps[0])))
+            let parentWindow = makeWindow(content: host.view)
+            defer { parentWindow.close() }
+            showOwnedProofWindow(parentWindow)
+            try await waitForVisible(parentWindow)
+            try await waitUntil("Reading-update parent did not mount its native activity arc") { findArc(in: host.view) != nil }
+            guard let originalView = findArc(in: host.view) else { throw MotionProofFailure("Missing initial parent arc") }
+            let originalLayer = try currentArc(in: host.view)
+            var originalFrame: NSRect?
+            var evidence: [[String: Any]] = []
+            for (index, step) in steps.enumerated() {
+                if index > 0 { host.rootView = AnyView(label(for: step)) }
+                try await waitUntil("Parent accessibility did not update for \(step.name): \(parentAccessibilityLabels(in: host.view))") {
+                    let labels = parentAccessibilityLabels(in: host.view)
+                    return labels.count == 1 && labels[0].hasSuffix(step.expectedDetail)
+                }
+                host.view.layoutSubtreeIfNeeded()
+                parentWindow.displayIfNeeded()
+                CATransaction.flush()
+                let nativeViews = nativeArcs(in: host.view)
+                try require(nativeViews.count == 1 && nativeViews[0] === originalView,
+                            "\(step.name) replaced or multiplied the production ActivityArcView")
+                let layer = try currentArc(in: host.view)
+                try require(layer === originalLayer, "\(step.name) replaced the production activity layer")
+                let frame = originalView.convert(originalView.bounds, to: host.view)
+                let size = host.view.fittingSize
+                try require(abs(size.width - MenuBarLabel.width) < 0.01 && abs(size.height - MenuBarLabel.height) < 0.01,
+                            "\(step.name) changed the label's native fitting size: \(NSStringFromSize(size))")
+                try require(abs(frame.width - 18) < 0.01 && abs(frame.height - 18) < 0.01,
+                            "\(step.name) changed the native arc size: \(NSStringFromRect(frame))")
+                if let originalFrame {
+                    try require(frame.equalTo(originalFrame), "\(step.name) shifted label geometry: \(NSStringFromRect(frame)) vs \(NSStringFromRect(originalFrame))")
+                } else { originalFrame = frame }
+                var entry: [String: Any] = ["step": step.name, "sameNativeView": true, "sameNativeLayer": true,
+                    "labelFittingSize": NSStringFromSize(size), "nativeArcFrame": NSStringFromRect(frame),
+                    "parentAccessibilityLabel": parentAccessibilityLabels(in: host.view)[0]]
+                if step.active && !step.stationary {
+                    try await waitForClock(layer)
+                    try require(layer.animationKeys() == ["inferenceRotation"], "\(step.name) must have exactly one native rotation key")
+                    try require(!layer.isHidden, "\(step.name) hid active inference evidence")
+                    let first = try await presentationAngle(layer, in: parentWindow)
+                    let second = try await presentationAngle(layer, in: parentWindow, differingFrom: first)
+                    entry["angleAdvance"] = angularDistance(first, second)
+                } else {
+                    // Allow pending native visibility/layout notifications to
+                    // run before proving that stationary/idle input stays stopped.
+                    try await Task.sleep(for: .milliseconds(100))
+                    try require((layer.animationKeys() ?? []).isEmpty,
+                                "\(step.name) retained an animation after stationary/idle parent input")
+                    try require(layer.isHidden == !step.active, "\(step.name) has the wrong activity cue visibility")
+                    if step.stationary {
+                        try require(!originalView.isHiddenOrHasHiddenAncestor && layer.path != nil
+                            && layer.strokeEnd > layer.strokeStart && (layer.strokeColor?.alpha ?? 0) > 0,
+                            "Stationary active input must retain a drawable visible native arc")
+                    }
+                }
+                entry["animationKeys"] = layer.animationKeys() ?? []
+                entry["activityArcHidden"] = layer.isHidden
+                evidence.append(entry)
+            }
+            return ["updates": evidence, "sameNativeViewAcrossAllUpdates": true,
+                    "sameNativeLayerAcrossAllUpdates": true, "syntheticReadingCount": steps.count]
+        }
         return report.finish()
+    }
+
+    private struct ParentReadingStep {
+        let name: String
+        let active: Bool
+        var stationary = false
+        var gpu: MenuBarIndicators.Reading = .unavailable
+        var fan: MenuBarIndicators.Reading = .unavailable
+        var temperature: MenuBarIndicators.Reading = .unavailable
+        let expectedDetail: String
+    }
+
+    private static func label(for step: ParentReadingStep) -> MenuBarLabel {
+        MenuBarLabel(presentation: .make(snapshot: .unavailable(now: Date(timeIntervalSince1970: 1_700_000_000)), thermal: .nominal,
+            earnings: .unavailable(reason: "Synthetic motion fixture"), mode: .statusOnly),
+            uptime: .available(percent: 100, observedSeconds: 600), family: .qwen,
+            indicators: .init(modelIsActive: step.active, gpu: step.gpu, fanSpeed: step.fan, temperature: step.temperature),
+            forceStationaryActivity: step.stationary)
+    }
+
+    private static func nativeArcs(in view: NSView) -> [MenuBarActivityArc.ActivityArcView] {
+        (view as? MenuBarActivityArc.ActivityArcView).map { [$0] } ?? view.subviews.flatMap { nativeArcs(in: $0) }
+    }
+
+    /// Read the actual combined native parent accessibility label, including
+    /// SwiftUI's unignored descendants, rather than the source-computed string.
+    private static func parentAccessibilityLabels(in root: NSView) -> [String] {
+        var labels: [String] = []
+        var seen = Set<ObjectIdentifier>()
+        func attribute(_ name: String, of object: NSObject) -> Any? {
+            guard object.responds(to: NSSelectorFromString(name)) else { return nil }
+            return object.value(forKey: name)
+        }
+        func visit(_ object: NSObject) {
+            guard seen.insert(ObjectIdentifier(object)).inserted, seen.count < 2_000 else { return }
+            if let label = attribute("accessibilityLabel", of: object) as? String,
+               label.contains("Model inference"), label.contains("Whole-Mac GPU use") { labels.append(label) }
+            for child in attribute("accessibilityChildren", of: object) as? [Any] ?? [] {
+                if let child = child as? NSObject { visit(child) }
+            }
+            if let view = object as? NSView {
+                if let descendant = NSAccessibility.unignoredDescendant(of: view) as? NSObject { visit(descendant) }
+                for child in view.subviews { visit(child) }
+            }
+        }
+        visit(root)
+        return labels
     }
 
     private static func label(forceStationary: Bool) -> MenuBarLabel {
@@ -263,8 +421,11 @@ enum MenuBarMotionProof {
     }
 
     private static func makeWindow(content: NSView) -> NSWindow {
-        let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
-        let rect = NSRect(x: screen.minX + 32, y: screen.minY + 32, width: 96, height: 96)
+        let screen = (NSApplication.shared.mainWindow?.screen ?? NSScreen.main)?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+        // Keep both the 96-point target and its 32-point cover margins clear
+        // of the menu bar, Dock and screen edges on the fixture's display.
+        let rect = NSRect(x: screen.midX - 48, y: screen.midY - 48, width: 96, height: 96)
         let window = NSWindow(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = false
@@ -273,21 +434,30 @@ enum MenuBarMotionProof {
         window.hasShadow = true
         window.backgroundColor = .windowBackgroundColor
         window.ignoresMouseEvents = false
+        window.collectionBehavior = [.moveToActiveSpace]
         window.contentView = content
         return window
+    }
+
+    private static func showOwnedProofWindow(_ window: NSWindow) {
+        // orderFront alone can leave an inactive fixture's normal-level
+        // window behind another app. Activate only this inert fixture and
+        // order only its proof window, without raising its window level.
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        window.orderFrontRegardless()
     }
 
     private static func require(_ condition: Bool, _ message: String) throws {
         guard condition else { throw MotionProofFailure(message) }
     }
 
-    private static func waitUntil(_ message: String, timeout: TimeInterval = 4, predicate: () -> Bool) async throws {
+    private static func waitUntil(_ message: @autoclosure () -> String, timeout: TimeInterval = 4, predicate: () -> Bool) async throws {
         let deadline = CACurrentMediaTime() + timeout
         repeat {
             if predicate() { return }
             try await Task.sleep(for: .milliseconds(20))
         } while CACurrentMediaTime() < deadline
-        try require(predicate(), message)
+        try require(predicate(), message())
     }
 
     private static func waitForVisible(_ window: NSWindow) async throws {
@@ -296,10 +466,10 @@ enum MenuBarMotionProof {
         }
     }
 
-    private static func waitForClock(_ arc: CAShapeLayer) async throws {
+    private static func waitForClock(_ arc: CAShapeLayer, context: @autoclosure () -> String = "") async throws {
         try require(!NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
                     "System Reduce Motion prevents the required rotation proof; the fixture never overrides it")
-        try await waitUntil("Eligible native activity did not start rotation") { arc.animation(forKey: "inferenceRotation") != nil }
+        try await waitUntil("Eligible native activity did not start rotation; \(context())") { arc.animation(forKey: "inferenceRotation") != nil }
         try require(arc.animation(forKey: "inferenceRotation")?.duration == 1.4
             && arc.animation(forKey: "inferenceRotation")?.repeatCount == .infinity,
             "Native rotation must retain the production duration and repeat policy")
@@ -326,13 +496,87 @@ enum MenuBarMotionProof {
     }
 
     private static func diagnostics(_ window: NSWindow) -> [String: Any] {
+        var result = windowDiagnostics(window)
+        if let anchor = dashboardAnchorWindow {
+            result["dashboardAnchorWindow"] = windowDiagnostics(anchor)
+        } else {
+            result["dashboardAnchorWindow"] = "No owned dashboard main/key window was available when the proof began"
+        }
+        return result
+    }
+
+    private static func windowDiagnostics(_ window: NSWindow) -> [String: Any] {
         ["windowNumber": window.windowNumber, "visible": window.isVisible,
-         "occlusionState": window.occlusionState.rawValue, "onActiveSpace": window.isOnActiveSpace,
+         "occlusionState": window.occlusionState.rawValue, "visibleOcclusionBit": NSWindow.OcclusionState.visible.rawValue,
+         "compositorVisible": window.occlusionState.contains(.visible), "onActiveSpace": window.isOnActiveSpace,
          "frame": NSStringFromRect(window.frame), "appRunning": NSApplication.shared.isRunning,
+         "appActive": NSApplication.shared.isActive, "miniaturized": window.isMiniaturized,
          "class": NSStringFromClass(type(of: window)), "level": window.level.rawValue,
          "opaque": window.isOpaque, "alpha": window.alphaValue, "shadow": window.hasShadow,
          "ignoresMouseEvents": window.ignoresMouseEvents, "contentOpaque": window.contentView?.isOpaque ?? false,
-         "screenFrame": window.screen.map { NSStringFromRect($0.frame) } ?? "nil"]
+         "screenFrame": window.screen.map { NSStringFromRect($0.frame) } ?? "nil",
+         "ownedWindowServerEntries": windowServerDiagnostics(windowNumbers: [window.windowNumber])]
+    }
+
+    private static func nativeDiagnostics(view: MenuBarActivityArc.ActivityArcView, arc: CAShapeLayer,
+                                          window: NSWindow) -> [String: Any] {
+        var result: [String: Any] = ["nativeViewIdentity": String(describing: ObjectIdentifier(view)),
+            "nativeLayerIdentity": String(describing: ObjectIdentifier(arc)),
+            "attachedToExpectedWindow": view.window === window, "attachedToSuperview": view.superview != nil,
+            "viewWindowNumber": view.window?.windowNumber ?? -1,
+            "viewHidden": view.isHidden, "hiddenOrHasHiddenAncestor": view.isHiddenOrHasHiddenAncestor,
+            "viewFrame": NSStringFromRect(view.frame), "viewBounds": NSStringFromRect(view.bounds),
+            "layerStillOwnedByView": arc.superlayer === view.layer, "layerHidden": arc.isHidden,
+            "layerFrame": NSStringFromRect(arc.frame), "layerBounds": NSStringFromRect(arc.bounds),
+            "layerSpeed": arc.speed, "layerTimeOffset": arc.timeOffset, "layerBeginTime": arc.beginTime,
+            "animationKeys": arc.animationKeys() ?? [], "hasPath": arc.path != nil,
+            "strokeStart": arc.strokeStart, "strokeEnd": arc.strokeEnd,
+            "strokeAlpha": arc.strokeColor?.alpha ?? 0,
+            "systemReduceMotion": NSWorkspace.shared.accessibilityDisplayShouldReduceMotion]
+        if let presentation = arc.presentation() {
+            result["presentationAngle"] = atan2(presentation.transform.m12, presentation.transform.m11)
+        } else { result["presentationAngle"] = "No compositor presentation layer" }
+        return result
+    }
+
+    /// Test-owned observers capture native notification order without calling
+    /// configure, private callbacks, or the production synchronizer. Capped
+    /// events and explicit teardown keep this diagnostic instrumentation finite.
+    @MainActor
+    private final class MotionLifecycleTrace: NSObject {
+        private let view: MenuBarActivityArc.ActivityArcView
+        private let window: NSWindow
+        private let arc: CAShapeLayer
+        private let startedAt = CACurrentMediaTime()
+        private(set) var events: [[String: Any]] = []
+
+        init(view: MenuBarActivityArc.ActivityArcView, window: NSWindow, arc: CAShapeLayer) {
+            self.view = view
+            self.window = window
+            self.arc = arc
+            super.init()
+            for name in [NSWindow.willCloseNotification, NSWindow.didChangeOcclusionStateNotification,
+                         NSWindow.didExposeNotification, NSWindow.didBecomeKeyNotification,
+                         NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification,
+                         NSWindow.didResignMainNotification] {
+                NotificationCenter.default.addObserver(self, selector: #selector(notificationReceived(_:)),
+                                                       name: name, object: window)
+            }
+        }
+
+        @objc private func notificationReceived(_ notification: Notification) { record(notification.name.rawValue) }
+
+        func record(_ name: String) {
+            guard events.count < 32 else { return }
+            events.append(["event": name, "seconds": CACurrentMediaTime() - startedAt,
+                "visible": window.isVisible, "occlusionState": window.occlusionState.rawValue,
+                "compositorVisible": window.occlusionState.contains(.visible), "appActive": NSApplication.shared.isActive,
+                "attachedToExpectedWindow": view.window === window, "hiddenOrHasHiddenAncestor": view.isHiddenOrHasHiddenAncestor,
+                "animationKeys": arc.animationKeys() ?? [], "layerHidden": arc.isHidden])
+        }
+
+        func stop() { NotificationCenter.default.removeObserver(self) }
+        deinit { NotificationCenter.default.removeObserver(self) }
     }
 
     /// Inspect ordering/opacity for only the two owned proof windows. Do not
@@ -486,7 +730,7 @@ enum MenuBarMotionProof {
             view.isHidden = false
             container.isHidden = false
             view.configure(active: true, tint: .systemYellow, reduceMotion: false)
-            window.orderFront(nil)
+            showOwnedProofWindow(window)
             try await waitForVisible(window)
             try await waitForClock(arc)
         }
@@ -597,7 +841,7 @@ private final class MotionProofReport {
         "self_hide_and_restore", "ancestor_hide_and_restore", "window_order_out_and_restore",
         "opaque_cover_occlusion_and_restore", "detach_and_restore", "same_window_close_and_reopen",
         "rapid_same_window_close_and_reopen", "native_stationary_true_false_true", "inactive_evidence_stops_immediately",
-        "dismantle_retained_view", "parent_stationary_activity_bridge"]
+        "dismantle_retained_view", "parent_stationary_activity_bridge", "parent_reading_updates_preserve_native_identity"]
 
     init(outputDirectory: URL) {
         outputURL = outputDirectory.appendingPathComponent("motion-lifecycle-proof.json")
