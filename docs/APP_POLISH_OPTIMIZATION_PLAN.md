@@ -240,3 +240,13 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   1,467 reported tests and final Release compilation pass. Bounded evidence and
   remaining long-reason/VoiceOver/runtime gaps are recorded in
   `docs/HEALTH_VERSION_NATIVE_REVIEW_20261002.md`.
+
+- Logs now retains new same-second arrivals at count/byte limits and preserves
+  newest-first export order. Quiet SwiftUI display-zone changes update local
+  times without changing selection or UTC evidence. Native138 checks paused
+  Phoenix/UTC/Kathmandu, 100-event eviction/retained selection, light/dark export
+  layout and Bloomy filename/clean save cancellation. All 101 source hashes,
+  actual binary and final tested telemetry archive match; 1,472 reported tests
+  and Release compilation pass. OS locale notification delivery, VoiceOver and
+  broader whole-app profiling/distribution remain open. See
+  `docs/LOGS_RETENTION_FORMAT_NATIVE_REVIEW_20261003.md`.

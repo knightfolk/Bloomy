@@ -5,6 +5,29 @@ import SwiftUI
 @testable import DarkbloomMonitor
 
 struct LogsQueryTests {
+    @Test("retention-cap eviction clears only removed selected details")
+    func selectionAtCapacity() throws {
+        let date = Date(timeIntervalSince1970: 100)
+        let events = (0...100).map { index in
+            LogEvent(timestamp: date, severity: .warning, category: "test",
+                     message: "event \(index)", source: .legacy, processID: nil, processImage: nil)
+        }
+        var buffer = EventBuffer(capacity: 100)
+        buffer.insert(Array(events.prefix(100)))
+        let rows = LogTableRow.make(events: buffer.events, query: LogsQuery())
+        let evictedID = try #require(rows.first(where: { $0.event == events[0] })?.id)
+        let keptID = try #require(rows.first(where: { $0.event == events[99] })?.id)
+        buffer.insert([events[100]])
+        let evicted = LogsPresentation.make(events: buffer.events, query: LogsQuery(), selectedID: evictedID)
+        #expect(evicted.rows.count == 100)
+        #expect(evicted.selectedEvent == nil)
+        #expect(evicted.retainedSelection(evictedID) == nil)
+        let kept = LogsPresentation.make(events: buffer.events, query: LogsQuery(), selectedID: keptID)
+        #expect(kept.selectedEvent == events[99])
+        #expect(kept.retainedSelection(keptID) == keptID)
+        #expect(kept.rows.first?.event == events[100])
+    }
+
     @Test("selected log details survive new arrivals and reordered snapshots")
     func retainsSelectionAcrossFeedChanges() {
         let first = event(.error, .unified, "Inference", "First failure")

@@ -5,6 +5,40 @@ import Testing
 
 @Suite("Logs display presentation")
 struct LogsPresentationTests {
+    @Test("display environment changes preserve identity, selection and canonical UTC evidence")
+    func explicitDisplayContext() throws {
+        let date = Date(timeIntervalSince1970: 0)
+        let events = [event("Synthetic", timestamp: date)]
+        let selected = try #require(LogTableRow.make(events: events, query: LogsQuery()).first?.id)
+        var allocations = 0
+        let factory = { allocations += 1; return DateFormatter() }
+        let utc = LogsFormattingContext(locale: Locale(identifier: "en_US"),
+            calendar: Calendar(identifier: .gregorian), timeZone: TimeZone(secondsFromGMT: 0)!)
+        let nepal = LogsFormattingContext(locale: Locale(identifier: "fr_FR"),
+            calendar: Calendar(identifier: .gregorian), timeZone: TimeZone(identifier: "Asia/Kathmandu")!)
+        let first = LogsPresentation.make(events: events, query: LogsQuery(), selectedID: selected,
+            sourceCapturedAt: date, formattingContext: utc, makeFormatter: factory)
+        let next = LogsPresentation.make(events: events, query: LogsQuery(), selectedID: selected,
+            sourceCapturedAt: date, formattingContext: nepal, makeFormatter: factory)
+        #expect(first.rows.first?.compactTimestamp == "01/01 00:00")
+        #expect(next.rows.first?.compactTimestamp == "01/01 05:30")
+        #expect(first.rowIDs == next.rowIDs)
+        #expect(next.selectedEvent == events.first)
+        #expect(next.retainedSelection(selected) == selected)
+        #expect(first.rows.first?.fullTimestamp == next.rows.first?.fullTimestamp)
+        #expect(first.sourceTimestamp == next.sourceTimestamp)
+        #expect(allocations == 4)
+        let buddhist = LogsFormattingContext(locale: Locale(identifier: "th_TH"),
+            calendar: Calendar(identifier: .buddhist), timeZone: utc.timeZone)
+        let other = LogsPresentation.make(events: events, query: LogsQuery(), selectedID: selected,
+            sourceCapturedAt: date, formattingContext: buddhist)
+        let reference = DateFormatter()
+        reference.locale = buddhist.locale; reference.calendar = buddhist.calendar
+        reference.timeZone = buddhist.timeZone; reference.dateFormat = "MM/dd HH:mm"
+        #expect(other.rows.first?.compactTimestamp == reference.string(from: date))
+        #expect(other.rows.first?.fullTimestamp == first.rows.first?.fullTimestamp)
+    }
+
     @Test("filtering preserves prior query semantics, source order, and duplicate occurrence selection")
     func queryAndIdentityParity() {
         let events = fixtures()

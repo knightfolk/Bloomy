@@ -11,12 +11,13 @@ public struct LogExportSnapshot: Identifiable, Sendable {
     public let omittedCount: Int
     public var previewText: String { String(decoding: data, as: UTF8.self) }
 
+    /// Input follows the visible telemetry feed: newest first, including timestamp ties.
     public static func make(events: [LogEvent], sourceCapturedAt: Date, sourceIsStale: Bool,
                             createdAt: Date) throws -> Self {
         guard sourceCapturedAt.timeIntervalSince1970.isFinite,
               createdAt.timeIntervalSince1970.isFinite else { throw LogExportError.invalidTimestamp }
         var buffer = EventBuffer(capacity: 100)
-        buffer.insert(events)
+        buffer.insert(Array(events.reversed()))
         var records = buffer.events.map(Record.init)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

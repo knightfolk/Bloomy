@@ -58,7 +58,7 @@ struct LogExportPreviewView: View {
         .padding(24)
         .frame(minWidth: 600, idealWidth: 700, minHeight: 550, idealHeight: 650)
         .fileExporter(isPresented: $showsSave, document: LogExportDocument(snapshot: snapshot),
-                      contentType: .json, defaultFilename: "darkbloom-logs") { result in
+                      contentType: .json, defaultFilename: "bloomy-logs") { result in
             switch result {
             case .success: resultMessage = "The reviewed snapshot was saved."
             case .failure: resultMessage = "The snapshot could not be saved. You can retry or close this preview."

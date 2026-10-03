@@ -14,6 +14,7 @@ public struct EventBuffer: Equatable, Sendable {
         events = []
     }
 
+    /// Incoming batches follow read order (oldest to newest), as legacy tails and streams do.
     public mutating func insert(_ newEvents: [LogEvent]) {
         guard capacity > 0, maximumPayloadBytes > 0 else {
             events = []
@@ -27,7 +28,11 @@ public struct EventBuffer: Equatable, Sendable {
             .map(EventPrivacy.sanitize)
         // Retained events are already sanitized and cannot be mutated externally.
         // Avoid re-running privacy regexes over the full buffer on every insert.
-        let sortedEvents = (events + sanitizedNewEvents).sorted(by: newestFirst)
+        // Swift's stable sort preserves this explicit read-order tie break:
+        // later incoming lines first, then the retained newest-first order.
+        // Keep overlapping tail entries here so replaying the same chronological
+        // tail preserves its order; the key filter below still deduplicates them.
+        let sortedEvents = (Array(sanitizedNewEvents.reversed()) + events).sorted(by: newestFirst)
         var keys = Set<EventKey>()
         var retained: [LogEvent] = []
         var remaining = maximumPayloadBytes

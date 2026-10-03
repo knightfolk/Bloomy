@@ -3,6 +3,24 @@ import Testing
 @testable import DarkbloomTelemetry
 
 struct LogExportSnapshotTests {
+    @Test("exports retain newest-first tied rows and omit the oldest ties at the byte limit")
+    func tiedOrder() throws {
+        for length in [0, 1_280] {
+            let events = (0..<100).reversed().map {
+                event(message: "event \($0) " + String(repeating: "\\", count: length))
+            }
+            let snapshot = try LogExportSnapshot.make(events: events, sourceCapturedAt: Date(),
+                sourceIsStale: false, createdAt: Date())
+            let object = try #require(JSONSerialization.jsonObject(with: snapshot.data) as? [String: Any])
+            let records = try #require(object["events"] as? [[String: Any]])
+            #expect(records.compactMap { $0["message"] as? String } == Array(events.prefix(snapshot.eventCount)).map(\.message))
+            #expect(snapshot.data.count <= LogExportSnapshot.maximumBytes)
+            #expect(snapshot.omittedCount == 100 - snapshot.eventCount)
+            if length == 0 { #expect(snapshot.eventCount == 100) }
+            else { #expect(snapshot.eventCount > 0 && snapshot.eventCount < 100) }
+        }
+    }
+
     @Test("export re-filters sensitive text, omits process identifiers and records stale provenance")
     func privacyAndProvenance() throws {
         let snapshot = try LogExportSnapshot.make(events: [event(message: "Authorization: Bearer fixture-secret")],

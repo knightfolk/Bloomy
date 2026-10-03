@@ -3,6 +3,43 @@ import Testing
 @testable import DarkbloomTelemetry
 
 struct EventBufferByteTests {
+    @Test("same-second arrivals replace oldest ties and repeated legacy tails stay stable")
+    func retainsNewTiedArrivals() {
+        let date = Date(timeIntervalSince1970: 100)
+        let events = (0...100).map { index in
+            LogEvent(timestamp: date, severity: .warning, category: "test",
+                     message: "event \(index)", source: .legacy, processID: nil, processImage: nil)
+        }
+        var buffer = EventBuffer(capacity: 100)
+        buffer.insert(Array(events.prefix(100)))
+        buffer.insert([events[100]])
+        #expect(buffer.events == Array(events[1...100].reversed()))
+        let retained = buffer.events
+        buffer.insert(events)
+        #expect(buffer.events == retained)
+        // Queued streams insert singly; the last read wins a timestamp tie.
+        var stream = EventBuffer(capacity: 100)
+        for event in events { stream.insert([event]) }
+        #expect(stream.events == retained)
+    }
+
+    @Test("byte limits also favor later arrivals with equal or missing timestamps")
+    func tiedByteBudget() {
+        for date in [Date(timeIntervalSince1970: 100), nil] as [Date?] {
+            let events = ["a", "b", "c"].map {
+                LogEvent(timestamp: date, severity: .warning, category: "x", message: $0,
+                         source: .legacy, processID: nil, processImage: nil)
+            }
+            var buffer = EventBuffer(capacity: 100, maximumPayloadBytes: 4)
+            buffer.insert(Array(events.prefix(2)))
+            buffer.insert([events[2]])
+            #expect(buffer.events == [events[2], events[1]])
+            #expect(buffer.retainedPayloadBytes == 4)
+            buffer.insert(events)
+            #expect(buffer.events == [events[2], events[1]])
+        }
+    }
+
     @Test("long log churn stays bounded and preserves the newest sanitized events")
     func sustainedChurn() {
         var buffer = EventBuffer(capacity: 100)

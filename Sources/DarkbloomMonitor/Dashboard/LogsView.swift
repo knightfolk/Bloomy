@@ -23,6 +23,9 @@ struct LogsQuery {
 
 struct LogsView: View {
     let feed: SourceAvailability<EventFeed>
+    @Environment(\.locale) private var locale
+    @Environment(\.calendar) private var calendar
+    @Environment(\.timeZone) private var timeZone
     @State private var query = LogsQuery()
     @State private var selectedID: LogTableRow.ID?
     @State private var exportPreview: LogExportSnapshot?
@@ -30,7 +33,8 @@ struct LogsView: View {
 
     var body: some View {
         let presentation = LogsPresentation.make(events: feed.value?.events ?? [], query: query,
-            selectedID: selectedID, sourceCapturedAt: sourceCapturedAt)
+            selectedID: selectedID, sourceCapturedAt: sourceCapturedAt,
+            formattingContext: LogsFormattingContext(locale: locale, calendar: calendar, timeZone: timeZone))
         return GeometryReader { geometry in
             ScrollView {
                 content(tableHeight: max(180, geometry.size.height * 0.6), presentation: presentation)

@@ -1,6 +1,12 @@
 import DarkbloomTelemetry
 import Foundation
 
+struct LogsFormattingContext {
+    let locale: Locale
+    let calendar: Calendar
+    let timeZone: TimeZone
+}
+
 /// One current display snapshot; formatters live only for this derivation so
 /// locale, calendar, and time-zone changes cannot leave a persistent cache stale.
 struct LogsPresentation {
@@ -22,13 +28,18 @@ struct LogsPresentation {
     }
 
     static func make(events: [LogEvent], query: LogsQuery, selectedID: LogTableRow.ID?,
-                     sourceCapturedAt: Date? = nil, makeFormatter: () -> DateFormatter = { DateFormatter() }) -> Self {
+                     sourceCapturedAt: Date? = nil, formattingContext: LogsFormattingContext? = nil, makeFormatter: () -> DateFormatter = { DateFormatter() }) -> Self {
         var compactFormatter: DateFormatter?
         var fullFormatter: DateFormatter?
         func compact(_ date: Date?) -> String {
             guard let date else { return "Unknown" }
             if compactFormatter == nil {
                 let formatter = makeFormatter()
+                if let context = formattingContext {
+                    formatter.locale = context.locale
+                    formatter.calendar = context.calendar
+                    formatter.timeZone = context.timeZone
+                }
                 formatter.dateFormat = "MM/dd HH:mm"
                 compactFormatter = formatter
             }

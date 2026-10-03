@@ -30,7 +30,7 @@ The linked reviews record the inspections; this matrix is their evidence index.
 | Chat — pop-out | **Partial:** 460 × 520 light/dark; close/reopen draft. [CAM] | Native65 dark keyboard Cancel restores its composer; dashboard draft remains independent. [Keys] | **Covered fixture/unit:** independent draft and verification ownership; updater protection; four shared-store focus assertions. [Expiry], [Update], [Keys] | Remaining independent route/key-editor flow; other sizes; close/minimize during send and verification. |
 | Action History | **Partial:** final compact light canonical/alias search/details; earlier dark compact/wide expanded notes. [History], [Draft] | Selection and independent scrolling observed; full key loop open. [History] | **Covered unit/fixture:** exact search/order; mid-row correction; selected details; Jobs empty state. [History] | Mixed jobs/actions/base rewards; keyboard filters/selection; actual arrivals while selected. |
 | Health & Logs — Source health | **Partial:** wide dark; compact light stale/offline; Native70 wide/compact dark all four sections expanded with reachable final rows; Native134 adds compact light/dark stopped versions, compact/wide missing/stale details and wide light stopped status. [Health], [Wide], [HealthVersion] | AX freshness timestamps/reasons; native outer scrolling reaches full verification/daemon/thermal/advanced details. [Health], [Wide] | **Covered fixture:** process mismatch remains verification unavailable; thermal last-observed readings stay qualified. Native134 labels version observations, exposes failed/stale verification reasons and confirms final diagnostic reachability with all groups expanded. [Health], [Wide], [HealthVersion] | Long identifiers and multi-paragraph reasons; real source transitions, spoken freshness and other display sizes. Existing broader keyboard/VoiceOver gaps remain lower priority. |
-| Health & Logs — Logs/export | **Partial:** compact light/dark stable selected details; earlier wide dark details. [Keys], [Latest], [Health] | Native page action reaches full details; table wheel independent; full key loop partial. [Keys] | **Covered unit/fixture:** frozen export/gate; corrected payloads/duplicate identity; Native65 selection survives source ticks/arrival/matching filter and clears on exclusion. [Latest], [Keys] | Wide final export/details; keyboard traversal; retention-cap/quiet locale/time-zone changes. |
+| Health & Logs — Logs/export | **Partial:** prior compact selection; Native138 compact light/dark table, wide light/dark details and export, compact dark export. [Keys], [Latest], [LogsRetention] | Ordinary native selection, page scroll and save cancellation checked; exhaustive traversal remains lower priority. | **Covered unit/native:** quiet scoped Phoenix/UTC/Kathmandu update preserves selected payload and UTC capture; count/byte tied-arrival regressions, 100-event eviction/retained selection; frozen newest-first export, review gate, Bloomy filename and clean Cancel. [LogsRetention] | Actual OS locale/calendar/time-zone notification delivery, spoken evidence, arbitrary sizes and real traffic. |
 
 ## Every Settings page
 
@@ -56,8 +56,8 @@ and resource use. Standard native keyboard access remains; exhaustive key-path
 review and custom shortcuts are lower priority, with existing gaps retained.
 
 1. **Remaining layouts and stable updates:** expanded missing-state Health,
-   Earnings negative/known-zero cues, resized Logs export and retention-cap/locale
-   changes after stable-arrival proof. Check actual screens at normal speed.
+   Earnings negative/known-zero cues and actual OS display-setting propagation
+   after the scoped quiet-zone proof. Check actual screens at normal speed.
 2. **Measured resource use:** comparable visible/minimized profiling and the
    cost of longer local histories, preserving missing data and recorded zeros.
 3. **Useful accessibility and motion checks:** spoken freshness/errors,
@@ -137,3 +137,5 @@ Each table's linked shorthand resolves to the exact repository review below.
 [EarningsIdentity]: EARNINGS_IDENTITY_PROFIT_EFFICIENCY_REVIEW_20261002.md
 
 [HealthVersion]: HEALTH_VERSION_NATIVE_REVIEW_20261002.md
+
+[LogsRetention]: LOGS_RETENTION_FORMAT_NATIVE_REVIEW_20261003.md

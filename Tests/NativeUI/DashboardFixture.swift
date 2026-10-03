@@ -25,6 +25,18 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+private enum FixtureLogTimeZone: String, CaseIterable, Identifiable {
+    case system = "Mac local", utc = "UTC", kathmandu = "Kathmandu"
+    var id: Self { self }
+    var value: TimeZone {
+        switch self {
+        case .system: .autoupdatingCurrent
+        case .utc: TimeZone(secondsFromGMT: 0)!
+        case .kathmandu: TimeZone(identifier: "Asia/Kathmandu")!
+        }
+    }
+}
+
 private enum FixtureData {
     static let modelIDs = ["qwen3.8-27b", "gemma-4-26b-qat-4bit", "gpt-oss-20b", "ternary-bonsai-2-27b"]
     static let catalog = [
@@ -91,11 +103,13 @@ private actor FixtureLogFeed {
     private var arrivals = 0
     init(events: [LogEvent]) { retained = Array(events.prefix(100)) }
     func events(limit: Int = 100) -> [LogEvent] { Array(retained.prefix(max(0, min(limit, 100)))) }
-    func prepend(at date: Date) {
-        arrivals += 1
-        retained.insert(LogEvent(timestamp: date, severity: .notice, category: "Synthetic arrival",
-            message: "Synthetic log arrival \(arrivals) · \(UUID().uuidString)", source: .unified,
-            processID: 4242, processImage: "Fixture"), at: 0)
+    func prepend(at date: Date, count: Int = 1) {
+        for _ in 0..<min(100, max(0, count)) {
+            arrivals += 1
+            retained.insert(LogEvent(timestamp: date, severity: .notice, category: "Synthetic arrival",
+                message: "Synthetic log arrival \(arrivals) · \(UUID().uuidString)", source: .unified,
+                processID: 4242, processImage: "Fixture"), at: 0)
+        }
         if retained.count > 100 { retained.removeLast(retained.count - 100) }
     }
 }
@@ -800,6 +814,7 @@ private final class FixtureModel: ObservableObject {
     @Published var focusTracing: Bool
     @Published var staticActivity = false
     @Published var grayscale = false
+    @Published var logTimeZone: FixtureLogTimeZone = .system
     @Published var popupHeightBudget: FixturePopupHeightBudget = .screen
     @Published private(set) var nativeProofStatus = "Native proof"
     private var nativeProofTask: Task<Void, Never>?
@@ -1036,13 +1051,13 @@ private final class FixtureModel: ObservableObject {
             try? data.write(to: directory.appendingPathComponent("fixture-metrics-read-proof.json"), options: .atomic)
         }
     }
-    func prependLogEvent() async {
+    func prependLogEvent(count: Int = 1) async {
         guard canPrependLogEvent else { return }
         let generation = loadGeneration
         let currentScenario = scenario
         let currentMonitor = monitor
         let currentLogFeed = logFeed
-        await currentLogFeed.prepend(at: Date())
+        await currentLogFeed.prepend(at: Date(), count: count)
         guard !Task.isCancelled, canPrependLogEvent, generation == loadGeneration else { return }
         await publishTelemetry(scenario: currentScenario, monitor: currentMonitor, logFeed: currentLogFeed)
     }
@@ -2067,6 +2082,17 @@ private struct FixtureReviewView: View {
                         }
                         .disabled(!model.canPrependLogEvent)
                         .help("Adds one uniquely named event; older log payloads stay unchanged within the 100-event bound.")
+                        Button("Fill synthetic log buffer (100 arrivals)") {
+                            Task { await model.prependLogEvent(count: 100) }
+                        }
+                        .disabled(!model.canPrependLogEvent)
+                        .help("One bounded synthetic publication replaces retained events; no real provider logs are touched.")
+                        Menu("Display time zone: \(model.logTimeZone.rawValue)") {
+                            ForEach(FixtureLogTimeZone.allCases) { zone in
+                                Button(zone.rawValue) { model.logTimeZone = zone }
+                            }
+                        }
+                        .help("Changes only this review dashboard's SwiftUI display environment; the Mac's preferences remain unchanged.")
                         Button(model.limitedActivityModels ? "Restore all Earnings models" : "Report only Qwen in Earnings") {
                             Task { await model.limitActivityModels(!model.limitedActivityModels) }
                         }
@@ -2126,6 +2152,7 @@ private struct FixtureReviewView: View {
                     navigation: model.navigation, settingsDraft: model.settingsDraft,
                     chatDraft: model.chatDraft, hostingDraft: model.hostingDraft, updateProtection: model.updateProtection)
                     .environment(\.modelManagerSheetMaximumHeight, model.modelSheetHeightLimit)
+                    .environment(\.timeZone, model.logTimeZone.value)
                     .disabled(model.proofRunning)
                     .saturation(model.grayscale ? 0 : 1)
                     .overlay { if !model.ready { ProgressView("Preparing synthetic sources…").padding().background(.regularMaterial) } }
