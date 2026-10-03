@@ -195,3 +195,30 @@ restores Hosting and sends no exposure/provider command. The fixture is quit
 normally. This remains inconclusive rendering evidence: no root cause establishes
 whether the product or computer-use capture is responsible, so no speculative
 confirmation redesign is accepted. The gate stays open.
+
+## Independent native-alert comparison, October 3
+
+At source `6a46a89`, a separate inert reference app compares ordinary
+`NSAlert.beginSheetModal`, `NSAlert.runModal` and a minimal SwiftUI
+`confirmationDialog`. All three expose their complete title/message and
+default-focused Cancel through accessibility, but the captures are blank.
+After cancellation, the reference app's ordinary SwiftUI parent window renders
+its labels and buttons correctly. Each presentation uses the same synthetic
+LAN address and has no network, provider, credential or preference operations.
+
+This establishes that the symptom also occurs outside Bloomy's Hosting view.
+It does not distinguish an OS rendering issue from a computer-use capture issue.
+No human on-screen confirmation was received during this pass. No speculative
+product confirmation replacement was made, and rendered alert proof remains
+open. The reference app was quit normally; installed Bloomy/provider were untouched.
+
+The exact fixture and plist are retained as
+`Tests/NativeUI/ConfirmationReferenceFixture.swift` and its matching Info plist.
+Source SHA-256: `f1f434ea7d94b849308ece6d0ae8183064c7ca00003e3289225096fd5586d175`.
+Observed executable SHA-256:
+`09745d365a1884bcf596418cb3916c48485baa70a3cc949573fa4f8f2574a3d3`.
+Local source, executable and sanitized summary remain under
+`/tmp/bloomy-dialog-probe-20261003/`. Reproduce in a separate app bundle using
+the supplied plist and `swiftc -parse-as-library -swift-version 6` with executable
+name `DialogProbe`; do not replace a production bundle. This new reference
+comparison supersedes repeating the same uninformative Bloomy sheet capture.

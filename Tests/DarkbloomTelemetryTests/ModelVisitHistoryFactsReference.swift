@@ -1,0 +1,256 @@
+import Foundation
+#if !BLOOMY_VISIT_FACTS_SAME_MODULE
+@testable import DarkbloomTelemetry
+#endif
+
+// Frozen comparison implementation from commit
+// 6a46a89f13e109c2e3006b42e8e1e3758ea63526, copied from
+// Sources/DarkbloomTelemetry/ModelVisitHistory.swift (history declaration to EOF).
+// Only the ModelVisitHistory identifier is renamed; shared public visit and
+// summary types remain authoritative. Keep this reference unchanged so the
+// per-observation facts pilot is checked against its original behavior.
+// Standalone benchmark compilation requires a telemetry module built with
+// -enable-testing, matching the test target's access to sample validation.
+public struct ModelVisitHistoryFactsReference: Equatable, Sendable {
+    public let visits: [ModelVisit]
+    public var completedNoObservedWorkVisits: [ModelVisit] {
+        visits.filter { $0.outcome == .noObservedWork }
+    }
+    public var summary: ModelVisitSummary { ModelVisitSummary(visits: visits) }
+
+    public init(samples: [PerformanceSample], period: DateInterval? = nil, maximumVisits: Int = 500) {
+        guard maximumVisits > 0 else { visits = []; return }
+        var builders: [VisitBuilder] = []
+        var current: VisitBuilder?
+        var previous: PerformanceSample?
+        for sample in samples {
+            let eligible = Self.eligible(sample)
+            if let prior = previous, var visit = current {
+                // Release the previous builder before appending to its arrays.
+                // Otherwise every observation copies the growing visit storage.
+                current = nil
+                if let interruption = Self.interruption(prior, sample) {
+                    visit.finish(at: prior.observedAt, reason: interruption, truncated: true)
+                    builders.append(visit)
+                    current = eligible ? VisitBuilder(sample, reason: interruption, truncated: true) : nil
+                } else if !eligible {
+                    if Self.confirmedEmptySlot(sample) {
+                        visit.addEmptySlotBoundary(prior, sample)
+                        visit.finish(at: sample.observedAt, reason: .residencyChanged, truncated: false)
+                    } else {
+                        let reason: ModelVisitBoundary = sample.model == nil ? .staleOrMissing : .residencyChanged
+                        visit.finish(at: prior.observedAt, reason: reason, truncated: true)
+                    }
+                    builders.append(visit)
+                    current = nil
+                } else if Self.selectedModel(prior) != Self.selectedModel(sample) {
+                    // Neither side owns a provider-wide increment spanning a
+                    // switch. Both visits retain the attribution uncertainty.
+                    let counters = Self.counterEvidence(prior, sample)
+                    visit.addSwitchInterval(prior, sample, counters: counters)
+                    visit.finish(at: sample.observedAt, reason: .modelChanged, truncated: false)
+                    builders.append(visit)
+                    var next = VisitBuilder(sample, reason: .modelChanged, truncated: false)
+                    if counters != .zero || !Self.singleResident(prior) || !Self.singleResident(sample) {
+                        next.uncertain = true
+                    }
+                    current = next
+                } else {
+                    visit.add(prior, sample)
+                    current = visit
+                }
+            } else if eligible {
+                if let prior = previous, Self.confirmedEmptySlot(prior), Self.interruption(prior, sample) == nil {
+                    var next = VisitBuilder(sample, reason: .residencyChanged, truncated: false)
+                    if Self.counterEvidence(prior, sample) != .zero { next.uncertain = true }
+                    current = next
+                } else {
+                    current = VisitBuilder(sample, reason: previous == nil ? .historyBoundary : .staleOrMissing, truncated: true)
+                }
+            }
+            previous = sample
+        }
+        if var visit = current {
+            visit.finish(at: visit.last.observedAt, reason: .historyBoundary, truncated: true, open: true)
+            builders.append(visit)
+        }
+        visits = Array(builders.compactMap { $0.value(period: period) }.suffix(maximumVisits))
+    }
+
+    private static func fresh(_ sample: PerformanceSample) -> Bool {
+        guard sample.isValid, sample.quality == .current, sample.providerSession != nil,
+              let capture = sample.sourceCapturedAt else { return false }
+        return (0...90).contains(sample.observedAt.timeIntervalSince(capture))
+    }
+
+    private static func eligible(_ sample: PerformanceSample) -> Bool {
+        fresh(sample) && selectedModel(sample) != nil
+    }
+
+    private static func selectedModel(_ sample: PerformanceSample) -> String? {
+        let residents = Set(sample.residentModels)
+        if residents.count == 1 { return residents.first }
+        guard let model = sample.model, residents.contains(model) else { return nil }
+        return model
+    }
+
+    private static func singleResident(_ sample: PerformanceSample) -> Bool {
+        Set(sample.residentModels).count == 1
+    }
+
+    /// An explicitly empty, fresh, idle slot is an observed unload boundary.
+    /// Retained MRU labels and incomplete/stale readings cannot establish it.
+    private static func confirmedEmptySlot(_ sample: PerformanceSample) -> Bool {
+        fresh(sample) && sample.model == nil && sample.residentModels.isEmpty
+            && sample.inferenceActive == false && (sample.activeRequests ?? 0) == 0
+            && (sample.tokensPerSecond ?? 0) == 0
+            && sample.requestsServed != nil && sample.tokensGenerated != nil
+    }
+
+    private static func interruption(_ prior: PerformanceSample, _ sample: PerformanceSample) -> ModelVisitBoundary? {
+        guard fresh(prior), fresh(sample), sample.model != nil || selectedModel(sample) != nil || confirmedEmptySlot(sample) else { return .staleOrMissing }
+        guard prior.providerSession == sample.providerSession else { return .providerRestart }
+        let duration = sample.observedAt.timeIntervalSince(prior.observedAt)
+        guard duration > 0 else { return .staleOrMissing }
+        guard duration <= 90 else { return .longGap }
+        guard let before = prior.sourceCapturedAt, let after = sample.sourceCapturedAt,
+              after > before else { return .staleOrMissing }
+        guard after.timeIntervalSince(before) <= 90 else { return .longGap }
+        if let before = prior.requestsServed, let after = sample.requestsServed, after < before { return .counterReset }
+        if let before = prior.tokensGenerated, let after = sample.tokensGenerated, after < before { return .counterReset }
+        return nil
+    }
+
+    private enum CounterEvidence { case positive, zero, unknown }
+
+    private static func counterEvidence(_ prior: PerformanceSample, _ sample: PerformanceSample) -> CounterEvidence {
+        let requests = prior.requestsServed.flatMap { before in sample.requestsServed.map { $0 - before } }
+        let tokens = prior.tokensGenerated.flatMap { before in sample.tokensGenerated.map { $0 - before } }
+        if requests.map({ $0 > 0 }) == true || tokens.map({ $0 > 0 }) == true { return .positive }
+        return requests != nil && tokens != nil ? .zero : .unknown
+    }
+
+    private static func directWork(_ sample: PerformanceSample) -> Bool {
+        singleResident(sample) && sample.model == selectedModel(sample)
+            && (sample.inferenceActive == true || (sample.activeRequests ?? 0) > 0
+            || (sample.tokensPerSecond ?? 0) > 0)
+    }
+
+    private static func knownInactive(_ sample: PerformanceSample) -> Bool {
+        singleResident(sample) && sample.hasActiveInference == false
+            && (sample.activeRequests ?? 0) == 0
+            && (sample.tokensPerSecond ?? 0) == 0
+    }
+
+    private struct Interval {
+        let start: Date
+        let end: Date
+        let idle: Bool
+
+        func duration(in period: DateInterval?) -> TimeInterval {
+            max(0, min(end, period?.end ?? end).timeIntervalSince(max(start, period?.start ?? start)))
+        }
+    }
+
+    private struct VisitBuilder {
+        let first: PerformanceSample
+        let model: String
+        var last: PerformanceSample
+        var startReason: ModelVisitBoundary
+        var startTruncated: Bool
+        var end: Date
+        var endReason: ModelVisitBoundary = .historyBoundary
+        var endTruncated = true
+        var open = false
+        var uncertain = false
+        var count = 1
+        var intervals: [Interval] = []
+        var directWorkTimes: [Date] = []
+        var counterWorkIntervals: [DateInterval] = []
+
+        init(_ sample: PerformanceSample, reason: ModelVisitBoundary, truncated: Bool) {
+            first = sample
+            model = ModelVisitHistoryFactsReference.selectedModel(sample)!
+            last = sample
+            startReason = reason
+            startTruncated = truncated
+            end = sample.observedAt
+            uncertain = !Self.fullyObserved(sample)
+            if ModelVisitHistoryFactsReference.directWork(sample) { directWorkTimes.append(sample.observedAt) }
+        }
+
+        private static func fullyObserved(_ sample: PerformanceSample) -> Bool {
+            ModelVisitHistoryFactsReference.knownInactive(sample) || ModelVisitHistoryFactsReference.directWork(sample)
+        }
+
+        mutating func add(_ prior: PerformanceSample, _ sample: PerformanceSample) {
+            let unique = ModelVisitHistoryFactsReference.singleResident(prior) && ModelVisitHistoryFactsReference.singleResident(sample)
+            let counters = ModelVisitHistoryFactsReference.counterEvidence(prior, sample)
+            let idle = unique && counters == .zero && ModelVisitHistoryFactsReference.knownInactive(prior)
+                && ModelVisitHistoryFactsReference.knownInactive(sample)
+            intervals.append(Interval(start: prior.observedAt, end: sample.observedAt, idle: idle))
+            if unique && counters == .positive {
+                counterWorkIntervals.append(DateInterval(start: prior.observedAt, end: sample.observedAt))
+            }
+            if ModelVisitHistoryFactsReference.directWork(sample) { directWorkTimes.append(sample.observedAt) }
+            if !unique || counters == .unknown || !Self.fullyObserved(sample) { uncertain = true }
+            last = sample
+            end = sample.observedAt
+            count += 1
+        }
+
+        mutating func addSwitchInterval(_ prior: PerformanceSample, _ sample: PerformanceSample, counters: CounterEvidence) {
+            intervals.append(Interval(start: prior.observedAt, end: sample.observedAt, idle: false))
+            if counters != .zero || !ModelVisitHistoryFactsReference.singleResident(prior) || !ModelVisitHistoryFactsReference.singleResident(sample) {
+                uncertain = true
+            }
+        }
+
+        mutating func addEmptySlotBoundary(_ prior: PerformanceSample, _ sample: PerformanceSample) {
+            intervals.append(Interval(start: prior.observedAt, end: sample.observedAt, idle: false))
+            if ModelVisitHistoryFactsReference.counterEvidence(prior, sample) != .zero
+                || !ModelVisitHistoryFactsReference.singleResident(prior) || !ModelVisitHistoryFactsReference.knownInactive(prior) {
+                uncertain = true
+            }
+        }
+
+        mutating func finish(at end: Date, reason: ModelVisitBoundary, truncated: Bool, open: Bool = false) {
+            self.end = end
+            endReason = reason
+            endTruncated = truncated
+            self.open = open
+        }
+
+        func value(period: DateInterval?) -> ModelVisit? {
+            let start = max(first.observedAt, period?.start ?? first.observedAt)
+            let stop = min(end, period?.end ?? end)
+            guard stop >= start else { return nil }
+            if let period {
+                // Periods use a half-open observation window. A single observed
+                // point can still be shown, but a visit ending at the window's
+                // start belongs to the preceding window.
+                let pointInside = first.observedAt == end && first.observedAt >= period.start
+                guard first.observedAt < period.end, end > period.start || pointInside else { return nil }
+            }
+            let clippedStart = start > first.observedAt
+            let clippedEnd = stop < end
+            let isOpen = open && !clippedEnd
+            let startTruncated = self.startTruncated || clippedStart
+            let endTruncated = self.endTruncated || clippedEnd
+            let worked = directWorkTimes.contains { $0 >= start && $0 <= stop }
+                || counterWorkIntervals.contains { $0.start >= start && $0.end <= stop }
+            let covered = intervals.reduce(0) { $0 + $1.duration(in: period) }
+            let idle = intervals.filter(\.idle).reduce(0) { $0 + $1.duration(in: period) }
+            let complete = !uncertain && !startTruncated && !endTruncated && covered > 0
+            let evidence: ModelVisitWorkEvidence = worked ? .observedWork : complete ? .noObservedWork : .unknown
+            let outcome: ModelVisitOutcome = isOpen ? .stillLoaded : worked ? .worked : complete ? .noObservedWork : .unknown
+            return ModelVisit(
+                id: first.id, model: model, observedStart: start, observedEnd: stop,
+                coveredSeconds: covered, observedIdleSeconds: idle, workEvidence: evidence, outcome: outcome,
+                startReason: clippedStart ? .periodBoundary : startReason,
+                endReason: clippedEnd ? .periodBoundary : endReason,
+                isStartTruncated: startTruncated, isEndTruncated: endTruncated, isOpen: isOpen, sampleCount: count
+            )
+        }
+    }
+}

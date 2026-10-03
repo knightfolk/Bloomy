@@ -1,5 +1,12 @@
 # Native export fixture
 
+The independent `ConfirmationReferenceFixture.swift` and matching Info plist
+compare AppKit sheet/modal and minimal SwiftUI confirmations with no real
+actions. October 3 captures reproduce the blank-alert symptom outside Bloomy;
+ordinary parent-window pixels render. Findings and limits are in
+`docs/HOSTING_KEYBOARD_NATIVE_REVIEW_20261002.md`. This is a diagnostic reference,
+not a replacement for the production confirmation or accepted alert pixels.
+
 ## Isolated keyboard focus regression
 
 Run the editor-owned focus regression separately from the parallel window tests:

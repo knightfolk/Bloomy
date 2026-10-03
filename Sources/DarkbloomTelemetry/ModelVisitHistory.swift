@@ -78,53 +78,54 @@ public struct ModelVisitHistory: Equatable, Sendable {
         guard maximumVisits > 0 else { visits = []; return }
         var builders: [VisitBuilder] = []
         var current: VisitBuilder?
-        var previous: PerformanceSample?
+        var previous: ObservationFacts?
         for sample in samples {
-            let eligible = Self.eligible(sample)
+            let facts = ObservationFacts(sample)
+            let eligible = facts.fresh && facts.selectedResident != nil
             if let prior = previous, var visit = current {
                 // Release the previous builder before appending to its arrays.
                 // Otherwise every observation copies the growing visit storage.
                 current = nil
-                if let interruption = Self.interruption(prior, sample) {
-                    visit.finish(at: prior.observedAt, reason: interruption, truncated: true)
+                if let interruption = Self.interruption(prior, facts) {
+                    visit.finish(at: prior.sample.observedAt, reason: interruption, truncated: true)
                     builders.append(visit)
-                    current = eligible ? VisitBuilder(sample, reason: interruption, truncated: true) : nil
+                    current = eligible ? VisitBuilder(facts, reason: interruption, truncated: true) : nil
                 } else if !eligible {
-                    if Self.confirmedEmptySlot(sample) {
-                        visit.addEmptySlotBoundary(prior, sample)
+                    if facts.confirmedEmptySlot {
+                        visit.addEmptySlotBoundary(prior, facts)
                         visit.finish(at: sample.observedAt, reason: .residencyChanged, truncated: false)
                     } else {
                         let reason: ModelVisitBoundary = sample.model == nil ? .staleOrMissing : .residencyChanged
-                        visit.finish(at: prior.observedAt, reason: reason, truncated: true)
+                        visit.finish(at: prior.sample.observedAt, reason: reason, truncated: true)
                     }
                     builders.append(visit)
                     current = nil
-                } else if Self.selectedModel(prior) != Self.selectedModel(sample) {
+                } else if prior.selectedResident != facts.selectedResident {
                     // Neither side owns a provider-wide increment spanning a
                     // switch. Both visits retain the attribution uncertainty.
-                    let counters = Self.counterEvidence(prior, sample)
-                    visit.addSwitchInterval(prior, sample, counters: counters)
+                    let counters = Self.counterEvidence(prior.sample, sample)
+                    visit.addSwitchInterval(prior, facts, counters: counters)
                     visit.finish(at: sample.observedAt, reason: .modelChanged, truncated: false)
                     builders.append(visit)
-                    var next = VisitBuilder(sample, reason: .modelChanged, truncated: false)
-                    if counters != .zero || !Self.singleResident(prior) || !Self.singleResident(sample) {
+                    var next = VisitBuilder(facts, reason: .modelChanged, truncated: false)
+                    if counters != .zero || !prior.singleResident || !facts.singleResident {
                         next.uncertain = true
                     }
                     current = next
                 } else {
-                    visit.add(prior, sample)
+                    visit.add(prior, facts)
                     current = visit
                 }
             } else if eligible {
-                if let prior = previous, Self.confirmedEmptySlot(prior), Self.interruption(prior, sample) == nil {
-                    var next = VisitBuilder(sample, reason: .residencyChanged, truncated: false)
-                    if Self.counterEvidence(prior, sample) != .zero { next.uncertain = true }
+                if let prior = previous, prior.confirmedEmptySlot, Self.interruption(prior, facts) == nil {
+                    var next = VisitBuilder(facts, reason: .residencyChanged, truncated: false)
+                    if Self.counterEvidence(prior.sample, sample) != .zero { next.uncertain = true }
                     current = next
                 } else {
-                    current = VisitBuilder(sample, reason: previous == nil ? .historyBoundary : .staleOrMissing, truncated: true)
+                    current = VisitBuilder(facts, reason: previous == nil ? .historyBoundary : .staleOrMissing, truncated: true)
                 }
             }
-            previous = sample
+            previous = facts
         }
         if var visit = current {
             visit.finish(at: visit.last.observedAt, reason: .historyBoundary, truncated: true, open: true)
@@ -133,38 +134,57 @@ public struct ModelVisitHistory: Equatable, Sendable {
         visits = Array(builders.compactMap { $0.value(period: period) }.suffix(maximumVisits))
     }
 
-    private static func fresh(_ sample: PerformanceSample) -> Bool {
-        guard sample.isValid, sample.quality == .current, sample.providerSession != nil,
-              let capture = sample.sourceCapturedAt else { return false }
-        return (0...90).contains(sample.observedAt.timeIntervalSince(capture))
+    /// Classification is immutable and computed once for each original row.
+    /// Only current/previous facts are retained; invalid and stale rows still
+    /// participate in adjacency and boundary checks.
+    private struct ObservationFacts {
+        let sample: PerformanceSample
+        let valid: Bool
+        let fresh: Bool
+        let selectedResident: String?
+        let singleResident: Bool
+        let directWork: Bool
+        let knownInactive: Bool
+        let confirmedEmptySlot: Bool
+
+        init(_ sample: PerformanceSample) {
+            self.sample = sample
+            valid = sample.isValid
+            if valid, sample.quality == .current, sample.providerSession != nil,
+               let capture = sample.sourceCapturedAt {
+                fresh = (0...90).contains(sample.observedAt.timeIntervalSince(capture))
+            } else {
+                fresh = false
+            }
+            // A sole distinct label is authoritative, including repeated labels.
+            // Concurrent residence selects only an MRU present in the array.
+            if let first = sample.residentModels.first,
+               sample.residentModels.allSatisfy({ $0 == first }) {
+                singleResident = true
+                selectedResident = first
+            } else {
+                singleResident = false
+                selectedResident = sample.model.flatMap { sample.residentModels.contains($0) ? $0 : nil }
+            }
+            directWork = singleResident && sample.model == selectedResident
+                && (sample.inferenceActive == true || (sample.activeRequests ?? 0) > 0
+                || (sample.tokensPerSecond ?? 0) > 0)
+            knownInactive = singleResident && sample.hasActiveInference == false
+                && (sample.activeRequests ?? 0) == 0 && (sample.tokensPerSecond ?? 0) == 0
+            // Explicitly empty, fresh, idle slots establish observed unloads.
+            // Retained MRU labels and incomplete readings cannot establish one.
+            confirmedEmptySlot = fresh && sample.model == nil && sample.residentModels.isEmpty
+                && sample.inferenceActive == false && (sample.activeRequests ?? 0) == 0
+                && (sample.tokensPerSecond ?? 0) == 0
+                && sample.requestsServed != nil && sample.tokensGenerated != nil
+        }
     }
 
-    private static func eligible(_ sample: PerformanceSample) -> Bool {
-        fresh(sample) && selectedModel(sample) != nil
-    }
-
-    private static func selectedModel(_ sample: PerformanceSample) -> String? {
-        let residents = Set(sample.residentModels)
-        if residents.count == 1 { return residents.first }
-        guard let model = sample.model, residents.contains(model) else { return nil }
-        return model
-    }
-
-    private static func singleResident(_ sample: PerformanceSample) -> Bool {
-        Set(sample.residentModels).count == 1
-    }
-
-    /// An explicitly empty, fresh, idle slot is an observed unload boundary.
-    /// Retained MRU labels and incomplete/stale readings cannot establish it.
-    private static func confirmedEmptySlot(_ sample: PerformanceSample) -> Bool {
-        fresh(sample) && sample.model == nil && sample.residentModels.isEmpty
-            && sample.inferenceActive == false && (sample.activeRequests ?? 0) == 0
-            && (sample.tokensPerSecond ?? 0) == 0
-            && sample.requestsServed != nil && sample.tokensGenerated != nil
-    }
-
-    private static func interruption(_ prior: PerformanceSample, _ sample: PerformanceSample) -> ModelVisitBoundary? {
-        guard fresh(prior), fresh(sample), sample.model != nil || selectedModel(sample) != nil || confirmedEmptySlot(sample) else { return .staleOrMissing }
+    private static func interruption(_ priorFacts: ObservationFacts, _ facts: ObservationFacts) -> ModelVisitBoundary? {
+        let prior = priorFacts.sample
+        let sample = facts.sample
+        guard priorFacts.fresh, facts.fresh,
+              sample.model != nil || facts.selectedResident != nil || facts.confirmedEmptySlot else { return .staleOrMissing }
         guard prior.providerSession == sample.providerSession else { return .providerRestart }
         let duration = sample.observedAt.timeIntervalSince(prior.observedAt)
         guard duration > 0 else { return .staleOrMissing }
@@ -184,18 +204,6 @@ public struct ModelVisitHistory: Equatable, Sendable {
         let tokens = prior.tokensGenerated.flatMap { before in sample.tokensGenerated.map { $0 - before } }
         if requests.map({ $0 > 0 }) == true || tokens.map({ $0 > 0 }) == true { return .positive }
         return requests != nil && tokens != nil ? .zero : .unknown
-    }
-
-    private static func directWork(_ sample: PerformanceSample) -> Bool {
-        singleResident(sample) && sample.model == selectedModel(sample)
-            && (sample.inferenceActive == true || (sample.activeRequests ?? 0) > 0
-            || (sample.tokensPerSecond ?? 0) > 0)
-    }
-
-    private static func knownInactive(_ sample: PerformanceSample) -> Bool {
-        singleResident(sample) && sample.hasActiveInference == false
-            && (sample.activeRequests ?? 0) == 0
-            && (sample.tokensPerSecond ?? 0) == 0
     }
 
     private struct Interval {
@@ -224,48 +232,46 @@ public struct ModelVisitHistory: Equatable, Sendable {
         var directWorkTimes: [Date] = []
         var counterWorkIntervals: [DateInterval] = []
 
-        init(_ sample: PerformanceSample, reason: ModelVisitBoundary, truncated: Bool) {
+        init(_ facts: ObservationFacts, reason: ModelVisitBoundary, truncated: Bool) {
+            let sample = facts.sample
             first = sample
-            model = ModelVisitHistory.selectedModel(sample)!
+            model = facts.selectedResident!
             last = sample
             startReason = reason
             startTruncated = truncated
             end = sample.observedAt
-            uncertain = !Self.fullyObserved(sample)
-            if ModelVisitHistory.directWork(sample) { directWorkTimes.append(sample.observedAt) }
+            uncertain = !(facts.knownInactive || facts.directWork)
+            if facts.directWork { directWorkTimes.append(sample.observedAt) }
         }
 
-        private static func fullyObserved(_ sample: PerformanceSample) -> Bool {
-            ModelVisitHistory.knownInactive(sample) || ModelVisitHistory.directWork(sample)
-        }
-
-        mutating func add(_ prior: PerformanceSample, _ sample: PerformanceSample) {
-            let unique = ModelVisitHistory.singleResident(prior) && ModelVisitHistory.singleResident(sample)
+        mutating func add(_ priorFacts: ObservationFacts, _ facts: ObservationFacts) {
+            let prior = priorFacts.sample
+            let sample = facts.sample
+            let unique = priorFacts.singleResident && facts.singleResident
             let counters = ModelVisitHistory.counterEvidence(prior, sample)
-            let idle = unique && counters == .zero && ModelVisitHistory.knownInactive(prior)
-                && ModelVisitHistory.knownInactive(sample)
+            let idle = unique && counters == .zero && priorFacts.knownInactive && facts.knownInactive
             intervals.append(Interval(start: prior.observedAt, end: sample.observedAt, idle: idle))
             if unique && counters == .positive {
                 counterWorkIntervals.append(DateInterval(start: prior.observedAt, end: sample.observedAt))
             }
-            if ModelVisitHistory.directWork(sample) { directWorkTimes.append(sample.observedAt) }
-            if !unique || counters == .unknown || !Self.fullyObserved(sample) { uncertain = true }
+            if facts.directWork { directWorkTimes.append(sample.observedAt) }
+            if !unique || counters == .unknown || !(facts.knownInactive || facts.directWork) { uncertain = true }
             last = sample
             end = sample.observedAt
             count += 1
         }
 
-        mutating func addSwitchInterval(_ prior: PerformanceSample, _ sample: PerformanceSample, counters: CounterEvidence) {
-            intervals.append(Interval(start: prior.observedAt, end: sample.observedAt, idle: false))
-            if counters != .zero || !ModelVisitHistory.singleResident(prior) || !ModelVisitHistory.singleResident(sample) {
+        mutating func addSwitchInterval(_ prior: ObservationFacts, _ facts: ObservationFacts, counters: CounterEvidence) {
+            intervals.append(Interval(start: prior.sample.observedAt, end: facts.sample.observedAt, idle: false))
+            if counters != .zero || !prior.singleResident || !facts.singleResident {
                 uncertain = true
             }
         }
 
-        mutating func addEmptySlotBoundary(_ prior: PerformanceSample, _ sample: PerformanceSample) {
-            intervals.append(Interval(start: prior.observedAt, end: sample.observedAt, idle: false))
-            if ModelVisitHistory.counterEvidence(prior, sample) != .zero
-                || !ModelVisitHistory.singleResident(prior) || !ModelVisitHistory.knownInactive(prior) {
+        mutating func addEmptySlotBoundary(_ prior: ObservationFacts, _ facts: ObservationFacts) {
+            intervals.append(Interval(start: prior.sample.observedAt, end: facts.sample.observedAt, idle: false))
+            if ModelVisitHistory.counterEvidence(prior.sample, facts.sample) != .zero
+                || !prior.singleResident || !prior.knownInactive {
                 uncertain = true
             }
         }

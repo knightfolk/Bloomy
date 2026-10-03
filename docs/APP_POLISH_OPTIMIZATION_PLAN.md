@@ -101,9 +101,10 @@ The Provider/Fans/Updates checkpoint adds execution-time idle/beta freshness,
 real finite visible expiry, protected fan submissions until matching readback,
 per-field fan freshness, and historical CLI notices with compact wrapping.
 Native 53, the 1,324-test pass, and release-build evidence are recorded in
-`docs/PROVIDER_FAN_CLI_SETTINGS_REVIEW_20261002.md`. The live provider's separate
-managed-launch cache failure remains unresolved after the authorized scoped
-permission reset; this checkpoint does not complete the full review matrix.
+`docs/PROVIDER_FAN_CLI_SETTINGS_REVIEW_20261002.md`. At that checkpoint the live
+provider's separate managed-launch cache failure remained unresolved after the
+authorized scoped permission reset. October 3's internal-cache migration later
+restored startup; neither checkpoint completes the full review matrix.
 
 The subsequent Chat/Activity/Opportunity/Models review is recorded in
 `docs/CHAT_ACTIVITY_MODELS_NATIVE_REVIEW_20261002.md`. Native failures in rejected
@@ -120,7 +121,7 @@ The two-minute Chat verification-expiry presentation and explicit Refresh path a
 
 Kevin subsequently authorized resuming the provider with its saved settings. Use isolated fixtures for visual states that do not require a real provider, and do not swap or nudge merely to produce visual evidence.
 
-On October 2 Kevin authorized resetting only Darkbloom's removable-drive permission. The `SystemPolicyRemovableVolumes` reset for `io.darkbloom.provider` succeeded, but the saved-settings restart still exited while reading the Sol cache. Its failed service and recovery watcher were stopped; the saved configuration hash remained unchanged. System Settings showed Darkbloom's removable-volume switch on. Diagnose that boundary before another retry; this does not authorize broader privacy resets, Full Disk, or Keychain access. Release publication is held until required native behavior is verified.
+On October 2 Kevin authorized resetting only Darkbloom's removable-drive permission. The `SystemPolicyRemovableVolumes` reset for `io.darkbloom.provider` succeeded, but the saved-settings restart still exited while reading the Sol cache. Its failed service and recovery watcher were stopped; the saved configuration hash remained unchanged. System Settings showed Darkbloom's removable-volume switch on. October 3's verified internal-cache migration and saved-settings restart subsequently resolved that startup boundary. This does not authorize broader privacy resets, Full Disk, or Keychain access. Release publication is held until required native behavior is verified.
 
 - Native91 preserves pending Metrics period and visit keyboard choices through changed measurements, then confirms with Space. Both native pickers share a stable leaf with immutable selection comparisons; 1,427 tests and the final release compile pass. The streaming diagnosis, rejected Native89 and intermediate Native90 are recorded in `docs/METRICS_SCOPE_KEYBOARD_NATIVE_REVIEW_20261002.md`. Broader native and distribution gates remain open.
 
@@ -287,3 +288,14 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   tests and Release compilation pass. Actual allocation limits, whole-app energy,
   deterministic in-scan cancellation and wider native/distribution proof remain
   separate; see `docs/METRICS_DECODED_CACHE_REVIEW_20261003.md`.
+
+- Model visits prepare immutable observation facts once, eliminating repeated
+  validity checks and resident-set allocation without changing result semantics
+  or retaining a history-sized array. Exact-reference tests and five optimized
+  100,000-row fixtures measure 2.89–3.05× component improvement. Native145 checks
+  compact light/wide dark visit pills, the sole 1m 30s no-work visit and restored
+  mixed outcomes. All 1,543 reported tests and Release compilation pass; evidence
+  and limits are in `docs/VISIT_OBSERVATION_FACTS_REVIEW_20261003.md`. Separate
+  AppKit sheet/modal and minimal SwiftUI references reproduce blank alert
+  captures outside Bloomy while normal parent content renders, narrowing the
+  Hosting investigation without inventing a confirmation redesign.

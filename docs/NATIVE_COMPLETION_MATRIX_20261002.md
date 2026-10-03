@@ -141,6 +141,29 @@ Each table's linked shorthand resolves to the exact repository review below.
 
 [HostingKeys]: HOSTING_KEYBOARD_NATIVE_REVIEW_20261002.md
 
+## October 3 Metrics and confirmation follow-up
+
+The Activity — Metrics row also has bounded Native144 decoded-cache lifecycle
+proof: compact light/wide dark, route exit/reopen, Refresh, 30-day selection,
+136-second Hide with continued recording, restoration and brief minimize
+eviction. [DecodedReuse] records the measured storage tradeoff and 1,537 reported
+tests; it does not prove full Metrics/production performance.
+
+Native145 checks the aligned compact light/wide dark visit list, the sole
+1m 30s Bonsai no-work visit and restored mixed outcomes. [VisitFacts] records
+exact-reference semantics, five optimized large-history component comparisons
+and 1,543 reported tests. Long production profiles, actual allocation measurement
+and in-pass cancellation remain separate.
+
+Hosting's blank-alert capture is now reproduced in independent standard AppKit
+sheet/modal and minimal SwiftUI references, while ordinary parent pixels render.
+[HostingKeys] records the comparison. This narrows the investigation beyond the
+Hosting view; rendered confirmation remains unaccepted. Every surface remains
+partial overall.
+
+[DecodedReuse]: METRICS_DECODED_CACHE_REVIEW_20261003.md
+[VisitFacts]: VISIT_OBSERVATION_FACTS_REVIEW_20261003.md
+
 [Earnings]: EARNINGS_KEYBOARD_VALUES_NATIVE_REVIEW_20261002.md
 
 [EarningsReads]: EARNINGS_RETAINED_READ_NATIVE_REVIEW_20261002.md
