@@ -299,3 +299,13 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   AppKit sheet/modal and minimal SwiftUI references reproduce blank alert
   captures outside Bloomy while normal parent content renders, narrowing the
   Hosting investigation without inventing a confirmation redesign.
+
+- Models distinguishes multiple startup choices from No preference, excludes
+  unavailable choices, qualifies startup loading off/default, and separates
+  empty/unavailable/search messages. Native145–149 comparisons repair stale
+  empty-state offsets and a blank rapid-scroll result while retaining lazy model
+  grids and normal Refresh position. Saved inert choices preserve enabled models
+  and the loading policy without lifecycle calls. The final 1,544 reported tests
+  and Release compilation pass; exact provenance and remaining large-catalog,
+  VoiceOver, alias-callback and distribution gates are in
+  `docs/MODEL_STARTUP_STATES_NATIVE_REVIEW_20261003.md`.

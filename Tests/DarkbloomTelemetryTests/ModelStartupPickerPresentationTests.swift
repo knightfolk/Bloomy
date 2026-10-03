@@ -21,6 +21,7 @@ struct ModelStartupPickerPresentationTests {
         let original = try #require(store.draft)
         let mounted = ModelStartupPickerPresentation.make(selection: original.selection, inventory: inventory)
         #expect(mounted.selectedTag == enabled)
+        #expect(mounted.selectedChoice == .model(enabled))
         #expect(store.draft == original)
         mounted.select(enabled, selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft == original)
@@ -62,6 +63,7 @@ struct ModelStartupPickerPresentationTests {
         let picker = ModelStartupPickerPresentation.make(selection: original.selection,
             inventory: kind == "missing-inventory" ? nil : inventory)
         #expect(picker.selectedTag == nil)
+        #expect(picker.selectedChoice == nil)
         picker.select(selection.enabled[0], selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft == original)
         #expect(store.draft?.hasChanges == false)
@@ -81,6 +83,7 @@ struct ModelStartupPickerPresentationTests {
         let original = try #require(store.draft)
         let initial = ModelStartupPickerPresentation.make(selection: original.selection, inventory: inventory)
         #expect(initial.selectedTag == "")
+        #expect(initial.selectedChoice == .noPreference)
         initial.select("", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         initial.select("unlisted", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft == original)
@@ -91,7 +94,7 @@ struct ModelStartupPickerPresentationTests {
         #expect(store.draft == original)
     }
 
-    @Test("multiple preloads retain the warning path and permit explicit clearing")
+    @Test("multiple preloads have their own picker state without rewriting or clearing the draft")
     func multiplePreferenceCanBeCleared() async throws {
         let selection = ProviderModelSelection(enabled: ["first", "second"], preloaded: ["first", "second"])
         let inventory = ModelInventory(myCatalog: [item("first", enabled: "first", preloaded: "first"),
@@ -101,11 +104,54 @@ struct ModelStartupPickerPresentationTests {
         let original = try #require(store.draft)
         let picker = ModelStartupPickerPresentation.make(selection: original.selection, inventory: inventory)
         #expect(picker.selectedTag == "")
+        #expect(picker.selectedChoice == .multiple)
         #expect(store.draft == original)
+        #expect(!picker.select(.multiple, selection: store.draft?.selection,
+            inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel))
+        #expect(store.draft == original)
+        #expect(picker.select(.model("second"), selection: store.draft?.selection,
+            inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel))
+        #expect(store.draft?.selection.preloaded == ["second"])
+        #expect(store.draft?.selection.enabled == selection.enabled)
+        let single = ModelStartupPickerPresentation.make(selection: try #require(store.draft).selection,
+            inventory: inventory)
+        #expect(single.selectedChoice == .model("second"))
         picker.select("", selection: store.draft?.selection, inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel)
         #expect(store.draft?.selection.preloaded.isEmpty == true)
         #expect(store.draft?.selection.enabled == selection.enabled)
         #expect(store.draft?.hasChanges == true)
+    }
+
+    @Test("startup menus offer only downloaded models with unambiguous controls",
+          arguments: [false, true])
+    func invalidOptionsAreNotOffered(preloadMissingModel: Bool) async throws {
+        let selection = ProviderModelSelection(enabled: ["ready", "missing", "issue"],
+            preloaded: preloadMissingModel ? ["missing"] : [])
+        let inventory = ModelInventory(myCatalog: [item("ready", enabled: "ready"),
+            item("issue", enabled: "issue", issue: "Ambiguous selector")],
+            available: [item("missing", enabled: "missing", downloaded: false)], issues: ["Ambiguous selector"])
+        let store = fixtureStore(selection: selection, inventory: inventory)
+        await store.refresh()
+        let original = try #require(store.draft)
+        let picker = ModelStartupPickerPresentation.make(selection: selection, inventory: inventory)
+        #expect(picker.options.map(\.catalogID) == ["ready"])
+        #expect(picker.selectedChoice == (preloadMissingModel ? nil : .noPreference))
+        #expect(!picker.select(.model("missing"), selection: selection, inventory: inventory,
+            using: store.setPreferredStartupModel))
+        #expect(!picker.select(.model("issue"), selection: selection, inventory: inventory,
+            using: store.setPreferredStartupModel))
+        #expect(store.draft == original)
+        if preloadMissingModel {
+            #expect(picker.select(.noPreference, selection: store.draft?.selection,
+                inventory: inventory, using: store.setPreferredStartupModel))
+        }
+        let current = ModelStartupPickerPresentation.make(selection: try #require(store.draft).selection,
+            inventory: inventory)
+        #expect(current.select(.model("ready"), selection: store.draft?.selection,
+            inventory: inventory, using: store.setPreferredStartupModel))
+        #expect(store.draft?.selection.preloaded == ["ready"])
+        #expect(store.draft?.selection.enabled == selection.enabled)
+        #expect(store.draft?.original == original.original)
     }
 
     @Test("duplicate enabled aliases offer one stable canonical model for every preload state",
@@ -284,10 +330,11 @@ struct ModelStartupPickerPresentationTests {
         #expect(store.draft?.selection.preloaded == ["gpt-oss"])
     }
 
-    private func item(_ id: String, enabled: String?, preloaded: String? = nil) -> ModelInventoryItem {
-        .init(catalogID: id, localID: id, displayName: id, modelType: "llm", capabilities: [],
-            sizeGB: 1, minimumRAMGB: 4, isDownloaded: true, isEnabled: enabled != nil,
-            isPreloaded: preloaded != nil, liveState: .unloaded, issue: nil,
+    private func item(_ id: String, enabled: String?, preloaded: String? = nil,
+                      downloaded: Bool = true, issue: String? = nil) -> ModelInventoryItem {
+        .init(catalogID: id, localID: downloaded ? id : nil, displayName: id, modelType: "llm", capabilities: [],
+            sizeGB: 1, minimumRAMGB: 4, isDownloaded: downloaded, isEnabled: enabled != nil,
+            isPreloaded: preloaded != nil, liveState: .unloaded, issue: issue,
             enabledSelector: enabled, preloadSelector: preloaded)
     }
 

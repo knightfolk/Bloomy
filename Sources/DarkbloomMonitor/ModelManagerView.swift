@@ -125,6 +125,12 @@ struct ModelActionPresentation: Equatable {
 /// The picker uses enabled selectors as its tags, but a saved preload can
 /// independently use another alias for that same catalog model.
 struct ModelStartupPickerPresentation: Equatable {
+    enum Choice: Hashable {
+        case noPreference
+        case multiple
+        case model(String)
+    }
+
     struct Option: Identifiable, Equatable {
         let selector: String
         let catalogID: String
@@ -134,6 +140,14 @@ struct ModelStartupPickerPresentation: Equatable {
     let selectedTag: String?
     let options: [Option]
     private let preloadCount: Int
+
+    /// A multiple-model selection has no single selector, but it is not an
+    /// empty preference. Keep that distinction in the native picker's tags.
+    var selectedChoice: Choice? {
+        guard let selectedTag else { return nil }
+        if preloadCount > 1 { return .multiple }
+        return selectedTag.isEmpty ? .noPreference : .model(selectedTag)
+    }
 
     static func make(selection: ProviderModelSelection, inventory: ModelInventory?) -> Self {
         let items = inventory.map { $0.myCatalog + $0.available } ?? []
@@ -148,7 +162,10 @@ struct ModelStartupPickerPresentation: Equatable {
         // Mounting never normalizes or removes raw selectors in the draft.
         var seen = Set<String>()
         let options = selection.enabled.compactMap { selector -> Option? in
-            guard let catalogID = identity(selector), seen.insert(catalogID).inserted else { return nil }
+            guard let catalogID = identity(selector),
+                  let item = items.first(where: { $0.catalogID == catalogID }),
+                  item.isDownloaded, item.issue == nil,
+                  seen.insert(catalogID).inserted else { return nil }
             return Option(selector: selector, catalogID: catalogID)
         }
         guard selection.preloaded.count == 1 else {
@@ -157,6 +174,17 @@ struct ModelStartupPickerPresentation: Equatable {
         let preferred = identity(selection.preloaded[0])
         return Self(selectedTag: options.first { $0.catalogID == preferred }?.selector,
             options: options, preloadCount: 1)
+    }
+
+    @MainActor
+    @discardableResult
+    func select(_ choice: Choice, selection: ProviderModelSelection?, inventory: ModelInventory?,
+                using stage: @MainActor (String?) -> Void) -> Bool {
+        switch choice {
+        case .noPreference: select("", selection: selection, inventory: inventory, using: stage)
+        case .model(let selector): select(selector, selection: selection, inventory: inventory, using: stage)
+        case .multiple: false
+        }
     }
 
     @MainActor
@@ -865,35 +893,51 @@ struct ModelManagerView: View {
                 }
             }
             GeometryReader { geometry in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 18) {
-                        let grouping = presentation.grouping
-                        if store.snapshot == nil && store.operation == .refreshing {
-                            HStack { ProgressView().controlSize(.small); Text("Reading your model catalog…") }
-                                .foregroundStyle(.secondary).padding(.vertical, 20)
-                        } else if grouping.isEmpty {
-                            ContentUnavailableView(search.isEmpty ? "No models here" : "No matching models",
-                                systemImage: "cpu", description: Text(store.snapshot == nil
-                                    ? "Refresh to load the model catalog." : "Try another search."))
-                        } else {
-                            modelGroup(.enabled, items: grouping.enabled,
-                                collapsed: $enabledGroupCollapsed, gridWidth: geometry.size.width,
-                                presentation: presentation)
-                            modelGroup(.available, items: grouping.available,
-                                collapsed: $availableGroupCollapsed, gridWidth: geometry.size.width,
-                                presentation: presentation)
-                        }
-                        capacityGroup
-                        if let issues = store.snapshot?.inventory.issues, !issues.isEmpty {
-                            DisclosureGroup("Catalog notices (\(issues.count))") {
-                                ForEach(issues, id: \.self) { issue in
-                                    Text(store.sanitizedDiagnostic(issue)).font(.callout).foregroundStyle(.orange)
+                ScrollViewReader { reader in
+                    ScrollView {
+                        // Lay out the few section bounds eagerly so a long
+                        // scroll cannot jump beyond an estimated outer height.
+                        // Individual model cards remain lazy inside their grids.
+                        VStack(alignment: .leading, spacing: 18) {
+                            let grouping = presentation.grouping
+                            if store.snapshot == nil && store.operation == .refreshing {
+                                HStack { ProgressView().controlSize(.small); Text("Reading your model catalog…") }
+                                    .foregroundStyle(.secondary).padding(.vertical, 20)
+                            } else if grouping.isEmpty {
+                                ContentUnavailableView(store.snapshot == nil ? "Model catalog unavailable"
+                                    : search.isEmpty ? "No models in the catalog" : "No matching models",
+                                    systemImage: "cpu", description: Text(store.snapshot == nil
+                                        ? "Refresh model controls to load the catalog."
+                                        : search.isEmpty ? "Refresh model controls to check again." : "Try another search."))
+                            } else {
+                                modelGroup(.enabled, items: grouping.enabled,
+                                    collapsed: $enabledGroupCollapsed, gridWidth: geometry.size.width,
+                                    presentation: presentation)
+                                modelGroup(.available, items: grouping.available,
+                                    collapsed: $availableGroupCollapsed, gridWidth: geometry.size.width,
+                                    presentation: presentation)
+                            }
+                            capacityGroup
+                            if let issues = store.snapshot?.inventory.issues, !issues.isEmpty {
+                                DisclosureGroup("Catalog notices (\(issues.count))") {
+                                    ForEach(issues, id: \.self) { issue in
+                                        Text(store.sanitizedDiagnostic(issue)).font(.callout).foregroundStyle(.orange)
+                                    }
                                 }
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.bottom, 8)
+                        .id("models.list.top")
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.bottom, 8)
+                    .onChange(of: search) { _, _ in
+                        reader.scrollTo("models.list.top", anchor: .top)
+                    }
+                    .onChange(of: presentation.grouping.isEmpty) { _, isEmpty in
+                        // Reveal the explanation when the last visible models
+                        // disappear; retain normal model-list scroll positions.
+                        if isEmpty { reader.scrollTo("models.list.top", anchor: .top) }
+                    }
                 }
             }
         }
@@ -1201,20 +1245,25 @@ struct ModelManagerView: View {
                             .font(.headline)
                         let startup = ModelStartupPickerPresentation.make(selection: draft.selection,
                             inventory: store.snapshot?.inventory)
-                        if let selected = startup.selectedTag {
+                        if let selected = startup.selectedChoice {
                             Picker("Start with", selection: Binding(
                                 get: { selected },
                                 set: { startup.select($0, selection: store.draft?.selection,
                                     inventory: store.snapshot?.inventory, using: store.setPreferredStartupModel) }
                             )) {
-                                Text("No preference").tag("")
+                                if selected == .multiple {
+                                    Text("Multiple startup models").tag(ModelStartupPickerPresentation.Choice.multiple)
+                                        .disabled(true)
+                                }
+                                Text("No preference").tag(ModelStartupPickerPresentation.Choice.noPreference)
                                 ForEach(startup.options) { option in
-                                    Text(ModelDisplayName.short(option.catalogID)).tag(option.selector)
+                                    Text(ModelDisplayName.short(option.catalogID)).tag(ModelStartupPickerPresentation.Choice.model(option.selector))
                                         .help(option.catalogID == option.selector ? option.catalogID
                                               : "\(option.catalogID) (\(option.selector))")
                                 }
                             }
                             .labelsHidden()
+                            .accessibilityIdentifier("models.capacity.startupPreference")
                         } else {
                             Text("Startup preference unavailable · refresh model controls")
                                 .font(.callout).foregroundStyle(.secondary)
@@ -1229,7 +1278,11 @@ struct ModelManagerView: View {
                             .accessibilityLabel("Clear startup model preference")
                         }
 
-                        Text("This model loads first after restart. Incoming requests can load other enabled models into the same slot.")
+                        Text(draft.startupPreload == false
+                             ? "Startup loading is off. This saved preference will apply if startup loading is enabled. Incoming requests can still load enabled models."
+                             : draft.startupPreload == nil
+                             ? "The provider's default startup-loading policy applies. This preference chooses which model loads first when startup loading is enabled."
+                             : "This preference chooses which model loads first after restart. Incoming requests can load other enabled models into the same slot.")
                             .font(.callout).foregroundStyle(.secondary)
                         if draft.selection.preloaded.count > 1 {
                             Text("Multiple startup models are selected. Choose one here for a clear preference.")

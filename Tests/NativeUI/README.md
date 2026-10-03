@@ -696,3 +696,18 @@ stage's evidence before saving over it. Inspect the production loading, error,
 empty and recovered report states directly in compact/light and wide/dark.
 A compiled fixture and gate counts alone do not establish rendered behavior,
 keyboard traversal, screen-reader behavior or real-ledger performance.
+
+## Model startup and inventory states
+
+The Scenario picker includes Multiple startup models, Missing startup download,
+Ambiguous startup alias, Startup loading off, Empty model catalog and Unavailable
+model catalog. Use Models → Provider capacity to inspect the real startup controls.
+These scenarios change only fake controller reads; selection, Save, Clear and
+Refresh use the production views/store with inert dependencies.
+
+Data checks → Save model control state writes `fixture-model-control-proof.json`
+in the banner's unique directory. It contains the fake controller's **saved**
+enabled/preload selectors, slot/loading policy and Save/lifecycle call counts;
+it does not capture the pending editor draft. Copy each result before another
+save/scenario overwrites it. See
+`docs/MODEL_STARTUP_STATES_NATIVE_REVIEW_20261003.md` for the comparisons and limits.

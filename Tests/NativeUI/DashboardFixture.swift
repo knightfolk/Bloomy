@@ -12,15 +12,17 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case frozenSettings = "Frozen settings"
     case fanConfirmation = "Fan confirmation"
     case noLANAddresses = "No LAN addresses"
+    case multipleStartup = "Multiple startup models", missingStartupModel = "Missing startup download"
+    case ambiguousStartup = "Ambiguous startup alias", startupLoadingOff = "Startup loading off"
+    case emptyCatalog = "Empty model catalog", unavailableCatalog = "Unavailable model catalog"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
     func availability<T: Equatable & Sendable>(_ value: T, at date: Date) -> SourceAvailability<T> {
         switch self {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses:
-            .available(value: value, capturedAt: date)
         case .stale: .stale(value: value, capturedAt: date, reason: "Synthetic source stopped refreshing")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic source unavailable")
+        default: .available(value: value, capturedAt: date)
         }
     }
 }
@@ -263,7 +265,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
     }
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -430,6 +432,15 @@ private actor FixtureAutopilot {
     func proof() -> [String: Int] { ["synthetic": 1, "enrollmentCount": enrollmentCount, "policyCount": policyCount] }
 }
 
+private struct FixtureModelControlProof: Codable, Sendable {
+    let enabled: [String]
+    let preloaded: [String]
+    let startupPreload: Bool?
+    let maxModelSlots: Int
+    let saveCount: Int
+    let lifecycleCount: Int
+}
+
 private actor FixtureController: ProviderControlling {
     let scenario: FixtureScenario
     let autopilot: FixtureAutopilot
@@ -440,6 +451,12 @@ private actor FixtureController: ProviderControlling {
     var slots = 3
     var startupPreload: Bool? = true
     var concurrent = 4
+    private var saveCount = 0
+    private var lifecycleCount = 0
+    func modelControlProof() -> FixtureModelControlProof {
+        .init(enabled: selection.enabled, preloaded: selection.preloaded, startupPreload: startupPreload,
+            maxModelSlots: slots, saveCount: saveCount, lifecycleCount: lifecycleCount)
+    }
     init(scenario: FixtureScenario, autopilot: FixtureAutopilot) {
         self.scenario = scenario
         self.autopilot = autopilot
@@ -450,6 +467,15 @@ private actor FixtureController: ProviderControlling {
                 preloaded: ["gpt-oss-20b"])
             slots = 1
         }
+        if [.multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff].contains(scenario) {
+            slots = 1
+        }
+        if scenario == .missingStartupModel { selection.preloaded = [FixtureData.modelIDs[0]] }
+        if scenario == .ambiguousStartup { selection.preloaded = ["qwen"] }
+        if scenario == .startupLoadingOff {
+            selection.preloaded = [FixtureData.modelIDs[2]]
+            startupPreload = false
+        }
     }
     func removeGemmaFromInventory() {
         let removed = FixtureData.modelIDs[1]
@@ -458,6 +484,7 @@ private actor FixtureController: ProviderControlling {
         selection.preloaded.removeAll { $0 == removed }
     }
     func refresh() async throws -> ProviderControlSnapshot {
+        if scenario == .unavailableCatalog { throw FixtureError.offline }
         if delayNextRead {
             delayNextRead = false
             // A finite, cancellable inert read makes the production editor's
@@ -471,8 +498,9 @@ private actor FixtureController: ProviderControlling {
         let loadedModelIDs = scenario.hasCurrentRuntime ? Array(FixtureData.modelIDs.prefix(2)).filter { !removedModels.contains($0) } : []
         // Bonsai and Qwen 3 8B are downloaded but neither selected nor resident.
         // Keep the three advertised models and two saved preload models intact.
-        let catalog = FixtureData.catalog.filter { !removedModels.contains($0.id) }
-        let local = catalog.map { LocalModel(id: $0.id, modelType: "text", sizeBytes: Int64($0.sizeGB * 1e9), estimatedMemoryGB: nil) }
+        let catalog = scenario == .emptyCatalog ? [] : FixtureData.catalog.filter { !removedModels.contains($0.id) }
+        let local = catalog.filter { scenario != .missingStartupModel || $0.id != FixtureData.modelIDs[0] }
+            .map { LocalModel(id: $0.id, modelType: "text", sizeBytes: Int64($0.sizeGB * 1e9), estimatedMemoryGB: nil) }
         let runtimeSource: ProviderControlSourceState = scenario.hasCurrentRuntime
             ? .fresh(evidenceAt: now) : scenario == .stale
             ? .stale("Synthetic runtime source stale") : .unavailable("Synthetic source offline")
@@ -488,6 +516,7 @@ private actor FixtureController: ProviderControlling {
             sources: ProviderControlSourceStates(catalog: catalogSource, localModels: catalogSource, daemon: runtimeSource, loadedModels: runtimeSource))
     }
     func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult {
+        saveCount += 1
         selection = draft.selection; slots = draft.maxModelSlots ?? 3; concurrent = draft.engineV2MaxConcurrent ?? 4
         startupPreload = draft.startupPreload
         return ProviderConfigSaveResult(draft: try await refresh().draft, restartRequired: true)
@@ -495,7 +524,7 @@ private actor FixtureController: ProviderControlling {
     func download(_ modelID: String, onOutput: (@Sendable (ProcessOutputChunk) -> Void)?) async throws {}
     func delete(_ localModelID: String) async throws {}
     func activityRisk() async -> ProviderActivityRisk { .idle }
-    func execute(_ action: ProviderLifecycleAction, enabledModels: [String]) async throws {}
+    func execute(_ action: ProviderLifecycleAction, enabledModels: [String]) async throws { lifecycleCount += 1 }
     func performAutopilotEnrollment(hosting: HostingOptions,
         onPhase: ProviderMutationPhaseObserver?) async throws -> ProviderAutopilotEnrollmentCompletion {
         if await autopilot.setupIsBlocked() {
@@ -931,6 +960,12 @@ private final class FixtureModel: ObservableObject {
         guard ready, !isTerminating else { return }
         await controllerClient.removeGemmaFromInventory()
         await control.refreshPreservingDraft()
+    }
+    func saveModelControlProof() async {
+        guard ready, !isTerminating else { return }
+        if let data = try? JSONEncoder().encode(await controllerClient.modelControlProof()) {
+            try? data.write(to: directory.appendingPathComponent("fixture-model-control-proof.json"), options: .atomic)
+        }
     }
     func setAutopilotMode(_ value: FixtureAutopilotMode) async {
         guard ready, !isTerminating else { return }
@@ -2144,6 +2179,7 @@ private struct FixtureReviewView: View {
                         Button("Remove Gemma from model inventory") {
                             Task { await model.removeGemmaFromInventory() }
                         }
+                        Button("Save model control state") { Task { await model.saveModelControlProof() } }
                         Button("Limit model sheet to 360 pt") { model.modelSheetHeightLimit = 360 }
                         Button("Use screen height for model sheet") { model.modelSheetHeightLimit = nil }
                         Button(model.networkExpiryReview ? "End network expiry review" : "Network expiry in 20 seconds") {
