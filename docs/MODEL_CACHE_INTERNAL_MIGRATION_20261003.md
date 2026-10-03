@@ -64,6 +64,7 @@ distribution gates remain open.
 
 Follow-up: `MODEL_CACHE_CLEANUP_20261003.md` records removal of 105.632 GiB of
 byte-identical, unselected legacy `snapshots/local` copies. The selected managed
-revisions remain internal and the external backup is preserved. Local Time
-Machine snapshots still appear to retain the removed bytes; physical space
-reclamation is tracked separately from cache-file removal.
+revisions remain internal and the external backup is preserved. Kevin then
+authorized removing nine local Time Machine snapshots after creating a fresh
+snapshot. The verified result was 131 GiB immediately free, with the provider
+still serving; see the cleanup report for physical space accounting.

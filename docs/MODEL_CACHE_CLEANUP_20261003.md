@@ -76,7 +76,7 @@ proof builds, project source and provenance, DerivedData, simulator data and
 other application state were retained. Bloomy's `.build` is about 15 GiB but
 contains active processes and source/manifest evidence, so it was not swept.
 
-## Space accounting and pending recovery-history approval
+## Space accounting and authorized snapshot cleanup
 
 Deleted bytes are not the same as immediately reclaimed physical storage. `df`
 and `statvfs` still reported about **19 GiB immediately free** after cleanup.
@@ -90,14 +90,24 @@ backup history that macOS can reclaim automatically. Removing a volume snapshot
 also removes intermediate restore points for unrelated files; it cannot remove
 only model bytes from that snapshot.
 
-A concrete plan was prepared to create a fresh snapshot first, preserve the
-00:27 and 01:27 snapshots and network backups, then remove only the nine local
-snapshots from 02:27 through 10:37. **User confirmation is pending; no local
-snapshot or network backup has been removed.** The supplied Friday instructions
-require approval before irreversible deletion of preserved work.
+Kevin then explicitly authorized snapshot removal: “Don’t care about the
+snapshots. I need space.” A fresh local snapshot (`2026-10-03-133546`) was created
+and verified first. All nine planned local snapshots from 02:27 through 10:37
+were then removed with `tmutil deletelocalsnapshots`; each command exited zero.
+The 00:27 and 01:27 snapshots, later 11:37/12:38 snapshots, fresh 13:35 snapshot
+and network backups were retained. No backup settings were changed.
+
+After removal, `statvfs` measured **130.94 GiB immediately free**,
+a gain of **112.78 GiB** from the live pre-removal measurement. `df` agreed,
+reporting 131 GiB free on the Data volume. This is actual released space, not
+just deleted-file totals or estimated purgeable capacity. The larger gain than
+the model-file total includes other blocks held by those same snapshots.
+A fresh daemon observation confirmed the same provider PID (`63387`), seven
+advertised models, warm GPT-OSS and active inference. No provider interruption
+was needed.
 
 Detailed source research, cleanup script, file hashes, unchanged inventories,
-completed-cache records and the pending snapshot plan are retained locally in
+completed-cache records and the completed snapshot plan/results are retained locally in
 `/tmp/bloomy-cache-research-20261003/`. No credentials, prompts or raw provider
 logs were included in the report. This storage work does not finish the broader
 native polish/optimization goal or authorize a release.
