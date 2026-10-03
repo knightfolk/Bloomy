@@ -158,3 +158,18 @@ The full test run passes 1,391 app/telemetry, 21 protocol and 28 host tests
 `/tmp/bloomy-popup-full-keyloop-release-20261002.log`.
 The production app remains PID 61760 with its original October 2 12:55:28 launch.
 This is source/native review evidence; no new distribution build was installed.
+
+## Current-source connection recheck
+
+Native121 matches all 100 current source manifest hashes at `71b0b6f`.
+A fresh light-appearance popup review visibly confirms selected Local only,
+the reported `http://127.0.0.1:8123/v1` URL, no-key requirement and check time.
+Pointer Refresh advances that time from 9:26:37 PM to 9:26:50 PM. Pointer Hosting
+opens the same dashboard's Hosting page, where connection details retain the
+9:26:50 PM report. The initial post-click read still shows Overview; the next
+AX/screenshot pair confirms Hosting, so the initial capture is not destination
+proof. The fixture exits normally. No real endpoint or production app was changed.
+
+This recheck uses the already verified Native121 binary and final source tests;
+it introduces no source changes and makes no new reachability, performance,
+coordinator-rendering or distribution claim.
