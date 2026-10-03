@@ -125,3 +125,12 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   release compilation pass. Standalone/expanded/state-specific key loops,
   VoiceOver, real actions, profiling and distribution remain open. See the
   Provider keyboard review for rejected candidates and exact evidence.
+
+- Native102 reproduced Fans disabling its entire editor during a read-only
+  model refresh. Native103 keeps presets, sliders, disclosures, Discard and
+  readings usable while helper commands wait for the shared mutation gate.
+  Native104 wires popup Cooling to the same gate and verifies live sheet updates.
+  Wide light and compact dark edits survive readback; pointer dragging works
+  during a delayed read, and Reload cancels and joins it. All 1,430 tests and
+  Release compilation pass. The Fan settings review records exact provenance;
+  full keyboard/VoiceOver, real helper actions and distribution remain open.

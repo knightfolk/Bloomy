@@ -2975,6 +2975,41 @@ private extension Optional where Wrapped == String {
 
 
 extension ProviderControlStoreTests {
+    @Test("read-only refresh allows settings drafts but refuses helper writes until it finishes")
+    func extrasGateReadOnlyRefresh() async {
+        let gate = TelemetryRefreshGate()
+        let controller = FakeProviderController.fixture(reconciliationRefreshGate: gate)
+        let control = ProviderControlStore(controller: controller, now: { providerControlTestNow })
+        await control.refresh()
+        await controller.gateSubsequentRefreshes()
+        let read = Task { await control.refreshPreservingDraft() }
+        guard await gate.waitUntilStarted() else {
+            read.cancel()
+            await gate.release()
+            await read.value
+            Issue.record("The inert model read did not suspend")
+            return
+        }
+        let draft = ProviderSettingsDraftState()
+        let called = ExtraMutationCounter()
+        #expect(control.operation == .refreshing)
+        #expect(control.canEditProviderSettings)
+        draft.editFanSpeed(83)
+        draft.editFanTemperature(48)
+        let policy = draft.fanPolicy
+        #expect(!((await control.performSettingsMutation("fan control configure") { await called.record() })))
+        #expect(await called.count == 0)
+        #expect(draft.fanDirty)
+        await gate.release()
+        await read.value
+        #expect(control.operation == .idle)
+        #expect(control.canEditProviderSettings)
+        #expect(draft.fanPolicy == policy)
+        #expect(draft.fanDirty)
+        #expect(await control.performSettingsMutation("fan control configure") { await called.record() })
+        #expect(await called.count == 1)
+    }
+
     @Test("advanced setting writes preserve a dirty model draft and do not dispatch")
     func extrasPreserveDraft() async {
         let control = ProviderControlStore(controller: FakeProviderController.fixture())

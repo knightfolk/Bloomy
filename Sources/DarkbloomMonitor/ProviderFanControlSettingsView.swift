@@ -88,6 +88,7 @@ struct ProviderFanControlSettingsView: View {
     var isVisible: Bool
     var ownsVisibleFanPolling: Bool
     var compactPresentation: Bool
+    let providerActionBusy: Bool
 
     init(
         store: ProviderExtrasStore,
@@ -95,13 +96,15 @@ struct ProviderFanControlSettingsView: View {
         isVisible: Bool = true,
         ownsVisibleFanPolling: Bool = true,
         compactPresentation: Bool = false,
-        draft: ProviderSettingsDraftState? = nil
+        draft: ProviderSettingsDraftState? = nil,
+        providerActionBusy: Bool = false
     ) {
         self.store = store
         self.performMutation = performMutation
         self.isVisible = isVisible
         self.ownsVisibleFanPolling = ownsVisibleFanPolling
         self.compactPresentation = compactPresentation
+        self.providerActionBusy = providerActionBusy
         _draft = StateObject(wrappedValue: draft ?? ProviderSettingsDraftState())
     }
 
@@ -234,7 +237,7 @@ struct ProviderFanControlSettingsView: View {
                         else { stage(.disable) }
                     }
                 ))
-                .disabled(!fresh || !status.supportsOfficialControl || mutationInFlight || store.mutationInFlight)
+                .disabled(!fresh || !status.supportsOfficialControl || helperActionBusy)
                 .accessibilityIdentifier("settings.provider.fan.enabled")
             } else {
                 Text("The helper's on/off status is unavailable. Refresh to try again.")
@@ -262,13 +265,13 @@ struct ProviderFanControlSettingsView: View {
                             Button("Disable…", role: .destructive) {
                                 stage(.disable)
                             }
-                            .disabled(mutationInFlight || store.mutationInFlight)
+                            .disabled(helperActionBusy)
                         }
                         if status.installed {
                             Button("Uninstall Helper…", role: .destructive) {
                                 stage(.uninstall)
                             }
-                            .disabled(mutationInFlight || store.mutationInFlight)
+                            .disabled(helperActionBusy)
                         }
                     }
                     Text("These actions stop this helper and release any fans it controls.")
@@ -437,7 +440,13 @@ struct ProviderFanControlSettingsView: View {
     private var policy: ProviderFanPolicy? { draft.fanPolicy }
 
     private var canSubmitPolicy: Bool {
-        policy != nil && !mutationInFlight && !store.mutationInFlight
+        policy != nil && !helperActionBusy
+    }
+
+    // Read-only provider refreshes do not own the local fan draft. Only
+    // commands must wait for the common provider mutation gate.
+    private var helperActionBusy: Bool {
+        providerActionBusy || mutationInFlight || store.mutationInFlight
     }
 
     private func syncDraft() {
@@ -474,6 +483,7 @@ struct ProviderFanControlSettingsView: View {
     }
 
     private func stage(_ action: FanAction) {
+        guard !helperActionBusy else { return }
         guard store.fanEvidenceIsFresh else {
             feedback = ProviderSettingsEvidenceError.refreshRequired.userMessage
             return
@@ -483,7 +493,7 @@ struct ProviderFanControlSettingsView: View {
     }
 
     private func run(_ action: FanAction) {
-        guard !mutationInFlight, !store.mutationInFlight else { return }
+        guard !helperActionBusy else { return }
         guard store.fanEvidenceIsFresh else {
             feedback = ProviderSettingsEvidenceError.refreshRequired.userMessage
             return

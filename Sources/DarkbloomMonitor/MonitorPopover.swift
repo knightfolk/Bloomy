@@ -578,7 +578,9 @@ struct MonitorPopover: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showsFans) {
             if let extras = store.providerExtras {
-                PopupFanPanel(extras: extras, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling, draft: popupSettingsDraft) { label, mutation in
+                PopupFanPanel(extras: extras, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling,
+                    draft: popupSettingsDraft,
+                    providerActionBusy: controlStore.operation != .idle || !controlStore.canEditProviderSettings) { label, mutation in
                     await controlStore.performSettingsMutation(label, mutation: mutation)
                 }
             }
@@ -1430,6 +1432,7 @@ struct PopupFanPanel: View {
     var isVisible: Bool = true
     var ownsVisibleFanPolling: Bool = true
     var draft: ProviderSettingsDraftState? = nil
+    var providerActionBusy = false
     let performMutation: ProviderExtrasMutationExecutor
     @Environment(\.dismiss) private var dismiss
 
@@ -1441,7 +1444,9 @@ struct PopupFanPanel: View {
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }.padding()
             Form {
-                ProviderFanControlSettingsView(store: extras, performMutation: performMutation, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling, compactPresentation: true, draft: draft)
+                ProviderFanControlSettingsView(store: extras, performMutation: performMutation,
+                    isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling,
+                    compactPresentation: true, draft: draft, providerActionBusy: providerActionBusy)
             }.formStyle(.grouped)
         }
         .frame(width: 560, height: 520)

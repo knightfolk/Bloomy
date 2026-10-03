@@ -138,3 +138,107 @@ The saved configuration SHA-256 remained
 `18c539de187013299d9801e68b79c92922477b37beb5c0aa83220d51e514b229`.
 The smallest useful vendor diagnostic is the underlying cache-open error and a
 read-only access check inside the managed launch context. No message was sent.
+
+## Fans editing during read-only refreshes — Native102/103 follow-up
+
+The enclosing Fans host still disabled all its contents during a model-control
+read. Native102, using the previous production source plus an inert delayed-read
+fixture, reproduced disabled Fan policy/Advanced disclosures and disabled
+readings refresh. A coordinate click could not open Fan policy during the read.
+The baseline was closed normally while its finite read was pending.
+
+The host now passes provider action busy state to the fan component. Local
+presets, sliders, disclosures, Discard and readings refresh remain usable during
+read-only model refreshes. Helper Enable, Save, Disable and Uninstall wait;
+staging and confirmation dispatch repeat that check. Existing evidence freshness,
+draft revision tracking, administrator confirmation and common mutation
+serialization remain. The optional combined Provider view passes the same busy
+state. No production timer, polling frequency or helper command changed.
+
+Native103 used normal NSApplication with production views and inert clients:
+
+- Wide light: Balanced creates an unsaved 75% / 45°C policy. During a delayed
+  model read, Enable and Save are disabled while both native slider accessibility
+  setters accept 83% / 48°C. Completed readback retains that draft and re-enables
+  Save. No helper action was submitted.
+- Compact dark: Cooling remains selectable during another delayed read. A later
+  pointer drag changes the temperature to 56°C. A third delayed read disables
+  Save/Enable while an actual pointer drag changes 56°C to 63°C.
+- Reload during that third read cancels and joins it, returning immediately with
+  the retained unsaved 90% / 63°C draft. Discard restores observed 80% / 65°C,
+  clears the draft and disables Save. The fixture then quits normally; both
+  Native102 and Native103 processes are absent.
+
+Tab/Right attempts did not establish slider keyboard focus, and no complete
+keyboard traversal is claimed. Actual VoiceOver, stale/unsupported/standalone
+loops and real helper/admin behavior remain open. This fixes one interaction
+regression, not the full polish goal or distribution readiness.
+
+The fixture's delay is a cancellable 20-second sleep consumed by the next
+synthetic model read. Reload and termination cancel and await the owned control
+operation. It creates no real provider work or persistent watcher.
+
+The new suspended-read regression verifies local draft eligibility, rejection
+without dispatch during the read, retained fan draft afterward and successful
+dispatch once idle. Focused checks passed **95 tests in 4 suites** in 1.835s.
+The full suite exited 0: **1,430 tests**, comprising 1,381 app/telemetry tests in
+182 suites (22.711s), 21 protocol tests (0.013s) and 28 companion-host tests
+(11.765s). Release compilation exited 0 in 48.38s. Logs:
+`/tmp/bloomy-fan-refresh-focused-20261002.log`,
+`/tmp/bloomy-fan-refresh-full-20261002.log`, and
+`/tmp/bloomy-fan-refresh-release-20261002.log`.
+A separate read-only Sol 6.1 review found no concrete issues; it did not run
+tests or inspect the native app.
+
+Native102 session: `DAAF7630-95C9-460A-B005-854B676F2E94`;
+Native103 session: `7320488C-A6A5-4C48-97B9-C0CB126CC1A5`.
+Their bundles/manifests remain in
+`.build/native-dashboard-fixture-20261002-102/` and `-103/`.
+All 95 Native103 source hashes matched its first reviewed checkout. The later
+popup wiring changes only MonitorPopover from that snapshot; Native104 below
+matches the final source. Native102 differs from Native103 only in the three
+production files repaired here. Native103 executable SHA-256:
+`7a1a347e0fdae53863c14b27793d016ae0999003aedda9b8c60ad69b4b4ca5a1`.
+Linked telemetry SHA-256:
+`0da0aed0eee0f3ace173ccbcbc1b413cc64f7d4f1ec2d78658e059fff593d102`.
+Local fixture signing is review evidence only.
+
+Installed Bloomy remains PID 61760 with unchanged executable SHA-256
+`5d692f240c9548f05350f2fb39d05eb15d00741ad7e9f317e3eeb8507e7c50c7`.
+No installed app replacement, real provider/helper action, credential change,
+inference or release occurred for this follow-up.
+
+### Final popup consistency and source verification — Native104
+
+The popup Cooling panel now receives the same provider action busy state,
+including dirty model drafts/pending confirmations. Its presets/sliders remain
+local; helper buttons reflect the shared action gate rather than appearing
+usable for commands that would be refused. The read-only reviewer found no
+issues in this added wiring; native proof verified actual sheet invalidation.
+
+Native104 opened Cooling during a delayed model read: Enable was disabled,
+Refresh readings and Fan policy disclosure remained usable. After a first local
+Balanced edit, a second delayed read retained the draft across Done/Escape and
+reopening. The native speed setter changed 75% to 82% while Enable and Save were
+disabled. Scrolling revealed the visibly disabled Save beside the dirty draft.
+When the read finished, the same open sheet enabled Save and retained 82% / 45°C.
+Discard restored 80% / 65°C and disabled Save; Done/Escape returned to the
+dashboard, and the app quit normally. No Save or helper command was submitted.
+One stale AX index after a preset change was refreshed before continuing; it
+was not treated as successful slider interaction.
+
+Final source verification repeated the full suite and Release compilation
+after the popup addition. Both exited 0: **1,430 tests** (1,381 app/telemetry in
+21.075s, 21 protocol in 0.014s, 28 companion-host in 11.797s); Release build
+**58.08s**. Final logs are
+`/tmp/bloomy-fan-refresh-full-02-20261002.log` and
+`/tmp/bloomy-fan-refresh-release-02-20261002.log`.
+
+Native104 session: `145E5636-26D4-4ABD-900D-CA009150E5BF`;
+bundle/manifest: `.build/native-dashboard-fixture-20261002-104/`.
+All 95 source hashes match the final checkout. Executable SHA-256:
+`7a1864e6d6795d725e7f2394816b03cb1b6ac67c0f50c88770426260f11af5ed`.
+The telemetry library hash remains the one recorded above. Native103 proves
+the unchanged dashboard editor; Native104 proves the final popup wiring.
+All three fixture processes are absent; protected installed production remains
+unchanged. The full native, real-helper and distribution gates remain open.

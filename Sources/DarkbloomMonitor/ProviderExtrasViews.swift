@@ -473,7 +473,8 @@ struct ProviderAdvancedSettingsView: View {
                 ProviderAutoUpdateSettingsView(store: store, performMutation: performMutation)
             }
             if showsFanControls {
-                ProviderFanControlSettingsView(store: store, performMutation: performMutation, draft: draft)
+                ProviderFanControlSettingsView(store: store, performMutation: performMutation,
+                    draft: draft, providerActionBusy: providerActionBusy)
             }
             if let feedback {
                 Text(feedback)

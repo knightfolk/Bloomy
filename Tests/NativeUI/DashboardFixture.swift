@@ -265,6 +265,8 @@ private actor FixtureController: ProviderControlling {
     let scenario: FixtureScenario
     let autopilot: FixtureAutopilot
     private var removedModels = Set<String>()
+    private var delayNextRead = false
+    func delayNextControlRead() { delayNextRead = true }
     var selection = ProviderModelSelection(enabled: Array(FixtureData.modelIDs.prefix(3)), preloaded: Array(FixtureData.modelIDs.prefix(2)))
     var slots = 3
     var startupPreload: Bool? = true
@@ -287,6 +289,12 @@ private actor FixtureController: ProviderControlling {
         selection.preloaded.removeAll { $0 == removed }
     }
     func refresh() async throws -> ProviderControlSnapshot {
+        if delayNextRead {
+            delayNextRead = false
+            // A finite, cancellable inert read makes the production editor's
+            // busy state observable without touching the real provider.
+            try await Task.sleep(for: .seconds(20))
+        }
         let now = Date()
         // Match ProviderControlService: expired runtime evidence is omitted
         // before building inventory, never retained as current residency.
@@ -766,6 +774,10 @@ private final class FixtureModel: ObservableObject {
         await publishTelemetry(scenario: currentScenario, monitor: currentMonitor, logFeed: logFeed)
         await currentControl.refreshPreservingDraft()
     }
+    func delayNextControlRead() async {
+        guard ready, !isTerminating else { return }
+        await controllerClient.delayNextControlRead()
+    }
     private func publishTelemetry(scenario: FixtureScenario, monitor: MonitorStore, logFeed: FixtureLogFeed) async {
         let generation = loadGeneration
         let previous = telemetryPublicationTask
@@ -890,6 +902,7 @@ private final class FixtureModel: ObservableObject {
     }
     private func prepare(_ requestedScenario: FixtureScenario, generation: Int) async {
         await popup.closeAndWait(resetContent: true)
+        await control.cancelCurrentOperationAndWait()
         guard !Task.isCancelled, generation == loadGeneration else { return }
         let stores = Self.makeStores(requestedScenario, defaults: defaults, directory: directory,
             capacityCapturedAt: networkExpiryReview ? Date().addingTimeInterval(-100) : nil)
@@ -1002,6 +1015,7 @@ private final class FixtureModel: ObservableObject {
         isTerminating = true
         setDashboardVisible(false)
         ready = false
+        await control.cancelCurrentOperationAndWait()
         loadGeneration += 1
         let loading = loadTask
         loading?.cancel()
@@ -1813,6 +1827,10 @@ private struct FixtureReviewView: View {
                     .frame(width: 210)
                     .help("Synthetic popup height budget only; the Mac's screen and preferences stay unchanged.")
                     Menu("Data checks") {
+                        Button("Delay next control read for 20 seconds") {
+                            Task { await model.delayNextControlRead() }
+                        }
+                        .disabled(!model.ready)
                         Menu("Synthetic Autopilot") {
                             ForEach(FixtureAutopilotMode.allCases, id: \.self) { mode in
                                 Button(mode.rawValue) { Task { await model.setAutopilotMode(mode) } }

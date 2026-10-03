@@ -404,9 +404,9 @@ private struct ProviderAdvancedSettingsHost: View {
                     store: extras,
                     performMutation: performMutation,
                     isVisible: isVisible,
-                    draft: draft
+                    draft: draft,
+                    providerActionBusy: control.operation != .idle
                 )
-                .disabled(control.operation == .refreshing)
             default:
                 EmptyView()
             }
