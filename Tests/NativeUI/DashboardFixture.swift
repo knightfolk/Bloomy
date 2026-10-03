@@ -1145,7 +1145,8 @@ private final class FixtureModel: ObservableObject {
                     tokensGenerated: Int64(counterIndex * 300), requestsServed: Int64(counterIndex / 3),
                     gpuUtilizationPercent: Double(35 + index % 45), gpuMemoryGB: 32, powerWatts: 75 + Double(index % 20), autopilotPhase: index % 90 < 8 ? "waiting_inventory" : "shadow"))
             }
-            let reads = try FixtureMetricsReads(url: performanceURL)
+            let reads = try FixtureMetricsReads(url: performanceURL,
+                proofURL: directory.appendingPathComponent("fixture-metrics-read-proof.json"))
             metricsReads = reads
             preparedMonitor.performanceHistory = PerformanceHistoryStore(url: performanceURL,
                 readSamples: { interval in try await reads.samples(in: interval) })
@@ -2184,6 +2185,8 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
     private var statusItem: FixtureStatusItemController?
     private let terminationGate = ApplicationTerminationGate()
     private var terminationRequested = false
+    private var visibilityRecords: [[String: Any]] = []
+    private var visibilityObserver: DashboardVisibilityObserver?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installApplicationMenus()
@@ -2199,6 +2202,11 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
         window.contentMinSize = NSSize(width: 800, height: 560)
         window.center()
         self.window = window
+        visibilityObserver = DashboardVisibilityObserver(window: window) { [weak self] visible in
+            guard let self else { return }
+            self.model.setDashboardVisible(visible)
+            self.recordVisibility("observer.changed")
+        }
         model.presentDashboard = { [weak self] section, settingsPage in
             self?.presentDashboard(section: section, settingsPage: settingsPage)
         }
@@ -2225,6 +2233,9 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
             menu.addItem(item)
         }
         let appMenu = submenu("Bloomy Dashboard Fixture")
+        add("Hide Bloomy Dashboard Fixture", action: #selector(NSApplication.hide(_:)),
+            key: "h", target: application, to: appMenu)
+        appMenu.addItem(.separator())
         add("Quit Bloomy Dashboard Fixture", action: #selector(NSApplication.terminate(_:)),
             key: "q", target: application, to: appMenu)
 
@@ -2270,10 +2281,11 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
         if let settingsPage { model.navigation.settingsPage = settingsPage }
         if let section { model.navigation.selected = section }
         if section != nil || settingsPage != nil { model.navigation.revealSelectedSection() }
+        visibilityObserver?.resetForPresentation()
         window.deminiaturize(nil)
-        model.setDashboardVisible(true)
         NSApplication.shared.activate()
         window.makeKeyAndOrderFront(nil)
+        visibilityObserver?.refreshVisibility()
         model.focusDiagnostics.captureWindowState(window, phase: "window.presented")
     }
 
@@ -2282,15 +2294,30 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
         return false
     }
 
-    // Mirror DashboardWindowController's visibility forwarding. Store.start()
-    // remains unused, so these events cannot start its autonomous collectors.
-    func windowWillClose(_ notification: Notification) { model.setDashboardVisible(false) }
+    // Share production visibility policy. Store.start() remains unused, so
+    // native visibility changes cannot start autonomous collectors.
+    private func recordVisibility(_ phase: String) {
+        guard let window else { return }
+        visibilityRecords.append([
+            "phase": phase, "uptime": ProcessInfo.processInfo.systemUptime,
+            "applicationHidden": NSApplication.shared.isHidden,
+            "windowVisible": window.isVisible, "miniaturized": window.isMiniaturized,
+            "compositorVisible": window.occlusionState.contains(.visible),
+            "displayEnabled": model.monitor.dashboardVisible
+        ])
+        if visibilityRecords.count > 64 { visibilityRecords.removeFirst(visibilityRecords.count - 64) }
+        guard let data = try? JSONSerialization.data(withJSONObject: visibilityRecords, options: [.sortedKeys]) else { return }
+        try? data.write(to: model.directory.appendingPathComponent("dashboard-visibility-proof.json"), options: .atomic)
+    }
+    func applicationDidHide(_ notification: Notification) { recordVisibility("application.hidden") }
+    func applicationDidUnhide(_ notification: Notification) { recordVisibility("application.unhidden") }
+
     func windowDidMiniaturize(_ notification: Notification) {
-        model.setDashboardVisible(false)
+        recordVisibility("window.minimized")
         if let window { model.focusDiagnostics.captureWindowState(window, phase: "window.didMiniaturize") }
     }
     func windowDidDeminiaturize(_ notification: Notification) {
-        model.setDashboardVisible(true)
+        recordVisibility("window.restored")
         if let window { model.focusDiagnostics.captureWindowState(window, phase: "window.didDeminiaturize") }
     }
 

@@ -23,6 +23,7 @@ struct FixtureMetricsReadSnapshot: Codable, Sendable {
 /// display read, never production preferences, telemetry, or provider actions.
 actor FixtureMetricsReads {
     private let database: PerformanceHistoryDatabase
+    private let proofURL: URL?
     private var nextMode = FixtureMetricsReadMode.normal
     private var pending: (id: UInt64, continuation: CheckedContinuation<FixtureMetricsReadMode, Error>)?
     private var started: UInt64 = 0
@@ -33,7 +34,15 @@ actor FixtureMetricsReads {
     private var lastStartedAt: Date?
     private var lastCompletedAt: Date?
 
-    init(url: URL) throws { database = try PerformanceHistoryDatabase(url: url) }
+    init(url: URL, proofURL: URL? = nil) throws {
+        database = try PerformanceHistoryDatabase(url: url)
+        self.proofURL = proofURL
+    }
+
+    private func persistProof() {
+        guard let proofURL, let data = try? JSONEncoder().encode(snapshot()) else { return }
+        try? data.write(to: proofURL, options: .atomic)
+    }
 
     func setNext(_ mode: FixtureMetricsReadMode) { nextMode = mode }
 
@@ -42,6 +51,8 @@ actor FixtureMetricsReads {
         started &+= 1
         let readID = started
         lastStartedAt = Date()
+        persistProof()
+        defer { persistProof() }
         var mode = nextMode
         nextMode = .normal
         do {

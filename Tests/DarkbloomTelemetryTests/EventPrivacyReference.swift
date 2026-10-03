@@ -1,8 +1,10 @@
+// Frozen privacy behavior from 8db49ec for parity and isolated benchmarks.
+import DarkbloomTelemetry
 import Foundation
 
 /// Conservative known-field filtering, not a guarantee about arbitrary prose.
 /// Apply before retention so search, tooltips and accessibility see the same text.
-enum EventPrivacy {
+enum EventPrivacyReference {
     private static let withheld = "[Sensitive log field withheld]"
     private static let homePath = FileManager.default.homeDirectoryForCurrentUser.path
 
@@ -12,41 +14,30 @@ enum EventPrivacy {
                  processID: event.processID, processImage: event.processImage.map(text))
     }
 
-    // Fixed, immutable expressions are safe to share across concurrent reads.
-    // Keep failed compilation optional so filtering retains its fail-closed path.
-    private static let terminalExpressions = [
-        #"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)"#,
-        #"\x1B\[[0-?]*[ -/]*[@-~]"#, #"\x1B[@-_]"#
-    ].map { try? NSRegularExpression(pattern: $0) }
-    private static let sensitiveExpression = try? NSRegularExpression(pattern:
-        #"(?i)\b(?:authorization|bearer|access[_ -]?token|refresh[_ -]?token|auth[_ -]?token|api[_ -]?key|password|secret|provider[_ -]?(?:id|key)|account[_ -]?(?:id|key)|prompt|response|completion|reasoning|messages|request[_ -]?body)\b|\btoken[\"']?\s*[:=]"#)
-    private static let urlExpression = try? NSRegularExpression(pattern:
-        #"(?i)\b[a-z][a-z0-9+.-]*://[^\s<>\"']+"#)
-    private static let userPathExpression = try? NSRegularExpression(pattern:
-        #"/(?:Users|home)/[^/\s]+"#)
-
     private static func text(_ raw: String) -> String {
         var value = raw.precomposedStringWithCanonicalMapping
         // Remove terminal control sequences before checking sensitive field names.
-        for expression in terminalExpressions {
-            value = replacing(expression, in: value, with: "")
+        for pattern in [#"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)"#,
+                        #"\x1B\[[0-?]*[ -/]*[@-~]"#, #"\x1B[@-_]"#] {
+            value = replacing(pattern, in: value, with: "")
         }
         value = String(value.unicodeScalars.filter {
             !CharacterSet.controlCharacters.contains($0) && $0.properties.generalCategory != .format
         })
-        guard let expression = sensitiveExpression else { return withheld }
+        let sensitive = #"(?i)\b(?:authorization|bearer|access[_ -]?token|refresh[_ -]?token|auth[_ -]?token|api[_ -]?key|password|secret|provider[_ -]?(?:id|key)|account[_ -]?(?:id|key)|prompt|response|completion|reasoning|messages|request[_ -]?body)\b|\btoken[\"']?\s*[:=]"#
+        guard let expression = try? NSRegularExpression(pattern: sensitive) else { return withheld }
         if expression.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)) != nil {
             return withheld
         }
-        value = replacing(urlExpression, in: value, with: "[URL withheld]")
+        value = replacing(#"(?i)\b[a-z][a-z0-9+.-]*://[^\s<>\"']+"#, in: value, with: "[URL withheld]")
         if homePath != "/", !homePath.isEmpty {
             value = value.replacingOccurrences(of: homePath, with: "~")
         }
-        return replacing(userPathExpression, in: value, with: "~")
+        return replacing(#"/(?:Users|home)/[^/\s]+"#, in: value, with: "~")
     }
 
-    private static func replacing(_ expression: NSRegularExpression?, in value: String, with replacement: String) -> String {
-        guard let expression else { return withheld }
+    private static func replacing(_ pattern: String, in value: String, with replacement: String) -> String {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return withheld }
         return expression.stringByReplacingMatches(in: value, range: NSRange(value.startIndex..., in: value),
                                                    withTemplate: replacement)
     }

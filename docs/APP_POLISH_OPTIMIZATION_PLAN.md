@@ -250,3 +250,12 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   and Release compilation pass. OS locale notification delivery, VoiceOver and
   broader whole-app profiling/distribution remain open. See
   `docs/LOGS_RETENTION_FORMAT_NATIVE_REVIEW_20261003.md`.
+
+- Native Hide/minimize now stop dashboard display reads without stopping history
+  recording. Six immutable privacy expressions replace per-field compilation;
+  frozen-reference Release tail processing is 4.77–7.15× faster with exact
+  retained-event parity. Native139/141, calibrated finite CPU windows, 1,482
+  reported tests and Release compilation are recorded in
+  `docs/RESOURCE_VISIBILITY_PRIVACY_REVIEW_20261003.md`. Whole-app energy,
+  larger-history profiling, genuine compositor occlusion and broad completion
+  remain open. Custom keyboard controls are not a project priority.

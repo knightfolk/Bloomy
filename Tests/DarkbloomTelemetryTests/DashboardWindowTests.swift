@@ -265,7 +265,9 @@ struct DashboardWindowTests {
         )
         let firstWindow = controller.window
         controller.present(activate: false)
-        #expect(store.dashboardVisible)
+        // An ordered window may still be occluded. Native exposure controls
+        // display work; this test verifies retained window ownership instead.
+        #expect(controller.window?.isVisible == true)
         controller.close()
         #expect(!store.dashboardVisible)
         controller.present(activate: false)

@@ -8,6 +8,7 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
     private let hostingStore: HostingSettingsStore?
     private let frameAutosaveName: String?
     private let unconstrainedContentMaxSize: NSSize
+    private var visibilityObserver: DashboardVisibilityObserver?
     private var isTransitioningFullScreen = false
     let navigation: DashboardNavigation
     let settingsDraft = ProviderSettingsDraftState()
@@ -53,6 +54,9 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
         if let frameAutosaveName { window.setFrameAutosaveName(frameAutosaveName) }
         super.init(window: window)
         window.delegate = self
+        visibilityObserver = DashboardVisibilityObserver(window: window) { [weak store] visible in
+            store?.setDashboardVisible(visible)
+        }
         constrainToVisibleScreen()
     }
 
@@ -63,19 +67,16 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
         if let settingsPage { navigation.settingsPage = settingsPage }
         if let section { navigation.selected = section }
         if hasExplicitRoute { navigation.revealSelectedSection() }
+        visibilityObserver?.resetForPresentation()
         if activate { showWindow(nil) } else { window?.orderBack(nil) }
         window?.deminiaturize(nil)
         constrainToVisibleScreen()
-        store.setDashboardVisible(true)
         if activate {
             NSApplication.shared.activate()
             window?.makeKeyAndOrderFront(nil)
         }
+        visibilityObserver?.refreshVisibility()
     }
-
-    func windowWillClose(_ notification: Notification) { store.setDashboardVisible(false) }
-    func windowDidMiniaturize(_ notification: Notification) { store.setDashboardVisible(false) }
-    func windowDidDeminiaturize(_ notification: Notification) { store.setDashboardVisible(true) }
 
     func windowDidChangeScreen(_ notification: Notification) {
         constrainToVisibleScreen()
