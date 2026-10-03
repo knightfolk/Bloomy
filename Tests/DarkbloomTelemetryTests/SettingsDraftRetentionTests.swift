@@ -176,6 +176,40 @@ struct SettingsDraftRetentionTests {
         #expect(!draft.fanSaveAwaitingConfirmation)
     }
 
+    @Test("unchanged idle field callbacks leave clean state and update protection intact")
+    func unchangedIdleCallback() async throws {
+        let fixture = try SettingsUpdateGuardFixture()
+        defer { fixture.close() }
+        await fixture.extras.refresh()
+        fixture.status.showSettings(page: .provider, activate: false)
+        let dashboard = try #require(fixture.status.dashboardWindowController)
+        let draft = dashboard.settingsDraft
+        draft.syncIdle(from: fixture.extras.snapshot?.idlePolicy)
+        let revision = draft.idleRevision
+        draft.editIdle("30")
+        #expect(draft.idleMinutesText == "30")
+        #expect(!draft.idleDirty)
+        #expect(draft.idleRevision == revision)
+        #expect(!dashboard.hasUnsavedSettingsEdits)
+        #expect(fixture.delegate.canRelaunchForAppUpdate())
+        #expect(await fixture.client.mutationCount == 0)
+        await fixture.monitor.stop()
+    }
+
+    @Test("duplicate callbacks preserve a real edit and its submitted revision")
+    func duplicateIdleCallback() {
+        let draft = ProviderSettingsDraftState()
+        draft.syncIdle(from: idleSource(30))
+        draft.editIdle("45")
+        let revision = draft.idleRevision
+        draft.editIdle("45")
+        #expect(draft.idleDirty)
+        #expect(draft.idleRevision == revision)
+        draft.didSaveIdle(revision: revision, source: idleSource(45))
+        #expect(!draft.idleDirty)
+        #expect(draft.idleMinutesText == "45")
+    }
+
     @Test("a late save result cannot clear edits made after its submission")
     func lateSavePreservesNewerEdits() {
         let draft = ProviderSettingsDraftState()

@@ -15,6 +15,11 @@ struct ProviderAutopilotPresentationTests {
             control: ProviderControlStore(controller: PresentationController(), hostingOptions: { .default }),
             performMutation: { _, _ in false }, isVisible: true, draft: draft)
         #expect(view.enrollmentReason == nil)
+        draft.syncIdle(from: .available(value: ProviderIdlePolicy(idleTimeoutMinutes: 30,
+            policy: "idle_timeout", summary: "Fixture", pinned: false), capturedAt: date))
+        draft.editIdle("30")
+        #expect(!view.hasUnsavedSettings)
+        #expect(view.enrollmentReason == nil)
         draft.editIdle("45")
         #expect(view.hasUnsavedSettings)
         #expect(view.enrollmentReason == "Save or discard your provider settings edits first.")

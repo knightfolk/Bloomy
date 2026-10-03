@@ -582,3 +582,13 @@ All visits → Without work; confirmation removes Show more and Tab reaches the
 recording disclosure directly. Test compact/light and wide/dark layouts.
 Unchanged reads alone do not exercise this regression. Native91 provenance and
 limits are in `docs/METRICS_SCOPE_KEYBOARD_NATIVE_REVIEW_20261002.md`.
+
+### Provider untouched-field regression
+
+In compact light Provider settings, focus the unchanged idle-minutes text and
+press Tab. It must stay clean: Save disabled, no Discard/unsaved warning and
+Autopilot still available. Shift-Tab/type a different value must immediately
+show Save/Discard and protect the real edit; Discard restores the observed
+value. Repeat untouched focus/blur in wide dark. Do not save or use a real key.
+Native92 records this regression and the separate incomplete upper-control key
+entry in `docs/PROVIDER_KEYBOARD_DRAFT_NATIVE_REVIEW_20261002.md`.

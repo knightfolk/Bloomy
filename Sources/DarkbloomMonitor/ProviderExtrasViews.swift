@@ -261,6 +261,9 @@ final class ProviderSettingsDraftState: ObservableObject {
     var hasChanges: Bool { idleDirty || fanDirty }
 
     func editIdle(_ text: String) {
+        // Native text fields can write their existing value when focus moves.
+        // Only a changed buffer is an edit or a new save revision.
+        guard text != idleMinutesText else { return }
         idleMinutesText = text
         idleDirty = true
         idleRevision &+= 1
