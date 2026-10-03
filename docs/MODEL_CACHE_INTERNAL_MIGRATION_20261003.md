@@ -61,3 +61,9 @@ credentials are included in this review.
 This removes the external-cache access boundary for the active setup. The
 broader native polish, large-history optimization, rendering/accessibility and
 distribution gates remain open.
+
+Follow-up: `MODEL_CACHE_CLEANUP_20261003.md` records removal of 105.632 GiB of
+byte-identical, unselected legacy `snapshots/local` copies. The selected managed
+revisions remain internal and the external backup is preserved. Local Time
+Machine snapshots still appear to retain the removed bytes; physical space
+reclamation is tracked separately from cache-file removal.
