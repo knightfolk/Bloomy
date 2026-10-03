@@ -569,5 +569,5 @@ Save read counts writes `fixture-metrics-read-proof.json` in the unique banner
 directory. Counts distinguish starts, completions, failures, cancellations and
 empty results. Copy stage evidence before saving over it. The inert reader has
 no live endpoint, credentials or provider mutations. Final bounded observations
-and the unresolved reverse key loop are in
+and the subsequent native focus-section repair are in
 `docs/METRICS_SCOPE_KEYBOARD_NATIVE_REVIEW_20261002.md`.

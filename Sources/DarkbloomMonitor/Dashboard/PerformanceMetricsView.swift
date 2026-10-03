@@ -232,6 +232,7 @@ struct PerformanceMetricsContent: View {
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
+                .focusSection()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .scrollIndicators(.automatic)

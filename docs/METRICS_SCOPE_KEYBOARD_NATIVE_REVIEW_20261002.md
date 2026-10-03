@@ -100,3 +100,71 @@ No real enrollment, policy change, inference, nudge, swap, download, credential,
 privacy operation, installed-app replacement or release was performed.
 Reverse keyboard traversal, actual VoiceOver, other displays, long production
 history/performance and the broader native/distribution gates remain open.
+
+## Reverse-keyboard follow-up — Native88
+
+The reverse-traversal finding above is repaired in the subsequent source
+checkpoint. A single `.focusSection()` on Metrics' eager content VStack groups
+its native controls for sequential navigation. The existing reveal callback
+could only scroll a control after it received focus; it could not correct a
+reverse sequence that skipped the control entirely. The Activity selector is
+outside that content as a sibling. Independent read-only hierarchy review
+confirmed there was no lazy creation, hidden parallel page or competing nested
+control behind this case. Apple's documented
+[focus-section behavior](https://developer.apple.com/documentation/swiftui/view/focussection%28%29)
+supports the native grouping; actual inspection establishes the result here.
+No custom key handler, extra focusable wrapper, polling or focus trap was added.
+
+**Native88**, session `4069A0CD-E952-478B-A0B4-41825D72A486`, uses the same final
+Metrics source plus that one modifier. Actual compact dark Tab reaches period,
+model, Refresh, visit filter, Show more and recording disclosure. Shift-Tab now
+returns through those controls in reverse, moving the viewport to reveal each
+focused section, then exits to the Activity selector from period. Repeating
+after Space expands recording details still returns to Show more and filter.
+Screenshots show complete centered filter/Show more focus rings.
+
+After pausing synthetic publications, native Right/Space selects Without work,
+removing Show more. Tab reaches recording details directly; Shift-Tab returns
+to Without work with its complete focus ring visible. Wide light repeats the
+filtered path and full All visits reverse sequence. Left/Space restores All
+visits; Right/Space on the period picker selects seven days and produces the
+correct seven-day coverage, then Tab reaches the model picker.
+
+The initial streaming arrow/Space attempt did not change the visit selection;
+the isolated repeat after pausing publications did. Full forward/reverse
+traversal succeeded with publications running, but preserving an in-progress
+segment choice across later publications remains a focused follow-up. This
+does not claim sustained update/composition/VoiceOver coverage.
+
+The opt-in read-only native focus trace saved 25 records for 12 real navigation
+keys. It consumes or synthesizes no events. The final read counts are 11 starts,
+11 completions, zero failures/cancellations/empty reads and no held read. Both
+files are preserved beside `.build/native-dashboard-fixture-20261002-88/fixture-manifest.json`.
+All **94** source hashes match. Executable SHA-256:
+`eac9fb8dee8214ebdda0bafb915368421855761ab2dea124dc9169e343b753cc`.
+The telemetry library hash is unchanged from Native87. The fixture was quit
+normally; its process was absent afterward. Production/provider PIDs, launch
+times and installed executable hash remain unchanged.
+
+The final source passes **1,425 tests** again: 1,376/181 suites in 20.155s,
+21/five suites in 0.013s and 28/nine suites in 11.718s, exit 0. Final release
+compilation exits 0 in 38.68s. Logs:
+`/tmp/bloomy-metrics-keyboard-20261002-full-01.log` and
+`/tmp/bloomy-metrics-keyboard-20261002-release-01.log`.
+This native regression is the meaningful proof for the one-line focus policy;
+no unit test that merely checks presence of the modifier was added.
+
+### Repeatable native regression
+
+1. Build a fresh isolated fixture from the current source; choose Activity →
+   Metrics, dark and 800 × 560. Keep the installed app untouched.
+2. Tab from the Activity selector through period, model, Refresh, filter, Show
+   more and disclosure. Each focused control must be wholly visible.
+3. Shift-Tab through exactly the reverse sequence. Repeat with disclosure
+   expanded. Period's previous control must be the Activity selector.
+4. Pause synthetic publications. Select Without work with native Right/Space;
+   Show more must disappear. Test filter ↔ disclosure in both directions.
+5. Repeat in wide light; restore All visits with Left/Space. Verify period
+   Right/Space and model Tab remain native and that no provider action occurs.
+6. Save bounded diagnostics, quit normally and verify process absence without
+   observing the closed app binding. Retain the exact source manifest.
