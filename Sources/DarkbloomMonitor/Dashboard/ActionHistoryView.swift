@@ -34,44 +34,12 @@ struct ActionHistoryView: View {
                     if presentation.events.isEmpty {
                         emptyState
                     } else {
-                        Table(presentation.events, selection: $selectedID) {
-                            TableColumn("Time") { event in
-                                Text(event.occurredAt, format: .dateTime.month().day().hour().minute())
-                                    .monospacedDigit()
-                                    .lineLimit(1)
-                                    .help(event.occurredAt.formatted(date: .complete, time: .complete))
-                            }
-                            .width(min: 112, ideal: 145)
-
-                            TableColumn("Action") { event in
-                                Text(Self.actionLabel(event))
-                                    .lineLimit(1)
-                                    .help(Self.actionLabel(event))
-                            }
-                            .width(min: 100, ideal: 135)
-
-                            TableColumn("Trigger") { event in
-                                Text(Self.titleCase(event.trigger.rawValue))
-                                    .lineLimit(1)
-                            }
-                            .width(min: 72, ideal: 100)
-
-                            TableColumn("Result") { event in
-                                Label(Self.titleCase(event.outcome.rawValue), systemImage: Self.outcomeSymbol(event.outcome.rawValue))
-                                    .foregroundStyle(Self.outcomeColor(event.outcome.rawValue))
-                                    .lineLimit(1)
-                                    .help(Self.titleCase(event.outcome.rawValue))
-                            }
-                            .width(min: 94, ideal: 118)
-
-                            TableColumn("Model") { event in
-                                Text(Self.modelLabel(event))
-                                    .lineLimit(1)
-                                    .help(event.model ?? "No model recorded")
-                            }
-                            .width(min: 110, ideal: 190)
+                        GeometryReader { geometry in
+                            historyTable(presentation.events, width: geometry.size.width)
                         }
-                        .frame(minHeight: 180, idealHeight: 300, maxHeight: 320)
+                        // Reserve a header and comfortable native rows, while
+                        // keeping short search results close to their details.
+                        .frame(height: max(72, min(320, 40 + CGFloat(min(presentation.events.count, 10)) * 28)))
                         .accessibilityLabel("Action and job history")
 
                         if let selectedEvent = presentation.selectedEvent {
@@ -95,6 +63,59 @@ struct ActionHistoryView: View {
         .onChange(of: store.events.map(\.id)) { _, ids in
             if let selectedID, !ids.contains(selectedID) { self.selectedID = nil }
         }
+    }
+
+    @ViewBuilder
+    private func historyTable(_ events: [ActionHistoryEvent], width: CGFloat) -> some View {
+        // Keep the model in view at the dashboard's compact width. Trigger is
+        // still available in selected-entry details. Separate builders support
+        // macOS 14.0, before conditional table columns became available.
+        if width < 700 {
+            Table(events, selection: $selectedID) {
+                timeColumn(compact: true)
+                actionColumn(compact: true)
+                resultColumn(compact: true)
+                modelColumn(compact: true)
+            }
+        } else {
+            Table(events, selection: $selectedID) {
+                timeColumn(compact: false)
+                actionColumn(compact: false)
+                TableColumn("Trigger") { event in
+                    Text(Self.titleCase(event.trigger.rawValue)).lineLimit(1)
+                }.width(min: 72, ideal: 100)
+                resultColumn(compact: false)
+                modelColumn(compact: false)
+            }
+        }
+    }
+
+    private func timeColumn(compact: Bool) -> some TableColumnContent<ActionHistoryEvent, Never> {
+        TableColumn("Time") { (event: ActionHistoryEvent) in
+            Text(event.occurredAt, format: .dateTime.month().day().hour().minute())
+                .monospacedDigit().lineLimit(1)
+                .help(event.occurredAt.formatted(date: .complete, time: .complete))
+        }.width(min: compact ? 116 : 112, ideal: compact ? 124 : 145, max: compact ? 128 : .infinity)
+    }
+
+    private func actionColumn(compact: Bool) -> some TableColumnContent<ActionHistoryEvent, Never> {
+        TableColumn("Action") { (event: ActionHistoryEvent) in
+            Text(Self.actionLabel(event)).lineLimit(1).help(Self.actionLabel(event))
+        }.width(min: compact ? 68 : 100, ideal: compact ? 76 : 135, max: compact ? 82 : .infinity)
+    }
+
+    private func resultColumn(compact: Bool) -> some TableColumnContent<ActionHistoryEvent, Never> {
+        TableColumn("Result") { (event: ActionHistoryEvent) in
+            Label(Self.titleCase(event.outcome.rawValue), systemImage: Self.outcomeSymbol(event.outcome.rawValue))
+                .foregroundStyle(Self.outcomeColor(event.outcome.rawValue)).lineLimit(1)
+                .help(Self.titleCase(event.outcome.rawValue))
+        }.width(min: compact ? 92 : 94, ideal: compact ? 100 : 118, max: compact ? 106 : .infinity)
+    }
+
+    private func modelColumn(compact: Bool) -> some TableColumnContent<ActionHistoryEvent, Never> {
+        TableColumn("Model") { (event: ActionHistoryEvent) in
+            Text(Self.modelLabel(event)).lineLimit(1).help(event.model ?? "No model recorded")
+        }.width(min: compact ? 100 : 110, ideal: compact ? 136 : 190, max: compact ? 150 : .infinity)
     }
 
     private var header: some View {

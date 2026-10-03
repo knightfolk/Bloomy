@@ -237,3 +237,18 @@ saved-edit confirmation is pending for restart and comparable profiling.
 Every broader surface remains partial overall.
 
 [Release142]: RELEASE_1_9_17_VERIFICATION_20261003.md
+
+## October 3 Action History recording and compact layout
+
+Native168 verifies a synthetic 5,000-entry mixed history at compact light/dark
+and wide light/dark, Model visibility, full older timestamps, short-result
+height, exact six-digit earnings, selected earning preservation through resize
+and Refresh, and clearing details during filter/search changes. The database
+benchmark compares every retained field/order through replay, corrections, new
+rows and expiry; separate-connection retention is covered. Final 1,579 reported
+tests with seven opt-in skips and Release compilation pass. [HistoryRecording]
+Spoken VoiceOver, other locales/displays, real selected-entry arrivals, installed
+CPU/energy comparison and the broader surface matrix remain open. This source
+postdates released build 142; the production app/provider were preserved.
+
+[HistoryRecording]: ACTION_RECORDING_COMPACT_HISTORY_REVIEW_20261003.md

@@ -46,6 +46,40 @@ struct ActionHistoryViewTests {
         #expect(rect.maxY <= host.view.bounds.maxY + 1)
     }
 
+    @Test("the model column is visible without horizontal scrolling at compact and wide sizes",
+          arguments: [NSSize(width: 800, height: 560), NSSize(width: 1280, height: 900)])
+    func modelColumnFits(size: NSSize) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("history-columns-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ActionHistoryStore(url: directory.appendingPathComponent("actions.sqlite3"))
+        store.record(action: .swap, trigger: .manual, outcome: .succeeded,
+                     model: "gemma-4-26b-qat-4bit", reason: .completed)
+        let host = NSHostingController(rootView: NavigationSplitView {
+            List { Text("Action History") }.navigationSplitViewColumnWidth(210)
+        } detail: {
+            ActionHistoryView(store: store)
+        })
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(size)
+        window.orderBack(nil)
+        defer { window.close() }
+        try await Task.sleep(for: .milliseconds(250))
+        host.view.layoutSubtreeIfNeeded()
+        let table = try #require(historySubviews(host.view).compactMap { $0 as? NSTableView }.first)
+        let modelIndex = try #require(table.tableColumns.firstIndex { $0.title == "Model" })
+        let clip = try #require(table.enclosingScrollView?.contentView)
+        let visible = clip.convert(clip.bounds, to: host.view)
+        let model = table.convert(table.rect(ofColumn: modelIndex), to: host.view)
+        #expect(model.minX >= visible.minX - 1)
+        #expect(model.maxX <= visible.maxX + 1)
+        // A one-entry result must not leave hundreds of points of empty rows
+        // ahead of its details. Keep enough room for the native header and row.
+        let tableScroll = try #require(table.enclosingScrollView)
+        #expect(tableScroll.bounds.height <= 120)
+        #expect(clip.bounds.height >= table.rowHeight)
+    }
+
     @Test("account actions, skipped nudges, jobs, and rewards fit a 900 by 650 window")
     func renderHistory() async throws {
         let directory = FileManager.default.temporaryDirectory

@@ -280,8 +280,9 @@ public final class ActionHistoryDatabase: @unchecked Sendable {
         guard Self.isValidTimestamp(time.timeIntervalSince1970) else {
             throw ActionHistoryDatabaseError.unavailable
         }
-        // Select only rows to remove. Building a set of every retained UUID
-        // for each replayed earning makes bounded history unnecessarily costly.
+        // Select only rows to remove. COUNT avoids walking retained rows when
+        // replayed earnings leave the journal within its limit. Read the count
+        // from SQLite so other connections cannot invalidate a cached total.
         // One statement preserves atomic age/count retention and rowid tie order.
         let statement = try prepare("""
             DELETE FROM action_history WHERE rowid IN (
@@ -289,7 +290,8 @@ public final class ActionHistoryDatabase: @unchecked Sendable {
                 UNION ALL
                 SELECT rowid FROM (
                     SELECT rowid FROM action_history
-                    ORDER BY occurred_at DESC, rowid DESC LIMIT -1 OFFSET ?
+                    ORDER BY occurred_at ASC, rowid ASC
+                    LIMIT MAX((SELECT COUNT(*) FROM action_history) - ?, 0)
                 )
             )
             """)

@@ -9,6 +9,16 @@ native, accessibility, performance or production integration review below.
 
 The ongoing goal is a consistent, polished native Mac app with minimal background cost. A verified release checkpoint does not establish that every screen or state has completed review.
 
+October 3 Action History checkpoint: compact columns retain Model and complete
+timestamps; short search results keep details close. Native168 verifies mixed
+5,000-entry history, precise amounts, resize/Refresh selection and filter recovery.
+Actual public-API recording with isolated synthetic databases is 35–48× faster
+than build 142 across four measured workloads, with exact retained-field/order
+parity. Final 1,579 reported tests (seven opt-in skips) and Release compilation
+pass. See `ACTION_RECORDING_COMPACT_HISTORY_REVIEW_20261003.md`; installed app
+profiling, distribution of this later source and the broader native matrix remain
+open.
+
 The [native completion matrix](NATIVE_COMPLETION_MATRIX_20261002.md) indexes all
 22 surfaces, distinguishing bounded coverage and each remaining proof gap.
 

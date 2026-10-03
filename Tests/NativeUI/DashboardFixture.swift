@@ -16,6 +16,7 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case ambiguousStartup = "Ambiguous startup alias", startupLoadingOff = "Startup loading off"
     case emptyCatalog = "Empty model catalog", unavailableCatalog = "Unavailable model catalog"
     case healthLongMixed = "Health long mixed", healthLongMissing = "Health long missing"
+    case largeActionHistory = "5,000 action records"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
@@ -46,6 +47,27 @@ private enum FixtureData {
         "Synthetic \(source) diagnostic: the review source did not complete its expected read. Retained capture time describes the last observation and cannot confirm current provider health.\n\nThis second paragraph is review-only recovery guidance. No real permissions, model files, settings or provider processes have changed. End of \(source) diagnostic."
     }
     static let modelIDs = ["qwen3.8-27b", "gemma-4-26b-qat-4bit", "gpt-oss-20b", "ternary-bonsai-2-27b"]
+    static func seedLargeActionHistory(at url: URL) throws {
+        let database = try ActionHistoryDatabase(url: url)
+        guard try database.retainedRecordCount() == 0 else { return }
+        let captured = Date()
+        for index in 0..<5_000 {
+            let occurred = captured.addingTimeInterval(-Double(5_000 - index) * 60)
+            let kind = index % 5
+            let job = kind >= 2
+            let model = kind == 2 ? "base_reward" : kind == 3 ? longModelID : modelIDs[index % 3]
+            try database.record(.init(
+                id: ActionHistoryEvent.deterministicID(namespace: "large-fixture", key: String(index)),
+                occurredAt: occurred,
+                action: kind == 0 ? .swap : kind == 1 ? .nudge : kind == 2 ? .baseReward : .job,
+                trigger: job ? .provider : kind == 1 ? .automatic : .manual,
+                outcome: kind == 1 ? .skipped : kind == 0 && index.isMultiple(of: 7) ? .failed : .succeeded,
+                model: model,
+                reason: job ? nil : kind == 1 ? .providerBusy : index.isMultiple(of: 7) ? .notConfirmed : .completed,
+                job: job ? .init(earningID: Int64(10_000 + index), promptTokens: kind == 2 ? 0 : 120,
+                                 completionTokens: kind == 2 ? 0 : 40, amountMicroUSD: Int64(index % 200 + 1)) : nil))
+        }
+    }
     static let catalog = [
         CatalogModel(id: modelIDs[0], displayName: "Qwen 3.8 27B", family: "qwen", modelType: "text", capabilities: ["chat", "tools"], sizeGB: 16.3, minimumRAMGB: 36, active: true),
         CatalogModel(id: modelIDs[1], displayName: "Gemma 4 26B", family: "gemma", modelType: "text", capabilities: ["chat"], sizeGB: 15.6, minimumRAMGB: 32, active: true),
@@ -338,7 +360,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
     }
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .largeActionHistory:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -1371,7 +1393,11 @@ private final class FixtureModel: ObservableObject {
             preparedMonitor.performanceHistory = PerformanceHistoryStore(url: performanceURL,
                 readSamples: { interval in try await reads.samples(in: interval) },
                 clearReadCache: { await reads.clearReadCache() })
-            let history = ActionHistoryStore(url: directory.appendingPathComponent("actions-\(requestedScenario.id).sqlite"))
+            let actionHistoryURL = directory.appendingPathComponent("actions-\(requestedScenario.id).sqlite")
+            if requestedScenario == .largeActionHistory {
+                try FixtureData.seedLargeActionHistory(at: actionHistoryURL)
+            }
+            let history = ActionHistoryStore(url: actionHistoryURL)
             if history.events.isEmpty {
                 for index in 0..<48 {
                     history.record(action: index % 3 == 0 ? .swap : .saveSettings, trigger: .manual,

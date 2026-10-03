@@ -225,6 +225,30 @@ struct ActionHistoryDatabaseTests {
         #expect(try database.recent() == [fourth, third, second])
     }
 
+    @Test("retention counts rows added through another connection without reopening")
+    func concurrentConnectionDoesNotInvalidateRetentionCount() throws {
+        let url = temporaryDatabaseURL()
+        let database = try makeDatabase(url: url, historyLimit: 3)
+        for index in 0..<3 {
+            try database.record(event(at: fixedNow.addingTimeInterval(Double(index - 3)), key: "initial-\(index)"))
+        }
+        #expect(try database.retainedRecordCount() == 3)
+        let imported = (0..<2).map { event(at: fixedNow.addingTimeInterval(Double($0)), key: "imported-\($0)") }
+        var raw: OpaquePointer?
+        #expect(sqlite3_open(url.path, &raw) == SQLITE_OK)
+        guard let raw else { return }
+        defer { sqlite3_close(raw) }
+        for row in imported {
+            let timestamp = row.occurredAt.timeIntervalSince1970
+            #expect(sqlite3_exec(raw, """
+                INSERT INTO action_history (id, occurred_at, updated_at, action, trigger, outcome)
+                VALUES ('\(row.id.uuidString)', \(timestamp), \(timestamp), 'watcher', 'system', 'succeeded')
+                """, nil, nil, nil) == SQLITE_OK)
+        }
+        #expect(try database.recent() == [imported[1], imported[0], event(at: fixedNow.addingTimeInterval(-1), key: "initial-2")])
+        #expect(try database.retainedRecordCount() == 3)
+    }
+
     @Test("bad files and malformed event data fail visibly")
     func errorsAreVisible() throws {
         let corruptURL = temporaryDatabaseURL()

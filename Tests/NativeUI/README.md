@@ -1,5 +1,17 @@
 # Native export fixture
 
+## Large Action History
+
+Choose **5,000 action records** in the isolated dashboard Scenario picker. It
+seeds only the fixture's private SQLite journal with synthetic swaps, skipped
+nudges, jobs and base rewards. Search earning `10204` for an older timestamp or
+`14998` for a long model ID and exact `$0.000199` amount. Check compact/wide and
+light/dark, selected details through resize/Refresh, and All/Actions/Jobs filters.
+Short result tables should leave their details close by; the Model column stays
+visible at compact width. No provider command, real account read or key write
+is needed. Quit the fixture normally when finished. See
+`docs/ACTION_RECORDING_COMPACT_HISTORY_REVIEW_20261003.md` for evidence and limits.
+
 ## Long Health diagnostics
 
 The dashboard Scenario picker includes **Health long mixed** (retained daemon
