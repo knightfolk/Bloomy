@@ -291,6 +291,46 @@ struct ActivityChartDataTests {
         #expect(segments[1].endUSD == 0.13)
     }
 
+    @Test("totals-only selected model keeps the same identity in stacked bars and other charts")
+    func selectedTotalsKeepIdentity() {
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 3_600), duration: 3_600)
+        let total = bucket(interval, work: 125_000, reward: 5_000)
+        let model = "qwen3.8-27b"
+        let values = ActivityChartData.values(buckets: [total], models: [model],
+            modelWorkByBucket: [:], selectedModel: model)
+        let segments = ActivityChartData.segments(buckets: [total], models: [model],
+            modelWorkByBucket: [:], selectedModel: model)
+        #expect(segments.map(\.series) == values.map(\.series))
+        #expect(segments.map(\.series) == [model])
+        #expect(segments.first?.startUSD == 0)
+        #expect(segments.first?.endUSD == values.first?.amountUSD)
+        #expect(!segments.contains { $0.series == "Base rewards" })
+    }
+
+    @Test("explicit model zero cannot become a positive fallback bar")
+    func selectedRecordedZeroIsNotAbsence() {
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 3_600), duration: 3_600)
+        let total = bucket(interval, work: 125_000)
+        let model = "qwen3.8-27b"
+        let attribution = [interval.start: [model: Int64(0)]]
+        let values = ActivityChartData.values(buckets: [total], models: [model],
+            modelWorkByBucket: attribution, selectedModel: model)
+        let segments = ActivityChartData.segments(buckets: [total], models: [model],
+            modelWorkByBucket: attribution, selectedModel: model)
+        #expect(values.first?.amountUSD == 0)
+        #expect(segments.isEmpty)
+    }
+
+    @Test("a retained model missing from the period list still has its explicit color domain")
+    func retainedModelColorDomain() {
+        let models = ["gemma-4-26b", "gpt-oss-20b"]
+        let selected = "qwen3.8-27b"
+        #expect(ActivityChartData.colorScaleDomain(models: models, selectedModel: selected)
+                == models + [selected, "Work", "Base rewards"])
+        #expect(ActivityChartData.colorScaleDomain(models: models, selectedModel: models[0])
+                == ActivityChartData.colorScaleDomain(models: models))
+    }
+
     @Test("currency axis rounds up to readable increments")
     func currencyAxis() {
         let small = ActivityChartAxis.yAxis(maximum: 0.17)

@@ -99,9 +99,10 @@ enum ActivityChartData {
             intervalValues.allSatisfy { $0.amountUSD == 0 } ? intervalValues.first : nil
         }.sorted { $0.interval.start < $1.interval.start }
     }
-    static func colorScaleDomain(models: [String]) -> [String] {
+    static func colorScaleDomain(models: [String], selectedModel: String? = nil) -> [String] {
         var seen = Set<String>()
-        return (models + ["Work", "Base rewards"]).filter { seen.insert($0).inserted }
+        return (models + (selectedModel.map { [$0] } ?? []) + ["Work", "Base rewards"])
+            .filter { seen.insert($0).inserted }
     }
 
     static func values(
@@ -192,18 +193,48 @@ enum ActivityChartData {
         let points = hourly.filter {
             $0.profitUSD.isFinite && (selectedModel == nil || $0.model == selectedModel)
         }
+        guard !points.isEmpty, !buckets.isEmpty else { return [] }
+        var aggregates = Array(repeating: [String: ProfitMean](), count: buckets.count)
+        // Calendar buckets are ordered and disjoint. Positive-length records
+        // can belong to at most one bucket, found without scanning the history
+        // again for every bucket. Retain generic containment for custom clients.
+        let ordered = buckets.enumerated().allSatisfy { index, bucket in
+            bucket.interval.duration > 0 && bucket.interval.start.timeIntervalSince1970.isFinite
+                && bucket.interval.end.timeIntervalSince1970.isFinite
+                && (index == 0 || buckets[index - 1].interval.end <= bucket.interval.start)
+        }
+        let positiveRecords = points.allSatisfy { $0.interval.duration > 0 }
+        for point in points {
+            if ordered && positiveRecords {
+                var lower = 0
+                var upper = buckets.count
+                while lower < upper {
+                    let middle = lower + (upper - lower) / 2
+                    if buckets[middle].interval.end < point.interval.end { lower = middle + 1 }
+                    else { upper = middle }
+                }
+                if lower < buckets.count,
+                   point.interval.start >= buckets[lower].interval.start,
+                   point.interval.end <= buckets[lower].interval.end {
+                    aggregates[lower][point.model, default: ProfitMean()].record(point.profitUSD)
+                }
+            } else {
+                // Zero-length observations can match both sides of an edge;
+                // overlapping, duplicate or unordered buckets may match many.
+                for index in buckets.indices where point.interval.start >= buckets[index].interval.start
+                    && point.interval.end <= buckets[index].interval.end {
+                    aggregates[index][point.model, default: ProfitMean()].record(point.profitUSD)
+                }
+            }
+        }
         var lastBucketIndex: [String: Int] = [:]
         var runBySeries: [String: Int] = [:]
         var result: [ActivityChartValue] = []
 
         for (bucketIndex, bucket) in buckets.enumerated() {
-            let inBucket = points.filter {
-                $0.interval.start >= bucket.interval.start && $0.interval.end <= bucket.interval.end
-            }
-            let byModel = Dictionary(grouping: inBucket, by: \.model)
-            for model in byModel.keys.sorted() {
-                guard let values = byModel[model], !values.isEmpty else { continue }
-                let amount = values.reduce(0) { $0 + $1.profitUSD } / Double(values.count)
+            for model in aggregates[bucketIndex].keys.sorted() {
+                guard let mean = aggregates[bucketIndex][model] else { continue }
+                let amount = mean.sum / Double(mean.count)
                 guard amount.isFinite else { continue }
                 let run: Int
                 if let previous = lastBucketIndex[model] {
@@ -222,6 +253,18 @@ enum ActivityChartData {
             }
         }
         return result
+    }
+
+    private struct ProfitMean {
+        var sum = 0.0
+        var count = 0
+
+        mutating func record(_ amount: Double) {
+            // Visit records in original order: floating-point addition and
+            // duplicate weighting must match the previous aggregation exactly.
+            sum += amount
+            count += 1
+        }
     }
 
     static func profitBounds(values: [ActivityChartValue], stacked: Bool) -> (minimum: Double, maximum: Double) {
@@ -264,47 +307,21 @@ enum ActivityChartData {
         selectedModel: String?,
         includeRewards: Bool = true
     ) -> [ActivityChartSegment] {
+        segments(values: values(buckets: buckets, models: models, modelWorkByBucket: modelWorkByBucket,
+                                selectedModel: selectedModel, includeRewards: includeRewards))
+    }
+
+    /// Stack the already resolved observations. Every chart style shares the
+    /// same attribution, zero and fallback rules; input order keeps series stable.
+    static func segments(values: [ActivityChartValue]) -> [ActivityChartSegment] {
         var result: [ActivityChartSegment] = []
-        for bucket in buckets {
-            guard let totals = bucket.totals else { continue }
-            var cursor = 0.0
-            let chartModels = selectedModel.map { [$0] } ?? models
-
-            for model in chartModels {
-                guard let work = modelWorkByBucket[bucket.id]?[model],
-                      work > 0 else { continue }
-                let amount = Double(work) / 1_000_000
-                result.append(ActivityChartSegment(
-                    interval: bucket.interval,
-                    series: model,
-                    startUSD: cursor,
-                    endUSD: cursor + amount
-                ))
-                cursor += amount
-            }
-
-            // Keep the aggregate work visible for older/custom earnings clients
-            // that can return totals but do not provide per-model activity.
-            if cursor == 0, totals.workMicroUSD > 0 {
-                let amount = Double(totals.workMicroUSD) / 1_000_000
-                result.append(ActivityChartSegment(
-                    interval: bucket.interval,
-                    series: "Work",
-                    startUSD: 0,
-                    endUSD: amount
-                ))
-                cursor = amount
-            }
-
-            if includeRewards, selectedModel == nil, totals.rewardMicroUSD > 0 {
-                let amount = Double(totals.rewardMicroUSD) / 1_000_000
-                result.append(ActivityChartSegment(
-                    interval: bucket.interval,
-                    series: "Base rewards",
-                    startUSD: cursor,
-                    endUSD: cursor + amount
-                ))
-            }
+        var cursors: [Date: Double] = [:]
+        for value in values where value.amountUSD.isFinite && value.amountUSD > 0 {
+            let cursor = cursors[value.interval.start, default: 0]
+            let end = cursor + value.amountUSD
+            result.append(ActivityChartSegment(interval: value.interval, series: value.series,
+                startUSD: cursor, endUSD: end))
+            cursors[value.interval.start] = end
         }
         return result
     }

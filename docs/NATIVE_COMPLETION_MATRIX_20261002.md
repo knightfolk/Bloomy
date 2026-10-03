@@ -19,7 +19,7 @@ The linked reviews record the inspections; this matrix is their evidence index.
 | Popup — Hosting summary | **Partial:** Native114 light empty discovery; dark reported URL/auth/check time and expiry; Native116 light 80-point/dark 240-point focus rings; Native117 surrounding model Refresh/Available/footer/header rings in light 240-point and dark 80-point. [PopupHosting] | **Covered bounded native:** exact-path rebind enables pointer actions; Tab/Shift-Tab reveals Hosting and surrounding controls; Space refresh retains focus, Hosting opens the same dashboard and Available expands. | **Covered unit/native:** configured/discovered distinction, mismatch, stale/future/undated state and URL-secret filtering; nested clips, stable unchanged focus, cancelled reveal and popup-only registration; no new polling timer. | Enabled model mutations, conditional entries, coordinator/unified rendering, delayed discovery, wheel scrolling and VoiceOver. |
 | Popup: Available, Cooling, Auto, Nudge | **Partial:** dark/grayscale actual screen; 80/240/360-point budgets; later light/dark icons; Native104 light Cooling editor. [Popup], [History], [Provider] | Native scrolling reaches footer; Fan policy Tab/Space. Motion 13/14; genuine occlusion fails. [Charts] | **Covered fixture:** Auto readback; fan draft survives Refresh/reopen; Native104 retains edits during delayed control reads and updates helper action gates in the open sheet; Nudge guide without credentials. [Popup], [Provider] | Physical-wheel/keyboard nested scrolling; moved anchors and other displays. |
 | Overview | **Partial:** early wide fresh/light, compact offline/light; compact light/dark mixed cooling; Native67 wide dark expanded Running/saved selection. [Base], [Resources], [Wide] | Tab-to-sidebar/Down-to-Activity; qualified request/thermal AX labels; outer scrolling reaches expanded footer. [Nav], [Resources], [Wide] | **Covered fixture:** missing earnings unavailable; current/retained/absent request and fan readings distinct. [Resources] | Sustained source updates; broader expanded/missing-state keyboard paths. |
-| Activity — Earnings | **Partial:** prior compact/wide charts; Native129 compact light empty/zero Area, compact/wide dark tiny values and selected-model table. [Earnings], [CAM], [Charts], [Wide] | **Covered bounded native:** compact dark forward/reverse sequence reaches all five filters, chart choices, disclosure and revealed table; individual filter AX labels and full About ring. Actual spoken point labels remain open. [Earnings] | **Covered fixture/unit:** empty versus recorded zero versus unknown, exact micro-dollar table values, scalar Area points without invisible AreaMarks, contiguous zero retention and eager historical choices. Native131 adds captured completed scope during pending/failure, honest first/empty/error states, obsolete-read cancellation and minimize/restore; a hosted test suppresses hidden revision reads. [Earnings], [EarningsReads] | Conditional date/average controls, readonly table key scrolling, all-unknown/negative states, pending Refresh keyboard focus, live-zone changes, automatic tiny-point AX grouping and VoiceOver. |
+| Activity — Earnings | **Partial:** prior compact/wide charts; Native129 compact light empty/zero Area, compact/wide dark tiny values and selected-model table. [Earnings], [CAM], [Charts], [Wide] | **Covered bounded native:** compact dark forward/reverse sequence reaches all five filters, chart choices, disclosure and revealed table; individual filter AX labels and full About ring. Actual spoken point labels remain open. [Earnings] | **Covered fixture/unit:** empty versus recorded zero versus unknown, exact micro-dollar table values, scalar Area points without invisible AreaMarks, contiguous zero retention and eager historical choices. Native132 adds bounded selected-model Bars/Lines/Area identity and color, aggregate fallback and zero/gaps; post-build manifest readback is unconfirmed. [EarningsIdentity] Native131 adds captured completed scope during pending/failure, honest first/empty/error states, obsolete-read cancellation and minimize/restore; a hosted test suppresses hidden revision reads. [Earnings], [EarningsReads] | Conditional date/average controls, readonly table key scrolling, all-unknown/negative states, pending Refresh keyboard focus, live-zone changes, automatic tiny-point AX grouping and VoiceOver. |
 | Activity — Metrics | **Partial:** Native87 wide light controls/visits, compact light/dark summaries and historical worked pills; Native88 compact dark/wide light focus rings; Native91 compact light/wide dark stable pickers; earlier grayscale logos. [Metrics], [Charts] | **Covered bounded native:** Native88 actual Tab/Shift-Tab reveals the full Metrics sequence, expanded details and filtered path without Show more; Space/arrow selection verified with publications paused; Native91 preserves both pending segment highlights through changed results and confirms with Space. [Metrics] | **Covered fixture/unit:** held first/empty read; actual arrival/expiry; retained period through failure; Refresh recovery; cancelled route-away; completed analysis retains scope. [Metrics], [CAM] | Held mounted slow analysis, other displays, actual VoiceOver and long production history/profile. |
 | Opportunity — Models | **Partial:** compact dark expanded cards; wide light aligned neighbors; corrected compact light/dark guidance and wide dark search/cards. [CAM], [Wide] | Native search, Tab/Space Qwen/Gemma Details and expanded page scroll; offscreen lazy-card traversal remains partial. [CAM], [Wide] | **Covered fixture/unit:** retained routing/pressure qualified; visible aliases searchable without catalog metadata; guidance no longer blanks compact page. [CAM], [Wide] | Missing/partial evidence and maintenance/full history; complete keyboard/VoiceOver traversal. |
 | Opportunity — Network activity/infrastructure | **Partial:** compact dark chart; compact light Refresh; light/dark failed retries. [Base], [Recovery] | Explicit Refresh; separate real-window helper passes two 65-second hidden/absent holds. [Latest] | **Covered unit/fixture:** honest failed-read state; cancelled reads joined; immediate restoration. [History], [Latest] | Actual dashboard route-away/minimize holds; wide controls and infrastructure disclosure traversal. |
@@ -51,16 +51,18 @@ Settings sidebar/key loop.
 
 ## Three highest-value next checks
 
-1. **Actual VoiceOver plus remaining decision-control keyboard paths:** Models,
-   Hosting, Chat and Support; confirm spoken freshness/errors, canonical identity,
-   secure input and reachable Discard/Cancel/Done/review gates.
-2. **Remaining layouts and stable updates:** compact light Models, lower Provider
-   controls, expanded missing-state Health, Earnings empty/negative/known-zero
-   cues; resized Logs export and retention-cap/locale changes after stable-arrival
-   proof. Wide Overview/Opportunity and dense/scalar Earnings have bounded proof.
-3. **Actual motion/display boundary:** system Reduce Motion delivery, genuine
-   occlusion diagnosis, moved anchors/other displays, physical-wheel and keyboard
-   tiny-popup reachability. Do not weaken the failed prerequisite.
+Kevin's October 2 priority is visible polish, truthful status, reliable actions
+and resource use. Standard native keyboard access remains; exhaustive key-path
+review and custom shortcuts are lower priority, with existing gaps retained.
+
+1. **Remaining layouts and stable updates:** expanded missing-state Health,
+   Earnings negative/known-zero cues, resized Logs export and retention-cap/locale
+   changes after stable-arrival proof. Check actual screens at normal speed.
+2. **Measured resource use:** comparable visible/minimized profiling and the
+   cost of longer local histories, preserving missing data and recorded zeros.
+3. **Useful accessibility and motion checks:** spoken freshness/errors,
+   system Reduce Motion delivery, genuine occlusion and tiny-popup reachability.
+   Fix observed ordinary-use failures without adding a custom keyboard system.
 
 ## Shared open gates
 
@@ -131,3 +133,5 @@ Each table's linked shorthand resolves to the exact repository review below.
 [Earnings]: EARNINGS_KEYBOARD_VALUES_NATIVE_REVIEW_20261002.md
 
 [EarningsReads]: EARNINGS_RETAINED_READ_NATIVE_REVIEW_20261002.md
+
+[EarningsIdentity]: EARNINGS_IDENTITY_PROFIT_EFFICIENCY_REVIEW_20261002.md

@@ -221,3 +221,12 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   six opt-in skips; Release compilation passes. Pending Refresh keyboard focus,
   conditional date controls, live-zone changes and wider performance/distribution
   remain open. See `docs/EARNINGS_RETAINED_READ_NATIVE_REVIEW_20261002.md`.
+
+- Selected-model stacked Earnings bars now share resolved observations with
+  Lines/Area, retaining the model identity/color and explicit zeros. Profit
+  aggregation matches the old algorithm exactly in boundary tests and runs
+  about 23× faster for the isolated eight-model/year Release fixture. Native132
+  checks compact light selected bars and wide dark chart styles, aggregate
+  fallback and zero/gaps. Full 1,467-test and Release checks pass; post-build Sol
+  manifest readback stalled and remains unconfirmed. Details and limits are in
+  `docs/EARNINGS_IDENTITY_PROFIT_EFFICIENCY_REVIEW_20261002.md`.

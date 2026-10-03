@@ -429,7 +429,7 @@ struct ActivityView: View {
     }
 
     private var chartStyleDomain: [String] {
-        ActivityChartData.colorScaleDomain(models: models)
+        ActivityChartData.colorScaleDomain(models: models, selectedModel: renderedModel)
     }
 
     private var chartStyleRange: [Color] {
@@ -490,7 +490,7 @@ struct ActivityView: View {
         let stackedBars = chartStyle == .bars && barArrangement == .stacked
         let values = chartValues
         let segments = stackedBars
-            ? (renderedMetric == .estimatedProfit ? ActivityChartData.profitSegments(values: values) : chartSegments)
+            ? (renderedMetric == .estimatedProfit ? ActivityChartData.profitSegments(values: values) : ActivityChartData.segments(values: values))
             : []
         let valueCues = chartStyle == .area || stackedBars ? [] : ChartSeriesCueSelection.values(values)
         let segmentCues = stackedBars ? ChartSeriesCueSelection.segments(segments) : []
@@ -648,16 +648,6 @@ struct ActivityView: View {
                 chartMark(value, query: query, style: styles[value.series], showsCue: valueCues.contains(value.id))
             }
         }
-    }
-
-    private var chartSegments: [ActivityChartSegment] {
-        ActivityChartData.segments(
-            buckets: buckets,
-            models: models,
-            modelWorkByBucket: modelWorkByBucket,
-            selectedModel: renderedModel,
-            includeRewards: showsBaseRewards
-        )
     }
 
     @ChartContentBuilder
