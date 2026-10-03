@@ -141,7 +141,54 @@ private enum FixtureActivityRead: String, CaseIterable, Identifiable, Sendable {
     case empty = "Empty Earnings"
     case knownZero = "Recorded zero with unknown gaps"
     case tiny = "Overlapping micro-dollar earnings"
+    case unknown = "Unknown calendar history"
+    case boundary = "Uncertain ledger boundaries"
+    case signed = "Signed earnings and covered profit"
     var id: String { rawValue }
+
+    static func signedWork(at date: Date, calendar: Calendar) -> [Int64]? {
+        switch calendar.component(.hour, from: date) % 6 {
+        case 0: [10_000, 30_000]
+        case 1: [30_000, 10_000]
+        case 2: nil
+        case 3: [20_000, 20_000]
+        case 4: [-10_000, 10_000]
+        default: [1, 3]
+        }
+    }
+
+    static func signedLedger(in interval: DateInterval, calendar: Calendar) -> (work: [Int64], reward: Int64, jobs: Int64)? {
+        var work: [Int64] = [0, 0]
+        var reward: Int64 = 0
+        var jobs: Int64 = 0
+        var cursor = interval.start
+        while cursor < interval.end {
+            if let amounts = signedWork(at: cursor, calendar: calendar) {
+                for index in work.indices { work[index] += amounts[index] }
+                if calendar.component(.hour, from: cursor) % 6 == 4 { reward -= 5_000 }
+                jobs += 2
+            }
+            cursor = cursor.addingTimeInterval(3_600)
+        }
+        return jobs == 0 ? nil : (work, reward, jobs)
+    }
+
+    /// Saved, inert ten-second power intervals for completed calendar hours.
+    /// No sensor acquisition or provider inference is involved.
+    static func savedPower(now: Date, calendar: Calendar) -> EnergyRecordingSnapshot {
+        let start = calendar.startOfDay(for: now).addingTimeInterval(-86_400)
+        let end = calendar.dateInterval(of: .hour, for: now)!.start
+        var intervals: [EnergyInterval] = []
+        var cursor = start
+        while cursor < end {
+            let hour = calendar.component(.hour, from: cursor)
+            let hourlyCost = hour % 6 == 5 ? 0.000004 : 0.04
+            intervals.append(EnergyInterval(start: cursor, end: cursor.addingTimeInterval(10),
+                kWh: hourlyCost / 360, usdPerKWh: 1, source: "Synthetic saved power", estimated: true))
+            cursor = cursor.addingTimeInterval(10)
+        }
+        return EnergyRecordingSnapshot(reading: nil, intervals: intervals, issue: "Synthetic saved power history")
+    }
 }
 
 private enum FixtureEarningsReadMode: String, CaseIterable, Identifiable, Codable, Sendable {
@@ -295,6 +342,21 @@ private actor FixtureEarnings: AccountEarningsFetching {
         guard scenario.hasCurrentRuntime else { return nil }
         if queryActivityRead == .empty { return [] }
         return try ActivityCalendar.intervals(in: range, unit: unit, calendar: calendar).enumerated().map { index, interval in
+            if queryActivityRead == .unknown {
+                return ActivityBucket(interval: interval, totals: nil, coverage: .unavailable)
+            }
+            if queryActivityRead == .boundary {
+                return ActivityBucket(interval: interval, totals: nil, coverage: .boundaryUncertain)
+            }
+            if queryActivityRead == .signed {
+                guard let amounts = FixtureActivityRead.signedLedger(in: interval, calendar: calendar) else {
+                    return ActivityBucket(interval: interval, totals: nil, coverage: .unavailable)
+                }
+                return ActivityBucket(interval: interval,
+                    totals: ActivityTotals(workMicroUSD: amounts.work.reduce(0, +),
+                        rewardMicroUSD: amounts.reward, jobs: amounts.jobs,
+                        promptTokens: amounts.jobs * 4, completionTokens: amounts.jobs * 10), coverage: .recorded)
+            }
             if queryActivityRead == .knownZero {
                 return ActivityBucket(interval: interval,
                     totals: index % 3 == 0 ? ActivityTotals(workMicroUSD: 0, rewardMicroUSD: 0, jobs: 0, promptTokens: 0, completionTokens: 0) : nil,
@@ -311,12 +373,19 @@ private actor FixtureEarnings: AccountEarningsFetching {
     }
     func activityModels(in range: DateInterval) async throws -> [String] {
         try await beginActivityQuery()
-        return scenario.hasCurrentRuntime && queryActivityRead != .empty ? Array(FixtureData.modelIDs.prefix(limitedModels ? 1 : 3)) : []
+        return scenario.hasCurrentRuntime && queryActivityRead != .empty && queryActivityRead != .unknown
+            ? Array(FixtureData.modelIDs.prefix(limitedModels ? 1 : queryActivityRead == .signed ? 2 : 3)) : []
     }
     func activityByModel(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ModelActivityBucket]? {
         guard scenario.hasCurrentRuntime, queryActivityRead != .normal else { return nil }
-        guard queryActivityRead != .empty else { return [] }
-        return try ActivityCalendar.intervals(in: range, unit: unit, calendar: calendar).enumerated().flatMap { index, interval in
+        guard queryActivityRead != .empty, queryActivityRead != .unknown, queryActivityRead != .boundary else { return [] }
+        return try ActivityCalendar.intervals(in: range, unit: unit, calendar: calendar).enumerated().flatMap { index, interval -> [ModelActivityBucket] in
+            if queryActivityRead == .signed {
+                guard let amounts = FixtureActivityRead.signedLedger(in: interval, calendar: calendar) else { return [] }
+                return amounts.work.prefix(limitedModels ? 1 : 2).enumerated().map { modelIndex, amount in
+                    ModelActivityBucket(interval: interval, model: FixtureData.modelIDs[modelIndex], workMicroUSD: amount)
+                }
+            }
             guard index % 3 == 0 else { return [ModelActivityBucket]() }
             return FixtureData.modelIDs.prefix(limitedModels ? 1 : 3).map { model in
                 ModelActivityBucket(interval: interval, model: model, workMicroUSD: queryActivityRead == .tiny ? 1 : 0)
@@ -330,13 +399,28 @@ private actor FixtureEarnings: AccountEarningsFetching {
             return try await activity(in: range, unit: unit, calendar: calendar)?.map { bucket in
                 ActivityBucket(interval: bucket.interval,
                     totals: bucket.totals.map { _ in
-                        ActivityTotals(workMicroUSD: queryActivityRead == .tiny ? 1 : 0,
+                        let signedAmounts = FixtureActivityRead.signedLedger(in: bucket.interval, calendar: calendar)?.work
+                        let index = FixtureData.modelIDs.firstIndex(of: model)
+                        let signedAmount = index.flatMap { index in
+                            signedAmounts.flatMap { $0.indices.contains(index) ? $0[index] : nil }
+                        }
+                        let amount = queryActivityRead == .signed ? signedAmount ?? 0
+                            : queryActivityRead == .tiny ? 1 : 0
+                        return ActivityTotals(workMicroUSD: amount,
                             rewardMicroUSD: 0, jobs: queryActivityRead == .tiny ? 1 : 0,
                             promptTokens: queryActivityRead == .tiny ? 4 : 0, completionTokens: queryActivityRead == .tiny ? 10 : 0)
                     }, coverage: bucket.coverage)
             }
         }
         return try await activity(in: range, unit: unit, calendar: calendar)
+    }
+    func modelHourlyEarningsAverages(in range: DateInterval) async throws -> [ModelHourlyEarningsAverage]? {
+        guard queryActivityRead != .normal else { return nil }
+        let rows = try await activityByModel(in: range, unit: .hour, calendar: .current) ?? []
+        return Dictionary(grouping: rows, by: \.model).map { model, values in
+            ModelHourlyEarningsAverage(model: model, workMicroUSD: values.reduce(0) { $0 + $1.workMicroUSD },
+                                       earningHours: values.count)
+        }.sorted { $0.model < $1.model }
     }
 }
 private actor FixtureCapacity: NetworkCapacityFetching {
@@ -878,6 +962,7 @@ private final class FixtureModel: ObservableObject {
     private var logFeed: FixtureLogFeed
     @Published var limitedActivityModels = false
     @Published var activityRead = FixtureActivityRead.normal
+    @Published private(set) var earningsRenderingReview = false
     @Published private(set) var earningsReadState = FixtureEarningsReadSnapshot()
     private var earningsReadSession = UUID()
     @Published var modelSheetHeightLimit: CGFloat?
@@ -941,6 +1026,7 @@ private final class FixtureModel: ObservableObject {
         let logFeed = FixtureLogFeed(events: events)
         let monitor = MonitorStore(service: TelemetryService(source: FixtureTelemetrySource(scenario: scenario, logFeed: logFeed)),
             initial: FixtureData.snapshot(scenario, now: seededAt, events: events), providerExtras: extras,
+            initialEnergy: FixtureActivityRead.savedPower(now: seededAt, calendar: .current),
             earningsClient: earningsClient,
             networkCapacityClient: FixtureCapacity(scenario: scenario, fixedCapture: capacityCapturedAt), publicCatalogClient: FixtureCatalog(scenario: scenario),
             publicPricingClient: FixturePricing(scenario: scenario), networkSeriesClient: FixtureSeries(scenario: scenario),
@@ -1166,7 +1252,12 @@ private final class FixtureModel: ObservableObject {
     }
     func setDashboardVisible(_ visible: Bool) {
         dashboardVisible = visible
-        monitor.setDashboardVisible(visible)
+        monitor.setDashboardVisible(visible || earningsRenderingReview)
+    }
+    func setEarningsRenderingReview(_ enabled: Bool) {
+        guard ready, !isTerminating else { return }
+        earningsRenderingReview = enabled
+        monitor.setDashboardVisible(dashboardVisible || enabled)
     }
     func startVerificationChat(_ verification: FixtureChatVerification) {
         guard ready, !isTerminating, scenario.hasCurrentRuntime, !chat.isSending else { return }
@@ -1279,7 +1370,7 @@ private final class FixtureModel: ObservableObject {
         }
         // Window events can arrive while synthetic sources are preparing.
         // Publish the replacement with the latest native visibility state.
-        preparedMonitor.setDashboardVisible(dashboardVisible)
+        preparedMonitor.setDashboardVisible(dashboardVisible || earningsRenderingReview)
         let gpuProof = FixtureGPUProtectionProof(defaults: defaults, directory: directory)
         preparedMonitor.attachHostGPUProtection(gpuProof.store)
         gpuProtectionProof = gpuProof
@@ -2240,6 +2331,10 @@ private struct FixtureReviewView: View {
                             }
                         }
                         .disabled(model.earningsReadState.heldReadID != nil)
+                        Button(model.earningsRenderingReview ? "Use native display visibility" : "Keep synthetic display reads on (review)") {
+                            model.setEarningsRenderingReview(!model.earningsRenderingReview)
+                        }
+                        .help("Review-only override for rendered inert history while this window is occluded. Never starts the provider or acquisition; do not use for visibility proof.")
                         Button("Remove Gemma from model inventory") {
                             Task { await model.removeGemmaFromInventory() }
                         }

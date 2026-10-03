@@ -13,6 +13,11 @@ struct ActivityReadSnapshot {
     let modelHourlyProfitAverages: [ModelHourlyProfitAverage]
     let tokenRates: [Date: ModelRateBucket]
 
+    /// Calendar storage supplies unknown buckets even when no ledger entries
+    /// exist. Recorded zero and signed corrections are still recorded activity.
+    var hasRecordedActivity: Bool { buckets.contains { $0.totals != nil } }
+    var hasBoundaryUncertainty: Bool { buckets.contains { $0.coverage == .boundaryUncertain } }
+
     init(query: ActivityQuery, capturedAt: Date = Date(), buckets: [ActivityBucket] = [], models: [String] = [],
          modelWorkByBucket: [Date: [String: Int64]] = [:], modelHourlyAverages: [ModelHourlyEarningsAverage] = [],
          modelHourlyProfits: [ModelHourlyProfit] = [], modelHourlyProfitAverages: [ModelHourlyProfitAverage] = [],

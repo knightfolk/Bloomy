@@ -131,14 +131,20 @@ struct ActivityView: View {
                     }
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    if buckets.isEmpty {
+                    if !completed.hasRecordedActivity && !completed.hasBoundaryUncertainty {
                         ContentUnavailableView(
                             "No recorded activity",
                             systemImage: "chart.bar",
                             description: Text("No local earnings entries were found for this selection. Missing history is not zero earnings.")
                         )
                     } else {
-                        if renderedMetric == .estimatedProfit && chartValues.isEmpty {
+                        if !completed.hasRecordedActivity {
+                            ContentUnavailableView(
+                                "History boundaries are uncertain",
+                                systemImage: "clock",
+                                description: Text("This selection does not align with the ledger's recorded hour boundaries. Amounts remain unknown; entries may exist.")
+                            )
+                        } else if renderedMetric == .estimatedProfit && chartValues.isEmpty {
                             ContentUnavailableView(
                                 "No covered profit hours",
                                 systemImage: "bolt.horizontal",
@@ -310,8 +316,7 @@ struct ActivityView: View {
                 ForEach(visibleModelHourlyProfitAverages) { average in
                     VStack(alignment: .leading, spacing: 4) {
                         averageModelLabel(average.model)
-                        Text(average.profitUSDPerHour
-                            .formatted(.currency(code: "USD").precision(.fractionLength(4))))
+                        Text(ActivityAmountPresentation.hourlyAmount(average.profitUSDPerHour))
                             .font(.headline)
                             .monospacedDigit()
                         Text("Profit / hour · \(average.coveredHours.formatted()) covered h")
@@ -337,8 +342,7 @@ struct ActivityView: View {
                 ForEach(visibleModelHourlyAverages) { average in
                     VStack(alignment: .leading, spacing: 4) {
                         averageModelLabel(average.model)
-                        Text(average.averageWorkUSDPerEarningHour
-                            .formatted(.currency(code: "USD").precision(.fractionLength(4))))
+                        Text(ActivityAmountPresentation.hourlyAmount(average.averageWorkUSDPerEarningHour))
                             .font(.headline)
                             .monospacedDigit()
                         Text("Work / hour · \(average.earningHours.formatted()) earning h")
@@ -492,6 +496,7 @@ struct ActivityView: View {
         let segments = stackedBars
             ? (renderedMetric == .estimatedProfit ? ActivityChartData.profitSegments(values: values) : ActivityChartData.segments(values: values))
             : []
+        let amountsByID = ActivityChartData.originalAmounts(values: values)
         let valueCues = chartStyle == .area || stackedBars ? [] : ChartSeriesCueSelection.values(values)
         let segmentCues = stackedBars ? ChartSeriesCueSelection.segments(segments) : []
         let zeroValues = ActivityChartData.recordedZeroValues(values)
@@ -509,7 +514,7 @@ struct ActivityView: View {
             ? segments.map(\.series) : values.map(\.series)
         let styles = ChartSeriesStyles(domain: chartStyleDomain + visibleSeries)
         let yAxis: ActivityChartYAxis
-        if renderedMetric == .estimatedProfit {
+        if renderedMetric == .estimatedProfit || values.contains(where: { $0.amountUSD < 0 }) {
             let bounds = ActivityChartData.profitBounds(values: values, stacked: stacked)
             yAxis = ActivityChartAxis.signedYAxis(minimum: bounds.minimum, maximum: bounds.maximum)
         } else {
@@ -525,7 +530,7 @@ struct ActivityView: View {
                 .foregroundStyle(.secondary)
             Chart {
                 chartMarks(query: query, values: markValues, segments: segments,
-                    styles: styles, valueCues: valueCues, segmentCues: segmentCues)
+                    originalAmounts: amountsByID, styles: styles, valueCues: valueCues, segmentCues: segmentCues)
                 ForEach(zeroValues) { value in
                     PointMark(
                         x: .value("Period", value.interval.start.addingTimeInterval(value.interval.duration / 2)),
@@ -579,8 +584,10 @@ struct ActivityView: View {
                 }
                 .chartYAxis {
                     AxisMarks(position: .trailing, values: yAxis.values) { value in
-                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.7, dash: [3, 3]))
-                            .foregroundStyle(Color.secondary.opacity(0.38))
+                        let isZeroBaseline = yAxis.lowerBound < 0 && value.as(Double.self) == 0
+                        AxisGridLine(stroke: StrokeStyle(lineWidth: isZeroBaseline ? 1.2 : 0.7,
+                                                        dash: isZeroBaseline ? [] : [3, 3]))
+                            .foregroundStyle(Color.secondary.opacity(isZeroBaseline ? 0.7 : 0.38))
                         AxisTick(stroke: StrokeStyle(lineWidth: 0.7))
                         AxisValueLabel {
                             if let amount = value.as(Double.self) {
@@ -626,6 +633,7 @@ struct ActivityView: View {
     @ChartContentBuilder
     private func chartMarks(
         query: ActivityQuery, values: [ActivityChartValue], segments: [ActivityChartSegment],
+        originalAmounts: [String: Double],
         styles: ChartSeriesStyles, valueCues: Set<String>, segmentCues: Set<String>
     ) -> some ChartContent {
         if chartStyle == .bars && barArrangement == .stacked {
@@ -637,6 +645,8 @@ struct ActivityView: View {
                     yEnd: .value("Recorded USD", segment.endUSD)
                 )
                 .foregroundStyle(by: .value("Series", segment.series))
+                .accessibilityLabel(Text("\(segment.series), recorded period beginning \(segment.interval.start.formatted(query.dateAndTimeFormat))"))
+                .accessibilityValue(Text(ChartSeriesCueSelection.pointAmountLabel(originalAmounts[segment.id] ?? (segment.endUSD - segment.startUSD))))
                 .annotation(position: .overlay) {
                     if segmentCues.contains(segment.id) {
                         ChartSeriesBadge(number: styles[segment.series].number)
@@ -657,6 +667,8 @@ struct ActivityView: View {
         switch chartStyle {
         case .bars:
             barMark(value, query: query)
+                .accessibilityLabel(Text("\(value.series), recorded period beginning \(value.interval.start.formatted(query.dateAndTimeFormat))"))
+                .accessibilityValue(Text(ChartSeriesCueSelection.pointAmountLabel(value.amountUSD)))
                 .annotation(position: .overlay) {
                     if showsCue { ChartSeriesBadge(number: style.number) }
                 }
@@ -670,6 +682,8 @@ struct ActivityView: View {
             .symbol(style.symbol.shape)
             .symbolSize(32)
             .lineStyle(style.stroke)
+            .accessibilityLabel(Text("\(value.series), recorded period beginning \(value.interval.start.formatted(query.dateAndTimeFormat))"))
+            .accessibilityValue(Text(ChartSeriesCueSelection.pointAmountLabel(value.amountUSD)))
             .interpolationMethod(.linear)
             .annotation(position: .top, spacing: 2) {
                 if showsCue { ChartSeriesBadge(number: style.number) }
@@ -683,6 +697,8 @@ struct ActivityView: View {
             )
             .foregroundStyle(by: .value("Series", value.series))
             .opacity(0.78)
+            .accessibilityLabel(Text("\(value.series), recorded period beginning \(value.interval.start.formatted(query.dateAndTimeFormat))"))
+            .accessibilityValue(Text(ChartSeriesCueSelection.pointAmountLabel(value.amountUSD)))
         }
     }
 

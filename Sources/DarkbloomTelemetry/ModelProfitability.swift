@@ -1,7 +1,8 @@
 import Foundation
 
 /// Estimated net earnings for one model with a recorded work row in one hour.
-/// Whole-Mac adapter electricity is divided evenly among earning models.
+/// Whole-Mac adapter electricity is divided evenly among recorded models,
+/// including zero work and signed ledger corrections.
 public struct ModelHourlyProfit: Equatable, Sendable, Identifiable {
     public let interval: DateInterval
     public let model: String
@@ -120,8 +121,7 @@ public enum ModelProfitability {
         var workByHour: [Date: [String: Int64]] = [:]
         for item in activity {
             guard item.interval.duration == 3_600,
-                  !item.model.isEmpty,
-                  item.workMicroUSD >= 0 else { continue }
+                  !item.model.isEmpty else { continue }
             let previous = workByHour[item.interval.start]?[item.model] ?? 0
             let (sum, overflow) = previous.addingReportingOverflow(item.workMicroUSD)
             guard !overflow else { return [] }
@@ -216,7 +216,7 @@ public enum ModelProfitability {
             activeSamples: Int)] = [:]
         let activityByHour = Dictionary(grouping: activity, by: \.interval.start)
         for (hourStart, entries) in activityByHour {
-            guard entries.allSatisfy({ $0.interval.duration == 3_600 && $0.workMicroUSD >= 0 }) else { continue }
+            guard entries.allSatisfy({ $0.interval.duration == 3_600 }) else { continue }
             let hour = DateInterval(start: hourStart, duration: 3_600)
             guard coveredCost(for: hour, energy: sortedEnergy) != nil,
                   hasActivityCoverage(for: hour, energy: sortedEnergy) else { continue }

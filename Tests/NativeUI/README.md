@@ -658,6 +658,27 @@ from the period picker through all model filters, chart choices, disclosure and
 table in a compact window. Real screen readers, production refresh performance
 and real provider earnings remain separate proof.
 
+### Signed, unknown and uncertain Earnings
+
+Data checks → Earnings read includes **Unknown calendar history**, **Uncertain
+ledger boundaries**, and **Signed earnings and covered profit**. Unknown returns
+calendar buckets without entries; uncertain boundaries retain a Partial table
+and must not claim the ledger is empty. Signed reads mix positive/negative work,
+reward corrections, unknown gaps and tiny amounts. Daily values aggregate the
+hourly pattern. All are inert fixture data.
+
+For profit, choose Date and yesterday. Saved synthetic ten-second power coverage
+produces opposing ±$0.01 hours, a Qwen -$0.03 correction hour and ±one-micro-dollar
+profit points. Current incomplete hours have no power coverage. Tiny mode also
+supplies exact one-micro-dollar hourly cards. Inspect full values after scrolling.
+
+If actual occlusion cancels a review read, opt in to **Keep synthetic display
+reads on (review)**. This controls only the inert display store, defaults off,
+never starts acquisition or the provider, and cannot serve as visibility proof.
+Choose **Use native display visibility** to restore the normal policy. The
+bounded observations and limitations are in
+`docs/EARNINGS_SIGNED_UNKNOWN_NATIVE_REVIEW_20261003.md`.
+
 ### Provider untouched-field regression
 
 In compact light Provider settings, focus the unchanged idle-minutes text and

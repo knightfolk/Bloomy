@@ -96,6 +96,38 @@ struct ActivityReadStateTests {
         #expect(read.message == nil)
     }
 
+    @Test("unknown calendar buckets remain distinct from recorded zero and signed amounts")
+    func recordedActivityPresence() {
+        let interval = DateInterval(start: now.addingTimeInterval(-3_600), duration: 3_600)
+        let unknown = ActivityBucket(interval: interval, totals: nil, coverage: .unavailable)
+        #expect(!ActivityReadSnapshot(query: query()).hasRecordedActivity)
+        #expect(!ActivityReadSnapshot(query: query(), buckets: [unknown]).hasRecordedActivity)
+        for amount: Int64 in [0, -1, 1] {
+            let recorded = ActivityBucket(interval: interval,
+                totals: ActivityTotals(workMicroUSD: amount, rewardMicroUSD: 0, jobs: 0,
+                                       promptTokens: 0, completionTokens: 0), coverage: .recorded)
+            #expect(ActivityReadSnapshot(query: query(), buckets: [unknown, recorded]).hasRecordedActivity)
+        }
+        // Presence is about ledger coverage, even when a display filter hides
+        // its rewards or there are no per-model rows from an older client.
+        let rewardOnly = ActivityBucket(interval: interval,
+            totals: ActivityTotals(workMicroUSD: 0, rewardMicroUSD: 1, jobs: 0,
+                                   promptTokens: 0, completionTokens: 0), coverage: .recorded)
+        #expect(ActivityReadSnapshot(query: query(), buckets: [rewardOnly]).hasRecordedActivity)
+    }
+
+    @Test("unaligned boundaries cannot claim an empty ledger even when every amount is unknown")
+    func uncertainBoundaries() {
+        let interval = DateInterval(start: now.addingTimeInterval(-3_600), duration: 3_600)
+        let boundary = ActivityBucket(interval: interval, totals: nil, coverage: .boundaryUncertain)
+        let unknown = ActivityBucket(interval: interval, totals: nil, coverage: .unavailable)
+        let report = ActivityReadSnapshot(query: query(), buckets: [unknown, boundary])
+        #expect(!report.hasRecordedActivity)
+        #expect(report.hasBoundaryUncertainty)
+        #expect(!ActivityReadSnapshot(query: query(), buckets: [unknown]).hasBoundaryUncertainty)
+        #expect(!ActivityReadSnapshot(query: query()).hasBoundaryUncertainty)
+    }
+
     @Test("superseded callbacks and mismatched responses cannot clear or overwrite a newer read", arguments: [false, true])
     func supersededReads(identicalScope: Bool) {
         var read = ActivityReadState()

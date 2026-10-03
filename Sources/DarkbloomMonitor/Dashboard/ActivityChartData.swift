@@ -39,6 +39,13 @@ enum ActivityAmountPresentation {
         return (Decimal(microUSD) / 1_000_000)
             .formatted(.number.locale(locale).precision(.fractionLength(4...6)))
     }
+
+    /// Estimated hourly amounts can be smaller than one ledger micro-dollar.
+    /// Share the point formatter so cards never round nonzero evidence to zero.
+    static func hourlyAmount(_ amountUSD: Double, locale: Locale = .current) -> String {
+        guard amountUSD.isFinite else { return "—" }
+        return ChartSeriesCueSelection.pointAmountLabel(amountUSD, locale: locale)
+    }
 }
 
 struct ActivityChartColorComponents: Equatable {
@@ -92,6 +99,11 @@ struct ActivityChartSegment: Equatable, Identifiable {
 }
 
 enum ActivityChartData {
+    /// Custom clients may repeat a presentation identity. Retain an original
+    /// amount without introducing a trapping dictionary into chart rendering.
+    static func originalAmounts(values: [ActivityChartValue]) -> [String: Double] {
+        values.reduce(into: [:]) { $0[$1.id] = $1.amountUSD }
+    }
     /// One aggregate marker for an interval whose displayed series are all
     /// recorded zero. Missing buckets have no values and never create a marker.
     static func recordedZeroValues(_ values: [ActivityChartValue]) -> [ActivityChartValue] {
@@ -123,7 +135,7 @@ enum ActivityChartData {
             var seriesValues: [(String, Double)] = []
 
             for model in chartModels {
-                if let work = amounts[model], work >= 0 {
+                if let work = amounts[model] {
                     seriesValues.append((model, Double(work) / 1_000_000))
                 }
             }
@@ -142,18 +154,16 @@ enum ActivityChartData {
             } else if !seriesValues.contains(where: { $0.0 == selectedModel }) {
                 // A selected-model query is already model-filtered. Retain its
                 // totals when an older client does not provide per-model rows.
-                if totals.workMicroUSD >= 0 {
-                    seriesValues.append((selectedModel!, Double(totals.workMicroUSD) / 1_000_000))
-                }
+                seriesValues.append((selectedModel!, Double(totals.workMicroUSD) / 1_000_000))
             }
 
-            let hasModelEarnings = seriesValues.contains { $0.0 != "Base rewards" && $0.1 > 0 }
-            if !hasModelEarnings, selectedModel == nil, totals.workMicroUSD > 0 {
+            let hasModelEarnings = seriesValues.contains { $0.0 != "Base rewards" && $0.1 != 0 }
+            if !hasModelEarnings, selectedModel == nil, totals.workMicroUSD != 0 {
                 // Legacy/custom clients can supply aggregate work only.
                 seriesValues.append(("Work", Double(totals.workMicroUSD) / 1_000_000))
             }
 
-            if includeRewards, selectedModel == nil, totals.rewardMicroUSD >= 0 {
+            if includeRewards, selectedModel == nil {
                 seriesValues.append(("Base rewards", Double(totals.rewardMicroUSD) / 1_000_000))
             }
 
@@ -178,11 +188,7 @@ enum ActivityChartData {
     }
 
     static func maximumUSD(values: [ActivityChartValue], stacked: Bool) -> Double {
-        guard stacked else { return values.map(\.amountUSD).max() ?? 0 }
-        return Dictionary(grouping: values, by: \.interval.start)
-            .values
-            .map { $0.reduce(0) { $0 + $1.amountUSD } }
-            .max() ?? 0
+        profitBounds(values: values, stacked: stacked).maximum
     }
 
     static func profitValues(
@@ -315,13 +321,15 @@ enum ActivityChartData {
     /// same attribution, zero and fallback rules; input order keeps series stable.
     static func segments(values: [ActivityChartValue]) -> [ActivityChartSegment] {
         var result: [ActivityChartSegment] = []
-        var cursors: [Date: Double] = [:]
-        for value in values where value.amountUSD.isFinite && value.amountUSD > 0 {
-            let cursor = cursors[value.interval.start, default: 0]
-            let end = cursor + value.amountUSD
+        var cursors: [Date: (positive: Double, negative: Double)] = [:]
+        for value in values where value.amountUSD.isFinite && value.amountUSD != 0 {
+            var cursor = cursors[value.interval.start] ?? (positive: 0, negative: 0)
+            let beginning = value.amountUSD > 0 ? cursor.positive : cursor.negative
+            let end = beginning + value.amountUSD
             result.append(ActivityChartSegment(interval: value.interval, series: value.series,
-                startUSD: cursor, endUSD: end))
-            cursors[value.interval.start] = end
+                startUSD: beginning, endUSD: end))
+            if value.amountUSD > 0 { cursor.positive = end } else { cursor.negative = end }
+            cursors[value.interval.start] = cursor
         }
         return result
     }

@@ -321,3 +321,15 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   and final Release compilation pass. Adjacent AX text remains grouped; spoken
   VoiceOver, long reasons and wider live/distribution proof remain open. See
   `docs/MODEL_FEEDBACK_RECOVERY_NATIVE_REVIEW_20261003.md`.
+
+- Earnings preserves signed ledger corrections in charts and hourly/serving
+  profit estimates, distinguishes all-unavailable history from uncertain hour
+  boundaries, and keeps micro-dollar hourly cards nonzero. Signed charts have
+  independent stack directions and a clearer zero line; stacked AX labels retain
+  original amounts. Native158/159 checks actual signed styles, selected work,
+  precise cards/table and empty/boundary guidance in compact/wide light/dark.
+  The explicit inert visibility override does not prove hidden-window behavior.
+  Final 1,568 reported tests, Release compilation and 109-source manifest checks
+  pass. Spoken automatic range grouping, actual OS display/time-zone changes,
+  wider history performance and distribution remain open. See
+  `docs/EARNINGS_SIGNED_UNKNOWN_NATIVE_REVIEW_20261003.md`.

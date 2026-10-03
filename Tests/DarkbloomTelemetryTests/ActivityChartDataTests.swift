@@ -5,6 +5,18 @@ import Testing
 
 @Suite("Activity chart model colors")
 struct ActivityChartDataTests {
+    @Test("original accessibility amounts tolerate repeated custom-client identities")
+    func originalAmountsDoNotTrap() {
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 0), duration: 3_600)
+        let first = ActivityChartValue(interval: interval, series: "Qwen", amountUSD: 0.1, run: 0)
+        let correction = ActivityChartValue(interval: interval, series: "Qwen", amountUSD: -0.000001, run: 0)
+        let other = ActivityChartValue(interval: interval, series: "Gemma", amountUSD: 0.25, run: 0)
+        let amounts = ActivityChartData.originalAmounts(values: [first, other, correction])
+        #expect(amounts.count == 2)
+        #expect(amounts[first.id] == -0.000001)
+        #expect(amounts[other.id] == 0.25)
+        #expect(ActivityChartData.originalAmounts(values: []).isEmpty)
+    }
     @Test("table amounts distinguish recorded zero, unknown and micro-dollar values without floating-point loss")
     func exactTableAmounts() {
         let locale = Locale(identifier: "en_US")
@@ -15,6 +27,33 @@ struct ActivityChartDataTests {
         #expect(ActivityAmountPresentation.tableAmount(-1, locale: locale) == "-0.000001")
         #expect(ActivityAmountPresentation.tableAmount(150_000, locale: locale) == "0.1500")
         #expect(ActivityAmountPresentation.tableAmount(Int64.max, locale: locale) == "9,223,372,036,854.775807")
+    }
+
+    @Test("hourly currency keeps ordinary values compact and tiny signed estimates distinct from zero")
+    func exactHourlyAmounts() {
+        let locale = Locale(identifier: "en_US")
+        let zero = ActivityAmountPresentation.hourlyAmount(0, locale: locale)
+        #expect(zero == "$0.0000")
+        #expect(ActivityAmountPresentation.hourlyAmount(-0.0, locale: locale) == zero)
+        #expect(ActivityAmountPresentation.hourlyAmount(0.15, locale: locale) == "$0.1500")
+        #expect(ActivityAmountPresentation.hourlyAmount(0.000001, locale: locale) == "$0.000001")
+        #expect(ActivityAmountPresentation.hourlyAmount(-0.00000025, locale: locale) == "-$0.00000025")
+        for amount in [0.000001, 0.00000025, 0.00000001, 1e-12] {
+            let positive = ActivityAmountPresentation.hourlyAmount(amount, locale: locale)
+            let negative = ActivityAmountPresentation.hourlyAmount(-amount, locale: locale)
+            #expect(positive != zero)
+            #expect(negative != zero && negative.contains("-"))
+            #expect(positive != negative)
+        }
+        #expect(ActivityAmountPresentation.hourlyAmount(0.000001, locale: Locale(identifier: "de_DE")).contains("0,000001"))
+        for amount in [Double.nan, .infinity, -.infinity] {
+            #expect(ActivityAmountPresentation.hourlyAmount(amount, locale: locale) == "—")
+        }
+        for amount in [1e-13, -2.5e-20, Double.leastNonzeroMagnitude, -Double.leastNonzeroMagnitude] {
+            let label = ActivityAmountPresentation.hourlyAmount(amount, locale: locale)
+            #expect(label.hasSuffix(" USD"))
+            #expect(Double(String(label.dropLast(4))) == amount)
+        }
     }
 
     @Test("zero markers represent recorded zero intervals rather than gaps or cancelling signed values")
@@ -31,6 +70,80 @@ struct ActivityChartDataTests {
         ]
         #expect(ActivityChartData.recordedZeroValues(values).map(\.interval) == [first])
         #expect(ActivityChartData.recordedZeroValues([]).isEmpty)
+    }
+
+    @Test("gross cancellation preserves signed model observations rather than a recorded zero")
+    func signedGrossCancellation() {
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 3_600), duration: 3_600)
+        let values = ActivityChartData.values(buckets: [bucket(interval, work: 0)],
+            models: ["positive", "negative", "idle"],
+            modelWorkByBucket: [interval.start: ["positive": 100_000, "negative": -100_000]],
+            selectedModel: nil)
+        #expect(values.map(\.series) == ["positive", "negative", "idle", "Base rewards"])
+        #expect(values.map(\.amountUSD) == [0.1, -0.1, 0, 0])
+        #expect(ActivityChartData.recordedZeroValues(values).isEmpty)
+        let segments = ActivityChartData.segments(values: values)
+        #expect(segments.map(\.series) == ["positive", "negative"])
+        #expect(segments.map(\.startUSD) == [0, 0])
+        #expect(segments.map(\.endUSD) == [0.1, -0.1])
+        let bounds = ActivityChartData.profitBounds(values: values, stacked: true)
+        #expect(bounds.minimum == -0.1 && bounds.maximum == 0.1)
+        #expect(ActivityChartData.maximumUSD(values: values, stacked: true) == 0.1)
+    }
+
+    @Test("negative model work and rewards stack below zero in original series order without aggregate duplication")
+    func signedGrossStacks() {
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 3_600), duration: 3_600)
+        let values = ActivityChartData.values(buckets: [bucket(interval, work: -300_000, reward: -50_000)],
+            models: ["qwen", "gemma"],
+            modelWorkByBucket: [interval.start: ["qwen": -100_000, "gemma": -200_000]],
+            selectedModel: nil)
+        #expect(values.map(\.series) == ["qwen", "gemma", "Base rewards"])
+        #expect(values.map(\.amountUSD) == [-0.1, -0.2, -0.05])
+        let segments = ActivityChartData.segments(values: values)
+        #expect(segments.map(\.series) == values.map(\.series))
+        for (actual, expected) in zip(segments.map(\.startUSD), [0, -0.1, -0.3]) {
+            #expect(abs(actual - expected) < 1e-12)
+        }
+        for (actual, expected) in zip(segments.map(\.endUSD), [-0.1, -0.3, -0.35]) {
+            #expect(abs(actual - expected) < 1e-12)
+        }
+        let bounds = ActivityChartData.profitBounds(values: values, stacked: true)
+        #expect(abs(bounds.minimum + 0.35) < 1e-12 && bounds.maximum == 0)
+    }
+
+    @Test("negative aggregate fallback retains selected model identity and excludes rewards")
+    func negativeSelectedFallback() {
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 3_600), duration: 3_600)
+        let total = bucket(interval, work: -1, reward: -2)
+        let values = ActivityChartData.values(buckets: [total], models: [],
+            modelWorkByBucket: [:], selectedModel: "retained")
+        #expect(values.map(\.series) == ["retained"])
+        #expect(values.map(\.amountUSD) == [-0.000001])
+        #expect(ActivityChartData.segments(values: values).first?.endUSD == -0.000001)
+    }
+
+    @Test("negative aggregate work remains visible with missing per-model history")
+    func negativeAggregateFallback() {
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 3_600), duration: 3_600)
+        let values = ActivityChartData.values(buckets: [bucket(interval, work: -125_000, reward: -5_000)],
+            models: ["gemma"], modelWorkByBucket: [:], selectedModel: nil)
+        #expect(values.map(\.series) == ["Work", "Base rewards"])
+        #expect(values.map(\.amountUSD) == [-0.125, -0.005])
+    }
+
+    @Test("resolved gross zeros stay distinct from signed cancellation and unknown buckets")
+    func resolvedGrossZeros() {
+        let first = DateInterval(start: Date(timeIntervalSince1970: 3_600), duration: 3_600)
+        let cancellation = DateInterval(start: first.end, duration: 3_600)
+        let missing = DateInterval(start: cancellation.end, duration: 3_600)
+        let values = ActivityChartData.values(buckets: [bucket(first, work: 0), bucket(cancellation, work: 0),
+            ActivityBucket(interval: missing, totals: nil, coverage: .unavailable)],
+            models: ["a", "b"], modelWorkByBucket: [cancellation.start: ["a": -1, "b": 1]],
+            selectedModel: nil)
+        #expect(ActivityChartData.recordedZeroValues(values).map(\.interval) == [first])
+        #expect(values.filter { $0.interval == cancellation }.map(\.amountUSD) == [-0.000001, 0.000001, 0])
+        #expect(!values.contains { $0.interval == missing })
     }
 
     @Test("chart values keep model earnings separate until the selected layout is applied")
