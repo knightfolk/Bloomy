@@ -340,3 +340,12 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   pass. Spoken automatic range grouping, actual OS display/time-zone changes,
   wider history performance and distribution remain open. See
   `docs/EARNINGS_SIGNED_UNKNOWN_NATIVE_REVIEW_20261003.md`.
+
+- Health uses concise attention summaries with complete source reasons retained,
+  and expanded daemon/thermal bodies align with their headings. Native164 verifies
+  bounded long-reason/identifier and missing/mixed layouts. Deferred updater
+  callbacks cancel replaced work and cannot install after their owner disappears;
+  six real-protocol regressions and the final 1,574-test run/Release build pass.
+  These source changes follow published 1.9.16 and are not yet a newer release.
+  See `docs/HEALTH_LONG_REASONS_UPDATER_REVIEW_20261003.md`; full native/VoiceOver,
+  production integration and comparable profiling remain open.

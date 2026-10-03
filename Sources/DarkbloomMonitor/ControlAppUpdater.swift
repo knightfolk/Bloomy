@@ -17,6 +17,8 @@ final class ControlAppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     private var resumeTask: Task<Void, Never>?
     var canRelaunch: () -> Bool = { true }
 
+    deinit { resumeTask?.cancel() }
+
     static func hasValidConfiguration(feed: String?, publicKey: String?) -> Bool {
         guard let feed, let url = URL(string: feed), url.scheme == "https",
               url.host != nil, url.user == nil, url.password == nil,
@@ -84,15 +86,23 @@ final class ControlAppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
 
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
                  untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
+        // Every callback replaces the earlier handler, even when Sparkle can
+        // proceed immediately with this one.
+        resumeTask?.cancel()
+        resumeTask = nil
         guard !canRelaunch() else { return false }
         message = "Update ready. Finish or discard edits. Bloomy will restart when pending requests and actions finish."
-        resumeTask?.cancel()
         resumeTask = Task { @MainActor [weak self] in
-            while let self, !self.canRelaunch() {
+            while !Task.isCancelled {
+                // Evaluate without retaining the owner across the sleep. A
+                // vanished owner must never resume its install handler.
+                guard let canRelaunch = self?.canRelaunch() else { return }
+                if canRelaunch {
+                    installHandler()
+                    return
+                }
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
-            guard !Task.isCancelled else { return }
-            installHandler()
         }
         return true
     }

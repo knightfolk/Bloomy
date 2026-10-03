@@ -1,5 +1,16 @@
 # Native export fixture
 
+## Long Health diagnostics
+
+The dashboard Scenario picker includes **Health long mixed** (retained daemon
+and events, missing models, current CLI status) and **Health long missing**
+(four unavailable sources). Both provide safe two-paragraph reasons and a long
+synthetic model ID. Expand Provider, Daemon, Thermal and Advanced, then inspect
+the complete reasons/last diagnostic at compact and wide sizes. Mac preferences
+and real provider state remain untouched. Final Native164 proof and updater
+callback regression limits are in
+`docs/HEALTH_LONG_REASONS_UPDATER_REVIEW_20261003.md`.
+
 The independent `ConfirmationReferenceFixture.swift` and matching Info plist
 compare AppKit sheet/modal and minimal SwiftUI confirmations with no real
 actions. October 3 captures reproduce the blank-alert symptom outside Bloomy;

@@ -15,6 +15,7 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case multipleStartup = "Multiple startup models", missingStartupModel = "Missing startup download"
     case ambiguousStartup = "Ambiguous startup alias", startupLoadingOff = "Startup loading off"
     case emptyCatalog = "Empty model catalog", unavailableCatalog = "Unavailable model catalog"
+    case healthLongMixed = "Health long mixed", healthLongMissing = "Health long missing"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
@@ -40,6 +41,10 @@ private enum FixtureLogTimeZone: String, CaseIterable, Identifiable {
 }
 
 private enum FixtureData {
+    private static let longModelID = "synthetic/Long-Model-Identifier-For-Compact-Health-Wrapping-Without-Live-Provider-Changes-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    private static func healthReason(_ source: String) -> String {
+        "Synthetic \(source) diagnostic: the review source did not complete its expected read. Retained capture time describes the last observation and cannot confirm current provider health.\n\nThis second paragraph is review-only recovery guidance. No real permissions, model files, settings or provider processes have changed. End of \(source) diagnostic."
+    }
     static let modelIDs = ["qwen3.8-27b", "gemma-4-26b-qat-4bit", "gpt-oss-20b", "ternary-bonsai-2-27b"]
     static let catalog = [
         CatalogModel(id: modelIDs[0], displayName: "Qwen 3.8 27B", family: "qwen", modelType: "text", capabilities: ["chat", "tools"], sizeGB: 16.3, minimumRAMGB: 36, active: true),
@@ -49,7 +54,7 @@ private enum FixtureData {
         CatalogModel(id: "qwen3-8b", displayName: "Qwen 3 8B", family: "qwen", modelType: "text", capabilities: ["chat", "tools"], sizeGB: 5.2, minimumRAMGB: 12, active: true)
     ]
     static func logEvents(_ scenario: FixtureScenario, now: Date) -> [LogEvent] {
-        let date = scenario == .stale ? now.addingTimeInterval(-900) : now
+        let date = scenario == .stale || scenario == .healthLongMixed ? now.addingTimeInterval(-900) : now
         return (0..<48).map { index in
             let eventDate = date.addingTimeInterval(Double(-index * 60))
             let severity: LogSeverity = index % 9 == 0 ? .warning : .info
@@ -60,14 +65,16 @@ private enum FixtureData {
         }
     }
     static func snapshot(_ scenario: FixtureScenario, now: Date, events: [LogEvent]? = nil) -> TelemetrySnapshot {
-        let date = scenario == .stale ? now.addingTimeInterval(-900) : now
-        let state = DaemonState(schema: 1, version: "0.9.17", currentModel: scenario == .offline ? "" : modelIDs[0],
+        let date = scenario == .stale || scenario == .healthLongMixed ? now.addingTimeInterval(-900) : now
+        let longHealth = scenario == .healthLongMixed || scenario == .healthLongMissing
+        let currentModel = longHealth ? longModelID : modelIDs[0]
+        let state = DaemonState(schema: 1, version: "0.9.17", currentModel: scenario == .offline ? "" : currentModel,
             warmModels: scenario == .offline ? [] : Array(modelIDs.prefix(2)),
             stats: ProviderStats(tokensGenerated: 126_400, requestsServed: 236, usageGaps: 0),
             trust: TrustState(level: "verified", status: scenario == .offline ? "offline" : "online",
                 reason: "Synthetic review", receivedAt: date.timeIntervalSince1970),
             capacity: scenario == .offline ? nil : MemoryCapacity(totalMemoryGB: 64, gpuMemoryActiveGB: 32, gpuMemoryCacheGB: 6),
-            slots: scenario == .offline ? [] : [ModelSlot(model: modelIDs[0], mtpEnabled: true, mtpActive: true,
+            slots: scenario == .offline ? [] : [ModelSlot(model: currentModel, mtpEnabled: true, mtpActive: true,
                 mtpReason: nil, kvBackend: "paged", requestedKVBackend: "paged")],
             inferenceActive: scenario.hasCurrentRuntime,
             startedAt: now.addingTimeInterval(-10_800).timeIntervalSince1970,
@@ -80,8 +87,27 @@ private enum FixtureData {
         var status = StatusSnapshot()
         status.version = "0.9.17"; status.providerName = "Synthetic review provider"
         status.hardware = "Synthetic 64 GB Mac"; status.daemon = scenario == .offline ? "Stopped" : "Running"
-        status.configuredModel = modelIDs[0]; status.localModelCount = catalog.count
+        status.configuredModel = currentModel; status.localModelCount = catalog.count
         status.requestCount = 236; status.tokenCount = 126_400
+        if longHealth {
+            let retainedAt = now.addingTimeInterval(-900)
+            let missing = scenario == .healthLongMissing
+            return TelemetrySnapshot(
+                state: missing ? .unavailable(reason: healthReason("daemon"))
+                    : .stale(value: state, capturedAt: retainedAt, reason: healthReason("daemon")),
+                loadedModels: .unavailable(reason: healthReason("loaded models")),
+                status: missing ? .unavailable(reason: healthReason("CLI status"))
+                    : .available(value: status, capturedAt: now),
+                eventFeed: missing ? .unavailable(reason: healthReason("events"))
+                    : .stale(value: EventFeed(events: events ?? logEvents(scenario, now: now),
+                        legacyReadAt: retainedAt, unifiedActivityAt: retainedAt),
+                        capturedAt: retainedAt, reason: healthReason("events")),
+                tokenRate: .unavailable(reason: "Synthetic health review has no current rate"),
+                diagnostics: [AcquisitionDiagnostic(id: "health-long", source: "Synthetic long health diagnostic",
+                    message: healthReason("acquisition") + "\n\nIdentifier: " + longModelID,
+                    occurredAt: now)],
+                capturedAt: now, menuStatus: missing ? .unavailable : .stale)
+        }
         // Offline has matching current synthetic daemon and official CLI
         // stopped-status evidence; unrelated sources remain unavailable.
         let stateAvailability: SourceAvailability<DaemonState> = scenario == .offline
@@ -312,7 +338,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
     }
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")

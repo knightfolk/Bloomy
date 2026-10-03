@@ -37,7 +37,11 @@ struct HealthView: View {
                                 sectionLabel("Provider & verification", symbol: "checkmark.shield")
                             }
                             DisclosureGroup(isExpanded: $showsDaemon) {
-                                daemonDetails.padding(.top, 10)
+                                VStack(alignment: .leading, spacing: 10) {
+                                    daemonDetails
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 10)
                             } label: {
                                 sectionLabel("Daemon details", symbol: "server.rack")
                             }
@@ -49,6 +53,7 @@ struct HealthView: View {
                                     Text("macOS reports thermal state independently of provider health.")
                                         .font(.callout).foregroundStyle(.secondary)
                                 }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.top, 10)
                             } label: {
                                 sectionLabel("Thermal details", symbol: "thermometer.medium")
@@ -93,9 +98,10 @@ struct HealthView: View {
         VStack(alignment: .leading, spacing: 9) {
             sectionLabel("Needs attention", symbol: "exclamationmark.triangle")
             if let warning {
-                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                Label(daemonAttentionTitle, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+                    .help(warning)
             }
             if !diagnostics.isEmpty {
                 Label("\(diagnostics.count) acquisition issue\(diagnostics.count == 1 ? "" : "s")",
@@ -209,6 +215,15 @@ struct HealthView: View {
             && isAvailable(store.snapshot.loadedModels)
             && isAvailable(store.snapshot.status)
             && isAvailable(store.snapshot.eventFeed)
+    }
+
+    /// Keep the overview scannable; full source reasons remain selectable below.
+    private var daemonAttentionTitle: String {
+        switch store.snapshot.state {
+        case .available: "Daemon timestamp is not current"
+        case .stale: "Using last-known daemon details"
+        case .unavailable: "Daemon details unavailable"
+        }
     }
 
     private func isAvailable<Value>(_ source: SourceAvailability<Value>) -> Bool
