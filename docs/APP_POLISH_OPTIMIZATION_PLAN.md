@@ -160,3 +160,11 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   visibly checked; CUA dismisses the transient popup when targeting its actions,
   leaving native Refresh/navigation proof open. All 1,436 tests and Release
   compilation pass. See `docs/POPUP_HOSTING_NATIVE_REVIEW_20261002.md`.
+
+- Exact-path CUA rebinding resolves the popup action-test targeting issue.
+  Native114 confirms Hosting navigation and Refresh; constrained keyboard review
+  then finds offscreen hosting focus and transient Refresh focus loss. Native116
+  reveals the two hosting controls through nested native clips only on focus
+  entry and preserves Refresh focus during reads. Light 80-point and dark
+  240-point native paths and the 1,439-test pass are recorded in the popup Hosting
+  review. The rest of the popup key loop and broader optimization stay open.

@@ -102,6 +102,14 @@ commands plus a synthetic inventory-removal command; production update/provider 
 minimize/restore route for Metrics lifecycle review, with tracing disabled for
 normal timing proof.
 
+For CUA, select the fixture by its exact app path. After opening the genuine
+menu-bar popup, call `cua.getApp` with that same path again so input targets the
+current transient window. A dashboard-bound handle may observe the popup yet
+raise the dashboard on input and dismiss it. Do not use the shared fixture bundle
+ID: preserved review bundles make that lookup ambiguous. Join finite Swift tests
+before keyboard review, since their native rendering windows can interfere with
+transient-window focus. Obtain fresh AX state after each adaptive action.
+
 The standalone compiler does not invoke SwiftPM or its build lock. Its small
 output stays under `.build/native-dashboard-fixture`; `--output /absolute/path`
 can select another task-owned output directory. The builder records original

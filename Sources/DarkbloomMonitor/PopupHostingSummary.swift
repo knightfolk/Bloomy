@@ -82,19 +82,23 @@ struct PopupHostingSummary: View {
                 .buttonStyle(.borderless)
                 .help("Open hosting settings and connection details")
                 .accessibilityIdentifier("popover.hosting.open")
+                .modifier(PopupKeyboardReveal())
                 Spacer(minLength: 8)
                 Text(presentation.selection).font(.caption).foregroundStyle(.secondary)
                     .help("Saved hosting preference. Apply changes before assuming the running provider uses it.")
                 Button {
+                    guard !store.isFetchingEndpointDetails else { return }
                     Task { await store.fetchEndpointDetails() }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: store.isFetchingEndpointDetails ? "hourglass" : "arrow.clockwise")
+                        .frame(width: 14)
                 }
                 .buttonStyle(.borderless)
-                .disabled(store.isFetchingEndpointDetails)
                 .accessibilityLabel("Refresh hosting connection")
+                .accessibilityValue(store.isFetchingEndpointDetails ? "Checking" : "Ready")
                 .help("Read local-only endpoint discovery from the CLI")
                 .accessibilityIdentifier("popover.hosting.refresh")
+                .modifier(PopupKeyboardReveal())
             }
             if let coordinator = PopupHostingPresentation.coordinatorHost(coordinator) {
                 Label("Coordinator · \(coordinator)", systemImage: "antenna.radiowaves.left.and.right")
