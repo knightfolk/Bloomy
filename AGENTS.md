@@ -31,3 +31,11 @@ Settings showed Darkbloom's removable-volume switch on. Diagnose that boundary
 before retrying. This scoped reset does not authorize other privacy resets or
 new Keychain, Full Disk, or broader drive access. Keep credentials out of logs
 and evidence.
+
+## Completion, integration and GitHub checkpoints
+
+- For Kevin's authorized project work, commit completed, coherent changes after the required checks pass. Stage only your own verified scope; preserve concurrent and unrelated edits. A local commit alone does not mean integration or delivery is complete.
+- Route completed work through the designated project integration owner, currently **Rebrand app as Bloomy** (task `01a0eb34-3317-7821-8c46-73723894fd79`) unless Kevin changes the owner, who verifies the intended target branch and handles merges after the relevant checks pass. Stop the merge when ownership or target is unclear, conflicts remain, or required checks fail; report the blocker and continue independent permitted work.
+- Push validated milestones to the existing GitHub remote when prudent and the remote, branch and scope are authorized. Verify the destination and push result; do not assume a local or saved remote-tracking ref proves a current remote update.
+- Do not force-push, rewrite shared history, stage unrelated work, or treat this workflow as authorization for deployments, credential/security changes or a broader scope. Existing project authorization, release gates and live tool restrictions still apply.
+- At handoff, report the commit identity, whether it is local only or merged into the intended branch, whether GitHub received it, the checks performed and any remaining blocker. Pass this workflow to workers so integration does not get lost between threads.
