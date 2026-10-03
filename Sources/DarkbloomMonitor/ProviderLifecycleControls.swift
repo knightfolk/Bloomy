@@ -393,6 +393,7 @@ struct ProviderLifecycleControls: View {
                     .help(control.accessibilityLabel)
                     .accessibilityLabel(control.accessibilityLabel)
                     .accessibilityIdentifier(control.accessibilityIdentifier)
+                    .modifier(PopupKeyboardReveal())
                 }
             }
 

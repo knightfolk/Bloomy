@@ -380,6 +380,7 @@ private struct PopupAvailableDisclosureStyle: DisclosureGroupStyle {
             }
             .buttonStyle(.borderless)
             .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
+            .modifier(PopupKeyboardReveal())
             if configuration.isExpanded {
                 configuration.content
             }
@@ -542,6 +543,7 @@ struct MonitorPopover: View {
                         if case .available(.updateAvailable(_, let latest), let checkedAt) = cliUpdates.status,
                            currentTime.timeIntervalSince(checkedAt) < 6 * 60 * 60 {
                             Button("CLI \(latest) available") { openSettings(.updates) }.font(.caption)
+                                .modifier(PopupKeyboardReveal())
                         }
                         if let error = controlStore.errorMessage {
                             Label(error, systemImage: "exclamationmark.circle")
@@ -584,6 +586,7 @@ struct MonitorPopover: View {
         .padding(popupPadding)
         .frame(width: Self.popupWidth, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
+        .environment(\.popupKeyboardRevealEnabled, true)
         .sheet(isPresented: $showsFans) {
             if let extras = store.providerExtras {
                 PopupFanPanel(extras: extras, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling,
@@ -702,6 +705,7 @@ struct MonitorPopover: View {
                 .help("Refresh model controls")
                 .accessibilityLabel("Refresh model controls")
                 .accessibilityIdentifier("popover.models.refresh")
+                .modifier(PopupKeyboardReveal())
             }
             if let advertised {
                 if advertised.isEmpty {
@@ -804,6 +808,7 @@ struct MonitorPopover: View {
                 Button { openSettings(.electricity) } label: {
                     Label("Set up electricity estimate", systemImage: "bolt")
                 }.font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
+                    .modifier(PopupKeyboardReveal())
             }
         }
         .padding(12)
@@ -873,6 +878,7 @@ struct MonitorPopover: View {
 
             Button(action: openDashboard) { Image(systemName: "rectangle.grid.2x2") }
                 .help("Open dashboard").accessibilityLabel("Open dashboard")
+                .modifier(PopupKeyboardReveal())
             Button { openSettings(nil) } label: {
                 Image(systemName: "gearshape")
             }
@@ -881,6 +887,7 @@ struct MonitorPopover: View {
             .help("Settings")
             .accessibilityLabel("Settings")
             .accessibilityIdentifier("dashboard.settings")
+            .modifier(PopupKeyboardReveal())
 
             Button(role: .destructive) {
                 Task { await store.quit() }
@@ -892,6 +899,7 @@ struct MonitorPopover: View {
             .help("Quit \(MonitorApplicationIdentity.displayName)")
             .accessibilityLabel("Quit \(MonitorApplicationIdentity.displayName)")
             .accessibilityIdentifier("dashboard.quit")
+            .modifier(PopupKeyboardReveal())
         }
     }
 

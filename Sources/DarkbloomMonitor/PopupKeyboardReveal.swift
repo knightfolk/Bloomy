@@ -1,17 +1,33 @@
 import AppKit
 import SwiftUI
 
+private struct PopupKeyboardRevealEnabledKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var popupKeyboardRevealEnabled: Bool {
+        get { self[PopupKeyboardRevealEnabledKey.self] }
+        set { self[PopupKeyboardRevealEnabledKey.self] = newValue }
+    }
+}
+
 /// The popup has both a body viewport and a whole-popup fallback viewport.
 /// Reveal through each native clip only when keyboard focus enters a control.
 struct PopupKeyboardReveal: ViewModifier {
+    @Environment(\.popupKeyboardRevealEnabled) private var isEnabled
     @FocusState private var isFocused: Bool
 
     func body(content: Content) -> some View {
-        content.focused($isFocused)
-            .background {
-                PopupFocusAnchor(isFocused: isFocused)
-                    .accessibilityHidden(true)
-            }
+        if isEnabled {
+            content.focused($isFocused)
+                .background {
+                    PopupFocusAnchor(isFocused: isFocused)
+                        .accessibilityHidden(true)
+                }
+        } else {
+            content
+        }
     }
 }
 

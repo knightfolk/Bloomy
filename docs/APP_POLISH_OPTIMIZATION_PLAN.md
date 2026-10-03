@@ -168,3 +168,12 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   entry and preserves Refresh focus during reads. Light 80-point and dark
   240-point native paths and the 1,439-test pass are recorded in the popup Hosting
   review. The rest of the popup key loop and broader optimization stay open.
+
+- Native116 then confirms offscreen model Refresh, Available and electricity
+  focus. Native117 extends focus-entry reveal across popup controls with an
+  opt-in environment so shared dashboard controls register no native anchors.
+  Light 240-point and dark 80-point rendered rings, Available Space expansion,
+  footer/header reverse reveal and stable held focus pass. All 1,440 tests and
+  Release compilation pass. Enabled model mutations, conditional entries,
+  physical wheel/VoiceOver and broader optimization/distribution remain open;
+  exact evidence is in the popup Hosting review.

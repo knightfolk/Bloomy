@@ -1,11 +1,28 @@
 import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import DarkbloomMonitor
 
 @Suite("Popup keyboard reveal")
 @MainActor
 struct PopupKeyboardRevealTests {
+    @Test("shared controls register native reveal anchors only in the popup", arguments: [false, true])
+    func scopedRegistration(enabled: Bool) async {
+        let root = Button("Shared control") {}.modifier(PopupKeyboardReveal())
+            .environment(\.popupKeyboardRevealEnabled, enabled)
+            .frame(width: 200, height: 50)
+        let host = NSHostingController(rootView: root)
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.setContentSize(NSSize(width: 200, height: 50))
+        host.view.layoutSubtreeIfNeeded()
+        await Task.yield()
+        host.view.layoutSubtreeIfNeeded()
+        #expect(anchors(in: host.view).count == (enabled ? 1 : 0))
+    }
+
     @Test("nested viewports reveal the same control with its focus-ring margin")
     func nestedClips() {
         let outer = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 80))
@@ -64,5 +81,9 @@ struct PopupKeyboardRevealTests {
         document.addSubview(anchor)
         scroll.layoutSubtreeIfNeeded()
         return (window, scroll, anchor)
+    }
+
+    private func anchors(in view: NSView) -> [PopupFocusAnchorView] {
+        (view as? PopupFocusAnchorView).map { [$0] } ?? view.subviews.flatMap { anchors(in: $0) }
     }
 }

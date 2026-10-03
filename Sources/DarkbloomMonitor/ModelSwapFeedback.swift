@@ -24,6 +24,7 @@ struct ModelSwapFeedback: View {
                 Button("Open Hosting", action: openHosting)
                     .font(.caption)
                     .accessibilityIdentifier("popover.swap.hosting")
+                    .modifier(PopupKeyboardReveal())
             }
         }
     }

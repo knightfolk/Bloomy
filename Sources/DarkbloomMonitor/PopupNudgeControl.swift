@@ -13,6 +13,7 @@ struct PopupNudgeControl: View {
         }
         .help("Send one optional self-route request through a warm model")
         .accessibilityIdentifier("popup.nudge.open")
+        .modifier(PopupKeyboardReveal())
         .sheet(isPresented: $showsSheet) {
             sheetContent
         }

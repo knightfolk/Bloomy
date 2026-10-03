@@ -74,6 +74,7 @@ struct PopupFanSummary: View {
         .buttonStyle(.plain)
         .help("Fan helper and cooling readings")
         .accessibilityIdentifier("popup.fans")
+        .modifier(PopupKeyboardReveal())
         .task(id: isVisible && ownsVisibleFanPolling) {
             guard isVisible && ownsVisibleFanPolling else { return }
             await store.observeVisibleFan()

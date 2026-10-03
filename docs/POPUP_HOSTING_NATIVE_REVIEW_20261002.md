@@ -112,3 +112,49 @@ wheel scrolling on the external display, delayed-discovery busy behavior,
 coordinator/unified rendering and actual VoiceOver remain separate proof. The
 running production app/provider and credentials remain unchanged; this is not
 distribution or whole-app performance evidence.
+
+## Follow-up: the surrounding popup controls
+
+A new light 240-point Native116 comparison confirms that model Refresh,
+Available and the electricity shortcut can also receive focus while offscreen.
+Native117 extends the same focus-entry reveal to popup header/lifecycle controls,
+Cooling, Auto, Nudge, model Refresh/actions, Available, electricity, the CLI
+update shortcut and swap-recovery Hosting navigation. An opt-in environment
+value confines native anchor registration to the popup; shared dashboard controls
+retain their ordinary rendering and focus registration. A regression checks
+both enabled and disabled registration. Existing operation eligibility guards
+remain unchanged.
+
+Native117 verifies these bounded paths after the full test runner exits and an
+exact-path popup rebind:
+
+- Light 240-point: model Refresh has a visible focus ring; Available and the
+  electricity shortcut reveal through both clips. Space expands Available while
+  retaining focus; Tab reveals the footer after expansion. Reverse traversal
+  reveals Restart and then the dashboard header button with full rings.
+- Dark 80-point: keyboard traversal changes the outer scroll position as it
+  reaches provider controls, Cooling, Auto/Nudge and Hosting. Rendered checks
+  confirm model Refresh, the electricity shortcut and Available have visible
+  rings. A later source publication and discovery expiry leave Available's focus
+  and both scroll positions unchanged.
+- CUA's immediate AX reads sometimes report a delayed focus step; the accepted
+  assertions use the final AX/screenshot pair, rather than claiming exact tab
+  counts. The review app exits normally after the check.
+
+The fixture's model mutation buttons are correctly disabled because it lacks
+matching live provider identity and swap capability. Their enabled native path,
+CLI-update/recovery-only entries, sheet traversal, physical wheel scrolling and
+actual VoiceOver remain separate proof. No real provider mutation was made.
+
+All 98 Native117 source hashes match the inspected source. The three existing
+inert dependency substitutions are unchanged. Binary SHA-256:
+`db8b8ee7a31141d31927f1634e3281cfea6be1cb423a71fa867330b1324d6019`.
+Linked telemetry SHA-256:
+`0da0aed0eee0f3ace173ccbcbc1b413cc64f7d4f1ec2d78658e059fff593d102`.
+
+The full test run passes 1,391 app/telemetry, 21 protocol and 28 host tests
+(1,440 total); Release compilation passes in 48.53 seconds. Logs:
+`/tmp/bloomy-popup-full-keyloop-tests-20261002.log` and
+`/tmp/bloomy-popup-full-keyloop-release-20261002.log`.
+The production app remains PID 61760 with its original October 2 12:55:28 launch.
+This is source/native review evidence; no new distribution build was installed.

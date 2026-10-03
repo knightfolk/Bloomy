@@ -18,6 +18,7 @@ struct PopupAutoModeControl: View {
         .controlSize(.small)
         .help("Advertise selected models with one slot and a chosen startup model")
         .accessibilityIdentifier("popover.auto")
+        .modifier(PopupKeyboardReveal())
         .sheet(isPresented: $showsSetup) {
             PopupAutoModeSetup(store: store, openModels: openModels, updateProtection: updateProtection)
         }

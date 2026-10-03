@@ -159,6 +159,7 @@ struct CompactModelCard: View {
                         .help(activationUnavailableReason ?? "Activate · \(activationHelp)")
                         .accessibilityLabel("Activate \(ModelDisplayName.short(modelID))")
                         .accessibilityHint(activationUnavailableReason ?? activationHelp)
+                        .modifier(PopupKeyboardReveal())
                     }
                     if let swapModel {
                         Button(action: swapModel) {
@@ -169,6 +170,7 @@ struct CompactModelCard: View {
                         .help(swapUnavailableReason ?? "Load this model while keeping all advertised models available")
                         .accessibilityLabel("Swap to \(ModelDisplayName.short(modelID))")
                         .accessibilityHint(swapUnavailableReason ?? "Keep all advertised models available")
+                        .modifier(PopupKeyboardReveal())
                     }
                     if let switchModel {
                         Button(action: switchModel) {
@@ -178,6 +180,7 @@ struct CompactModelCard: View {
                         .disabled(switchUnavailableReason != nil)
                         .help(switchUnavailableReason ?? "Make this the only advertised model. Current work drains before switching.")
                         .accessibilityLabel("Switch to \(ModelDisplayName.short(modelID)) only")
+                        .modifier(PopupKeyboardReveal())
                         .accessibilityHint(switchUnavailableReason ?? "Make this the only advertised model")
                     }
                 }
