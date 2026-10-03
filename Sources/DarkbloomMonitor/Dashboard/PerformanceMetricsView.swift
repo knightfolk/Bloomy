@@ -77,7 +77,10 @@ private struct RecordedPerformanceMetricsView: View {
             )
         }
         .task(id: PerformanceHistoryQuery(period: period, refreshID: refreshID, isVisible: isVisible)) {
-            guard isVisible else { return }
+            guard isVisible else {
+                await history.releaseReadCache()
+                return
+            }
             let requestedPeriod = period
             // Capture stays immediate; aggregate display work is coalesced.
             // Period changes, reopening, and explicit refresh start a new task.
@@ -97,6 +100,9 @@ private struct RecordedPerformanceMetricsView: View {
                 }
                 loading = false
             }
+        }
+        .onDisappear {
+            Task { await history.releaseReadCache() }
         }
     }
 }

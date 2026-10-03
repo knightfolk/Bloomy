@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SQLite3
 
@@ -27,6 +28,27 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
     private let historyLimit: Int
     private let retentionDays: Int
     private let now: @Sendable () -> Date
+    private let decoder = JSONDecoder()
+    private var decodedRows = PerformanceHistoryDecodedCache.Generation.empty
+    private var decodedDiagnostics = PerformanceHistoryDecodedCache.Diagnostics.empty
+
+    var decodedCacheDiagnostics: PerformanceHistoryDecodedCache.Diagnostics {
+        lock.lock()
+        defer { lock.unlock() }
+        return decodedDiagnostics
+    }
+
+    /// Release derived read data when its consumer becomes inactive. Stored
+    /// measurements, retention and provider state are unaffected.
+    @discardableResult
+    public func clearDecodedReadCache() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        let released = decodedRows.entries.count
+        decodedRows = .empty
+        decodedDiagnostics = .empty
+        return released
+    }
 
     public init(
         url: URL, historyLimit: Int = maximumHistoryLimit,
@@ -131,13 +153,13 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
             SELECT id, observed_at, model, sample FROM performance_history
             WHERE observed_at >= ? AND observed_at <= ?
             \(model == nil ? "" : "AND model = ?")
-            ORDER BY observed_at ASC, rowid ASC
+            ORDER BY observed_at DESC, rowid DESC
             """)
         defer { sqlite3_finalize(statement) }
         try checked(sqlite3_bind_double(statement, 1, interval.start.timeIntervalSince1970))
         try checked(sqlite3_bind_double(statement, 2, interval.end.timeIntervalSince1970))
         if let model { try bind(model, statement, 3) }
-        return try rows(statement)
+        return try rows(statement, chronological: true)
     }
 
     /// Newest measurements first.
@@ -150,7 +172,7 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
         let statement = try prepare("SELECT id, observed_at, model, sample FROM performance_history ORDER BY observed_at DESC, rowid DESC LIMIT ?")
         defer { sqlite3_finalize(statement) }
         try checked(sqlite3_bind_int64(statement, 1, Int64(count)))
-        return try rows(statement)
+        return try rows(statement, chronological: false)
     }
 
     public func retainedRecordCount() throws -> Int {
@@ -163,20 +185,48 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
         return Int(sqlite3_column_int64(statement, 0))
     }
 
-    private func rows(_ statement: OpaquePointer) throws -> [PerformanceSample] {
+    private func rows(_ statement: OpaquePointer, chronological: Bool) throws -> [PerformanceSample] {
+        let previous = decodedRows
+        let staged = PerformanceHistoryDecodedCache.Builder()
         var result: [PerformanceSample] = []
+        var hits = 0
+        var misses = 0
+        var hashedRows = 0
         while true {
             // Bound obsolete decoding work when a view's read task is cancelled.
             if result.count.isMultiple(of: 64) { try Task.checkCancellation() }
             switch sqlite3_step(statement) {
-            case SQLITE_DONE: return result
-            case SQLITE_ROW: result.append(try decode(statement))
+            case SQLITE_DONE:
+                // A late cancellation must not publish a partially obsolete read.
+                try Task.checkCancellation()
+                if chronological { result.reverse() }
+                try Task.checkCancellation()
+                let generation = staged.finish()
+                decodedRows = generation
+                decodedDiagnostics = .init(
+                    rows: generation.entries.count, accountedBytes: generation.accountedBytes,
+                    hits: hits, misses: misses, hashedRows: hashedRows,
+                    peakAccountedBytes: previous.accountedBytes + staged.peakAccountedBytes
+                )
+                return result
+            case SQLITE_ROW:
+                let (sample, reused, hashed) = try decodedRow(statement, previous: previous, staged: staged)
+                result.append(sample)
+                if reused { hits += 1 } else { misses += 1 }
+                if hashed { hashedRows += 1 }
             default: throw PerformanceHistoryDatabaseError.unavailable
             }
         }
     }
 
     private func decode(_ statement: OpaquePointer) throws -> PerformanceSample {
+        try decodedRow(statement, previous: decodedRows, staged: nil).0
+    }
+
+    private func decodedRow(
+        _ statement: OpaquePointer, previous: PerformanceHistoryDecodedCache.Generation,
+        staged: PerformanceHistoryDecodedCache.Builder?
+    ) throws -> (PerformanceSample, Bool, Bool) {
         guard sqlite3_column_type(statement, 0) == SQLITE_TEXT,
               sqlite3_column_type(statement, 1) == SQLITE_FLOAT || sqlite3_column_type(statement, 1) == SQLITE_INTEGER,
               sqlite3_column_type(statement, 2) == SQLITE_NULL || sqlite3_column_type(statement, 2) == SQLITE_TEXT,
@@ -185,11 +235,46 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
               let bytes = sqlite3_column_blob(statement, 3) else { throw PerformanceHistoryDatabaseError.corruptRecord }
         let size = Int(sqlite3_column_bytes(statement, 3))
         guard size > 0, size <= Self.maximumPayloadBytes else { throw PerformanceHistoryDatabaseError.corruptRecord }
-        let payload = Data(bytes: bytes, count: size)
-        guard let sample = try? JSONDecoder().decode(PerformanceSample.self, from: payload), sample.isValid,
-              sample.id == id, sample.observedAt.timeIntervalSince1970 == sqlite3_column_double(statement, 1),
-              sample.model == text(statement, 2) else { throw PerformanceHistoryDatabaseError.corruptRecord }
-        return sample
+        // SQLite owns these bytes until the next step/finalize. Neither the
+        // generation nor its entries retain the payload or this temporary view.
+        let payload = Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: bytes), count: size, deallocator: .none)
+        let cached = previous.entries[id]
+        // Verify every possible reuse. A miss beyond this read's bounded cache
+        // still gets decoded and validated, without an unnecessary hash.
+        var digest = cached.map { _ in SHA256.hash(data: payload) }
+        let sample: PerformanceSample
+        let reused: Bool
+        if let cached, cached.digest == digest {
+            sample = cached.sample
+            reused = true
+        } else {
+            guard let decoded = try? decoder.decode(PerformanceSample.self, from: payload), decoded.isValid else {
+                throw PerformanceHistoryDatabaseError.corruptRecord
+            }
+            sample = decoded
+            reused = false
+        }
+        let indexedModel: String?
+        if sqlite3_column_type(statement, 2) == SQLITE_TEXT {
+            guard let model = text(statement, 2) else { throw PerformanceHistoryDatabaseError.corruptRecord }
+            indexedModel = model
+        } else {
+            indexedModel = nil
+        }
+        // Hash equality never substitutes for checking the current indexed
+        // columns. Another SQLite writer can alter them independently of BLOBs.
+        guard sample.id == id,
+              sample.observedAt.timeIntervalSince1970 == sqlite3_column_double(statement, 1),
+              sample.model == indexedModel else { throw PerformanceHistoryDatabaseError.corruptRecord }
+        if let staged {
+            if reused, let cached {
+                staged.insert(cached)
+            } else if let cost = staged.admissionCost(of: sample) {
+                if digest == nil { digest = SHA256.hash(data: payload) }
+                if let digest { staged.insert(.init(digest: digest, sample: sample, accountedBytes: cost)) }
+            }
+        }
+        return (sample, reused, digest != nil)
     }
 
     private func prune() throws {

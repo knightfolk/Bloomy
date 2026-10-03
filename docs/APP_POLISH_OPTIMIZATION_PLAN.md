@@ -276,3 +276,14 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   A fresh snapshot reports seven advertised models, one warm and active inference.
   The external originals remain preserved. Details and storage/runtime limits are
   in `docs/MODEL_CACHE_INTERNAL_MIGRATION_20261003.md`.
+
+- Metrics now reuses bounded decoded recent rows only after current-BLOB and
+  indexed-field verification, and releases derived reuse on page exit/Hide.
+  The accepted serial Release comparison measures 56.24 → 13.37 ms repeated
+  reads at 10,000 rows and 595.39 → 531.73 ms at 100,000, with first-read overhead
+  and a 12.4 MiB isolated resident-size difference explicitly recorded. Native144
+  checks compact light/wide dark, route exit/reopen, Refresh, 30-day selection,
+  136-second Hide/recording/restore and brief minimize eviction. All 1,537 reported
+  tests and Release compilation pass. Actual allocation limits, whole-app energy,
+  deterministic in-scan cancellation and wider native/distribution proof remain
+  separate; see `docs/METRICS_DECODED_CACHE_REVIEW_20261003.md`.

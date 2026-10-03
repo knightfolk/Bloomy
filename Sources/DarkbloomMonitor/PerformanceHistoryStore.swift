@@ -38,6 +38,11 @@ private actor PerformanceJournal {
         try Task.checkCancellation()
         return try opened().samples(in: interval)
     }
+
+    func clearReadCache() {
+        // Hiding Metrics must not open a journal solely to clear derived state.
+        database?.clearDecodedReadCache()
+    }
 }
 
 private enum PerformanceRecordingError: Error { case backlogOverflow }
@@ -49,14 +54,24 @@ final class PerformanceHistoryStore: ObservableObject {
     @Published private(set) var recordingStartedAt: Date?
     private let journal: PerformanceJournal
     private let readSamples: (@Sendable (DateInterval) async throws -> [PerformanceSample])?
+    private let clearReadCache: (@Sendable () async -> Void)?
     private var lastObserved: PerformanceSample?
     private var lastAttemptAt: Date?
     private var recordError: String?
     private var readError: String?
 
-    init(url: URL, readSamples: (@Sendable (DateInterval) async throws -> [PerformanceSample])? = nil) {
+    init(url: URL, readSamples: (@Sendable (DateInterval) async throws -> [PerformanceSample])? = nil,
+         clearReadCache: (@Sendable () async -> Void)? = nil) {
         journal = PerformanceJournal(url: url)
         self.readSamples = readSamples
+        self.clearReadCache = clearReadCache
+    }
+
+    /// Releases only decoded display reuse. Recorded rows, pending writes,
+    /// revisions and storage faults remain unchanged.
+    func releaseReadCache() async {
+        if let clearReadCache { await clearReadCache() }
+        else { await journal.clearReadCache() }
     }
 
     /// Called for every accepted observation. Persist every 30 seconds and at

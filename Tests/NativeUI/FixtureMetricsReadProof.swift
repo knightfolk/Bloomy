@@ -17,6 +17,9 @@ struct FixtureMetricsReadSnapshot: Codable, Sendable {
     let heldReadID: UInt64?
     let lastStartedAt: Date?
     let lastCompletedAt: Date?
+    let cacheReleases: UInt64
+    let lastReleasedDecodedRows: Int
+    let totalReleasedDecodedRows: UInt64
 }
 
 /// Owns only the explicitly supplied synthetic database. Modes affect one
@@ -33,6 +36,9 @@ actor FixtureMetricsReads {
     private var empty: UInt64 = 0
     private var lastStartedAt: Date?
     private var lastCompletedAt: Date?
+    private var cacheReleases: UInt64 = 0
+    private var lastReleasedDecodedRows = 0
+    private var totalReleasedDecodedRows: UInt64 = 0
 
     init(url: URL, proofURL: URL? = nil) throws {
         database = try PerformanceHistoryDatabase(url: url)
@@ -45,6 +51,13 @@ actor FixtureMetricsReads {
     }
 
     func setNext(_ mode: FixtureMetricsReadMode) { nextMode = mode }
+
+    func clearReadCache() {
+        lastReleasedDecodedRows = database.clearDecodedReadCache()
+        totalReleasedDecodedRows &+= UInt64(lastReleasedDecodedRows)
+        cacheReleases &+= 1
+        persistProof()
+    }
 
     func samples(in interval: DateInterval) async throws -> [PerformanceSample] {
         try Task.checkCancellation()
@@ -96,7 +109,9 @@ actor FixtureMetricsReads {
     func snapshot() -> FixtureMetricsReadSnapshot {
         .init(nextMode: nextMode, started: started, completed: completed, failed: failed,
               cancelled: cancelled, empty: empty, heldReadID: pending?.id,
-              lastStartedAt: lastStartedAt, lastCompletedAt: lastCompletedAt)
+              lastStartedAt: lastStartedAt, lastCompletedAt: lastCompletedAt,
+              cacheReleases: cacheReleases, lastReleasedDecodedRows: lastReleasedDecodedRows,
+              totalReleasedDecodedRows: totalReleasedDecodedRows)
     }
 
     private func hold(_ readID: UInt64) async throws -> FixtureMetricsReadMode {

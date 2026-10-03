@@ -614,7 +614,11 @@ current time, permitting arrival/freshness-expiry inspection without advancing
 a fake clock. Resume releases held work and resumes ordinary fake publication.
 Save read counts writes `fixture-metrics-read-proof.json` in the unique banner
 directory. Counts distinguish starts, completions, failures, cancellations and
-empty results. Copy stage evidence before saving over it. The inert reader has
+empty results. Copy stage evidence before saving over it.
+Cache release counters also report the last and cumulative evicted decoded-row
+counts, so Hide, minimize and route-exit cleanup can be observed without row
+payloads. Clearing display reuse does not remove persisted observations.
+The inert reader has
 no live endpoint, credentials or provider mutations. Final bounded observations
 and the subsequent native focus-section repair are in
 `docs/METRICS_SCOPE_KEYBOARD_NATIVE_REVIEW_20261002.md`.

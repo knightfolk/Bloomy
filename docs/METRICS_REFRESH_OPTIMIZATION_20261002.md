@@ -67,9 +67,12 @@ These are component timings, not full Metrics rendering or app CPU. The mixed
 synthetic inputs differ from earlier visit benchmarks; do not compare them as
 a before/after result. The benchmark retained baseline and updated arrays for
 equality checks; its 131,006,464-byte peak RSS is not a database-cache estimate.
-No decoded-row cache has been added. Such a cache needs demonstrated benefit,
+At this October 2 checkpoint no decoded-row cache had been added. Such a cache needs demonstrated benefit,
 bounded retained memory and authoritative invalidation for external changes,
 out-of-order rows, tied timestamps, corruption and manual Refresh.
+
+The subsequently measured October 3 implementation and its memory/correctness
+limits are in `docs/METRICS_DECODED_CACHE_REVIEW_20261003.md`.
 
 Reproduce after a release build, choosing a fresh output directory:
 

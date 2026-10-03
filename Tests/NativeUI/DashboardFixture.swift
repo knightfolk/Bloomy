@@ -1153,7 +1153,8 @@ private final class FixtureModel: ObservableObject {
                 proofURL: directory.appendingPathComponent("fixture-metrics-read-proof.json"))
             metricsReads = reads
             preparedMonitor.performanceHistory = PerformanceHistoryStore(url: performanceURL,
-                readSamples: { interval in try await reads.samples(in: interval) })
+                readSamples: { interval in try await reads.samples(in: interval) },
+                clearReadCache: { await reads.clearReadCache() })
             let history = ActionHistoryStore(url: directory.appendingPathComponent("actions-\(requestedScenario.id).sqlite"))
             if history.events.isEmpty {
                 for index in 0..<48 {
