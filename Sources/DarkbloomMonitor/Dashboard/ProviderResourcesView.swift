@@ -29,6 +29,9 @@ struct ProviderResourcesView: View {
                 requestActivityMetric
                 gpuMemoryMetric
             }
+            if let protection = store.hostGPUProtection {
+                HostGPUProtectionSummaryView(protection: protection, slowdownWarning: store.servingSlowdownWarning)
+            }
 
             if let extras = store.providerExtras {
                 ProviderThermalView(store: extras, isVisible: store.dashboardVisible)

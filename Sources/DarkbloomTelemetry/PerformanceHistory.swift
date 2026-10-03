@@ -118,6 +118,10 @@ public struct PerformanceSummary: Equatable, Sendable {
     public let activeCoveredSeconds: TimeInterval
     public let averageTokenRate: Double?
     public let averageGPUUtilizationPercent: Double?
+    /// Whole-Mac readings bracketed by observed idle inference and unchanged
+    /// request counters. This is a proxy, not attribution to other processes.
+    public let averageIdleGPUUtilizationPercent: Double?
+    public let idleGPUCoveredSeconds: TimeInterval
     public let completedRequests: Int64?
     public let generatedTokens: Int64?
 
@@ -131,6 +135,8 @@ public struct PerformanceSummary: Equatable, Sendable {
         var tokenSeconds = 0.0
         var gpuIntegral = 0.0
         var gpuSeconds = 0.0
+        var idleGPUIntegral = 0.0
+        var idleGPUSeconds = 0.0
         var requests: Int64?
         var tokens: Int64?
         var requestsOverflow = false
@@ -155,6 +161,11 @@ public struct PerformanceSummary: Equatable, Sendable {
             if let firstGPU = first.gpuUtilizationPercent, let secondGPU = second.gpuUtilizationPercent {
                 gpuIntegral += (firstGPU / 2 + secondGPU / 2) * duration
                 gpuSeconds += duration
+                if firstActive == false, secondActive == false,
+                   let before = first.requestsServed, let after = second.requestsServed, before == after {
+                    idleGPUIntegral += (firstGPU / 2 + secondGPU / 2) * duration
+                    idleGPUSeconds += duration
+                }
             }
             // Provider counters are global. A last-used model at both ends
             // cannot prove which models served requests between observations.
@@ -170,6 +181,8 @@ public struct PerformanceSummary: Equatable, Sendable {
         activeCoveredSeconds = activeCovered
         averageTokenRate = tokenSeconds > 0 ? tokenIntegral / tokenSeconds : nil
         averageGPUUtilizationPercent = gpuSeconds > 0 ? gpuIntegral / gpuSeconds : nil
+        averageIdleGPUUtilizationPercent = idleGPUSeconds > 0 ? idleGPUIntegral / idleGPUSeconds : nil
+        idleGPUCoveredSeconds = idleGPUSeconds
         completedRequests = requests
         generatedTokens = tokens
     }

@@ -11,6 +11,8 @@ final class SystemGPUUsageStore: ObservableObject {
     @Published private(set) var sampledAt: Date?
     @Published private(set) var lastGoodPercentage: Double?
     @Published private(set) var lastGoodSampledAt: Date?
+    /// One shared sample feeds opt-in protection without another poller.
+    var onSample: (@MainActor () -> Void)?
 
     enum Reading: Equatable {
         case current(percentage: Double, sampledAt: Date)
@@ -60,6 +62,7 @@ final class SystemGPUUsageStore: ObservableObject {
     }
 
     func refresh() {
+        defer { onSample?() }
         guard let value = read(), let valid = SystemGPUUtilization.validPercentage(value) else {
             percentage = nil
             sampledAt = nil

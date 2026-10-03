@@ -826,6 +826,7 @@ private final class FixtureModel: ObservableObject {
     private var modelKeyboardProofTask: Task<Void, Never>?
     @Published private(set) var metricsReview = false
     private var metricsReads: FixtureMetricsReads?
+    private var gpuProtectionProof: FixtureGPUProtectionProof?
     var proofRunning: Bool { nativeProofTask != nil || cacheProofTask != nil || chatFocusProofTask != nil || modelKeyboardProofTask != nil }
     @Published private(set) var chatVerificationTest: FixtureChatVerification?
     private var chatVerificationClient: FixtureChatVerificationClient?
@@ -1051,6 +1052,9 @@ private final class FixtureModel: ObservableObject {
             try? data.write(to: directory.appendingPathComponent("fixture-metrics-read-proof.json"), options: .atomic)
         }
     }
+    func showHighIdleGPU() async { await gpuProtectionProof?.highIdle() }
+    func showRecoveredGPU() async { await gpuProtectionProof?.recover() }
+    func saveGPUProtectionProof() { gpuProtectionProof?.save() }
     func prependLogEvent(count: Int = 1) async {
         guard canPrependLogEvent else { return }
         let generation = loadGeneration
@@ -1176,6 +1180,9 @@ private final class FixtureModel: ObservableObject {
         // Window events can arrive while synthetic sources are preparing.
         // Publish the replacement with the latest native visibility state.
         preparedMonitor.setDashboardVisible(dashboardVisible)
+        let gpuProof = FixtureGPUProtectionProof(defaults: defaults, directory: directory)
+        preparedMonitor.attachHostGPUProtection(gpuProof.store)
+        gpuProtectionProof = gpuProof
         retireChatWindow()
         chat.cancelSend()
         monitor = preparedMonitor; control = preparedControl; hosting = stores.2; chat = stores.3; extrasClient = stores.4
@@ -2051,6 +2058,11 @@ private struct FixtureReviewView: View {
                             }
                             Divider()
                             Button("Save action counts") { Task { await model.saveAutopilotProof() } }
+                        }
+                        Menu("Synthetic host GPU protection") {
+                            Button("High GPU while provider idle") { Task { await model.showHighIdleGPU() } }
+                            Button("GPU recovered") { Task { await model.showRecoveredGPU() } }
+                            Button("Save protection action counts") { model.saveGPUProtectionProof() }
                         }
                         Button(model.cacheProofStatus) { model.runCacheVisibilityProof() }
                             .disabled(model.proofRunning || !model.ready || navigation.selected != .overview)

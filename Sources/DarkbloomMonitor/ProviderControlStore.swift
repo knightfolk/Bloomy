@@ -52,6 +52,19 @@ enum LifecycleConfirmation: Equatable {
 @MainActor
 final class ProviderControlStore: ObservableObject {
     var actionHistory: ActionHistoryStore?
+    var onManualProviderIntent: (@MainActor () -> Void)?
+    private var hostGPUResumeRevision: String?
+    private var hostGPUResumeHosting: HostingOptions?
+    private var hostGPUStoppedIdentity: ProcessIdentity?
+    private var manualProviderIntentGeneration: UInt64 = 0
+
+    var ownsHostGPUPause: Bool { hostGPUResumeRevision != nil }
+
+    func relinquishHostGPUPause() {
+        hostGPUResumeRevision = nil
+        hostGPUResumeHosting = nil
+        hostGPUStoppedIdentity = nil
+    }
     private var historyOperationID: UUID?
     private var historySwapID: UUID?
     private var historyNudgeID: UUID?
@@ -978,7 +991,90 @@ final class ProviderControlStore: ObservableObject {
         await awaitTask(task)
     }
 
+    /// Opt-in host protection uses the ordinary serialized native lifecycle.
+    /// It never confirms unknown/active activity or restarts an unowned stop.
+    func performHostGPUProtection(
+        _ action: ProviderLifecycleAction,
+        permitted: @escaping @MainActor () -> Bool,
+        confirmed: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        guard action != .restart, pendingConfirmation == nil, draft?.hasChanges != true,
+              (action == .stop ? permitted() : ownsHostGPUPause),
+              let generation = begin(.lifecycle(action), trigger: .automatic,
+                  historyAction: action == .stop ? .hostGPUPause : .hostGPUResume) else { return false }
+        var succeeded = false
+        let intentGeneration = manualProviderIntentGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                // Periodic status can be 30 seconds old. Establish stopped
+                // evidence now before permitting an owned automatic restart.
+                if action == .start {
+                    await refreshTelemetry()
+                    try Task.checkCancellation()
+                }
+                let refreshed = try await controller.refresh()
+                try Task.checkCancellation()
+                accept(refreshed, preserving: draft)
+                guard manualProviderIntentGeneration == intentGeneration,
+                      draft?.hasChanges != true, pendingConfirmation == nil, permitted() else {
+                    finish(generation, observedOutcome: .skipped)
+                    return
+                }
+                let revision = refreshed.draft.sourceRevision
+                if action == .start {
+                    guard hostGPUResumeRevision == revision, hostGPUResumeHosting == hostingOptions(),
+                          refreshed.daemonState == nil || refreshed.daemonState?.processIdentity == hostGPUStoppedIdentity else {
+                        relinquishHostGPUPause()
+                        finish(generation, observedOutcome: .skipped)
+                        return
+                    }
+                } else {
+                    guard await controller.activityRisk() == .idle else {
+                        finish(generation, observedOutcome: .skipped)
+                        return
+                    }
+                    try Task.checkCancellation()
+                    guard await controller.activityRisk() == .idle, permitted(),
+                          manualProviderIntentGeneration == intentGeneration else {
+                        finish(generation, observedOutcome: .skipped)
+                        return
+                    }
+                }
+                try Task.checkCancellation()
+                let hosting = hostingOptions()
+                try await executeLifecycle(action, enabledModels: refreshed.draft.original.enabled,
+                    generation: generation)
+                try Task.checkCancellation()
+                succeeded = errorMessage == nil && confirmed()
+                    && manualProviderIntentGeneration == intentGeneration
+                if succeeded && action == .stop {
+                    hostGPUResumeRevision = revision
+                    hostGPUResumeHosting = hosting
+                    hostGPUStoppedIdentity = refreshed.daemonState?.processIdentity
+                } else if action == .start {
+                    relinquishHostGPUPause()
+                }
+                if !succeeded && errorMessage == nil {
+                    errorMessage = "GPU protection could not confirm the provider state. Check Health & Logs."
+                }
+            } catch is CancellationError {
+                relinquishHostGPUPause()
+            } catch {
+                errorMessage = "GPU protection could not complete the provider action. Check Health & Logs."
+                relinquishHostGPUPause()
+            }
+            finish(generation)
+        }
+        currentTask = task
+        await awaitTask(task)
+        return succeeded
+    }
+
     func request(_ action: ProviderLifecycleAction) async {
+        manualProviderIntentGeneration &+= 1
+        relinquishHostGPUPause()
+        onManualProviderIntent?()
         pendingConfirmation = nil
         guard let generation = begin(.lifecycle(action)) else { return }
         let controller = self.controller
@@ -1365,6 +1461,11 @@ final class ProviderControlStore: ObservableObject {
     }
 
     private func begin(_ newOperation: ProviderOperation, trigger: ActionHistoryTrigger = .manual, model: String? = nil, historyAction: ActionHistoryAction? = nil) -> UInt64? {
+        if trigger == .manual, newOperation != .idle, newOperation != .refreshing {
+            manualProviderIntentGeneration &+= 1
+            relinquishHostGPUPause()
+            onManualProviderIntent?()
+        }
         guard operation == .idle else { return nil }
         operationGeneration &+= 1
         historyCancelled = false
@@ -1379,7 +1480,7 @@ final class ProviderControlStore: ObservableObject {
         case .lifecycle(let value):
             switch value {
             case .start: action = historyAction ?? .startProvider
-            case .stop: action = .stopProvider
+            case .stop: action = historyAction ?? .stopProvider
             case .restart: action = .restartProvider
             }
         }

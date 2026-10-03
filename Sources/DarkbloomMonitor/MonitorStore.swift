@@ -56,6 +56,11 @@ final class MonitorStore: ObservableObject {
     /// App-owned opt-in watcher. It receives only accepted telemetry and
     /// current source availability, so failed refreshes cannot look live.
     var profitSwitch: ProfitSwitchStore?
+    var hostGPUProtection: HostGPUProtectionStore?
+    @Published private(set) var servingSlowdownWarning: String?
+    private var slowdownPolicy = ServingSlowdownPolicy()
+    private var slowdownSettings: HostGPUProtectionSettings?
+    private var slowdownWasWarned = false
     @Published private(set) var alertHistory: [AlertRecord] = []
     @Published private(set) var alertHistoryAvailable = false
     @Published private(set) var thermalState: SystemThermalState
@@ -810,6 +815,9 @@ final class MonitorStore: ObservableObject {
     }
 
     func stop() async {
+        slowdownPolicy.reset()
+        servingSlowdownWarning = nil
+        await hostGPUProtection?.stop()
         performanceSamplingTask?.cancel()
         await performanceSamplingTask?.value
         performanceSamplingTask = nil
@@ -907,6 +915,8 @@ final class MonitorStore: ObservableObject {
     }
 
     func accept(_ snapshot: TelemetrySnapshot) async {
+        // Compare with the recorded baseline before adding this observation.
+        observeServingSlowdown(snapshot)
         if let state = snapshot.state.value {
             tokenRateAccumulator.record(
                 snapshot.tokenRate,
@@ -931,8 +941,10 @@ final class MonitorStore: ObservableObject {
         }
         self.snapshot = snapshot
         await recordPerformanceSample()
-        inactivityNudge?.observe(snapshot)
-        observeProfitSwitch()
+        if hostGPUProtection?.isHoldingProvider != true {
+            inactivityNudge?.observe(snapshot)
+            observeProfitSwitch()
+        }
         await recordOperationalAlertTransitions(from: snapshot)
         if previousCurrentModel != snapshot.state.value?.currentModel {
             await refreshRecommendation()
@@ -1147,12 +1159,55 @@ final class MonitorStore: ObservableObject {
     }
 
     private func observeProfitSwitch() {
+        guard hostGPUProtection?.isHoldingProvider != true else { return }
         profitSwitch?.observe(
             telemetry: snapshot,
             network: networkCapacity,
             profits: modelServingProfitAverages,
             profitsCapturedAt: profitSwitchEvidenceCapturedAt
         )
+    }
+
+    private func observeServingSlowdown(_ telemetry: TelemetrySnapshot) {
+        let instant = now()
+        let settings = hostGPUProtection?.settings ?? .init()
+        if slowdownSettings != settings {
+            slowdownPolicy = ServingSlowdownPolicy(thresholdRatio: settings.throughputFloorPercent / 100,
+                sustainedSeconds: settings.slowdownSeconds)
+            slowdownSettings = settings
+        }
+        let input: ServingSlowdownInput?
+        if settings.mode != .off, case .available(let state, let capturedAt) = telemetry.state,
+           (0...10).contains(instant.timeIntervalSince(capturedAt)),
+           state.startupPreloadPendingModels?.isEmpty == true,
+           state.lifecycle?.outcome == .serving, state.availability == nil,
+           state.modelSwitch.map({ ![.serving, .switched].contains($0.outcome) }) != true {
+            let speed: Double?
+            if case .available(let value, _) = telemetry.tokenRate { speed = value }
+            else { speed = nil }
+            let highGPU: Bool
+            if case .current(let gpu, _) = gpuUsage.reading(at: instant) {
+                highGPU = gpu >= settings.ceilingPercent
+            } else { highGPU = false }
+            let baseline = currentModelTokenRateAverages.first { $0.model == state.currentModel }
+            input = .init(modelID: state.currentModel,
+                providerIdentity: "\(state.processIdentity.pid):\(state.processIdentity.startTimeMicros)",
+                currentTokensPerSecond: speed, baselineTokensPerSecond: baseline?.tokensPerSecond,
+                baselineSampleCount: baseline?.sampleCount ?? 0,
+                capturedAt: Date(timeIntervalSince1970: state.writtenAt),
+                isActiveInference: state.inferenceActive, highHostGPU: highGPU)
+        } else { input = nil }
+        if let report = slowdownPolicy.observe(input, at: instant) {
+            servingSlowdownWarning = "Possible GPU contention · \(report.currentTokensPerSecond.formatted(.number.precision(.fractionLength(1)))) tok/s vs \(report.baselineTokensPerSecond.formatted(.number.precision(.fractionLength(1)))) recorded for this model."
+            if !slowdownWasWarned {
+                actionHistory?.record(action: .servingSlowdown, trigger: .automatic, outcome: .succeeded,
+                    model: telemetry.state.value?.currentModel)
+            }
+            slowdownWasWarned = true
+        } else {
+            servingSlowdownWarning = nil
+            slowdownWasWarned = false
+        }
     }
 
     private static func staleOrUnavailable(

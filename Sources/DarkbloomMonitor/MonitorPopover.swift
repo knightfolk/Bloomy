@@ -563,6 +563,9 @@ struct MonitorPopover: View {
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityIdentifier("popover.attention")
                         }
+                        if let protection = store.hostGPUProtection {
+                            HostGPUProtectionSummaryView(protection: protection, slowdownWarning: store.servingSlowdownWarning)
+                        }
                         if let hostingStore {
                             PopupHostingSummary(store: hostingStore, isVisible: isVisible, now: currentTime,
                                 coordinator: providerRunning(at: currentTime) == true ? store.snapshot.state.value?.coordinatorURL : nil,

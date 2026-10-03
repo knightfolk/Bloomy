@@ -305,11 +305,68 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             }
         )
         providerControlStore.actionHistory = actionHistory
+        let hostGPUProtection = HostGPUProtectionStore(
+            pause: { [weak monitorStore, weak providerControlStore] in
+                guard let monitorStore, let providerControlStore else { return false }
+                let idleIdentity = monitorStore.hostGPUProviderContext?.identity
+                return await providerControlStore.performHostGPUProtection(.stop,
+                    permitted: {
+                        guard let protection = monitorStore.hostGPUProtection,
+                              protection.settings.mode == .automaticPause,
+                              let context = monitorStore.hostGPUProviderContext,
+                              context.running, context.idle, !context.isTransitioning, context.identity == idleIdentity,
+                              case .current(let gpu, _) = monitorStore.gpuUsage.reading() else { return false }
+                        return gpu >= protection.settings.ceilingPercent
+                    }, confirmed: { monitorStore.freshProviderRunningForGPUProtection == false })
+            },
+            resume: { [weak monitorStore, weak providerControlStore] in
+                guard let monitorStore, let providerControlStore else { return false }
+                return await providerControlStore.performHostGPUProtection(.start,
+                    permitted: {
+                        guard let protection = monitorStore.hostGPUProtection,
+                              protection.settings.mode == .automaticPause,
+                              protection.isHoldingProvider,
+                              monitorStore.freshProviderRunningForGPUProtection == false,
+                              case .current(let gpu, _) = monitorStore.gpuUsage.reading() else { return false }
+                        return gpu < protection.settings.resumePercent
+                    }, confirmed: { monitorStore.freshProviderRunningForGPUProtection == true })
+            },
+            canAct: { [weak providerControlStore] in
+                providerControlStore?.operation == .idle
+                    && providerControlStore?.pendingConfirmation == nil
+                    && providerControlStore?.draft?.hasChanges != true
+            },
+            shouldRetainPause: { [weak monitorStore, weak providerControlStore] in
+                providerControlStore?.ownsHostGPUPause == true
+                    && providerControlStore?.draft?.hasChanges != true
+                    && monitorStore?.freshProviderRunningForGPUProtection != true
+            },
+            actionWasDeferred: { [weak providerControlStore] in
+                providerControlStore?.errorMessage == nil
+            },
+            onEvent: { [weak actionHistory, weak monitorStore, weak providerControlStore] event in
+                switch event {
+                case .settingsChanged:
+                    actionHistory?.record(action: .hostGPUSettings, trigger: .manual, outcome: .succeeded)
+                    if monitorStore?.hostGPUProtection?.settings.mode != .automaticPause {
+                        providerControlStore?.relinquishHostGPUPause()
+                    }
+                case .warning:
+                    actionHistory?.record(action: .hostGPUWarning, trigger: .automatic, outcome: .succeeded)
+                // The control store owns the correlated start/completion audit.
+                case .pauseSucceeded, .pauseFailed, .resumeSucceeded, .resumeFailed: break
+                }
+            }
+        )
+        monitorStore.attachHostGPUProtection(hostGPUProtection)
+        providerControlStore.onManualProviderIntent = { [weak hostGPUProtection] in
+            hostGPUProtection?.invalidatePauseOwnership()
+        }
         monitorStore.profitSwitch = ProfitSwitchStore(control: providerControlStore)
         monitorStore.inactivityNudge = InactivityNudgeStore(
             keyStore: nudgeKeyStore,
-            canAct: { [weak providerControlStore] in
-                providerControlStore?.canAutomaticNudge == true
+            canAct: { [weak providerControlStore, weak hostGPUProtection] in
+                providerControlStore?.canAutomaticNudge == true && hostGPUProtection?.isHoldingProvider != true
             },
             send: { [weak providerControlStore] state, canSend in
                 guard let providerControlStore else { return nil }

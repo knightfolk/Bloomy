@@ -122,6 +122,9 @@ struct MonitorSettingsView: View {
                 providerSection(for: .updates, isVisible: isVisible)
             case .provider, .fans:
                 providerSection(for: page, isVisible: isVisible)
+                if page == .provider, let protection = monitorStore?.hostGPUProtection {
+                    HostGPUProtectionSettingsView(store: protection, slowdownWarning: monitorStore?.servingSlowdownWarning)
+                }
                 if page == .provider, let profitSwitch = monitorStore?.profitSwitch {
                     ProfitSwitchSettingsView(store: profitSwitch)
                 }

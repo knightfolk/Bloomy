@@ -259,3 +259,13 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   `docs/RESOURCE_VISIBILITY_PRIVACY_REVIEW_20261003.md`. Whole-app energy,
   larger-history profiling, genuine compositor occlusion and broad completion
   remain open. Custom keyboard controls are not a project priority.
+
+- Host GPU protection adds Off/Warn/Automatically pause with configurable idle
+  pressure and recovery dwell, guarded session-owned graceful restart and
+  manual override. A same-model speed drop corroborated by high whole-Mac GPU
+  produces a warning while accepted inference continues. Activity Metrics
+  includes qualified idle GPU coverage. Native143 inert checks, 1,520 reported
+  tests and final Release compilation are recorded in
+  `docs/HOST_GPU_PROTECTION_REVIEW_20261003.md`. No real provider lifecycle
+  action was issued; current startup remains blocked by the Sol-cache access
+  failure. Hardware pressure, long-duration and distribution proof remain open.

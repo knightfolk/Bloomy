@@ -330,6 +330,7 @@ struct PerformanceMetricsContent: View {
             metric("Active time", symbol: "bolt", value: activeTime, detail: "Observed inference intervals")
             metric("Model speed", symbol: "speedometer", value: summary.averageTokenRate.map { "\(number($0)) tok/s" } ?? "Unknown", detail: "Average during measured work")
             metric("GPU use", symbol: "cpu", value: summary.averageGPUUtilizationPercent.map { "\(number($0))%" } ?? "Unknown", detail: "Whole Mac · covered intervals")
+            metric("GPU while idle", symbol: "cpu", value: summary.averageIdleGPUUtilizationPercent.map { "\(number($0))%" } ?? "Unknown", detail: "Whole Mac · \(duration(summary.idleGPUCoveredSeconds)) observed")
             metric("Requests completed", symbol: "checkmark.circle", value: summary.completedRequests.map { $0.formatted() } ?? "Unknown", detail: renderedQuery.model == nil ? "Provider-wide counter increases" : "Provider-wide · choose All models")
             metric("Tokens generated", symbol: "text.word.spacing", value: summary.generatedTokens.map { $0.formatted() } ?? "Unknown", detail: renderedQuery.model == nil ? "Provider-wide counter increases" : "Provider-wide · choose All models")
         }
@@ -439,6 +440,7 @@ struct PerformanceMetricsContent: View {
                 Text("\(presentation.staleCount) stale · \(presentation.unavailableCount) unavailable observations. Unobserved time is unknown; it is not recorded as idle or zero.")
                 Text("Saved locally while Bloomy is open. The display refreshes every 30 seconds, or when you tap Refresh. Up to 30 days / 100,000 samples are retained. Counters use increasing readings within the same provider session; resets and gaps are excluded.")
                 Text("GPU use and power describe the whole Mac and include other apps. Model filtering does not isolate a model’s hardware consumption. GPU memory is reported by the provider.")
+                Text("GPU while idle uses intervals with no inference at either end and unchanged request counters. Work between readings may be missed; it is not a measurement of other apps alone.")
                 if let latest = presentation.latestForModel,
                    MetricsRecordingFreshness.isCurrent(latest, at: now, timelineDate: timelineDate) {
                     let memory = latest.gpuMemoryGB.map { "\(number($0)) GB" } ?? "Unknown"

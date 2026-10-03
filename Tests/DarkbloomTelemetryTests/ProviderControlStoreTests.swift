@@ -10,6 +10,77 @@ private let providerControlTestNow = Date(timeIntervalSince1970: 1_750_000_000)
 @Suite("Provider control store")
 @MainActor
 struct ProviderControlStoreTests {
+    @Test("GPU protection owns only a confirmed idle stop and one restart")
+    func hostGPUStopOwnership() async {
+        let controller = FakeProviderController.fixture(activityRisks: [.idle, .idle])
+        let store = ProviderControlStore(controller: controller)
+        await store.refresh()
+        #expect(!store.ownsHostGPUPause)
+        #expect(await store.performHostGPUProtection(.start, permitted: { true }, confirmed: { true }) == false)
+        #expect(await store.performHostGPUProtection(.stop, permitted: { true }, confirmed: { true }))
+        #expect(store.ownsHostGPUPause)
+        #expect(await store.performHostGPUProtection(.start, permitted: { true }, confirmed: { true }))
+        #expect(!store.ownsHostGPUPause)
+        #expect(await store.performHostGPUProtection(.start, permitted: { true }, confirmed: { true }) == false)
+        #expect(await controller.executedActions.map(\.action) == [.stop, .start])
+    }
+
+    @Test("GPU protection refuses active work, unconfirmed stops and changed intent")
+    func hostGPUStopSafety() async {
+        for risk in [ProviderActivityRisk.active, .unknown("unknown")] {
+            let controller = FakeProviderController.fixture(activityRisks: [risk])
+            let store = ProviderControlStore(controller: controller)
+            await store.refresh()
+            #expect(await store.performHostGPUProtection(.stop, permitted: { true }, confirmed: { true }) == false)
+            #expect(await controller.executedActions.isEmpty)
+            #expect(!store.ownsHostGPUPause)
+        }
+        let controller = FakeProviderController.fixture(activityRisks: [.idle, .idle])
+        let store = ProviderControlStore(controller: controller)
+        await store.refresh()
+        #expect(await store.performHostGPUProtection(.stop, permitted: { true }, confirmed: { false }) == false)
+        #expect(!store.ownsHostGPUPause)
+        #expect(await store.performHostGPUProtection(.start, permitted: { true }, confirmed: { true }) == false)
+        #expect(await controller.executedActions.map(\.action) == [.stop])
+    }
+
+    @Test("manual provider intent ends GPU restart authority")
+    func manualIntentEndsHostGPUPause() async {
+        let controller = FakeProviderController.fixture(activityRisks: [.idle, .idle, .active])
+        let store = ProviderControlStore(controller: controller)
+        await store.refresh()
+        #expect(await store.performHostGPUProtection(.stop, permitted: { true }, confirmed: { true }))
+        #expect(store.ownsHostGPUPause)
+        await store.request(.stop)
+        #expect(!store.ownsHostGPUPause)
+        #expect(await store.performHostGPUProtection(.start, permitted: { true }, confirmed: { true }) == false)
+    }
+
+    @Test("saved configuration changes cannot restart a GPU protection stop")
+    func changedConfigEndsHostGPUPause() async {
+        let controller = FakeProviderController.fixture(activityRisks: [.idle, .idle])
+        let store = ProviderControlStore(controller: controller)
+        await store.refresh()
+        #expect(await store.performHostGPUProtection(.stop, permitted: { true }, confirmed: { true }))
+        await controller.replaceSnapshot(externallyChangedControls())
+        #expect(await store.performHostGPUProtection(.start, permitted: { true }, confirmed: { true }) == false)
+        #expect(!store.ownsHostGPUPause)
+        #expect(await controller.executedActions.map(\.action) == [.stop])
+    }
+
+    @Test("GPU recovery refreshes stopped evidence before checking resume permission")
+    func staleStoppedEvidenceGetsRefreshed() async {
+        let controller = FakeProviderController.fixture(activityRisks: [.idle, .idle])
+        var stoppedEvidenceFresh = false
+        let store = ProviderControlStore(controller: controller,
+            refreshTelemetry: { stoppedEvidenceFresh = true })
+        await store.refresh()
+        #expect(await store.performHostGPUProtection(.stop, permitted: { true }, confirmed: { true }))
+        stoppedEvidenceFresh = false
+        #expect(await store.performHostGPUProtection(.start,
+            permitted: { stoppedEvidenceFresh }, confirmed: { true }))
+        #expect(await controller.executedActions.map(\.action) == [.stop, .start])
+    }
     @Test("first catalog failure keeps saved limits visible without enabling model actions")
     func savedCapacitySurvivesCatalogFailure() async throws {
         let controller = FakeProviderController.fixture()

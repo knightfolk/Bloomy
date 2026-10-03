@@ -120,6 +120,21 @@ struct PerformanceHistoryTests {
         #expect(PerformanceSummary(samples: []).sampleCount == 0)
     }
 
+    @Test("idle GPU coverage excludes work, unknown counts and capture gaps")
+    func idleGPUCoverage() {
+        let idle = PerformanceSummary(samples: [sample(0, active: false, gpu: 40, requests: 10),
+            sample(30, active: false, gpu: 80, requests: 10)])
+        #expect(idle.averageIdleGPUUtilizationPercent == 60)
+        #expect(idle.idleGPUCoveredSeconds == 30)
+        for next in [sample(30, active: true, requests: 10),
+                     sample(30, active: false, requests: 11),
+                     sample(30, active: false), sample(120, active: false, requests: 10)] {
+            let summary = PerformanceSummary(samples: [sample(0, active: false, requests: 10), next])
+            #expect(summary.averageIdleGPUUtilizationPercent == nil)
+            #expect(summary.idleGPUCoveredSeconds == 0)
+        }
+    }
+
     private func sample(
         _ seconds: Double, quality: PerformanceSampleQuality = .current,
         captureOffset: Double? = nil, session: String? = "123:1", model: String? = "a",

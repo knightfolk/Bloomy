@@ -49,6 +49,17 @@ Settings sidebar/key loop.
 | iPhone Companion | **Partial:** compact light/dark fits. [Latest] | Full page/sidebar name; no unsupported setup controls. [Nav], [Latest] | **Covered fixture:** explicitly unavailable pairing/remote controls. [Latest] | Wide/standalone availability reading and sidebar entry. |
 | Support/review/exporter | **Partial:** latest compact light/dark warning; earlier wide light keyboard. [Latest], [Quit] | Sheet-targeted Tab/Space, gated Return, exporter/preview Escape covered. [Quit] | **Covered fixture/unit:** frozen availability/live flips; known-empty distinction; review resets. Latest saved/shared nothing. [Latest] | Latest wide warning/known-empty case; recheck current sheet/export focus. |
 
+## October 3 host GPU protection checkpoint
+
+Native143 verifies compact light Warn/Auto settings, dark recovery status and
+compact light/wide dark Activity idle GPU metrics. Inert Warn sends no commands;
+Auto records one owned stop/restart, and Off during a second pause prevents a
+further restart. Policy/control/summary tests and final Release compilation pass.
+No real provider was stopped or started for this checkpoint. The October 3 CLI
+check reports not running with the existing Sol-cache failure. Whole-Mac GPU is
+an idle proxy; throughput slowdown is warning-only, with no app attribution.
+[Bounded proof and remaining live gates](HOST_GPU_PROTECTION_REVIEW_20261003.md).
+
 ## Three highest-value next checks
 
 Kevin's October 2 priority is visible polish, truthful status, reliable actions
