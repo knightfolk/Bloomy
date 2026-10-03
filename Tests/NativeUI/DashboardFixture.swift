@@ -1473,15 +1473,34 @@ private struct FixtureMenuBarMotionCapture: NSViewRepresentable {
 // no focus/key-view policy is changed, and no control text/value is recorded.
 @MainActor
 private final class FixtureFocusDiagnostics {
+    struct NavigationEvent {
+        let number: Int
+        let keyCode: UInt16
+        let modifiers: UInt
+        let uptime: TimeInterval
+    }
+    private final class ResponderIdentity {
+        weak var responder: NSResponder?
+        let number: Int
+        init(_ responder: NSResponder, number: Int) {
+            self.responder = responder
+            self.number = number
+        }
+    }
     var isEnabled = CommandLine.arguments.contains("--focus-diagnostics")
     let outputURL: URL
     private var capturedReady = false
     private var navigationKeys = 0
     private var capturedRecords = 0
-    private let maximumRecords = 49
+    private let maximumRecords = 125
     private let maximumNavigationKeys = 24
     private let maximumViews = 384
     private let maximumLoopLength = 64
+    private let startedAt = ProcessInfo.processInfo.systemUptime
+    private var responderIdentities: [ObjectIdentifier: ResponderIdentity] = [:]
+    private var nextResponderIdentity = 0
+    private var responderChanges = 0
+    private var latestNavigation: NavigationEvent?
 
     init(directory: URL) {
         outputURL = directory.appendingPathComponent("focus-diagnostics.jsonl")
@@ -1493,18 +1512,30 @@ private final class FixtureFocusDiagnostics {
         capture(window, phase: "ready")
     }
 
-    func begin(_ event: NSEvent, window: NSWindow) -> Int? {
+    func begin(_ event: NSEvent, window: NSWindow) -> NavigationEvent? {
         guard isEnabled, capturedReady, event.type == .keyDown,
               [48, 49, 123, 124, 125, 126].contains(Int(event.keyCode)),
               navigationKeys < maximumNavigationKeys,
               capturedRecords < maximumRecords else { return nil }
         navigationKeys += 1
-        capture(window, phase: "before", eventNumber: navigationKeys)
-        return navigationKeys
+        let navigation = NavigationEvent(number: navigationKeys, keyCode: event.keyCode,
+                                         modifiers: event.modifierFlags.intersection(.deviceIndependentFlagsMask).rawValue,
+                                         uptime: event.timestamp)
+        latestNavigation = navigation
+        capture(window, phase: "before", event: navigation)
+        return navigation
     }
 
-    func end(window: NSWindow, eventNumber: Int) {
-        capture(window, phase: "after", eventNumber: eventNumber)
+    func end(window: NSWindow, event: NavigationEvent) {
+        capture(window, phase: "after", event: event)
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.capture(window, phase: "next-turn", event: event)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.capture(window, phase: "settled", event: event)
+        }
     }
 
     func captureWindowState(_ window: NSWindow, phase: String) {
@@ -1513,10 +1544,43 @@ private final class FixtureFocusDiagnostics {
         capture(window, phase: phase)
     }
 
-    private func capture(_ window: NSWindow, phase: String, eventNumber: Int? = nil) {
+    func captureResponderChange(_ window: NSWindow, requested: NSResponder?,
+                                previous: NSResponder?, accepted: Bool) {
+        guard isEnabled, capturedReady, responderChanges < 24,
+              capturedRecords < maximumRecords else { return }
+        responderChanges += 1
+        capturedRecords += 1
+        var record: [String: Any] = [
+            "schema": 2, "phase": "responder-request",
+            "elapsedSeconds": ProcessInfo.processInfo.systemUptime - startedAt,
+            "previous": responderReference(previous),
+            "requested": responderReference(requested),
+            "firstResponder": responderReference(window.firstResponder),
+            "accepted": accepted,
+            "stack": Array(Thread.callStackSymbols.dropFirst(1).prefix(12)).map { String($0.prefix(240)) }
+        ]
+        if let latestNavigation { record["eventNumber"] = latestNavigation.number }
+        write(record)
+    }
+
+    private func responderReference(_ responder: NSResponder?, ids: [ObjectIdentifier: Int] = [:]) -> [String: Any] {
+        guard let responder else { return ["kind": "nil"] }
+        let identity = ObjectIdentifier(responder)
+        var result: [String: Any] = ["class": String(String(describing: type(of: responder)).prefix(160))]
+        if let id = ids[identity] { result["id"] = id }
+        if responderIdentities[identity]?.responder !== responder {
+            nextResponderIdentity += 1
+            responderIdentities[identity] = ResponderIdentity(responder, number: nextResponderIdentity)
+        }
+        result["stableID"] = responderIdentities[identity]?.number
+        return result
+    }
+
+    private func capture(_ window: NSWindow, phase: String, event: NavigationEvent? = nil) {
         // Lifecycle and key-event evidence share the original overall limit.
         guard isEnabled, capturedRecords < maximumRecords else { return }
         capturedRecords += 1
+        responderIdentities = responderIdentities.filter { $0.value.responder != nil }
         var views: [NSView] = []
         var treeTruncated = false
         func visit(_ view: NSView, depth: Int) {
@@ -1527,10 +1591,7 @@ private final class FixtureFocusDiagnostics {
         if let content = window.contentView { visit(content, depth: 0) }
         let ids = Dictionary(uniqueKeysWithValues: views.enumerated().map { (ObjectIdentifier($0.element), $0.offset) })
         func reference(_ responder: NSResponder?) -> [String: Any] {
-            guard let responder else { return ["kind": "nil"] }
-            var result: [String: Any] = ["class": String(String(describing: type(of: responder)).prefix(160))]
-            if let id = ids[ObjectIdentifier(responder)] { result["id"] = id }
-            return result
+            responderReference(responder, ids: ids)
         }
         func loop(_ start: NSView?, validOnly: Bool) -> [String: Any] {
             var visited = Set<ObjectIdentifier>()
@@ -1557,6 +1618,7 @@ private final class FixtureFocusDiagnostics {
                 "nextKeyView": reference(view.nextKeyView),
                 "nextValidKeyView": reference(view.nextValidKeyView)
             ]
+            node["stableID"] = reference(view)["stableID"]
             if let control = view as? NSControl { node["enabled"] = control.isEnabled }
             if let table = view as? NSTableView {
                 node["tableRows"] = table.numberOfRows
@@ -1566,7 +1628,8 @@ private final class FixtureFocusDiagnostics {
         }
         let start = (window.firstResponder as? NSView) ?? window.initialFirstResponder ?? window.contentView
         var record: [String: Any] = [
-            "schema": 1, "phase": phase,
+            "schema": 2, "phase": phase,
+            "elapsedSeconds": ProcessInfo.processInfo.systemUptime - startedAt,
             "fullKeyboardAccess": NSApplication.shared.isFullKeyboardAccessEnabled,
             "autorecalculatesKeyViewLoop": window.autorecalculatesKeyViewLoop,
             "isKeyWindow": window.isKeyWindow,
@@ -1580,7 +1643,16 @@ private final class FixtureFocusDiagnostics {
             "nextKeyLoop": loop(start, validOnly: false),
             "nextValidKeyLoop": loop(start, validOnly: true)
         ]
-        if let eventNumber { record["eventNumber"] = eventNumber }
+        if let event {
+            record["eventNumber"] = event.number
+            record["navigationKeyCode"] = event.keyCode
+            record["navigationModifiers"] = event.modifiers
+            record["navigationElapsedSeconds"] = event.uptime - startedAt
+        }
+        write(record)
+    }
+
+    private func write(_ record: [String: Any]) {
         guard var data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) else { return }
         data.append(0x0A)
         do {
@@ -1601,10 +1673,17 @@ private final class FixtureFocusDiagnostics {
 @MainActor
 private final class FixtureWindow: NSWindow {
     var focusDiagnostics: FixtureFocusDiagnostics?
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let previous = firstResponder
+        let accepted = super.makeFirstResponder(responder)
+        focusDiagnostics?.captureResponderChange(self, requested: responder,
+                                                previous: previous, accepted: accepted)
+        return accepted
+    }
     override func sendEvent(_ event: NSEvent) {
         let eventNumber = focusDiagnostics?.begin(event, window: self)
         super.sendEvent(event)
-        if let eventNumber { focusDiagnostics?.end(window: self, eventNumber: eventNumber) }
+        if let eventNumber { focusDiagnostics?.end(window: self, event: eventNumber) }
     }
 }
 
@@ -1616,7 +1695,9 @@ private struct FixtureWindowCapture: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {
         DispatchQueue.main.async {
             guard let window = view.window else { return }
-            window.setContentSize(size)
+            if window.contentView?.frame.size != size {
+                window.setContentSize(size)
+            }
             window.title = "Bloomy Dashboard — Synthetic Review"
             if let diagnostics = (window as? FixtureWindow)?.focusDiagnostics {
                 diagnostics.isEnabled = traceEnabled
@@ -1681,14 +1762,27 @@ private struct FixtureReviewView: View {
     @ObservedObject var model: FixtureModel
     @ObservedObject private var navigation: DashboardNavigation
     @AppStorage private var appearance: String
-    @State private var compact = false
+    @State private var compact: Bool
+    private var showsReviewBanner: Bool {
+        #if FIXTURE_HIDE_REVIEW_BANNER
+        false
+        #else
+        true
+        #endif
+    }
     init(model: FixtureModel) {
         self.model = model
         self.navigation = model.navigation
+        #if FIXTURE_COMPACT
+        _compact = State(initialValue: true)
+        #else
+        _compact = State(initialValue: false)
+        #endif
         _appearance = AppStorage(wrappedValue: "light", ApplicationAppearance.defaultsKey, store: model.defaults)
     }
     var body: some View {
             VStack(spacing: 0) {
+                if showsReviewBanner {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("SYNTHETIC REVIEW · no live API calls").font(.headline)
@@ -1778,6 +1872,7 @@ private struct FixtureReviewView: View {
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .background(Color.orange.opacity(0.08))
                 if let issue = model.issue { Text(issue).foregroundStyle(.red).padding(6) }
+                }
                 DashboardRootView(store: model.monitor, controlStore: model.control, hostingStore: model.hosting,
                     chatStore: model.chat, openChatWindow: { model.openChatWindow() },
                     navigation: model.navigation, settingsDraft: model.settingsDraft,

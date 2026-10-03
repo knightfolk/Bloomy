@@ -395,10 +395,12 @@ struct ProviderControlStoreTests {
         }
 
         #expect(store.operation == .refreshing)
+        #expect(store.canEditProviderSettings == !initiallyDirty)
         store.setEnabled(true, modelID: "second-model")
         store.setMaxModelSlots(3)
         let latestDraft = store.draft
         #expect(latestDraft?.hasChanges == true)
+        #expect(!store.canEditProviderSettings)
         await gate.release()
         await refresh.value
 
@@ -3025,6 +3027,7 @@ extension ProviderControlStoreTests {
         let first = Task { await control.performSettingsMutation("idle") { await gate.refresh() } }
         #expect(await gate.waitUntilStarted())
         #expect(control.operation == .saving)
+        #expect(!control.canEditProviderSettings)
         let called = ExtraMutationCounter()
         let second = await control.performSettingsMutation("beta") { await called.record() }
         await control.request(.start)
@@ -3034,6 +3037,7 @@ extension ProviderControlStoreTests {
         await gate.release()
         #expect(await first.value)
         #expect(control.operation == .idle)
+        #expect(control.canEditProviderSettings)
     }
 }
 

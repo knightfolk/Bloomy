@@ -389,7 +389,8 @@ private struct ProviderAdvancedSettingsHost: View {
                     showsAutoUpdate: false,
                     showsFanControls: false,
                     isVisible: isVisible,
-                    draft: draft
+                    draft: draft,
+                    providerActionBusy: control.operation != .idle
                 )
             case .updates:
                 ProviderAutoUpdateSettingsView(
@@ -397,6 +398,7 @@ private struct ProviderAdvancedSettingsHost: View {
                     performMutation: performMutation,
                     isVisible: isVisible
                 )
+                .disabled(control.operation == .refreshing)
             case .fans:
                 ProviderFanControlSettingsView(
                     store: extras,
@@ -404,13 +406,12 @@ private struct ProviderAdvancedSettingsHost: View {
                     isVisible: isVisible,
                     draft: draft
                 )
+                .disabled(control.operation == .refreshing)
             default:
                 EmptyView()
             }
         }
-        .disabled(control.operation != .idle
-            || control.pendingConfirmation != nil
-            || control.draft?.hasChanges == true)
+        .disabled(!control.canEditProviderSettings)
         if let error = control.errorMessage {
             Section { Text(error).foregroundStyle(.orange) }
         }

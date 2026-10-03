@@ -15,6 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--output", type=Path, default=ROOT / ".build/native-dashboard-fixture")
+parser.add_argument("--hide-review-banner", action="store_true",
+                    help="Omit fixture controls to inspect the dashboard's own keyboard entry.")
+parser.add_argument("--compact", action="store_true", help="Start the isolated window at 800 x 560.")
 args = parser.parse_args()
 output = args.output.resolve()
 if output.exists():
@@ -100,13 +103,17 @@ staged_telemetry = stage / telemetry.name
 shutil.copy2(telemetry, staged_telemetry)
 arch = "arm64" if platform.machine() == "arm64" else "x86_64"
 command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6",
-           "-parse-as-library", "-D", "DEBUG", "-I", str(products), "-F", str(products),
+           "-parse-as-library", "-D", "DEBUG",
+           *(["-D", "FIXTURE_HIDE_REVIEW_BANNER"] if args.hide_review_banner else []),
+           *(["-D", "FIXTURE_COMPACT"] if args.compact else []),
+           "-I", str(products), "-F", str(products),
            str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle", "-lsqlite3",
            "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks", "-o", str(binary)]
 subprocess.run(command, cwd=ROOT, check=True)
 subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], check=True)
 manifest = {
     "fixture": str(app), "synthetic": True, "distribution": False,
+    "review_banner_visible": not args.hide_review_banner, "initial_compact": args.compact,
     "source_sha256": hashes,
     "dependency_substitutions": {name: {"before": pair[0], "after": pair[1]}
                                  for name, pair in substitutions.items()},

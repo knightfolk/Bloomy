@@ -128,6 +128,13 @@ final class ProviderControlStore: ObservableObject {
         operation == .idle && pendingConfirmation == nil && draft?.hasChanges != true
     }
 
+    /// Local settings buffers need no command ownership. A provider mutation,
+    /// unresolved operation or model-selection draft still blocks editing.
+    var canEditProviderSettings: Bool {
+        (operation == .idle || operation == .refreshing)
+            && pendingConfirmation == nil && draft?.hasChanges != true
+    }
+
     /// Own the same operation gate used by model switches and lifecycle work
     /// for the entire self-route request. The watcher owns cancellation.
     func performAutomaticNudge(

@@ -389,6 +389,7 @@ struct ProviderAdvancedSettingsView: View {
     let showsAutoUpdate: Bool
     let showsFanControls: Bool
     let isVisible: Bool
+    let providerActionBusy: Bool
 
     struct EvidencePresentation {
         let isFresh: Bool
@@ -428,6 +429,7 @@ struct ProviderAdvancedSettingsView: View {
     @State private var idleSaveInFlight = false
     @State private var betaSaveIDs: Set<String> = []
     @State private var feedback: String?
+    @FocusState private var idleFieldFocused: Bool
 
     init(
         store: ProviderExtrasStore,
@@ -435,13 +437,15 @@ struct ProviderAdvancedSettingsView: View {
         showsAutoUpdate: Bool = true,
         showsFanControls: Bool = true,
         isVisible: Bool = true,
-        draft: ProviderSettingsDraftState? = nil
+        draft: ProviderSettingsDraftState? = nil,
+        providerActionBusy: Bool = false
     ) {
         self.store = store
         self.performMutation = performMutation
         self.showsAutoUpdate = showsAutoUpdate
         self.showsFanControls = showsFanControls
         self.isVisible = isVisible
+        self.providerActionBusy = providerActionBusy
         _draft = StateObject(wrappedValue: draft ?? ProviderSettingsDraftState())
     }
 
@@ -504,6 +508,7 @@ struct ProviderAdvancedSettingsView: View {
                 HStack {
                     Text("Unload after")
                     TextField("Minutes", text: idleTextBinding)
+                        .focused($idleFieldFocused)
                         .labelsHidden()
                         .accessibilityLabel("Idle minutes")
                         .textFieldStyle(.roundedBorder)
@@ -592,7 +597,7 @@ struct ProviderAdvancedSettingsView: View {
                         Button("Disable") { setBeta(feature, enabled: false) }
                             .disabled(feature.state == .off)
                     }
-                    .disabled(store.mutationInFlight || saving)
+                    .disabled(providerActionBusy || store.mutationInFlight || saving)
                     .accessibilityLabel("Change \(feature.title), saved \(feature.stateLabel)")
                 } else {
                     Text(sourceIsFresh ? "Read-only" : "Needs refresh")
@@ -604,7 +609,7 @@ struct ProviderAdvancedSettingsView: View {
 
     private func canSaveIdle(evidence: EvidencePresentation) -> Bool {
         evidence.canSaveIdle(text: draft.idleMinutesText, isDirty: draft.idleDirty,
-            isSaving: idleSaveInFlight, mutationInFlight: store.mutationInFlight)
+            isSaving: idleSaveInFlight, mutationInFlight: providerActionBusy || store.mutationInFlight)
     }
 
     private func syncIdleDraft() {
@@ -648,7 +653,7 @@ struct ProviderAdvancedSettingsView: View {
     }
 
     private func setBeta(_ feature: ProviderBetaFeature, enabled: Bool) {
-        guard !betaSaveIDs.contains(feature.id), !store.mutationInFlight,
+        guard !providerActionBusy, !betaSaveIDs.contains(feature.id), !store.mutationInFlight,
               betaEvidence.isFresh,
               ProviderExtrasClient.allowedBetaFeatureIDs.contains(feature.id) else { return }
         betaSaveIDs.insert(feature.id)

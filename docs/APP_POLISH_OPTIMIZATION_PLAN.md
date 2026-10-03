@@ -115,3 +115,13 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
 - Native91 preserves pending Metrics period and visit keyboard choices through changed measurements, then confirms with Space. Both native pickers share a stable leaf with immutable selection comparisons; 1,427 tests and the final release compile pass. The streaming diagnosis, rejected Native89 and intermediate Native90 are recorded in `docs/METRICS_SCOPE_KEYBOARD_NATIVE_REVIEW_20261002.md`. Broader native and distribution gates remain open.
 
 - Native92 fixes false idle draft edits caused by native focus callbacks repeating unchanged text. Actual 30 focus/Tab stays clean; typing 45 still protects edits and Discard restores eligibility. The regression, partial Provider traversal, new upper-control key-loop finding and provenance are in `docs/PROVIDER_KEYBOARD_DRAFT_NATIVE_REVIEW_20261002.md`. All 1,429 tests and the final release compile pass. The full settings and distribution gates remain open.
+
+- Native100 repairs idle editing lost when a read-only model refresh disabled
+  the enclosing settings group. Mutations remain serialized and their actions
+  stay gated. Sustained clean/dirty editing passes in compact light and wide
+  dark. Native101 removes only the synthetic banner and verifies dashboard
+  entry through both Autopilot buttons, plus forward/reverse lower-page reveal;
+  the banner-origin skip is not proven as a product defect. All 1,429 tests and
+  release compilation pass. Standalone/expanded/state-specific key loops,
+  VoiceOver, real actions, profiling and distribution remain open. See the
+  Provider keyboard review for rejected candidates and exact evidence.

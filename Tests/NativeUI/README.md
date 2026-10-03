@@ -116,7 +116,15 @@ Existing output directories are rejected before copying or compiling; use a
 fresh `--output` path for each retry/rebuild and preserve failed outputs until
 their diagnostics and review provenance are no longer needed.
 
-The persistent orange banner identifies synthetic review, disabled CPU/GPU
+For a dashboard-only keyboard comparison, build a fresh output with
+`--hide-review-banner --compact`. These compile-time options remove only the
+fixture control rows and start at 800 × 560; the actual production dashboard
+views, inert stores, collectors-off policy and synthetic window title remain.
+The manifest records both options. Use the normal banner build for scenario,
+appearance and diagnostic controls. This comparison isolates window-content
+focus boundaries; it does not prove installed-app behavior or VoiceOver.
+
+By default, the persistent orange banner identifies synthetic review, disabled CPU/GPU
 collectors, and the actual local Mac name/host thermal state. Scenario switches reconstruct the
 injected stores. **Fresh** supplies synthetic CLI 0.9.17 telemetry and refreshes
 the synthetic state/control evidence every five seconds, preserving model drafts.
@@ -343,10 +351,11 @@ The checkbox defaults off without the flag; its tooltip shows the exact file
 path. Trace records stay in the session's task-owned temporary directory as
 `BloomyDashboardFixture-*/focus-diagnostics.jsonl`, with one JSON record per line.
 When disabled the diagnostic writes nothing. It captures one ready-view sample
-after first enabling, then immediate before/after samples
+after first enabling, then immediate before/after, next-main-queue-turn, and
+50ms settled samples
 for the first **24** Tab, Space, or arrow key-down events delivered to the fixture
 window. Ready, key, presentation, minimize, and restore samples share a maximum
-of **49 records**. Lifecycle samples require the trace to be enabled and ready;
+of **125 records**. Lifecycle samples require the trace to be enabled and ready;
 they can use part of the key-event budget. Turning the checkbox off/on does not
 reset either per-process budget.
 With the same opt-in control, `menu-bar-motion.jsonl` records up to 48 changed
@@ -356,11 +365,19 @@ visible, and whether its rotation is installed. It reads the native layer after
 rendering; it adds no clock, records no control text, and never inspects another
 application. Installed animation state is distinct from compositor advancement,
 which the finite native rendering test checks separately.
-Only a sample event ordinal is stored; key codes, modifiers, typed characters,
-control labels/values, accessibility contents, credentials, and user data are
-omitted. Record the controlled action sequence separately to match ordinals to
-the tested keys. The diagnostic consumes no events, moves no focus,
-and changes no key-view or OS keyboard settings. It has no timer or observer.
+Schema 2 stores each navigation event's ordinal, key code, modifier flags and
+monotonic elapsed time. Typed characters, control labels/values, accessibility
+contents, credentials and user data are omitted. The six accepted navigation
+keys are the only events recorded. The diagnostic consumes no events, moves no
+focus, and changes no key-view or OS keyboard settings. Each accepted event
+schedules two bounded samples with weak window/diagnostic references; there is
+no repeating timer or observer.
+Up to 24 native `makeFirstResponder` outcomes share that record cap. They
+include requested/previous/resulting responder identities, acceptance and 12
+bounded native stack symbols. The override returns AppKit's unchanged result;
+it does not retry or redirect focus. Stack symbols describe code, not control
+contents. A transition's event ordinal is the latest observed navigation event,
+so delayed transitions can be correlated without claiming synchronous causation.
 
 Each sample includes the native first and initial responders, the existing
 Full Keyboard Access and automatic key-view-loop recalculation states, native
@@ -368,14 +385,18 @@ window identity/frame and minimized/visible flags, and up to
 384 native views with class, parent,
 window-relative geometry, hidden/enabled state, `acceptsFirstResponder`,
 `canBecomeKeyView`, and `nextKeyView`/`nextValidKeyView` edges. Native table/outline
-views also report row count and selected row indexes. View IDs are local to one
-sample; compare class, geometry, and ancestry across samples. The raw and valid
+views also report row count and selected row indexes. The `id` remains local to
+one sample. `stableID` tracks responder identity across samples using weak
+references; a replacement gets a new identity even if its memory address is
+reused. Compare stable identities together with class, geometry and ancestry.
+The raw and valid
 key-view loops start at the current native first-responder view (falling back to
 initial responder/content) and stop at a cycle, nil, or 64 views. Truncation is
 explicit. SwiftUI can manage focus inside a single native hosting view, so a
 native loop alone does not establish SwiftUI's internal focus order. The
-after sample is synchronous with `sendEvent`; a deferred SwiftUI change may
-first appear in the next before sample. Diagnostic sampling adds work to key
+after sample is synchronous with `sendEvent`; next-turn and settled samples
+distinguish subsequent SwiftUI focus or geometry changes. They are bounded
+observations, not proof of when the compositor draws a frame. Diagnostic sampling adds work to key
 handling and is evidence about focus membership, not interaction performance.
 
 This trace samples only the owned dashboard window, not SwiftUI sheets or native

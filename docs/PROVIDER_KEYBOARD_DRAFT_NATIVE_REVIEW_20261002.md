@@ -90,7 +90,7 @@ the root cause. The next controlled experiment should compare consecutive Tab
 inputs with and without intermediate observation, starting from a verified
 last-banner responder and inspecting before/after frames.
 
-## Final verification
+## Verification of the unchanged-text repair
 
 The exact repaired source passes **1,429 tests**, exit 0: 1,380 app/telemetry
 tests in 182 suites (16.918s), 21 protocol tests (0.012s), and 28 companion-host
@@ -102,3 +102,105 @@ Final release compilation exits 0 in 42.11s; log:
 Actual VoiceOver, the full Provider/standalone settings key loop, rendered Leave
 alert, other displays, real enrollment/restart, comparable production profiling
 and signed updater/distribution gates remain open.
+
+## Follow-up: editing across read-only control refreshes
+
+Native93's whole-Form focus grouping and Native94's redundant-size guard did
+not establish a correction. Native95 registered the idle field with local
+`FocusState`; short forward/reverse checks retained focus, but upper entry and
+sustained refresh behavior remained unproven. Native96 repeated grouping with
+that registration and still skipped upper controls. Native98's explicit default
+focus also failed to change entry. Both product experiments were removed.
+No custom key routing or Form replacement remains.
+
+Native97 adds bounded next-turn/50ms snapshots, monotonic timing and weak
+persistent responder identities. Its first field editor remains identical
+through settled sampling and the next key. Reverse traversal reaches Refresh
+Autopilot, Enable and header Refresh. Native99 additionally observes AppKit
+responder requests without altering their results. During initial entry SwiftUI's
+FocusBridge requests the text field directly; the native proxy links alone do
+not describe that decision.
+
+More importantly, Native99 then loses editing without another key: at elapsed
+21.657s, AppKit's `NSTextField setEnabled` / `NSControl abortEditing` path moves
+focus to the window. The shared Provider host disabled all children whenever
+the control store was non-idle, including its read-only `.refreshing` state.
+The five-second inert control refresh reproduces that boundary. Field
+registration alone does not prevent an enclosing disabled environment.
+
+The Provider host now allows local editing during idle and read-only refreshing
+when there is no pending confirmation or model draft. Mutations still block the
+group. Idle Save and beta actions separately reflect provider operation
+ownership, and the existing serialized write gate still requires idle. Autopilot
+retains its own busy checks; Fans and Updates retain their previous refresh
+policy. The fixture also avoids redundant native window resizes.
+
+A held-read regression fails with the prior non-idle editing gate and passes
+after the repair. It covers both clean and dirty model selections, late edits
+and the exclusive settings-write gate. Focused verification passes 101 tests
+in four suites. Logs: `/tmp/bloomy-provider-refresh-focus-20261002-red-held-read.log`
+and `/tmp/bloomy-provider-refresh-focus-20261002-focused.log`.
+The first red command selected only the write-gate test; the corrected held-read
+command records the intended failure. Read-only review found no actionable
+serialization or enabled-state regression; native focus remained a separate gate.
+
+### Native100: sustained editing
+
+Session `B2FBBADA-18BD-4571-8202-02EA653E110D` uses the final production source.
+Compact light keeps the same field editor from elapsed 19.313s through the next
+key at 65.260s, with the existing five-second read loop running. Tab reaches beta,
+and Shift-Tab reveals the field. Actual typing 45 retains its draft and focus
+through subsequent reads; Save/Discard are reachable, Autopilot immediately
+blocks, and keyboard Discard restores clean 30. Wide dark retains the same editor
+through another approximately 50-second interval and Tab reaches beta.
+The saved `provider-read-edit-focus-diagnostics.jsonl` contains 47 records.
+
+All 95 source hashes matched at inspection. Executable SHA-256:
+`4226c5bbb53838478066708e53e4a1ebff5d1f33c356a29a87cd49bebbfbfdbd`.
+Only the fixture subsequently changed to support the comparison below; all 87
+production-view hashes still match both candidates.
+
+### Native101: dashboard-only entry comparison
+
+The review builder's explicit `--hide-review-banner --compact` options remove
+only synthetic control rows. Inert data, collectors-off policy, native host and
+synthetic window title remain. The manifest records those options. This avoids
+making product changes to compensate for a focus boundary created by fixture
+controls outside the production dashboard.
+
+Session `9AD8593C-AF1D-482D-A06E-6FD08F84792C` shows compact light Provider with
+the idle field visible. An actual sidebar pointer click followed by Tab reaches
+Nudge, Settings, then header Refresh. Further Tab reaches Enable Autopilot,
+Refresh Autopilot and idle minutes in order, with visible focus rings. The
+banner-origin skip is therefore not established as a dashboard entry defect.
+
+Forward Tab continues through beta disclosure/menu, profit switch/disclosure,
+four timing steppers, automatic nudge/period, console link and the empty secure
+field; native scrolling reveals each lower region. Fifteen Shift-Tab inputs
+return through every page control to header Refresh. The next Shift-Tab reaches
+the sidebar; another wraps to the secure field. This is bounded page traversal,
+not a claim that all toolbar/window focus domains share one symmetric loop.
+No link was opened, credential entered, setting saved or provider action issued.
+Its executable SHA-256 is
+`1270497bac90cae850641bfc48c4289ce5d2cef2135c4f8cf4925583c9117dbf`;
+all 95 manifest source hashes match. Both candidates link telemetry SHA-256
+`0da0aed0eee0f3ace173ccbcbc1b413cc64f7d4f1ec2d78658e059fff593d102`.
+
+Native96–101 were quit normally; no owned app or compiler handle remains.
+Installed Bloomy PID 61760 retains its earlier launch and executable hash.
+No real provider, privacy, key or installed-app changes occurred.
+
+### Integrated verification and remaining limits
+
+The repaired production source passes all 1,429 tests: 1,380 app/telemetry in
+182 suites (26.072s), 21 protocol (0.014s) and 28 companion-host (11.800s), exit 0.
+Release compilation exits 0 in 41.62s. Logs:
+`/tmp/bloomy-provider-refresh-focus-20261002-full.log` and
+`/tmp/bloomy-provider-refresh-focus-20261002-release.log`.
+The fixture builder separately compiles and opens both normal and dashboard-only
+layouts. Local review signing is not notarized distribution.
+
+Standalone Settings, expanded/error/paused control loops, actual VoiceOver,
+rendered Leave confirmation, real enrollment/restart, production preservation,
+whole-app profiling and updater/distribution remain open. The full polish goal
+is not complete.
