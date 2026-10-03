@@ -143,3 +143,12 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   compilation pass. See `docs/FAN_KEYBOARD_NATIVE_REVIEW_20261002.md`.
   Native108 also reconfirms app-native Autopilot Enable/Pause/Resume/Leave;
   real enrollment and distribution remain separate gates.
+
+- Native111 repairs the compact Fans offscreen-control issue: native focus
+  requests minimum scrolling with a six-point ring margin, preserving card
+  layout and source-update stability. Compact light/dark forward/reverse paths,
+  draft retention, Refresh and keyboard Discard pass; Native112 adds wide
+  comparisons and dark traversal. All 1,430 tests and Release compilation pass.
+  The Fan keyboard review retains both intermediate candidates and exact proof.
+  Standalone/stale, full-window continuation after Discard, VoiceOver, real helper
+  actions and broader optimization/distribution remain open.

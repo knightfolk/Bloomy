@@ -70,3 +70,68 @@ October 2 12:55:28 launch and executable hash
 `5d692f240c9548f05350f2fb39d05eb15d00741ad7e9f317e3eeb8507e7c50c7`.
 No installed release, provider settings, real inference, helper or privacy
 permission was changed. Broader polish and distribution gates remain open.
+
+## Follow-up: compact keyboard reveal
+
+The Native108 offscreen-control failure is repaired in the Fans settings Form.
+`FanSettingsKeyboardReveal` reports only native focus entering a control to a
+page-owned `ScrollViewReader`. Other settings pages and the popup install no
+callback. No keys are consumed, focus is not assigned programmatically, and
+there is no polling, animation or source-update scroll request.
+
+The reader uses [Apple's minimum-scroll API](https://developer.apple.com/documentation/swiftui/scrollviewproxy/scrollto%28_%3Aanchor%3A%29).
+A transparent background target extends six points beyond the control to
+include its native focus ring, without changing layout or adding an AX element.
+The helper action and draft gates are unchanged.
+
+Native109 verified the initial centered-scroll pilot in compact light. Native110
+changed only the reader anchor to minimum scrolling, but exposed a clipped
+slider ring at the lower viewport boundary. Native111 adds the reveal margin;
+the layout remains identical and the full ring is visible. An initial conditional
+closure failed Swift type checking; explicit page branches repaired compilation
+and keep the reader out of other settings routes. The failed log is retained at
+`/tmp/bloomy-fan-reveal-focused-20261002.log`.
+
+**Native111**, compact light and dark:
+
+- Native sidebar entry and Tab reach header Refresh, readings Refresh, checkbox,
+  policy disclosure, all presets, both sliders, Save, advanced disclosure,
+  Disable, Uninstall and Discard. Space expands disclosures. No pointer
+  scrolling is required to reveal these controls or their full focus rings.
+- Right edits 80%/65 °C to 81%/66 °C. The speed slider keeps the same visible
+  position and focus across updated readings at 8:08:32 and 8:09:10.
+- Reverse navigation returns through the expanded policy to the upper controls.
+  Refresh retains the draft. Appearance → Dark → Fans retains both edited values;
+  the newly mounted disclosures can be expanded and traversed by keyboard again.
+- Space on the checkbox opens the inert disable confirmation; Escape returns
+  focus to the still-checked control. No command is submitted. Space on Discard
+  restores 80%/65 °C and disables Save.
+
+**Native112**, wide light and dark, preserves the native card layout and draft
+through appearance changes. Light verifies slider entry and Right editing;
+dark verifies the complete bounded forward/reverse control path, fully visible
+Discard and Space discard. The disappearing Discard control does not expose an
+AX focus identity immediately afterwards or after the first Tab; the surrounding
+toolbar/full-window continuation remains unverified. This is not a claim of a
+complete window key loop or VoiceOver proof.
+
+The final source passed all **1,430 tests** (1,381 app/telemetry in 25.770s,
+21 protocol in 0.022s, 28 companion-host in 11.810s). Release compilation exited
+0 in 55.10s. Logs are `/tmp/bloomy-fan-reveal-full-20261002.log` and
+`/tmp/bloomy-fan-reveal-release-20261002.log`. The initial centered candidate's
+95 focused tests passed in 1.654s; the final full suite reruns that coverage.
+Native before/after observations cover the scrolling regression directly;
+no artificial test that merely mirrors the modifier was added.
+
+All four bundles and manifests are retained in `.build/native-dashboard-fixture-20261002-109/`
+through `-112/`. Native111/112 each match all **96** recorded source hashes.
+Native109 predates the reader-anchor and margin refinements; Native110 predates
+only the margin. All use the same three documented inert dependency substitutions
+and linked telemetry hash recorded above. Executable SHA-256 values:
+
+- Native111: `da0c29eb3ec2f27c50a7f28ab64c3ee70e727f405fc4646a0bf44c73c5134ef7`
+- Native112: `c42206d532ce5849f4b38a1a33f4958329548add7a6c9ea36901ec0add353ecb`
+
+All review apps were quit normally. Stale/error and standalone Settings paths,
+actual VoiceOver, rendered helper confirmations, real helper actions, full-window
+navigation and distribution remain open. The full polish goal is still active.

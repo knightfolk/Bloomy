@@ -135,6 +135,7 @@ struct ProviderFanControlSettingsView: View {
                         .disabled(manuallyRefreshing || mutationInFlight || store.mutationInFlight)
                         .accessibilityIdentifier("settings.provider.fan.refresh")
                         .accessibilityValue(manuallyRefreshing ? "Refreshing" : "Ready")
+                        .modifier(FanSettingsKeyboardReveal(target: .readingsRefresh))
                     }
                     switch store.snapshot?.fanStatus {
                     case .available(let status, let checkedAt):
@@ -155,6 +156,7 @@ struct ProviderFanControlSettingsView: View {
                         }
                         .accessibilityIdentifier("settings.provider.fan.discard")
                         .help("Reset this unsaved edit to the latest observed policy")
+                        .modifier(FanSettingsKeyboardReveal(target: .discard))
                     }
                     if draft.fanSaveAwaitingConfirmation {
                         Text("Fan command completed. Your submitted policy is retained until fresh readings confirm it.")
@@ -240,6 +242,7 @@ struct ProviderFanControlSettingsView: View {
                 .toggleStyle(.checkbox)
                 .disabled(!fresh || !status.supportsOfficialControl || helperActionBusy)
                 .accessibilityIdentifier("settings.provider.fan.enabled")
+                .modifier(FanSettingsKeyboardReveal(target: .enabled))
             } else {
                 Text("The helper's on/off status is unavailable. Refresh to try again.")
                     .font(.callout)
@@ -256,8 +259,10 @@ struct ProviderFanControlSettingsView: View {
                         Button("Save Fan Policy…") { stagePolicy(.configure) }
                             .disabled(!fresh || !draft.fanDirty || !canSubmitPolicy)
                             .accessibilityIdentifier("settings.provider.fan.save")
+                            .modifier(FanSettingsKeyboardReveal(target: .save))
                     }
                 }
+                .modifier(FanSettingsKeyboardReveal(target: .policy))
             }
             if status.installed || status.loaded {
                 DisclosureGroup("Advanced helper actions", isExpanded: $showsAdvancedActions) {
@@ -267,18 +272,21 @@ struct ProviderFanControlSettingsView: View {
                                 stage(.disable)
                             }
                             .disabled(helperActionBusy)
+                            .modifier(FanSettingsKeyboardReveal(target: .disable))
                         }
                         if status.installed {
                             Button("Uninstall Helper…", role: .destructive) {
                                 stage(.uninstall)
                             }
                             .disabled(helperActionBusy)
+                            .modifier(FanSettingsKeyboardReveal(target: .uninstall))
                         }
                     }
                     Text("These actions stop this helper and release any fans it controls.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .modifier(FanSettingsKeyboardReveal(target: .advanced))
             }
             Text("Changing fan control asks for macOS administrator approval.")
                 .font(.caption)
@@ -384,6 +392,7 @@ struct ProviderFanControlSettingsView: View {
                         .accessibilityLabel("Choose \(preset.title) fan policy")
                         .accessibilityValue(draft.fanPreset == preset ? "Selected" : "Not selected")
                         .accessibilityIdentifier("settings.provider.fan.preset.\(preset.rawValue)")
+                        .modifier(FanSettingsKeyboardReveal(target: .preset(preset)))
                 }
             }
             Text("Starting points only. Adjust either slider before saving.")
@@ -403,6 +412,7 @@ struct ProviderFanControlSettingsView: View {
                     .accessibilityValue(Self.percent(draft.fanSpeedPercent))
                     .accessibilityHint("Target fan speed after the trigger temperature is reached")
                     .accessibilityIdentifier("settings.provider.fan.speed")
+                    .modifier(FanSettingsKeyboardReveal(target: .speed))
             }
             VStack(alignment: .leading, spacing: 5) {
                 HStack {
@@ -417,6 +427,7 @@ struct ProviderFanControlSettingsView: View {
                     .accessibilityValue(Self.temperature(draft.fanTriggerTemperature))
                     .accessibilityHint("GPU temperature where the fan target starts")
                     .accessibilityIdentifier("settings.provider.fan.temperature")
+                    .modifier(FanSettingsKeyboardReveal(target: .temperature))
             }
             Label(
                 "At \(Self.temperature(draft.fanTriggerTemperature)), target \(Self.percent(draft.fanSpeedPercent)) while the provider is active.",

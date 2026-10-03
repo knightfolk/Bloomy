@@ -83,7 +83,23 @@ struct MonitorSettingsView: View {
             .id(selected)
     }
 
+    @ViewBuilder
     private func pageForm(_ page: SettingsPage, isVisible: Bool) -> some View {
+        if page == .fans {
+            ScrollViewReader { reader in
+                settingsForm(page, isVisible: isVisible)
+                    .environment(\.fanSettingsFocusReveal, { target in
+                        // Keep the surrounding context when the control is
+                        // already visible; scroll only enough to reveal it.
+                        reader.scrollTo(target)
+                    })
+            }
+        } else {
+            settingsForm(page, isVisible: isVisible)
+        }
+    }
+
+    private func settingsForm(_ page: SettingsPage, isVisible: Bool) -> some View {
         Form {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
@@ -365,6 +381,7 @@ private struct ProviderAdvancedSettingsHost: View {
                     }
                 }
                 .disabled(isManuallyRefreshing || extras.mutationInFlight)
+                .modifier(FanSettingsKeyboardReveal(target: .settingsRefresh))
             }
         }
         if control.draft?.hasChanges == true {
