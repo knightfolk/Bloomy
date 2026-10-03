@@ -3,6 +3,19 @@
     <channel>
         <title>Bloomy</title>
         <item>
+            <title>1.9.18</title>
+            <pubDate>Sat, 03 Oct 2026 07:31:00 -0700</pubDate>
+            <sparkle:version>143</sparkle:version>
+            <sparkle:shortVersionString>1.9.18</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<p>Action History keeps models visible in compact windows and gives full timestamps more room. Searching for a few entries now puts their details close to the results, with exact earnings amounts and complete model names still available. Selection stays with its entry when resizing or refreshing; changing the filter or search clears details that no longer belong to the results.</p>
+<p>Repeated earnings recording does much less database work. Four controlled, disk-backed recording workloads measured 35–48 times faster than v1.9.17, with every retained field and event order matching. These measurements cover database recording; they do not claim whole-app CPU, battery or provider speed gains.</p>
+<p>For Apple Silicon Macs running macOS 14 or newer. Existing provider settings, model selection and Autopilot enrollment are preserved. The broader native polish, accessibility and performance review continues.</p>
+]]></description>
+            <enclosure url="https://github.com/knightfolk/Bloomy/releases/download/v1.9.18/Bloomy-1.9.18-mac-arm64.zip" length="9742205" type="application/octet-stream" sparkle:edSignature="7KsOuBAlT218VQoxlTKbHu7KwussvXnZ3G7Fhj6VlLrtQxErMtVFYOyjbf+H1ZSOr4hVGdpAH0yu2jnR8Jr4Cw=="/>
+        </item>
+        <item>
             <title>1.9.17</title>
             <pubDate>Sat, 03 Oct 2026 06:07:27 -0700</pubDate>
             <sparkle:version>142</sparkle:version>

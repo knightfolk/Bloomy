@@ -1,10 +1,10 @@
 # Bloomy native polish and efficiency
 
-October 3 distribution checkpoint: version 1.9.16/build 141 was rebuilt from
+October 3 distribution checkpoint: version 1.9.18/build 143 was rebuilt from
 the verified current source, signed, notarized, stapled and published with
 matching asset digests and four exact-ZIP isolated updater gates. The running
 installed app and provider were preserved. See
-`RELEASE_1_9_16_VERIFICATION_20261003.md`; this does not complete the remaining
+`RELEASE_1_9_18_VERIFICATION_20261003.md`; this does not complete the remaining
 native, accessibility, performance or production integration review below.
 
 The ongoing goal is a consistent, polished native Mac app with minimal background cost. A verified release checkpoint does not establish that every screen or state has completed review.
@@ -16,8 +16,8 @@ Actual public-API recording with isolated synthetic databases is 35–48× faste
 than build 142 across four measured workloads, with exact retained-field/order
 parity. Final 1,579 reported tests (seven opt-in skips) and Release compilation
 pass. See `ACTION_RECORDING_COMPACT_HISTORY_REVIEW_20261003.md`; installed app
-profiling, distribution of this later source and the broader native matrix remain
-open.
+profiling and the broader native matrix remain open. This source is distributed
+in signed/notarized 1.9.18/build 143 with four isolated updater gates verified.
 
 The [native completion matrix](NATIVE_COMPLETION_MATRIX_20261002.md) indexes all
 22 surfaces, distinguishing bounded coverage and each remaining proof gap.

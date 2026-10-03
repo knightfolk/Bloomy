@@ -249,6 +249,11 @@ rows and expiry; separate-connection retention is covered. Final 1,579 reported
 tests with seven opt-in skips and Release compilation pass. [HistoryRecording]
 Spoken VoiceOver, other locales/displays, real selected-entry arrivals, installed
 CPU/energy comparison and the broader surface matrix remain open. This source
-postdates released build 142; the production app/provider were preserved.
+postdates build 142 and is distributed in signed/notarized 1.9.18/build 143;
+the production app/provider were preserved. [Release143] records exact-source
+checks, asset digests and four isolated update scenarios. Installed profiling and
+production dirty-editor installation remain open.
 
 [HistoryRecording]: ACTION_RECORDING_COMPACT_HISTORY_REVIEW_20261003.md
+
+[Release143]: RELEASE_1_9_18_VERIFICATION_20261003.md
