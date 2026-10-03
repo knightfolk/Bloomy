@@ -177,3 +177,14 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   Release compilation pass. Enabled model mutations, conditional entries,
   physical wheel/VoiceOver and broader optimization/distribution remain open;
   exact evidence is in the popup Hosting review.
+
+- Hosting native review finds offscreen Apply/input focus and lazily omitted
+  network choices. Small eager choice groups and shared native reveal repair
+  page-local traversal. Native121 additionally keeps the invalid port visible
+  when Discard inserts above it, using document geometry rather than focus-only
+  updates. Compact light/dark draft/Discard, wide dark traversal/aligned cards
+  and dark 80-point popup regression pass; all 1,443 tests and Release compilation
+  pass. Native118–120 partial/rejected results and the separate installed 1.9.15
+  process baseline are recorded in `docs/HOSTING_KEYBOARD_NATIVE_REVIEW_20261002.md`.
+  Full window-entry order, state-specific controls, VoiceOver, current-source
+  profiling and distribution remain open.

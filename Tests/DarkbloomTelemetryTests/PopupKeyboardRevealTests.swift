@@ -32,7 +32,7 @@ struct PopupKeyboardRevealTests {
         outerDocument.addSubview(inner)
         let innerDocument = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
         inner.documentView = innerDocument
-        let anchor = PopupFocusAnchorView(frame: NSRect(x: 40, y: 450, width: 100, height: 20))
+        let anchor = KeyboardFocusRevealAnchorView(frame: NSRect(x: 40, y: 450, width: 100, height: 20))
         innerDocument.addSubview(anchor)
         outer.layoutSubtreeIfNeeded()
         anchor.revealInEnclosingViewports()
@@ -69,7 +69,22 @@ struct PopupKeyboardRevealTests {
         #expect(scroll.documentVisibleRect.minY == 0)
     }
 
-    private func fixture() -> (NSWindow, NSScrollView, PopupFocusAnchorView) {
+    @Test("a focused control moving after validation stays visible without a focus change")
+    func changedFocusedLayout() async throws {
+        let (window, scroll, anchor) = fixture()
+        defer { window.close() }
+        anchor.setFocused(true)
+        try await Task.sleep(for: .milliseconds(30))
+        let previousOffset = scroll.documentVisibleRect.minY
+        anchor.setFrameOrigin(NSPoint(x: anchor.frame.minX, y: anchor.frame.minY + 50))
+        anchor.setFocused(true)
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(scroll.documentVisibleRect.minY > previousOffset)
+        let frame = scroll.documentView!.convert(anchor.bounds.insetBy(dx: -6, dy: -6), from: anchor)
+        #expect(scroll.documentVisibleRect.contains(frame))
+    }
+
+    private func fixture() -> (NSWindow, NSScrollView, KeyboardFocusRevealAnchorView) {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 80),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -77,13 +92,13 @@ struct PopupKeyboardRevealTests {
         window.contentView = scroll
         let document = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
         scroll.documentView = document
-        let anchor = PopupFocusAnchorView(frame: NSRect(x: 40, y: 450, width: 100, height: 20))
+        let anchor = KeyboardFocusRevealAnchorView(frame: NSRect(x: 40, y: 450, width: 100, height: 20))
         document.addSubview(anchor)
         scroll.layoutSubtreeIfNeeded()
         return (window, scroll, anchor)
     }
 
-    private func anchors(in view: NSView) -> [PopupFocusAnchorView] {
-        (view as? PopupFocusAnchorView).map { [$0] } ?? view.subviews.flatMap { anchors(in: $0) }
+    private func anchors(in view: NSView) -> [KeyboardFocusRevealAnchorView] {
+        (view as? KeyboardFocusRevealAnchorView).map { [$0] } ?? view.subviews.flatMap { anchors(in: $0) }
     }
 }

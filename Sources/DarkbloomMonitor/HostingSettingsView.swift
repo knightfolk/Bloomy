@@ -55,6 +55,7 @@ struct HostingSettingsView: View {
                         .buttonStyle(.bordered)
                         .help("Restore port and address text to the saved settings.")
                         .accessibilityIdentifier("hosting.discardInputEdits")
+                        .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
                     }
                 }
 
@@ -87,6 +88,7 @@ struct HostingSettingsView: View {
             .padding(24)
             .frame(maxWidth: 1120, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .topLeading)
+            .coordinateSpace(name: "hosting.document")
         }
         .accessibilityIdentifier("hosting.page")
         .onAppear {
@@ -144,6 +146,7 @@ struct HostingSettingsView: View {
             .help("Refresh the CLI version and detected LAN addresses")
             .accessibilityLabel("Refresh hosting environment")
             .accessibilityIdentifier("hosting.refresh")
+            .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
         }
         .padding(.bottom, 2)
     }
@@ -181,7 +184,7 @@ struct HostingSettingsView: View {
             title: "How this Mac serves",
             subtitle: "Choose a mode; Apply uses the installed Darkbloom CLI with the matching start options."
         ) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 205), spacing: 12, alignment: .top)], spacing: 12) {
+            HostingChoiceLayout(minimumWidth: 205, spacing: 12) {
                 modeCard(
                     .off,
                     title: "Fleet only",
@@ -264,6 +267,7 @@ struct HostingSettingsView: View {
         .buttonStyle(.plain)
         .disabled(!store.cliSupportsHosting)
         .accessibilityIdentifier("hosting.mode.\(mode.rawValue)")
+        .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -290,6 +294,7 @@ struct HostingSettingsView: View {
                         .monospacedDigit()
                         .accessibilityLabel("Local endpoint port")
                         .accessibilityIdentifier("hosting.port")
+                        .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
                     Text("Default \(String(HostingOptions.defaultPort))")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -307,7 +312,7 @@ struct HostingSettingsView: View {
                 VStack(alignment: .leading, spacing: 11) {
                     Label("Reachable from", systemImage: "wifi")
                         .font(.headline)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 10)], spacing: 10) {
+                    HostingChoiceLayout(minimumWidth: 190, spacing: 10) {
                         bindCard(
                             preset: .loopback,
                             title: "This Mac only",
@@ -341,7 +346,7 @@ struct HostingSettingsView: View {
                             } else {
                                 Text("Active addresses on this Mac")
                                     .font(.subheadline.weight(.medium))
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 125), spacing: 8)], spacing: 8) {
+                                HostingChoiceLayout(minimumWidth: 125, spacing: 8) {
                                     ForEach(store.lanAddresses, id: \.self) { address in
                                         Button {
                                             selectAddress(address)
@@ -353,6 +358,7 @@ struct HostingSettingsView: View {
                                         .buttonStyle(.bordered)
                                         .tint(address == store.options.bindAddress ? .accentColor : .secondary)
                                         .accessibilityIdentifier("hosting.bind.address.\(address)")
+                                        .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
                                     }
                                 }
                             }
@@ -363,9 +369,11 @@ struct HostingSettingsView: View {
                                     .font(.callout.monospacedDigit())
                                     .accessibilityLabel("Custom local interface address")
                                     .accessibilityIdentifier("hosting.bind.customAddress")
+                                    .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
                                 Button("Use address") { useCustomAddress() }
                                     .disabled(draft.customAddressText == store.options.bindAddress)
                                     .accessibilityIdentifier("hosting.bind.useCustomAddress")
+                                    .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
                             }
                             if let customAddressError {
                                 Text(customAddressError)
@@ -421,6 +429,7 @@ struct HostingSettingsView: View {
                 }
                 .toggleStyle(.switch)
                 .accessibilityIdentifier("hosting.auth.required")
+                .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
 
                 if store.options.requiresAuthentication {
                     Text("On is the CLI default. Turning it off adds `--no-auth` and needs confirmation.")
@@ -443,6 +452,7 @@ struct HostingSettingsView: View {
                     SecureField("Set a custom bearer token", text: bearerTokenBinding)
                         .textFieldStyle(.roundedBorder)
                         .accessibilityIdentifier("hosting.auth.bearerToken")
+                        .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
                     Button("Save token") {
                         if store.saveBearerToken(bearerTokenText) {
                             clearBearerTokenInput()
@@ -451,10 +461,12 @@ struct HostingSettingsView: View {
                     .buttonStyle(.bordered)
                     .disabled(!LocalEndpointTokenFile.isValidBearerToken(bearerTokenText))
                     .accessibilityIdentifier("hosting.auth.saveToken")
+                    .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
                     if !bearerTokenText.isEmpty {
                         Button("Clear input") { clearBearerTokenInput() }
                             .buttonStyle(.bordered)
                             .accessibilityIdentifier("hosting.auth.clearTokenInput")
+                            .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
                     }
                 }
                 Text("16–256 letters, numbers, or - . _ ~ + / =. Saved as `~/.darkbloom/local_token` with private file permissions—not in app preferences.")
@@ -478,6 +490,7 @@ struct HostingSettingsView: View {
                     .buttonStyle(.bordered)
                     .disabled(!store.canCopyBearerToken)
                     .accessibilityIdentifier("hosting.auth.copyToken")
+                    .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
                     Text("Copies the active endpoint key, or the saved CLI key when no endpoint is running.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -525,6 +538,7 @@ struct HostingSettingsView: View {
                 }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("hosting.details.copyURL")
+                .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
             }
 
             if store.options.bindScope == .allInterfaces {
@@ -565,6 +579,7 @@ struct HostingSettingsView: View {
             }
             .disabled(store.isFetchingEndpointDetails)
             .accessibilityIdentifier("hosting.details.refresh")
+            .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
 
             if let checkedAt = store.endpointDetailsCheckedAt {
                 Text("Last checked: \(checkedAt.formatted(date: .abbreviated, time: .standard))")
@@ -619,6 +634,7 @@ struct HostingSettingsView: View {
                             .buttonStyle(.borderedProminent)
                             .disabled(!standaloneCommandMatchesDraft)
                             .accessibilityIdentifier("hosting.copyStandaloneCommand")
+                            .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
                         }
                         Text("The CLI will ask you to choose local models when you run the command.")
                         .font(.caption)
@@ -639,6 +655,7 @@ struct HostingSettingsView: View {
                     .controlSize(.large)
                     .disabled(!store.cliSupportsHosting || !isPortValid)
                     .accessibilityIdentifier("hosting.apply")
+                    .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Uses the official darkbloom start command.")
@@ -783,6 +800,7 @@ struct HostingSettingsView: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("hosting.bind.choice.\(preset.rawValue)")
+        .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
