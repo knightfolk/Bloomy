@@ -184,3 +184,14 @@ skipped focus proof that passed separately. Log:
 passes in 41.43 seconds, log `/tmp/bloomy-hosting-address-release-20261002.log`.
 Confirmation rendering, actual VoiceOver, real provider behavior, current-source
 performance and distribution remain separate open gates.
+
+## October 3 confirmation recheck
+
+Native143 at source `45b4fe3` repeats the pointer path in compact light: Fleet +
+local, fake LAN address, Apply. Accessibility exposes the full address, preserved
+API-key requirement, HTTP limitation and default Cancel, but the sheet image is
+blank. Raising the native sheet does not change the capture. Pointer Cancel
+restores Hosting and sends no exposure/provider command. The fixture is quit
+normally. This remains inconclusive rendering evidence: no root cause establishes
+whether the product or computer-use capture is responsible, so no speculative
+confirmation redesign is accepted. The gate stays open.

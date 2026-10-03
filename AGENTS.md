@@ -32,6 +32,17 @@ before retrying. This scoped reset does not authorize other privacy resets or
 new Keychain, Full Disk, or broader drive access. Keep credentials out of logs
 and evidence.
 
+On 2026-10-03 Kevin requested moving all models to the internal drive. The
+complete Hugging Face cache was copied and file-hash verified; the active
+`~/.cache/huggingface` is now an internal directory, not the Sol symlink.
+The original external cache and a renamed rollback symlink remain preserved.
+The official graceful stop drained accepted requests, and restart confirmed a
+fresh authorized connection with unchanged provider configuration, seven
+advertised models and one warm model. The earlier Sol-cache startup failure
+is no longer a blocker for this restored setup. See
+`docs/MODEL_CACHE_INTERNAL_MIGRATION_20261003.md`. This does not authorize deleting
+the preserved external backup, unrelated storage or broader privacy changes.
+
 ## Completion, integration and GitHub checkpoints
 
 - For Kevin's authorized project work, commit completed, coherent changes after the required checks pass. Stage only your own verified scope; preserve concurrent and unrelated edits. A local commit alone does not mean integration or delivery is complete.

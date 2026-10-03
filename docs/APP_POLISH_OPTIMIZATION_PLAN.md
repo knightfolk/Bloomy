@@ -269,3 +269,10 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   `docs/HOST_GPU_PROTECTION_REVIEW_20261003.md`. No real provider lifecycle
   action was issued; current startup remains blocked by the Sol-cache access
   failure. Hardware pressure, long-duration and distribution proof remain open.
+
+- Kevin's October 3 model migration supersedes the startup blocker above:
+  the complete 230.44 GiB cache is now internal, every file hash passed, model
+  records/configuration match and official restart confirmed fresh authorization.
+  A fresh snapshot reports seven advertised models, one warm and active inference.
+  The external originals remain preserved. Details and storage/runtime limits are
+  in `docs/MODEL_CACHE_INTERNAL_MIGRATION_20261003.md`.
