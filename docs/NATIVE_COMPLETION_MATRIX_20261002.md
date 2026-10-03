@@ -257,3 +257,14 @@ production dirty-editor installation remain open.
 [HistoryRecording]: ACTION_RECORDING_COMPACT_HISTORY_REVIEW_20261003.md
 
 [Release143]: RELEASE_1_9_18_VERIFICATION_20261003.md
+
+
+October 3 menu-ring diagnostic follow-up: Native178–183 retain strict compositor
+visibility and actual-angle recovery checks across a 1.6-second hold. The
+one-retry animation-delegate candidate failed 11/15 and was removed. Layer
+ownership/direct-content paths and cancellation retry did not solve reopening;
+cover geometry/front ordering alone still cannot prove occlusion. The menu-bar
+motion and release gates remain open. Final retained-source Native183 confirms
+12/15 motion cases and passing model/chart checks; all 110 source hashes match.
+The 1,579 reported tests (seven opt-in skips) and Release build pass. See
+[Cancellation review](MENU_BAR_ANIMATION_CANCELLATION_REVIEW_20261003.md).

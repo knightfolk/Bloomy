@@ -346,6 +346,15 @@ Done buttons, then dismisses using the footer. See the current bounded results
 in `docs/MENU_BAR_INDICATOR_PREVIEW_REVIEW_20261003.md`; a rendered screenshot
 of an occluded dashboard is not evidence of visible animation.
 
+Reopen checks additionally require real advancing compositor angles before and
+after a 1.6-second hold, with no forced native display or transaction flush.
+Dismantle waits for late callbacks before checking that no clock restarted.
+Order-out failures retain final state and a bounded notification trace. The
+cancellation recovery candidate was rejected after Native178; stronger proof
+must not be interpreted as a production fix. Diagnostic overlays and cover
+experiments remain staged-only. See
+`docs/MENU_BAR_ANIMATION_CANCELLATION_REVIEW_20261003.md`.
+
 Each helper writes a bounded JSON report to the temporary directory shown in
 the button's help. `native-proof-result.json` records all three terminal results;
 an exit code or a partially written report is not a passing native proof. Review

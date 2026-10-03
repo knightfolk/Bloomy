@@ -76,15 +76,28 @@ enum MenuBarMotionProof {
             return ["restored": true]
         }
         await report.check("window_order_out_and_restore") {
-            try await fixture.restoreActive()
-            window.orderOut(nil)
-            try await waitUntil("Ordered-out window retained rotation") {
-                !window.isVisible && arc.animation(forKey: "inferenceRotation") == nil
+            let lifecycle = MotionLifecycleTrace(view: view, window: window, arc: arc)
+            defer { lifecycle.stop() }
+            do {
+                lifecycle.record("before_restore_active")
+                try await fixture.restoreActive()
+                lifecycle.record("before_order_out")
+                window.orderOut(nil)
+                lifecycle.record("after_order_out")
+                try await waitUntil("Ordered-out window retained rotation") {
+                    !window.isVisible && arc.animation(forKey: "inferenceRotation") == nil
+                }
+                showOwnedProofWindow(window)
+                try await waitForVisible(window)
+                lifecycle.record("order_out_visibility_regained")
+                try await waitForClock(arc)
+                return ["restored": true, "lifecycle": lifecycle.events,
+                        "finalWindow": diagnostics(window), "finalNative": nativeDiagnostics(view: view, arc: arc, window: window)]
+            } catch {
+                throw MotionProofFailure("\(error.localizedDescription); window_order_out_and_restore; "
+                    + "finalWindow=\(diagnostics(window)); finalNative=\(nativeDiagnostics(view: view, arc: arc, window: window)); "
+                    + "lifecycle=\(lifecycle.events)")
             }
-            showOwnedProofWindow(window)
-            try await waitForVisible(window)
-            try await waitForClock(arc)
-            return ["restored": true]
         }
         await report.check("opaque_cover_occlusion_and_restore") {
             try await fixture.restoreActive()
@@ -162,7 +175,9 @@ enum MenuBarMotionProof {
             lifecycle.record("visibility_regained")
             try await waitForClock(arc, context: "same_window_close_and_reopen; finalWindow=\(diagnostics(window)); "
                 + "finalNative=\(nativeDiagnostics(view: view, arc: arc, window: window)); lifecycle=\(lifecycle.events)")
+            let recoveredClock = try await recoveredClockEvidence(arc, in: window)
             return ["sameWindowAndView": view.window === window, "lifecycle": lifecycle.events,
+                    "recoveredClock": recoveredClock,
                     "finalWindow": diagnostics(window), "finalNative": nativeDiagnostics(view: view, arc: arc, window: window)]
         }
         await report.check("rapid_same_window_close_and_reopen") {
@@ -181,6 +196,7 @@ enum MenuBarMotionProof {
             lifecycle.record("rapid_visibility_regained")
             try await waitForClock(arc, context: "rapid_same_window_close_and_reopen; finalWindow=\(diagnostics(window)); "
                 + "finalNative=\(nativeDiagnostics(view: view, arc: arc, window: window)); lifecycle=\(lifecycle.events)")
+            let recoveredClock = try await recoveredClockEvidence(arc, in: window)
             try require(window.contentView === fixture.container && view.window === window,
                         "Rapid reopen must retain the same window and native view")
             view.configure(active: true, tint: .systemYellow, reduceMotion: true)
@@ -195,6 +211,7 @@ enum MenuBarMotionProof {
             try require(!arc.isHidden && arc.animation(forKey: "inferenceRotation") == nil,
                         "Deferred close reevaluation must preserve stationary active evidence")
             return ["sameWindowAndView": true, "stationaryReopenStayedStatic": true, "lifecycle": lifecycle.events,
+                    "recoveredClock": recoveredClock,
                     "finalWindow": diagnostics(window), "finalNative": nativeDiagnostics(view: view, arc: arc, window: window)]
         }
         await report.check("native_stationary_true_false_true") {
@@ -230,9 +247,14 @@ enum MenuBarMotionProof {
             try await waitUntil("Dismantled test window did not hide") { !window.occlusionState.contains(.visible) }
             showOwnedProofWindow(window)
             try await waitForVisible(window)
+            let settleStartedAt = CACurrentMediaTime()
+            // Deliver pending false-finished delegate callbacks while retaining
+            // the dismantled native view; none may restart its compositor clock.
+            try await Task.sleep(for: .milliseconds(100))
             try require(arc.animation(forKey: "inferenceRotation") == nil,
                         "Later view/window updates must not restart a dismantled clock")
-            return ["didNotRestart": true]
+            return ["didNotRestart": true, "lateCallbackSettleSeconds": CACurrentMediaTime() - settleStartedAt,
+                    "finalNative": nativeDiagnostics(view: view, arc: arc, window: window)]
         }
         await report.check("parent_stationary_activity_bridge") {
             let host = NSHostingController(rootView: AnyView(label(forceStationary: true)))
@@ -480,11 +502,13 @@ enum MenuBarMotionProof {
     }
 
     private static func presentationAngle(_ arc: CAShapeLayer, in window: NSWindow,
-                                          differingFrom initial: Double? = nil) async throws -> Double {
+                                          differingFrom initial: Double? = nil, requestDisplay: Bool = true) async throws -> Double {
         let deadline = CACurrentMediaTime() + 4
         repeat {
-            window.displayIfNeeded()
-            CATransaction.flush()
+            if requestDisplay {
+                window.displayIfNeeded()
+                CATransaction.flush()
+            }
             if let presentation = arc.presentation() {
                 let transform = presentation.transform
                 let angle = atan2(transform.m12, transform.m11)
@@ -493,6 +517,34 @@ enum MenuBarMotionProof {
             try await Task.sleep(for: .milliseconds(20))
         } while CACurrentMediaTime() < deadline
         throw MotionProofFailure("A genuinely visible native compositor did not supply an advancing rotation angle")
+    }
+
+    private static func recoveredClockEvidence(_ arc: CAShapeLayer, in window: NSWindow) async throws -> [String: Any] {
+        try require(arc.animationKeys() == ["inferenceRotation"],
+                    "Automatically recovered activity must have exactly one rotation key")
+        try require((arc.animation(forKey: "inferenceRotation") as? CABasicAnimation)?.keyPath == "transform.rotation.z",
+                    "Automatically recovered activity must retain the production rotation key path")
+        // Observe the compositor only. In particular, do not force a native
+        // draw, configure input, or call any production recovery callback.
+        let beforeFirst = try await presentationAngle(arc, in: window, requestDisplay: false)
+        let beforeSecond = try await presentationAngle(arc, in: window, differingFrom: beforeFirst, requestDisplay: false)
+        let holdStartedAt = CACurrentMediaTime()
+        try await Task.sleep(for: .milliseconds(1_600))
+        let holdSeconds = CACurrentMediaTime() - holdStartedAt
+        try require(holdSeconds > 1.4, "Recovered-clock observation must extend beyond one production rotation cycle")
+        try require(window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible),
+                    "Recovered-clock hold lost actual window visibility: \(diagnostics(window))")
+        try require(arc.animationKeys() == ["inferenceRotation"],
+                    "Recovered rotation did not retain exactly one key after \(holdSeconds) seconds; window=\(diagnostics(window))")
+        try await waitForClock(arc, context: "after \(holdSeconds)-second recovered-clock hold; window=\(diagnostics(window))")
+        try require((arc.animation(forKey: "inferenceRotation") as? CABasicAnimation)?.keyPath == "transform.rotation.z",
+                    "Recovered clock changed its production rotation key path after the hold")
+        let afterFirst = try await presentationAngle(arc, in: window, requestDisplay: false)
+        let afterSecond = try await presentationAngle(arc, in: window, differingFrom: afterFirst, requestDisplay: false)
+        return ["beforeHoldAngles": [beforeFirst, beforeSecond], "beforeHoldAngleAdvance": angularDistance(beforeFirst, beforeSecond),
+                "holdSeconds": holdSeconds, "productionDurationSeconds": 1.4, "productionRepeatIsInfinite": true,
+                "afterHoldAngles": [afterFirst, afterSecond], "afterHoldAngleAdvance": angularDistance(afterFirst, afterSecond),
+                "animationKeysAfterHold": arc.animationKeys() ?? [], "requestedNativeDisplay": false]
     }
 
     private static func diagnostics(_ window: NSWindow) -> [String: Any] {

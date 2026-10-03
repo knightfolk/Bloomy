@@ -33,6 +33,17 @@ of reliable reopening from older bounded motion evidence. A drawing-callback
 experiment failed and was removed. No release is ready from this checkpoint;
 see `MENU_BAR_INDICATOR_PREVIEW_REVIEW_20261003.md`.
 
+October 3 motion diagnosis: native stop callbacks confirm cancellation after
+reopening; a one-retry recovery regressed order-out and failed both reopen
+checks, so it was removed. The helper now requires real advancing angles across
+more than one rotation cycle without forced display. Root ownership and direct
+layer-content experiments did not repair reopening; a genuinely occluded cover
+is still unproven despite confirmed front/opaque coverage. No release is ready.
+Final retained-source Native183 still passes 12/15 motion cases; model/chart
+checks, 1,579 reported tests (seven skips) and Release compilation pass.
+See `MENU_BAR_ANIMATION_CANCELLATION_REVIEW_20261003.md` for rejected candidates,
+finite traces, provenance and the next restoration/commit-boundary investigation.
+
 ## Current review priorities
 
 Kevin questioned the emphasis on keyboard controls on October 2. Keep ordinary
