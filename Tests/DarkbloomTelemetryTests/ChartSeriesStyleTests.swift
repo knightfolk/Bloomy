@@ -6,6 +6,21 @@ import Testing
 @Suite("Chart series identity", .serialized)
 @MainActor
 struct ChartSeriesStyleTests {
+    @Test("area marks exclude scalar runs without removing contiguous zero endpoints")
+    func scalarAreaMarks() {
+        let first = DateInterval(start: Date(timeIntervalSince1970: 0), duration: 3600)
+        let second = DateInterval(start: first.end, duration: 3600)
+        let afterGap = DateInterval(start: second.end.addingTimeInterval(3600), duration: 3600)
+        let values = [
+            ActivityChartValue(interval: first, series: "a", amountUSD: 1, run: 0),
+            ActivityChartValue(interval: second, series: "a", amountUSD: 0, run: 0),
+            ActivityChartValue(interval: afterGap, series: "a", amountUSD: 0.000001, run: 1),
+            ActivityChartValue(interval: first, series: "b", amountUSD: 0, run: 0)
+        ]
+        #expect(ChartSeriesCueSelection.areaMarkValues(values) == Array(values.prefix(2)))
+        #expect(ChartSeriesCueSelection.areaMarkValues([]).isEmpty)
+    }
+
     @Test("series retain their distinct shape and number when the visible model is filtered")
     func stableFilteredIdentity() {
         let styles = ChartSeriesStyles(domain: ["gemma", "qwen", "Work", "Base rewards", "qwen"])

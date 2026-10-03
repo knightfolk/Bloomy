@@ -120,11 +120,21 @@ private struct FixtureTelemetrySource: TelemetrySource {
 }
 private enum FixtureError: Error { case offline }
 
+private enum FixtureActivityRead: String, CaseIterable, Identifiable {
+    case normal = "Normal Earnings"
+    case empty = "Empty Earnings"
+    case knownZero = "Recorded zero with unknown gaps"
+    case tiny = "Overlapping micro-dollar earnings"
+    var id: String { rawValue }
+}
+
 private actor FixtureEarnings: AccountEarningsFetching {
     let scenario: FixtureScenario
     private var limitedModels = false
+    private var activityRead = FixtureActivityRead.normal
     init(scenario: FixtureScenario) { self.scenario = scenario }
     func setLimitedModels(_ value: Bool) { limitedModels = value }
+    func setActivityRead(_ value: FixtureActivityRead) { activityRead = value }
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
         case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses:
@@ -155,16 +165,48 @@ private actor FixtureEarnings: AccountEarningsFetching {
     }
     func activity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ActivityBucket]? {
         guard scenario.hasCurrentRuntime else { return nil }
+        if activityRead == .empty { return [] }
         return try ActivityCalendar.intervals(in: range, unit: unit, calendar: calendar).enumerated().map { index, interval in
-            ActivityBucket(interval: interval, totals: ActivityTotals(workMicroUSD: Int64(150_000 + index % 7 * 30_000),
+            if activityRead == .knownZero {
+                return ActivityBucket(interval: interval,
+                    totals: index % 3 == 0 ? ActivityTotals(workMicroUSD: 0, rewardMicroUSD: 0, jobs: 0, promptTokens: 0, completionTokens: 0) : nil,
+                    coverage: index % 3 == 0 ? .recorded : .unavailable)
+            }
+            if activityRead == .tiny {
+                return ActivityBucket(interval: interval,
+                    totals: index % 3 == 0 ? ActivityTotals(workMicroUSD: 3, rewardMicroUSD: 1, jobs: 3, promptTokens: 12, completionTokens: 30) : nil,
+                    coverage: index % 3 == 0 ? .recorded : .unavailable)
+            }
+            return ActivityBucket(interval: interval, totals: ActivityTotals(workMicroUSD: Int64(150_000 + index % 7 * 30_000),
                 rewardMicroUSD: 20_000, jobs: Int64(5 + index % 5), promptTokens: 2_000, completionTokens: 5_000), coverage: .recorded)
         }
     }
     func activityModels(in range: DateInterval) async throws -> [String] {
-        scenario.hasCurrentRuntime ? Array(FixtureData.modelIDs.prefix(limitedModels ? 1 : 3)) : []
+        scenario.hasCurrentRuntime && activityRead != .empty ? Array(FixtureData.modelIDs.prefix(limitedModels ? 1 : 3)) : []
+    }
+    func activityByModel(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ModelActivityBucket]? {
+        guard scenario.hasCurrentRuntime, activityRead != .normal else { return nil }
+        guard activityRead != .empty else { return [] }
+        return try ActivityCalendar.intervals(in: range, unit: unit, calendar: calendar).enumerated().flatMap { index, interval in
+            guard index % 3 == 0 else { return [ModelActivityBucket]() }
+            return FixtureData.modelIDs.prefix(limitedModels ? 1 : 3).map { model in
+                ModelActivityBucket(interval: interval, model: model, workMicroUSD: activityRead == .tiny ? 1 : 0)
+            }
+        }
     }
     func modelActivity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar, model: String?) async throws -> [ActivityBucket]? {
         if limitedModels, let model, model != FixtureData.modelIDs.first { return [] }
+        if activityRead != .normal, let model {
+            guard FixtureData.modelIDs.prefix(3).contains(model) else { return [] }
+            return try await activity(in: range, unit: unit, calendar: calendar)?.map { bucket in
+                ActivityBucket(interval: bucket.interval,
+                    totals: bucket.totals.map { _ in
+                        ActivityTotals(workMicroUSD: activityRead == .tiny ? 1 : 0,
+                            rewardMicroUSD: 0, jobs: activityRead == .tiny ? 1 : 0,
+                            promptTokens: activityRead == .tiny ? 4 : 0, completionTokens: activityRead == .tiny ? 10 : 0)
+                    }, coverage: bucket.coverage)
+            }
+        }
         return try await activity(in: range, unit: unit, calendar: calendar)
     }
 }
@@ -635,6 +677,7 @@ private final class FixtureModel: ObservableObject {
     private var earningsClient: FixtureEarnings
     private var logFeed: FixtureLogFeed
     @Published var limitedActivityModels = false
+    @Published var activityRead = FixtureActivityRead.normal
     @Published var modelSheetHeightLimit: CGFloat?
     @Published var networkExpiryReview = false
     private var chatWindow: ChatWindowController?
@@ -718,6 +761,11 @@ private final class FixtureModel: ObservableObject {
     func limitActivityModels(_ value: Bool) async {
         limitedActivityModels = value
         await earningsClient.setLimitedModels(value)
+    }
+    func setActivityRead(_ value: FixtureActivityRead) async {
+        guard ready, !isTerminating else { return }
+        await earningsClient.setActivityRead(value)
+        activityRead = value
     }
     func removeGemmaFromInventory() async {
         guard ready, !isTerminating else { return }
@@ -972,6 +1020,7 @@ private final class FixtureModel: ObservableObject {
         controllerClient = stores.5; earningsClient = stores.6
         logFeed = stores.7
         limitedActivityModels = false
+        activityRead = .normal
         fanReadback = .held
         chatVerificationTest = nil
         chatVerificationClient = nil
@@ -1871,6 +1920,11 @@ private struct FixtureReviewView: View {
                         .help("Adds one uniquely named event; older log payloads stay unchanged within the 100-event bound.")
                         Button(model.limitedActivityModels ? "Restore all Earnings models" : "Report only Qwen in Earnings") {
                             Task { await model.limitActivityModels(!model.limitedActivityModels) }
+                        }
+                        Menu("Earnings read: \(model.activityRead.rawValue)") {
+                            ForEach(FixtureActivityRead.allCases) { read in
+                                Button(read.rawValue) { Task { await model.setActivityRead(read) } }
+                            }
                         }
                         Button("Remove Gemma from model inventory") {
                             Task { await model.removeGemmaFromInventory() }

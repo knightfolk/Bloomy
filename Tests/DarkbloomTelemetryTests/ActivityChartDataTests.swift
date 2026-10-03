@@ -5,6 +5,34 @@ import Testing
 
 @Suite("Activity chart model colors")
 struct ActivityChartDataTests {
+    @Test("table amounts distinguish recorded zero, unknown and micro-dollar values without floating-point loss")
+    func exactTableAmounts() {
+        let locale = Locale(identifier: "en_US")
+        #expect(ActivityAmountPresentation.tableAmount(nil, locale: locale) == "—")
+        #expect(ActivityAmountPresentation.tableAmount(0, locale: locale) == "0.0000")
+        #expect(ActivityAmountPresentation.tableAmount(1, locale: locale) == "0.000001")
+        #expect(ActivityAmountPresentation.tableAmount(3, locale: locale) == "0.000003")
+        #expect(ActivityAmountPresentation.tableAmount(-1, locale: locale) == "-0.000001")
+        #expect(ActivityAmountPresentation.tableAmount(150_000, locale: locale) == "0.1500")
+        #expect(ActivityAmountPresentation.tableAmount(Int64.max, locale: locale) == "9,223,372,036,854.775807")
+    }
+
+    @Test("zero markers represent recorded zero intervals rather than gaps or cancelling signed values")
+    func recordedZeroMarkers() {
+        let first = DateInterval(start: Date(timeIntervalSince1970: 3_600), duration: 3_600)
+        let second = DateInterval(start: first.end, duration: 3_600)
+        let third = DateInterval(start: second.end, duration: 3_600)
+        let values = [
+            ActivityChartValue(interval: first, series: "a", amountUSD: 0, run: 0),
+            ActivityChartValue(interval: first, series: "b", amountUSD: 0, run: 0),
+            ActivityChartValue(interval: second, series: "a", amountUSD: 1, run: 0),
+            ActivityChartValue(interval: second, series: "b", amountUSD: -1, run: 0),
+            ActivityChartValue(interval: third, series: "a", amountUSD: 0.000001, run: 0)
+        ]
+        #expect(ActivityChartData.recordedZeroValues(values).map(\.interval) == [first])
+        #expect(ActivityChartData.recordedZeroValues([]).isEmpty)
+    }
+
     @Test("chart values keep model earnings separate until the selected layout is applied")
     func independentChartValues() {
         let interval = DateInterval(start: Date(timeIntervalSince1970: 3_600), duration: 3_600)

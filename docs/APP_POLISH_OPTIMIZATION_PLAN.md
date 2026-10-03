@@ -200,3 +200,5 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   The normal suite, explicitly isolated editor-focus regression and Release
   compile pass; their separate invocation and initial parallel-focus failures
   are preserved in that review and `Tests/NativeUI/README.md`.
+
+- Earnings keeps offscreen filters in both native key directions, preserves individual model labels and reveals its history table. Empty, recorded zero and unknown states remain distinct; Decimal table values retain micro-dollar precision and scalar Area readings use points. Native129, rejected candidates, 1,449 reported tests and Release compilation are recorded in `docs/EARNINGS_KEYBOARD_VALUES_NATIVE_REVIEW_20261002.md`. Pending-read focus/scope retention, conditional controls, VoiceOver and broader performance/distribution gates remain open.

@@ -151,6 +151,13 @@ enum ChartSeriesCueSelection {
         return isolated
     }
 
+    /// Scalar runs are represented by the explicit point overlay. Keeping
+    /// invisible AreaMarks for them lets chart accessibility bridge unknown gaps.
+    static func areaMarkValues(_ values: [ActivityChartValue]) -> [ActivityChartValue] {
+        let runCounts = Dictionary(grouping: values, by: \.runKey).mapValues(\.count)
+        return values.filter { runCounts[$0.runKey, default: 0] > 1 }
+    }
+
     /// Area annotations use the very same series and bucket values as the
     /// plotted marks. Totals-only clients can attribute a selected model here
     /// even when the separate bar-segment fallback still names aggregate Work.

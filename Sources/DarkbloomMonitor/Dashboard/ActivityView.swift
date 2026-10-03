@@ -118,28 +118,40 @@ struct ActivityView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
+                .padding(.leading, 6)
                 if loading {
                     ProgressView("Reading local history…")
                 } else if let message {
                     ContentUnavailableView("History unavailable", systemImage: "chart.bar", description: Text(message))
                 } else if let range = query.range {
-                    if chartMetric == .estimatedProfit && chartValues.isEmpty {
+                    if buckets.isEmpty {
                         ContentUnavailableView(
-                            "No covered profit hours",
-                            systemImage: "bolt.horizontal",
-                            description: Text("Profit estimates need saved whole-Mac power readings for a complete hour with recorded model work. Enable electricity cost in Settings and allow readings to accumulate.")
+                            "No recorded activity",
+                            systemImage: "chart.bar",
+                            description: Text("No local earnings entries were found for this selection. Missing history is not zero earnings.")
                         )
                     } else {
-                        activityChart(query: query, range: range)
+                        if chartMetric == .estimatedProfit && chartValues.isEmpty {
+                            ContentUnavailableView(
+                                "No covered profit hours",
+                                systemImage: "bolt.horizontal",
+                                description: Text("Profit estimates need saved whole-Mac power readings for a complete hour with recorded model work. Enable electricity cost in Settings and allow readings to accumulate.")
+                            )
+                        } else {
+                            activityChart(query: query, range: range)
+                        }
+                        if chartMetric == .estimatedProfit && !visibleModelHourlyProfitAverages.isEmpty {
+                            profitAveragesDisclosure
+                        } else if chartMetric == .earnings && !visibleModelHourlyAverages.isEmpty {
+                            earningsAveragesDisclosure
+                        }
+                        activityTable
                     }
-                    if chartMetric == .estimatedProfit && !visibleModelHourlyProfitAverages.isEmpty {
-                        profitAveragesDisclosure
-                    } else if chartMetric == .earnings && !visibleModelHourlyAverages.isEmpty {
-                        earningsAveragesDisclosure
-                    }
-                    activityTable
                 }
             }
+            .focusSection()
+            .coordinateSpace(name: "activity.earnings.document")
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
@@ -165,19 +177,23 @@ struct ActivityView: View {
         .labelsHidden()
         .accessibilityLabel("Calendar period")
         .frame(width: 130)
+        .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
     }
 
     private var refreshButton: some View {
         Button { refreshID += 1 } label: { Label("Refresh history", systemImage: "arrow.clockwise") }
             .labelStyle(.iconOnly)
+            .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
     }
 
     @ViewBuilder
     private var dateControls: some View {
         let from = DatePicker(period == .dateRange ? "From" : "Date", selection: $selectedDate,
                               in: ...Date(), displayedComponents: .date)
+            .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
         if period == .dateRange {
             let through = DatePicker("Through", selection: $endDate, in: ...Date(), displayedComponents: .date)
+                .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 16) { from; through }
                 VStack(alignment: .leading, spacing: 8) { from; through }
@@ -192,11 +208,7 @@ struct ActivityView: View {
         if !models.isEmpty || model != nil {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Models").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 145, maximum: 190), spacing: 8)],
-                    alignment: .leading,
-                    spacing: 8
-                ) {
+                AdaptiveChoiceLayout(minimumWidth: 145, spacing: 8, maximumWidth: 190) {
                     modelFilterChip(
                         title: "All models",
                         color: .secondary,
@@ -226,6 +238,7 @@ struct ActivityView: View {
                     }
                 }
                 .frame(maxWidth: 1_020, alignment: .leading)
+                .accessibilityElement(children: .contain)
                 .accessibilityLabel("Model filters")
             }
         }
@@ -238,12 +251,14 @@ struct ActivityView: View {
                     ForEach(ActivityChartMetric.allCases) { metric in Text(metric.rawValue).tag(metric) }
                 }
                 .labelsHidden().pickerStyle(.segmented)
+                .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
             }
             chartControlRow("Chart") {
                 Picker("Chart style", selection: $chartStyle) {
                     ForEach(ActivityChartStyle.allCases) { style in Text(style.rawValue).tag(style) }
                 }
                 .labelsHidden().pickerStyle(.segmented)
+                .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
             }
             chartControlRow("Layout") {
                 Picker("Bar layout", selection: $barArrangement) {
@@ -251,6 +266,7 @@ struct ActivityView: View {
                 }
                 .labelsHidden().pickerStyle(.segmented)
                 .disabled(chartStyle != .bars)
+                .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
             }
         }
         .frame(maxWidth: 520, alignment: .leading)
@@ -296,6 +312,7 @@ struct ActivityView: View {
         } label: {
             Text("Estimated profit per model-hour").font(.headline)
         }
+        .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
     }
 
     private var earningsAveragesDisclosure: some View {
@@ -322,6 +339,7 @@ struct ActivityView: View {
         } label: {
             Text("Work earnings per model-hour").font(.headline)
         }
+        .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
     }
 
     private func averageModelLabel(_ name: String) -> some View {
@@ -352,11 +370,11 @@ struct ActivityView: View {
                     Text(bucket.interval.start, format: .dateTime.month().day().hour().timeZone())
                 }
             }.width(compact ? 100 : 130)
-            TableColumn("Work USD") { bucket in Text(amount(bucket.totals?.workMicroUSD)) }
-                .width(compact ? 58 : 65)
+            TableColumn("Work USD") { bucket in amountCell(bucket.totals?.workMicroUSD) }
+                .width(compact ? 80 : 85)
             TableColumn(compact ? (model == nil ? "Rewards" : "Tok/s") : (model == nil ? "Rewards USD" : "Avg tok/sec")) { bucket in
                 if model == nil {
-                    Text(amount(bucket.totals?.rewardMicroUSD))
+                    amountCell(bucket.totals?.rewardMicroUSD)
                 } else if let rate = tokenRates[bucket.id], let average = rate.average {
                     Text(average, format: .number.precision(.fractionLength(1)))
                         .help(rateDescription(rate))
@@ -364,7 +382,7 @@ struct ActivityView: View {
                 } else {
                     Text("—").accessibilityLabel("No attributed throughput samples")
                 }
-            }.width(compact ? 68 : 80)
+            }.width(compact ? 80 : 85)
             TableColumn("Jobs") { bucket in Text(bucket.totals.map { $0.jobs.formatted() } ?? "—") }
                 .width(compact ? 36 : 35)
             TableColumn(compact ? "Status" : "Coverage") { bucket in
@@ -373,6 +391,7 @@ struct ActivityView: View {
                     .help(coverage(bucket.coverage))
             }.width(compact ? 60 : 85)
         }
+        .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
     }
 
     private var chartValues: [ActivityChartValue] {
@@ -447,6 +466,7 @@ struct ActivityView: View {
         .help(help ?? title)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
     }
 
     private func activityChart(query: ActivityQuery, range: DateInterval) -> some View {
@@ -458,7 +478,11 @@ struct ActivityView: View {
             : []
         let valueCues = chartStyle == .area || stackedBars ? [] : ChartSeriesCueSelection.values(values)
         let segmentCues = stackedBars ? ChartSeriesCueSelection.segments(segments) : []
-        let isolatedArea = chartStyle == .area ? ChartSeriesCueSelection.isolatedAreaSegments(values) : []
+        let zeroValues = ActivityChartData.recordedZeroValues(values)
+        let zeroIntervals = Set(zeroValues.map(\.interval.start))
+        let isolatedArea = chartStyle == .area
+            ? ChartSeriesCueSelection.isolatedAreaSegments(values).filter { !zeroIntervals.contains($0.interval.start) } : []
+        let markValues = chartStyle == .area ? ChartSeriesCueSelection.areaMarkValues(values) : values
         let isolatedAreaIDs = Set(isolatedArea.map(\.id))
         let isolatedAreaAmounts: [String: Double] = isolatedArea.isEmpty ? [:] : values.reduce(into: [:]) { amounts, value in
             if isolatedAreaIDs.contains(value.id) { amounts[value.id] = value.amountUSD }
@@ -484,8 +508,19 @@ struct ActivityView: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
             Chart {
-                chartMarks(query: query, values: values, segments: segments,
+                chartMarks(query: query, values: markValues, segments: segments,
                     styles: styles, valueCues: valueCues, segmentCues: segmentCues)
+                ForEach(zeroValues) { value in
+                    PointMark(
+                        x: .value("Period", value.interval.start.addingTimeInterval(value.interval.duration / 2)),
+                        y: .value("Recorded USD", 0)
+                    )
+                    .foregroundStyle(Color.secondary)
+                    .symbol(.circle)
+                    .symbolSize(24)
+                    .accessibilityLabel(Text("Recorded zero, period beginning \(value.interval.start.formatted(date: .abbreviated, time: .shortened))"))
+                    .accessibilityValue(Text("0 US dollars"))
+                }
                 // A single value cannot form an area. Place its symbol within
                 // the recorded bucket, using the same signed stack endpoint.
                 ForEach(isolatedArea) { segment in
@@ -507,7 +542,8 @@ struct ActivityView: View {
             }
                 .id(query.model)
                 .chartXScale(domain: range.start...range.end)
-                .chartYScale(domain: yAxis.lowerBound...yAxis.upperBound)
+                .chartYScale(domain: yAxis.lowerBound...yAxis.upperBound,
+                             range: .plotDimension(startPadding: zeroValues.isEmpty ? 0 : 4, endPadding: 0))
                 .chartXAxisLabel("Local time")
                 .chartXAxis {
                     AxisMarks(values: ActivityChartAxis.xValues(in: range, unit: query.unit, calendar: query.calendar)) { value in
@@ -560,6 +596,10 @@ struct ActivityView: View {
             ChartSeriesLegend(entries: styles.visibleEntries(in: visibleSeries),
                 showsLine: chartStyle == .lines, color: chartColor(for:))
                 .padding(.top, 6)
+            if !zeroValues.isEmpty {
+                Label("Recorded zero", systemImage: "circle.fill")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(chartMetric == .estimatedProfit
@@ -711,8 +751,10 @@ struct ActivityView: View {
         return DateInterval(start: start, end: end)
     }
 
-    private func amount(_ value: Int64?) -> String {
-        value.map { (Double($0) / 1_000_000).formatted(.number.precision(.fractionLength(4))) } ?? "—"
+    private func amountCell(_ microUSD: Int64?) -> some View {
+        let value = ActivityAmountPresentation.tableAmount(microUSD)
+        return Text(value).monospacedDigit()
+            .help(microUSD == nil ? "No recorded amount" : "\(value) USD")
     }
 
     private func rateDescription(_ rate: ModelRateBucket) -> String {

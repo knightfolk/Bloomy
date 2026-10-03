@@ -2,15 +2,22 @@ import SwiftUI
 
 /// These short decision groups must mount every native control on first entry.
 /// A lazy grid can omit offscreen choices from the window's initial key loop.
-struct HostingChoiceLayout: Layout {
+struct AdaptiveChoiceLayout: Layout {
     let minimumWidth: CGFloat
     let spacing: CGFloat
+    var maximumWidth: CGFloat? = nil
 
     static func columns(width: CGFloat, minimumWidth: CGFloat, spacing: CGFloat, count: Int) -> Int {
         guard count > 0 else { return 1 }
         guard width.isFinite, minimumWidth > 0, spacing >= 0 else { return 1 }
         let fitting = floor((max(0, width) + spacing) / (minimumWidth + spacing))
         return Int(min(CGFloat(count), max(1, fitting)))
+    }
+
+    static func choiceWidth(width: CGFloat, columns: Int, spacing: CGFloat, maximumWidth: CGFloat? = nil) -> CGFloat {
+        let available = max(0, (width - CGFloat(max(0, columns - 1)) * spacing) / CGFloat(max(1, columns)))
+        guard let maximumWidth, maximumWidth.isFinite, maximumWidth > 0 else { return available }
+        return min(available, maximumWidth)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -35,7 +42,7 @@ struct HostingChoiceLayout: Layout {
 
     private func measurements(width: CGFloat, subviews: Subviews) -> (columns: Int, width: CGFloat, heights: [CGFloat]) {
         let columns = Self.columns(width: width, minimumWidth: minimumWidth, spacing: spacing, count: subviews.count)
-        let cardWidth = max(0, (width - CGFloat(columns - 1) * spacing) / CGFloat(columns))
+        let cardWidth = Self.choiceWidth(width: width, columns: columns, spacing: spacing, maximumWidth: maximumWidth)
         var heights: [CGFloat] = []
         for index in subviews.indices {
             let height = subviews[index].sizeThatFits(ProposedViewSize(width: cardWidth, height: nil)).height
@@ -46,3 +53,6 @@ struct HostingChoiceLayout: Layout {
         return (columns, cardWidth, heights)
     }
 }
+
+/// Existing Hosting groups retain their uncapped, equal-width layout.
+typealias HostingChoiceLayout = AdaptiveChoiceLayout

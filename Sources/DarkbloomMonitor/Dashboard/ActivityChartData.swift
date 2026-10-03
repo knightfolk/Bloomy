@@ -33,6 +33,14 @@ struct ActivityChartValue: Equatable, Identifiable {
     var runKey: String { "\(series)-run-\(run)" }
 }
 
+enum ActivityAmountPresentation {
+    static func tableAmount(_ microUSD: Int64?, locale: Locale = .current) -> String {
+        guard let microUSD else { return "—" }
+        return (Decimal(microUSD) / 1_000_000)
+            .formatted(.number.locale(locale).precision(.fractionLength(4...6)))
+    }
+}
+
 struct ActivityChartColorComponents: Equatable {
     let hue: Double
     let saturation: Double
@@ -84,6 +92,13 @@ struct ActivityChartSegment: Equatable, Identifiable {
 }
 
 enum ActivityChartData {
+    /// One aggregate marker for an interval whose displayed series are all
+    /// recorded zero. Missing buckets have no values and never create a marker.
+    static func recordedZeroValues(_ values: [ActivityChartValue]) -> [ActivityChartValue] {
+        Dictionary(grouping: values, by: \.interval.start).values.compactMap { intervalValues in
+            intervalValues.allSatisfy { $0.amountUSD == 0 } ? intervalValues.first : nil
+        }.sorted { $0.interval.start < $1.interval.start }
+    }
     static func colorScaleDomain(models: [String]) -> [String] {
         var seen = Set<String>()
         return (models + ["Work", "Base rewards"]).filter { seen.insert($0).inserted }

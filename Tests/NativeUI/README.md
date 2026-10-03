@@ -630,6 +630,23 @@ recording disclosure directly. Test compact/light and wide/dark layouts.
 Unchanged reads alone do not exercise this regression. Native91 provenance and
 limits are in `docs/METRICS_SCOPE_KEYBOARD_NATIVE_REVIEW_20261002.md`.
 
+### Earnings empty, zero and tiny values
+
+Data checks → Earnings read selects normal, empty, recorded zero with unknown
+gaps, or overlapping micro-dollar results. Use the production Earnings Refresh
+button to consume the chosen mode. Empty returns no buckets or model list;
+zero/tiny modes record every third interval and leave the others unavailable.
+Tiny mode assigns one micro-dollar of work to each of three models and one of
+base rewards. Selecting one model returns only its work, with no base rewards.
+The modes persist until changed or the fixture scenario is reloaded. They never
+read a real ledger, request inference, or change provider configuration.
+
+Inspect both the chart and table: unknown is a dash, recorded zero has a chart
+marker, and tiny amounts must remain nonzero. Test normal forward/reverse Tab
+from the period picker through all model filters, chart choices, disclosure and
+table in a compact window. Real screen readers, production refresh performance
+and real provider earnings remain separate proof.
+
 ### Provider untouched-field regression
 
 In compact light Provider settings, focus the unchanged idle-minutes text and
