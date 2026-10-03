@@ -3,6 +3,29 @@
     <channel>
         <title>Bloomy</title>
         <item>
+            <title>1.9.16</title>
+            <pubDate>Sat, 03 Oct 2026 05:28:02 -0700</pubDate>
+            <sparkle:version>141</sparkle:version>
+            <sparkle:shortVersionString>1.9.16</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Bloomy v1.9.16
+
+Bloomy brings a more consistent native Mac interface to the popup, dashboard and settings. Model cards keep their layout stable, startup choices explain what will actually preload, and errors leave Refresh and recovery controls available. Hosting connection details are now visible in the popup. Settings retain unfinished edits through refreshes, navigation and app-update requests.
+
+Experimental Darkbloom Autopilot can be joined, paused, resumed or left from Provider settings using supported CLI controls. Bloomy distinguishes enrollment, shadow proposals and active control, and preserves your saved startup and memory choices. Enrollment does not mean live control is active.
+
+Optional host GPU protection can warn or gracefully pause the provider after sustained high whole-Mac GPU use while it is idle. Configurable thresholds, recovery delays and minimum pause time prevent rapid cycling. A separate warning uses a recorded same-model speed baseline to flag possible contention during serving; it never interrupts accepted inference. These protections default to Off. Whole-Mac GPU readings do not identify individual apps.
+
+Activity keeps the last completed report visible during refreshes and failures. Earnings charts preserve negative corrections, separate positive and negative stacks, and show tiny amounts precisely. Recorded zero, missing history and uncertain time boundaries have distinct presentations. Metrics qualifies historical visits and shows observed GPU use while idle without inventing missing measurements.
+
+Background work is reduced through bounded history caches, faster log and visit analysis, incremental electricity storage and suspended display reads in hidden windows. Monitoring, local recording and enabled automatic actions continue while Bloomy runs. Native controls, compact layouts, focus handling and Quit cleanup have also been improved.
+
+For Apple Silicon Macs running macOS 14 or newer. This update does not install the Darkbloom CLI, change Autopilot enrollment or move model files. The broader polish and accessibility review continues.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/Bloomy/releases/download/v1.9.16/Bloomy-1.9.16-mac-arm64.zip" length="9738209" type="application/octet-stream" sparkle:edSignature="HvOH4dZvvhjz3MDS02B7Nsd6fyonuB4/9evH+uieLPPrae3W/DNiI9/3LLjRSGUEWrsz1rK4eOXDFOFfUqOqDg=="/>
+        </item>
+        <item>
             <title>1.9.14</title>
             <pubDate>Thu, 01 Oct 2026 19:02:16 -0700</pubDate>
             <sparkle:version>139</sparkle:version>

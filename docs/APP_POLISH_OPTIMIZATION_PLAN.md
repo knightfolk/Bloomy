@@ -1,5 +1,12 @@
 # Bloomy native polish and efficiency
 
+October 3 distribution checkpoint: version 1.9.16/build 141 was rebuilt from
+the verified current source, signed, notarized, stapled and published with
+matching asset digests and four exact-ZIP isolated updater gates. The running
+installed app and provider were preserved. See
+`RELEASE_1_9_16_VERIFICATION_20261003.md`; this does not complete the remaining
+native, accessibility, performance or production integration review below.
+
 The ongoing goal is a consistent, polished native Mac app with minimal background cost. A verified release checkpoint does not establish that every screen or state has completed review.
 
 The [native completion matrix](NATIVE_COMPLETION_MATRIX_20261002.md) indexes all
