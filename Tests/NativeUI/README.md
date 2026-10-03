@@ -656,3 +656,32 @@ show Save/Discard and protect the real edit; Discard restores the observed
 value. Repeat untouched focus/blur in wide dark. Do not save or use a real key.
 Native92 records this regression and the separate incomplete upper-control key
 entry in `docs/PROVIDER_KEYBOARD_DRAFT_NATIVE_REVIEW_20261002.md`.
+
+### Controlled Earnings reads
+
+Data checks → Synthetic Earnings reads controls the first production Earnings
+query method, `activityModels`. Pause synthetic observations in that menu first
+(the same pause used by Metrics; no new timer). This prevents normal synthetic
+publication from consuming or replacing the controlled query. Choose Next read:
+hold, fail or empty, then use Earnings Refresh or change its period, dates, model
+or metric. The choice is
+consumed once and the next query returns to normal. A held read pauses before
+any bucket results arrive; release it successfully, as empty, or as failed with
+the three enabled menu actions. Empty supplies no models or buckets for that
+query. A successful release uses the existing persistent Earnings read mode
+(normal, empty, recorded zero or tiny); those persistent modes remain available.
+
+Next-read, persistent mode and synthetic model-list choices are disabled while a
+read is held. Changing the Earnings scope cancels the previous task's owned hold
+before the next gate runs. Leaving Earnings cancels that hold; fixture reload
+and Quit explicitly cancel and join it. There is one owned continuation, with no
+read timer, fake clock, live ledger, provider action, inference or credential read.
+
+The menu updates from read events and shows starts, completions, failures,
+cancellations and empty outcomes. Save Earnings read counts writes
+`fixture-earnings-read-proof.json` into the unique banner directory. These counts
+measure the first-query gate, not completion of the whole report; copy each
+stage's evidence before saving over it. Inspect the production loading, error,
+empty and recovered report states directly in compact/light and wide/dark.
+A compiled fixture and gate counts alone do not establish rendered behavior,
+keyboard traversal, screen-reader behavior or real-ledger performance.

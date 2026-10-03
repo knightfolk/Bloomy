@@ -5,6 +5,16 @@ The ongoing goal is a consistent, polished native Mac app with minimal backgroun
 The [native completion matrix](NATIVE_COMPLETION_MATRIX_20261002.md) indexes all
 22 surfaces, distinguishing bounded coverage and each remaining proof gap.
 
+## Current review priorities
+
+Kevin questioned the emphasis on keyboard controls on October 2. Keep ordinary
+native Tab/Space/Escape behavior and accessible control names, but prioritize
+visible layout, truthful state, reliable actions and measured resource use.
+Exhaustive key-path audits and custom shortcuts are lower priority. Fix concrete
+keyboard bugs that affect ordinary use; an unverified optional path is not itself
+a product failure or a reason to add a new control system. Existing evidence and
+remaining proof gaps stay recorded.
+
 ## Optimization checkpoint
 
 Changes prepared for 1.9.15:
@@ -202,3 +212,12 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   are preserved in that review and `Tests/NativeUI/README.md`.
 
 - Earnings keeps offscreen filters in both native key directions, preserves individual model labels and reveals its history table. Empty, recorded zero and unknown states remain distinct; Decimal table values retain micro-dollar precision and scalar Area readings use points. Native129, rejected candidates, 1,449 reported tests and Release compilation are recorded in `docs/EARNINGS_KEYBOARD_VALUES_NATIVE_REVIEW_20261002.md`. Pending-read focus/scope retention, conditional controls, VoiceOver and broader performance/distribution gates remain open.
+
+- Earnings now retains a completed report across pending/failed reads, with its
+  captured dates, model, measure and time zone. Hidden revisions start no reads;
+  hiding, model changes and Metrics navigation cancel obsolete work. Native131
+  verifies compact light and wide dark retention, empty/error/retry and native
+  minimize/restore paths. The regular suite passes with 1,458 reported tests and
+  six opt-in skips; Release compilation passes. Pending Refresh keyboard focus,
+  conditional date controls, live-zone changes and wider performance/distribution
+  remain open. See `docs/EARNINGS_RETAINED_READ_NATIVE_REVIEW_20261002.md`.

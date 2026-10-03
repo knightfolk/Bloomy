@@ -8,12 +8,55 @@ import Testing
 @Suite("Activity rendering", .serialized)
 @MainActor
 struct ActivityViewTests {
+    @Test("hidden Earnings skips revision reads, cancels pending work and rereads on restoration")
+    func hiddenReadLifecycle() async throws {
+        let client = ActivityHeldReadClient()
+        let store = MonitorStore(service: TelemetryService(source: ActivityUnusedSource()),
+            initial: .unavailable(now: Date()), earningsClient: client)
+        let host = NSHostingController(rootView: ActivityView(store: store))
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 570, height: 650))
+        window.orderBack(nil)
+        defer { window.close() }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(await client.counts().started == 0)
+
+        store.setDashboardVisible(true)
+        try await waitForReads(client, started: 1, cancelled: 0)
+        store.setDashboardVisible(false)
+        try await waitForReads(client, started: 1, cancelled: 1)
+        let revision = store.activityRevision
+        await store.refreshEarnings()
+        #expect(store.activityRevision > revision)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(await client.counts().started == 1)
+
+        store.setDashboardVisible(true)
+        try await waitForReads(client, started: 2, cancelled: 1)
+        store.setDashboardVisible(false)
+        try await waitForReads(client, started: 2, cancelled: 2)
+        #expect(await client.counts().buckets == 0)
+    }
+
+    private func waitForReads(_ client: ActivityHeldReadClient, started: Int, cancelled: Int) async throws {
+        for _ in 0..<40 {
+            let counts = await client.counts()
+            if counts.started == started, counts.cancelled == cancelled { return }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        let counts = await client.counts()
+        #expect(counts.started == started)
+        #expect(counts.cancelled == cancelled)
+    }
+
     @Test("Metrics tab preserves Activity initializer options and renders without a history store")
     func rendersMetricsTab() async throws {
         let store = MonitorStore(
             service: TelemetryService(source: ActivityUnusedSource()),
             initial: .unavailable(now: Date()), earningsClient: ActivityFixtureClient()
         )
+        store.setDashboardVisible(true)
         let host = NSHostingController(rootView: ActivityView(
             store: store, initialModelFilter: ActivityFixtureModel.gemma,
             initialChartStyle: .lines, initialBarArrangement: .sideBySide,
@@ -36,6 +79,7 @@ struct ActivityViewTests {
             service: TelemetryService(source: ActivityUnusedSource()),
             initial: .unavailable(now: Date()), earningsClient: ActivityFixtureClient()
         )
+        store.setDashboardVisible(true)
         let host = NSHostingController(rootView: ActivityView(store: store))
         let window = NSWindow(contentViewController: host)
         window.isReleasedWhenClosed = false
@@ -66,6 +110,7 @@ struct ActivityViewTests {
             service: TelemetryService(source: ActivityUnusedSource()),
             initial: .unavailable(now: Date()), earningsClient: ActivityFixtureClient()
         )
+        store.setDashboardVisible(true)
         let host = NSHostingController(rootView: ActivityView(store: store, initialModelFilter: ActivityFixtureModel.gemma))
         let window = NSWindow(contentViewController: host)
         window.isReleasedWhenClosed = false
@@ -88,6 +133,7 @@ struct ActivityViewTests {
                 service: TelemetryService(source: ActivityUnusedSource()),
                 initial: .unavailable(now: Date()), earningsClient: ActivityFixtureClient()
             )
+            store.setDashboardVisible(true)
             let host = NSHostingController(rootView: ActivityView(
                 store: store,
                 initialChartStyle: style,
@@ -122,6 +168,7 @@ struct ActivityViewTests {
             initialEnergy: fixtureEnergy(now: now),
             earningsClient: ActivityFixtureClient()
         )
+        store.setDashboardVisible(true)
         let host = NSHostingController(rootView: ActivityView(store: store, initialChartMetric: .estimatedProfit))
         let window = NSWindow(contentViewController: host)
         window.isReleasedWhenClosed = false
@@ -226,4 +273,22 @@ private struct ActivityUnusedSource: TelemetrySource {
     func readLoadedModels() async throws -> LoadedModelsState { throw Unused() }
     func readStatus() async throws -> StatusSnapshot { throw Unused() }
     func readLegacyEvents(limit: Int) async throws -> [LogEvent] { throw Unused() }
+}
+
+private actor ActivityHeldReadClient: AccountEarningsFetching {
+    private var started = 0
+    private var cancelled = 0
+    private var buckets = 0
+    func counts() -> (started: Int, cancelled: Int, buckets: Int) { (started, cancelled, buckets) }
+    func fetch(now: Date) async throws -> EarningsPresentationValue { .unavailable(reason: "Inert fixture") }
+    func activityModels(in range: DateInterval) async throws -> [String] {
+        started += 1
+        do { try await Task.sleep(for: .seconds(60)) }
+        catch { cancelled += 1; throw error }
+        return []
+    }
+    func activity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ActivityBucket]? {
+        buckets += 1
+        return []
+    }
 }

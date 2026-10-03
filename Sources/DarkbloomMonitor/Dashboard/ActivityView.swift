@@ -27,22 +27,23 @@ struct ActivityView: View {
     @State private var period = ActivityPeriod.today
     @State private var selectedDate = Date()
     @State private var endDate = Date()
-    @State private var buckets: [ActivityBucket] = []
-    @State private var modelWorkByBucket: [Date: [String: Int64]] = [:]
-    @State private var modelHourlyAverages: [ModelHourlyEarningsAverage] = []
-    @State private var modelHourlyProfits: [ModelHourlyProfit] = []
-    @State private var modelHourlyProfitAverages: [ModelHourlyProfitAverage] = []
+    @State private var read = ActivityReadState()
     @State private var showsModelHourlyAverages = true
-    @State private var message: String?
-    @State private var loading = false
     @State private var refreshID = 0
     @State private var model: String?
     @State private var chartMetric = ActivityChartMetric.earnings
     @State private var chartStyle = ActivityChartStyle.bars
     @State private var barArrangement = ActivityBarArrangement.stacked
     @State private var showsBaseRewards = true
-    @State private var models: [String] = []
-    @State private var tokenRates: [Date: ModelRateBucket] = [:]
+    private var buckets: [ActivityBucket] { read.completed?.buckets ?? [] }
+    private var models: [String] { read.completed?.models ?? [] }
+    private var modelWorkByBucket: [Date: [String: Int64]] { read.completed?.modelWorkByBucket ?? [:] }
+    private var modelHourlyAverages: [ModelHourlyEarningsAverage] { read.completed?.modelHourlyAverages ?? [] }
+    private var modelHourlyProfits: [ModelHourlyProfit] { read.completed?.modelHourlyProfits ?? [] }
+    private var modelHourlyProfitAverages: [ModelHourlyProfitAverage] { read.completed?.modelHourlyProfitAverages ?? [] }
+    private var tokenRates: [Date: ModelRateBucket] { read.completed?.tokenRates ?? [:] }
+    private var renderedModel: String? { read.completed?.query.model }
+    private var renderedMetric: ActivityChartMetric { read.completed?.query.metric ?? chartMetric }
 
     init(
         store: MonitorStore,
@@ -109,10 +110,10 @@ struct ActivityView: View {
                 modelFilters
                 chartControls
                 DisclosureGroup("About this activity") {
-                    Text("Recorded ledger events · \(Calendar.current.timeZone.identifier)")
-                    Text(chartMetric == .estimatedProfit
+                    Text("Recorded ledger events · \((read.completed?.query.calendar ?? query.calendar).timeZone.identifier)")
+                    Text(renderedMetric == .estimatedProfit
                          ? "Estimated per earning model-hour. Whole-Mac electricity is shared evenly among models with recorded work; other Mac use is included. Incomplete power hours are omitted."
-                         : model == nil
+                         : renderedModel == nil
                             ? "Company shades stay related; base rewards are separate. Gaps are unknown, not zero. Recorded totals may be incomplete."
                             : "Showing recorded work for this model only. Base rewards are excluded; gaps are unknown, not zero.")
                 }
@@ -120,11 +121,16 @@ struct ActivityView: View {
                 .foregroundStyle(.secondary)
                 .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
                 .padding(.leading, 6)
-                if loading {
-                    ProgressView("Reading local history…")
-                } else if let message {
-                    ContentUnavailableView("History unavailable", systemImage: "chart.bar", description: Text(message))
-                } else if let range = query.range {
+                if let completed = read.completed, let range = completed.query.range {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(completed.query.scopeSummary)
+                            .accessibilityIdentifier("activity.earnings.completedScope")
+                            .help(completed.query.model ?? "All models")
+                        Text("\(read.status) · \(completed.query.calendar.timeZone.identifier)")
+                            .accessibilityIdentifier("activity.earnings.readStatus")
+                    }
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                     if buckets.isEmpty {
                         ContentUnavailableView(
                             "No recorded activity",
@@ -132,22 +138,26 @@ struct ActivityView: View {
                             description: Text("No local earnings entries were found for this selection. Missing history is not zero earnings.")
                         )
                     } else {
-                        if chartMetric == .estimatedProfit && chartValues.isEmpty {
+                        if renderedMetric == .estimatedProfit && chartValues.isEmpty {
                             ContentUnavailableView(
                                 "No covered profit hours",
                                 systemImage: "bolt.horizontal",
                                 description: Text("Profit estimates need saved whole-Mac power readings for a complete hour with recorded model work. Enable electricity cost in Settings and allow readings to accumulate.")
                             )
                         } else {
-                            activityChart(query: query, range: range)
+                            activityChart(query: completed.query, range: range)
                         }
-                        if chartMetric == .estimatedProfit && !visibleModelHourlyProfitAverages.isEmpty {
+                        if renderedMetric == .estimatedProfit && !visibleModelHourlyProfitAverages.isEmpty {
                             profitAveragesDisclosure
-                        } else if chartMetric == .earnings && !visibleModelHourlyAverages.isEmpty {
+                        } else if renderedMetric == .earnings && !visibleModelHourlyAverages.isEmpty {
                             earningsAveragesDisclosure
                         }
-                        activityTable
+                        activityTable(query: completed.query)
                     }
+                } else if let message = read.message {
+                    ContentUnavailableView("History unavailable", systemImage: "chart.bar", description: Text(message))
+                } else {
+                    ProgressView("Reading local history…")
                 }
             }
             .focusSection()
@@ -157,7 +167,13 @@ struct ActivityView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .scrollIndicators(.automatic)
-        .task(id: query) { await load(query: query) }
+        .task(id: store.dashboardVisible ? query : nil) {
+            if store.dashboardVisible {
+                await load(query: query)
+            } else if !Task.isCancelled, let ticket = read.pending {
+                read.cancel(ticket)
+            }
+        }
     }
 
     private var activityHeader: some View {
@@ -353,27 +369,27 @@ struct ActivityView: View {
         }
     }
 
-    private var activityTable: some View {
+    private func activityTable(query: ActivityQuery) -> some View {
         GeometryReader { geometry in
-            activityTable(compact: geometry.size.width < 620)
+            activityTable(compact: geometry.size.width < 620, query: query)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(height: 300)
     }
 
-    private func activityTable(compact: Bool) -> some View {
+    private func activityTable(compact: Bool, query: ActivityQuery) -> some View {
         Table(buckets) {
             TableColumn("Period") { bucket in
                 if compact {
-                    Text(bucket.interval.start, format: .dateTime.month(.abbreviated).day().hour())
+                    Text(bucket.interval.start, format: query.dateFormat.month(.abbreviated).day().hour())
                 } else {
-                    Text(bucket.interval.start, format: .dateTime.month().day().hour().timeZone())
+                    Text(bucket.interval.start, format: query.dateFormat.month().day().hour().timeZone())
                 }
             }.width(compact ? 100 : 130)
             TableColumn("Work USD") { bucket in amountCell(bucket.totals?.workMicroUSD) }
                 .width(compact ? 80 : 85)
-            TableColumn(compact ? (model == nil ? "Rewards" : "Tok/s") : (model == nil ? "Rewards USD" : "Avg tok/sec")) { bucket in
-                if model == nil {
+            TableColumn(compact ? (renderedModel == nil ? "Rewards" : "Tok/s") : (renderedModel == nil ? "Rewards USD" : "Avg tok/sec")) { bucket in
+                if renderedModel == nil {
                     amountCell(bucket.totals?.rewardMicroUSD)
                 } else if let rate = tokenRates[bucket.id], let average = rate.average {
                     Text(average, format: .number.precision(.fractionLength(1)))
@@ -395,20 +411,20 @@ struct ActivityView: View {
     }
 
     private var chartValues: [ActivityChartValue] {
-        if chartMetric == .estimatedProfit {
-            return ActivityChartData.profitValues(hourly: modelHourlyProfits, buckets: buckets, selectedModel: model)
+        if renderedMetric == .estimatedProfit {
+            return ActivityChartData.profitValues(hourly: modelHourlyProfits, buckets: buckets, selectedModel: renderedModel)
         }
         return ActivityChartData.values(buckets: buckets, models: models, modelWorkByBucket: modelWorkByBucket,
-                                        selectedModel: model, includeRewards: showsBaseRewards)
+                                        selectedModel: renderedModel, includeRewards: showsBaseRewards)
     }
 
     private var visibleModelHourlyAverages: [ModelHourlyEarningsAverage] {
-        guard let model else { return modelHourlyAverages }
+        guard let model = renderedModel else { return modelHourlyAverages }
         return modelHourlyAverages.filter { $0.model == model }
     }
 
     private var visibleModelHourlyProfitAverages: [ModelHourlyProfitAverage] {
-        guard let model else { return modelHourlyProfitAverages }
+        guard let model = renderedModel else { return modelHourlyProfitAverages }
         return modelHourlyProfitAverages.filter { $0.model == model }
     }
 
@@ -474,7 +490,7 @@ struct ActivityView: View {
         let stackedBars = chartStyle == .bars && barArrangement == .stacked
         let values = chartValues
         let segments = stackedBars
-            ? (chartMetric == .estimatedProfit ? ActivityChartData.profitSegments(values: values) : chartSegments)
+            ? (renderedMetric == .estimatedProfit ? ActivityChartData.profitSegments(values: values) : chartSegments)
             : []
         let valueCues = chartStyle == .area || stackedBars ? [] : ChartSeriesCueSelection.values(values)
         let segmentCues = stackedBars ? ChartSeriesCueSelection.segments(segments) : []
@@ -493,7 +509,7 @@ struct ActivityView: View {
             ? segments.map(\.series) : values.map(\.series)
         let styles = ChartSeriesStyles(domain: chartStyleDomain + visibleSeries)
         let yAxis: ActivityChartYAxis
-        if chartMetric == .estimatedProfit {
+        if renderedMetric == .estimatedProfit {
             let bounds = ActivityChartData.profitBounds(values: values, stacked: stacked)
             yAxis = ActivityChartAxis.signedYAxis(minimum: bounds.minimum, maximum: bounds.maximum)
         } else {
@@ -502,7 +518,7 @@ struct ActivityView: View {
         }
 
         return VStack(alignment: .leading, spacing: 2) {
-            Text(chartMetric == .estimatedProfit
+            Text(renderedMetric == .estimatedProfit
                  ? "Estimated profit per earning model-hour · USD"
                  : "Gross recorded earnings · USD")
                 .font(.caption.weight(.medium))
@@ -518,7 +534,7 @@ struct ActivityView: View {
                     .foregroundStyle(Color.secondary)
                     .symbol(.circle)
                     .symbolSize(24)
-                    .accessibilityLabel(Text("Recorded zero, period beginning \(value.interval.start.formatted(date: .abbreviated, time: .shortened))"))
+                    .accessibilityLabel(Text("Recorded zero, period beginning \(value.interval.start.formatted(query.dateAndTimeFormat))"))
                     .accessibilityValue(Text("0 US dollars"))
                 }
                 // A single value cannot form an area. Place its symbol within
@@ -535,7 +551,7 @@ struct ActivityView: View {
                         .annotation(position: .trailing, spacing: 4) {
                             ChartSeriesBadge(number: styles[segment.series].number)
                         }
-                        .accessibilityLabel(Text("\(segment.series), recorded period beginning \(segment.interval.start.formatted(date: .abbreviated, time: .shortened))"))
+                        .accessibilityLabel(Text("\(segment.series), recorded period beginning \(segment.interval.start.formatted(query.dateAndTimeFormat))"))
                         .accessibilityValue(Text(ChartSeriesCueSelection.pointAmountLabel(originalAmount)))
                     }
                 }
@@ -553,9 +569,9 @@ struct ActivityView: View {
                         AxisValueLabel {
                             if let date = value.as(Date.self) {
                                 if query.unit == .hour {
-                                    Text(date, format: .dateTime.hour())
+                                    Text(date, format: query.dateFormat.hour())
                                 } else {
-                                    Text(date, format: .dateTime.month(.abbreviated).day())
+                                    Text(date, format: query.dateFormat.month(.abbreviated).day())
                                 }
                             }
                         }
@@ -602,7 +618,7 @@ struct ActivityView: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(chartMetric == .estimatedProfit
+        .accessibilityLabel(renderedMetric == .estimatedProfit
             ? "Estimated net profit per earning model-hour in US dollars by local time, with positive and negative values around zero. Numbered labels and the legend identify each series."
             : "Recorded gross earnings in US dollars by local time. Numbered labels and the legend identify the series. Aggregate totals and coverage are in the table below.")
     }
@@ -639,7 +655,7 @@ struct ActivityView: View {
             buckets: buckets,
             models: models,
             modelWorkByBucket: modelWorkByBucket,
-            selectedModel: model,
+            selectedModel: renderedModel,
             includeRewards: showsBaseRewards
         )
     }
@@ -694,29 +710,31 @@ struct ActivityView: View {
 
     private func load(query: ActivityQuery) async {
         guard !Task.isCancelled else { return }
-        loading = true
-        message = nil
-        buckets = []
-        modelWorkByBucket = [:]
-        modelHourlyAverages = []
-        modelHourlyProfits = []
-        modelHourlyProfitAverages = []
-        tokenRates = [:]
+        let ticket = read.begin(query)
         guard let range = query.range else {
-            message = "Choose an end date on or after the start date, with no more than 366 calendar days."
-            loading = false
+            read.fail("Choose an end date on or after the start date, with no more than 366 calendar days.", for: ticket)
             return
         }
+        // Capture power alongside the request, before any local-read suspension.
+        let powerIntervals = store.energy?.intervals ?? []
         do {
             let availableModels = try await store.activityModels(in: range)
-            let result = try await store.activity(in: range, unit: query.unit, calendar: query.calendar, model: query.model)
+            try Task.checkCancellation()
+            guard let result = try await store.activity(in: range, unit: query.unit, calendar: query.calendar, model: query.model) else {
+                try Task.checkCancellation()
+                read.fail("Local earnings storage is unavailable.", for: ticket)
+                return
+            }
+            try Task.checkCancellation()
             let modelHistory = try await store.activityByModel(in: range, unit: query.unit, calendar: query.calendar) ?? []
+            try Task.checkCancellation()
             let averages = (try? await store.modelHourlyEarningsAverages(in: range)) ?? []
-            let powerIntervals = store.energy?.intervals ?? []
+            try Task.checkCancellation()
             let hourlyProfits: [ModelHourlyProfit]
             if query.metric == .estimatedProfit,
                let powerRange = rangeCoveredByEnergy(range, intervals: powerIntervals) {
                 let hourlyActivity = try await store.activityByModel(in: powerRange, unit: .hour, calendar: query.calendar) ?? []
+                try Task.checkCancellation()
                 hourlyProfits = ModelProfitability.hourlyProfits(activity: hourlyActivity, energy: powerIntervals)
             } else {
                 hourlyProfits = []
@@ -728,19 +746,17 @@ struct ActivityView: View {
             if let model = query.model {
                 rates = try? await store.activityTokenRates(in: range, unit: query.unit, calendar: query.calendar, model: model)
             } else { rates = nil }
-            guard !Task.isCancelled else { return }
-            models = availableModels
-            modelWorkByBucket = perModel
-            modelHourlyAverages = averages
-            modelHourlyProfits = hourlyProfits
-            modelHourlyProfitAverages = ModelProfitability.averages(hourlyProfits)
-            tokenRates = Dictionary(uniqueKeysWithValues: (rates ?? []).map { ($0.id, $0) })
-            if let result { buckets = result } else { message = "Local earnings storage is unavailable." }
+            try Task.checkCancellation()
+            read.finish(ActivityReadSnapshot(query: query, buckets: result, models: availableModels,
+                modelWorkByBucket: perModel, modelHourlyAverages: averages, modelHourlyProfits: hourlyProfits,
+                modelHourlyProfitAverages: ModelProfitability.averages(hourlyProfits),
+                tokenRates: Dictionary(uniqueKeysWithValues: (rates ?? []).map { ($0.id, $0) })), for: ticket)
+        } catch is CancellationError {
+            read.cancel(ticket)
         } catch {
-            guard !Task.isCancelled else { return }
-            message = "Could not read local earnings history. Try refreshing."
+            if Task.isCancelled { read.cancel(ticket) }
+            else { read.fail("Could not read local earnings history. Try refreshing.", for: ticket) }
         }
-        loading = false
     }
 
     private func rangeCoveredByEnergy(_ range: DateInterval, intervals: [EnergyInterval]) -> DateInterval? {

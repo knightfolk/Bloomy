@@ -120,7 +120,7 @@ private struct FixtureTelemetrySource: TelemetrySource {
 }
 private enum FixtureError: Error { case offline }
 
-private enum FixtureActivityRead: String, CaseIterable, Identifiable {
+private enum FixtureActivityRead: String, CaseIterable, Identifiable, Sendable {
     case normal = "Normal Earnings"
     case empty = "Empty Earnings"
     case knownZero = "Recorded zero with unknown gaps"
@@ -128,13 +128,125 @@ private enum FixtureActivityRead: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private enum FixtureEarningsReadMode: String, CaseIterable, Identifiable, Codable, Sendable {
+    case normal, hold, fail, empty
+    var id: Self { self }
+}
+
+/// Counts the first-query gate, not completion of the entire production report.
+private struct FixtureEarningsReadSnapshot: Codable, Sendable {
+    var revision: UInt64 = 0
+    var nextMode = FixtureEarningsReadMode.normal
+    var started: UInt64 = 0
+    var completed: UInt64 = 0
+    var failed: UInt64 = 0
+    var cancelled: UInt64 = 0
+    var empty: UInt64 = 0
+    var heldReadID: UInt64?
+}
+
 private actor FixtureEarnings: AccountEarningsFetching {
     let scenario: FixtureScenario
     private var limitedModels = false
     private var activityRead = FixtureActivityRead.normal
+    private var queryActivityRead = FixtureActivityRead.normal
+    private var readState = FixtureEarningsReadSnapshot()
+    private var pending: (id: UInt64, continuation: CheckedContinuation<FixtureEarningsReadMode, Error>)?
+    private var activeGateID: UInt64?
+    private var gateWaiters: [CheckedContinuation<Void, Never>] = []
+    private var stateChanged: (@Sendable (FixtureEarningsReadSnapshot) -> Void)?
     init(scenario: FixtureScenario) { self.scenario = scenario }
-    func setLimitedModels(_ value: Bool) { limitedModels = value }
-    func setActivityRead(_ value: FixtureActivityRead) { activityRead = value }
+    func setLimitedModels(_ value: Bool) -> Bool {
+        guard activeGateID == nil else { return false }
+        limitedModels = value
+        return true
+    }
+    func setActivityRead(_ value: FixtureActivityRead) -> Bool {
+        guard activeGateID == nil else { return false }
+        activityRead = value
+        queryActivityRead = value
+        return true
+    }
+    func observeReads(_ observer: @escaping @Sendable (FixtureEarningsReadSnapshot) -> Void) {
+        stateChanged = observer
+        publishReadState()
+    }
+    func setNextRead(_ mode: FixtureEarningsReadMode) {
+        guard activeGateID == nil else { return }
+        readState.nextMode = mode
+        publishReadState()
+    }
+    func releaseHeld(as mode: FixtureEarningsReadMode) {
+        guard let held = pending else { return }
+        pending = nil
+        held.continuation.resume(returning: mode == .hold ? .normal : mode)
+    }
+    /// Cancellation resolves and joins the one owned gate before teardown returns.
+    func cancelHeldAndWait() async {
+        guard activeGateID != nil else { return }
+        cancelHeld()
+        await withCheckedContinuation { gateWaiters.append($0) }
+    }
+    func readSnapshot() -> FixtureEarningsReadSnapshot { readState }
+    private func publishReadState() {
+        readState.revision &+= 1
+        readState.heldReadID = activeGateID
+        stateChanged?(readState)
+    }
+    private func cancelHeld(_ id: UInt64? = nil) {
+        guard let held = pending, id == nil || held.id == id else { return }
+        pending = nil
+        held.continuation.resume(throwing: CancellationError())
+    }
+    private func holdRead(_ id: UInt64) async throws -> FixtureEarningsReadMode {
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    pending = (id, continuation)
+                    publishReadState()
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelHeld(id) }
+        }
+    }
+    private func beginActivityQuery() async throws {
+        try Task.checkCancellation()
+        // A new scope cancels and joins a previous held gate; never accumulate holds.
+        await cancelHeldAndWait()
+        try Task.checkCancellation()
+        readState.started &+= 1
+        let id = readState.started
+        var mode = readState.nextMode
+        readState.nextMode = .normal
+        activeGateID = id
+        let persistentRead = activityRead
+        defer {
+            activeGateID = nil
+            publishReadState()
+            let waiters = gateWaiters
+            gateWaiters.removeAll()
+            for waiter in waiters { waiter.resume() }
+        }
+        do {
+            if mode == .hold { mode = try await holdRead(id) }
+            try Task.checkCancellation()
+            if mode == .fail { throw FixtureError.offline }
+            queryActivityRead = mode == .empty ? .empty : persistentRead
+            readState.completed &+= 1
+            if queryActivityRead == .empty { readState.empty &+= 1 }
+        } catch {
+            if error is CancellationError || Task.isCancelled {
+                readState.cancelled &+= 1
+                throw CancellationError()
+            }
+            readState.failed &+= 1
+            throw error
+        }
+    }
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
         case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses:
@@ -165,14 +277,14 @@ private actor FixtureEarnings: AccountEarningsFetching {
     }
     func activity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ActivityBucket]? {
         guard scenario.hasCurrentRuntime else { return nil }
-        if activityRead == .empty { return [] }
+        if queryActivityRead == .empty { return [] }
         return try ActivityCalendar.intervals(in: range, unit: unit, calendar: calendar).enumerated().map { index, interval in
-            if activityRead == .knownZero {
+            if queryActivityRead == .knownZero {
                 return ActivityBucket(interval: interval,
                     totals: index % 3 == 0 ? ActivityTotals(workMicroUSD: 0, rewardMicroUSD: 0, jobs: 0, promptTokens: 0, completionTokens: 0) : nil,
                     coverage: index % 3 == 0 ? .recorded : .unavailable)
             }
-            if activityRead == .tiny {
+            if queryActivityRead == .tiny {
                 return ActivityBucket(interval: interval,
                     totals: index % 3 == 0 ? ActivityTotals(workMicroUSD: 3, rewardMicroUSD: 1, jobs: 3, promptTokens: 12, completionTokens: 30) : nil,
                     coverage: index % 3 == 0 ? .recorded : .unavailable)
@@ -182,28 +294,29 @@ private actor FixtureEarnings: AccountEarningsFetching {
         }
     }
     func activityModels(in range: DateInterval) async throws -> [String] {
-        scenario.hasCurrentRuntime && activityRead != .empty ? Array(FixtureData.modelIDs.prefix(limitedModels ? 1 : 3)) : []
+        try await beginActivityQuery()
+        return scenario.hasCurrentRuntime && queryActivityRead != .empty ? Array(FixtureData.modelIDs.prefix(limitedModels ? 1 : 3)) : []
     }
     func activityByModel(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ModelActivityBucket]? {
-        guard scenario.hasCurrentRuntime, activityRead != .normal else { return nil }
-        guard activityRead != .empty else { return [] }
+        guard scenario.hasCurrentRuntime, queryActivityRead != .normal else { return nil }
+        guard queryActivityRead != .empty else { return [] }
         return try ActivityCalendar.intervals(in: range, unit: unit, calendar: calendar).enumerated().flatMap { index, interval in
             guard index % 3 == 0 else { return [ModelActivityBucket]() }
             return FixtureData.modelIDs.prefix(limitedModels ? 1 : 3).map { model in
-                ModelActivityBucket(interval: interval, model: model, workMicroUSD: activityRead == .tiny ? 1 : 0)
+                ModelActivityBucket(interval: interval, model: model, workMicroUSD: queryActivityRead == .tiny ? 1 : 0)
             }
         }
     }
     func modelActivity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar, model: String?) async throws -> [ActivityBucket]? {
         if limitedModels, let model, model != FixtureData.modelIDs.first { return [] }
-        if activityRead != .normal, let model {
+        if queryActivityRead != .normal, let model {
             guard FixtureData.modelIDs.prefix(3).contains(model) else { return [] }
             return try await activity(in: range, unit: unit, calendar: calendar)?.map { bucket in
                 ActivityBucket(interval: bucket.interval,
                     totals: bucket.totals.map { _ in
-                        ActivityTotals(workMicroUSD: activityRead == .tiny ? 1 : 0,
-                            rewardMicroUSD: 0, jobs: activityRead == .tiny ? 1 : 0,
-                            promptTokens: activityRead == .tiny ? 4 : 0, completionTokens: activityRead == .tiny ? 10 : 0)
+                        ActivityTotals(workMicroUSD: queryActivityRead == .tiny ? 1 : 0,
+                            rewardMicroUSD: 0, jobs: queryActivityRead == .tiny ? 1 : 0,
+                            promptTokens: queryActivityRead == .tiny ? 4 : 0, completionTokens: queryActivityRead == .tiny ? 10 : 0)
                     }, coverage: bucket.coverage)
             }
         }
@@ -678,6 +791,8 @@ private final class FixtureModel: ObservableObject {
     private var logFeed: FixtureLogFeed
     @Published var limitedActivityModels = false
     @Published var activityRead = FixtureActivityRead.normal
+    @Published private(set) var earningsReadState = FixtureEarningsReadSnapshot()
+    private var earningsReadSession = UUID()
     @Published var modelSheetHeightLimit: CGFloat?
     @Published var networkExpiryReview = false
     private var chatWindow: ChatWindowController?
@@ -759,13 +874,42 @@ private final class FixtureModel: ObservableObject {
         return (monitor, control, hosting, chat, extrasClient, controller, earningsClient, logFeed)
     }
     func limitActivityModels(_ value: Bool) async {
+        guard ready, !isTerminating, await earningsClient.setLimitedModels(value) else { return }
         limitedActivityModels = value
-        await earningsClient.setLimitedModels(value)
     }
     func setActivityRead(_ value: FixtureActivityRead) async {
         guard ready, !isTerminating else { return }
-        await earningsClient.setActivityRead(value)
+        guard await earningsClient.setActivityRead(value) else { return }
         activityRead = value
+    }
+    func setNextEarningsRead(_ mode: FixtureEarningsReadMode) async {
+        guard ready, !isTerminating, metricsReview else { return }
+        await earningsClient.setNextRead(mode)
+    }
+    func releaseEarningsRead(_ mode: FixtureEarningsReadMode) async {
+        guard ready, !isTerminating else { return }
+        await earningsClient.releaseHeld(as: mode)
+    }
+    func saveEarningsReadProof() async {
+        let snapshot = await earningsClient.readSnapshot()
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(snapshot)
+            try data.write(to: directory.appendingPathComponent("fixture-earnings-read-proof.json"), options: .atomic)
+        } catch { issue = "Could not save synthetic Earnings read counts." }
+    }
+    private func observeEarningsReads() async {
+        let session = UUID()
+        earningsReadSession = session
+        earningsReadState = FixtureEarningsReadSnapshot()
+        await earningsClient.observeReads { [weak self] snapshot in
+            Task { @MainActor [weak self] in
+                guard let self, self.earningsReadSession == session,
+                      snapshot.revision >= self.earningsReadState.revision else { return }
+                self.earningsReadState = snapshot
+            }
+        }
     }
     func removeGemmaFromInventory() async {
         guard ready, !isTerminating else { return }
@@ -856,6 +1000,7 @@ private final class FixtureModel: ObservableObject {
     }
     func setMetricsReview(_ enabled: Bool) async {
         guard ready, !isTerminating, !proofRunning else { return }
+        if !enabled, await earningsClient.readSnapshot().heldReadID != nil { return }
         metricsReview = enabled
         if enabled {
             let publication = telemetryPublicationTask
@@ -951,6 +1096,7 @@ private final class FixtureModel: ObservableObject {
     private func prepare(_ requestedScenario: FixtureScenario, generation: Int) async {
         await popup.closeAndWait(resetContent: true)
         await control.cancelCurrentOperationAndWait()
+        await earningsClient.cancelHeldAndWait()
         guard !Task.isCancelled, generation == loadGeneration else { return }
         let stores = Self.makeStores(requestedScenario, defaults: defaults, directory: directory,
             capacityCapturedAt: networkExpiryReview ? Date().addingTimeInterval(-100) : nil)
@@ -1021,6 +1167,7 @@ private final class FixtureModel: ObservableObject {
         logFeed = stores.7
         limitedActivityModels = false
         activityRead = .normal
+        await observeEarningsReads()
         fanReadback = .held
         chatVerificationTest = nil
         chatVerificationClient = nil
@@ -1091,6 +1238,7 @@ private final class FixtureModel: ObservableObject {
         await modelKeyboardProof?.value
         modelKeyboardProofTask = nil
         await metricsReads?.cancelHeld()
+        await earningsClient.cancelHeldAndWait()
         await popup.closeAndWait(resetContent: true)
         retireChatWindow()
         chat.cancelSend()
@@ -1898,6 +2046,7 @@ private struct FixtureReviewView: View {
                             Button(model.metricsReview ? "Resume synthetic observations" : "Pause synthetic observations") {
                                 Task { await model.setMetricsReview(!model.metricsReview) }
                             }
+                            .disabled(model.earningsReadState.heldReadID != nil)
                             ForEach([FixtureMetricsReadMode.normal, .hold, .fail, .empty], id: \.rawValue) { mode in
                                 Button("Next read: \(mode.rawValue)") { Task { await model.setNextMetricsRead(mode) } }
                                     .disabled(!model.metricsReview)
@@ -1921,11 +2070,37 @@ private struct FixtureReviewView: View {
                         Button(model.limitedActivityModels ? "Restore all Earnings models" : "Report only Qwen in Earnings") {
                             Task { await model.limitActivityModels(!model.limitedActivityModels) }
                         }
+                        .disabled(model.earningsReadState.heldReadID != nil)
+                        Menu("Synthetic Earnings reads") {
+                            Button(model.metricsReview ? "Resume synthetic observations" : "Pause synthetic observations") {
+                                Task { await model.setMetricsReview(!model.metricsReview) }
+                            }
+                            .disabled(model.earningsReadState.heldReadID != nil)
+                            Text(model.earningsReadState.heldReadID.map { "Held read \($0)" }
+                                ?? "Next read: \(model.earningsReadState.nextMode.rawValue)")
+                            ForEach(FixtureEarningsReadMode.allCases) { mode in
+                                Button("Next read: \(mode.rawValue)") { Task { await model.setNextEarningsRead(mode) } }
+                                    .disabled(!model.metricsReview || model.earningsReadState.heldReadID != nil)
+                            }
+                            Divider()
+                            Button("Release held read successfully") { Task { await model.releaseEarningsRead(.normal) } }
+                                .disabled(model.earningsReadState.heldReadID == nil)
+                            Button("Release held read as empty") { Task { await model.releaseEarningsRead(.empty) } }
+                                .disabled(model.earningsReadState.heldReadID == nil)
+                            Button("Fail held read") { Task { await model.releaseEarningsRead(.fail) } }
+                                .disabled(model.earningsReadState.heldReadID == nil)
+                            Divider()
+                            Text("Gates: \(model.earningsReadState.started) started · \(model.earningsReadState.completed) completed")
+                            Text("\(model.earningsReadState.failed) failed · \(model.earningsReadState.cancelled) cancelled · \(model.earningsReadState.empty) empty")
+                            Button("Save Earnings read counts") { Task { await model.saveEarningsReadProof() } }
+                        }
+                        .help("Inert first-query gate. Choose a next read, then use Earnings Refresh or change scope.")
                         Menu("Earnings read: \(model.activityRead.rawValue)") {
                             ForEach(FixtureActivityRead.allCases) { read in
                                 Button(read.rawValue) { Task { await model.setActivityRead(read) } }
                             }
                         }
+                        .disabled(model.earningsReadState.heldReadID != nil)
                         Button("Remove Gemma from model inventory") {
                             Task { await model.removeGemmaFromInventory() }
                         }
