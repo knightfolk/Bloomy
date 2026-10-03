@@ -1984,6 +1984,8 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
 
         let windowMenu = submenu("Window")
         add("Minimize", action: #selector(NSWindow.performMiniaturize(_:)), key: "m", to: windowMenu)
+        add("Toggle bounded focus diagnostics", action: #selector(toggleFocusDiagnostics),
+            target: self, to: windowMenu)
         windowMenu.addItem(.separator())
         add("Show Dashboard", action: #selector(showDashboard), key: "d",
             modifiers: [.command, .shift], target: self, to: windowMenu)
@@ -1997,6 +1999,10 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
     @objc private func showDashboard() {
         presentDashboard()
     }
+
+    // Enable the same passive trace when the review banner is omitted. This
+    // menu never changes the key-view loop or requests a first responder.
+    @objc private func toggleFocusDiagnostics() { model.focusTracing.toggle() }
 
     @objc private func removeReviewGemma() {
         Task { await model.removeGemmaFromInventory() }

@@ -237,6 +237,7 @@ struct ProviderFanControlSettingsView: View {
                         else { stage(.disable) }
                     }
                 ))
+                .toggleStyle(.checkbox)
                 .disabled(!fresh || !status.supportsOfficialControl || helperActionBusy)
                 .accessibilityIdentifier("settings.provider.fan.enabled")
             } else {

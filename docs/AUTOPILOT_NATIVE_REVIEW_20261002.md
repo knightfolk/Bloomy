@@ -131,6 +131,16 @@ times. The installed executable hash remains
 
 ## Remaining limits
 
+A current-source recheck in **Native108** confirms compact light Provider →
+Enable Autopilot opens the readable consent sheet, with both footer buttons.
+Confirming shows Observing · shadow mode; Pause shows Paused/Resume, Resume
+returns to shadow, and confirmed Leave returns to Off with Enable available.
+All actions were inert. This adds current UI evidence without performing a real
+provider enrollment or requiring Kevin to use the interactive startup command.
+The Leave screenshot again returned a blank image; AX/action proof does not
+accept its appearance. Native108's provenance and final 1,430-test/Release checks
+are recorded in [the keyboard review](FAN_KEYBOARD_NATIVE_REVIEW_20261002.md).
+
 The native Leave alert's screenshot capture returned a blank image in both
 Native78 and Native79 despite functional accessibility/actions. Its rendered
 appearance is **unaccepted**; do not treat the action proof as visual acceptance.

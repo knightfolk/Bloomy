@@ -134,3 +134,12 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   during a delayed read, and Reload cancels and joins it. All 1,430 tests and
   Release compilation pass. The Fan settings review records exact provenance;
   full keyboard/VoiceOver, real helper actions and distribution remain open.
+
+- Native106 traces the fan enable switch losing focus when native disabling
+  occurs. A standard macOS checkbox preserves focus; Native107 verifies sustained
+  focus, confirmation cancellation and the bounded wide-light key sequence.
+  Native108 checks compact dark traversal but exposes missing keyboard reveal
+  for offscreen policy controls, which remains open. All 1,430 tests and Release
+  compilation pass. See `docs/FAN_KEYBOARD_NATIVE_REVIEW_20261002.md`.
+  Native108 also reconfirms app-native Autopilot Enable/Pause/Resume/Leave;
+  real enrollment and distribution remain separate gates.
