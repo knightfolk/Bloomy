@@ -171,6 +171,60 @@ struct ActionHistoryDatabaseTests {
         #expect(try later.recent().isEmpty)
     }
 
+    @Test("reopening applies simultaneous age and count limits with stable timestamp ties",
+          arguments: [1, 3, 37], [1, 7, 30])
+    func retentionMatchesOrderedReference(limit: Int, days: Int) throws {
+        let url = temporaryDatabaseURL()
+        let rows = (0..<80).map { index in
+            // Repeated timestamps and interleaved ages deliberately disagree
+            // with UUID lexical order and insertion order.
+            let age = [0, 1, 7, 29][(index * 17) % 4]
+            return event(at: fixedNow.addingTimeInterval(-Double(age) * 86_400), key: "tie-\(index)")
+        }
+        do {
+            let original = try makeDatabase(url: url)
+            for row in rows { try original.record(row) }
+        }
+        let reopened = try ActionHistoryDatabase(url: url, historyLimit: limit,
+                                                retentionDays: days, now: { Date(timeIntervalSince1970: 2_000_000_001) })
+        let cutoff = fixedNow.addingTimeInterval(1 - Double(days) * 86_400)
+        let expected = rows.enumerated().sorted {
+            $0.element.occurredAt == $1.element.occurredAt
+                ? $0.offset > $1.offset
+                : $0.element.occurredAt > $1.element.occurredAt
+        }.prefix(limit).map(\.element).filter { $0.occurredAt >= cutoff }
+        #expect(try reopened.recent(limit: 5_000) == expected)
+        #expect(try reopened.retainedRecordCount() == expected.count)
+        // A subsequent read must not reorder or remove the remaining rows.
+        #expect(try reopened.recent(limit: 5_000) == expected)
+    }
+
+    @Test("retention includes the exact age boundary and expires it after time advances")
+    func ageBoundaryIsInclusive() throws {
+        let url = temporaryDatabaseURL()
+        let boundary = event(at: fixedNow.addingTimeInterval(-30 * 86_400), key: "boundary")
+        do {
+            let database = try makeDatabase(url: url)
+            try database.record(event(at: boundary.occurredAt.addingTimeInterval(-1), key: "too-old"))
+            try database.record(boundary)
+            #expect(try database.recent() == [boundary])
+        }
+        let later = try ActionHistoryDatabase(url: url, now: { Date(timeIntervalSince1970: 2_000_000_001) })
+        #expect(try later.recent(limit: 0).isEmpty)
+        #expect(try later.retainedRecordCount() == 0)
+    }
+
+    @Test("replaying a retained equal-timestamp entry does not move it ahead of later inserts")
+    func tiedReplayDoesNotChangeRetentionOrder() throws {
+        let database = try makeDatabase(url: temporaryDatabaseURL(), historyLimit: 3)
+        let first = event(at: fixedNow, key: "first")
+        let second = event(at: fixedNow, key: "second")
+        let third = event(at: fixedNow, key: "third")
+        let fourth = event(at: fixedNow, key: "fourth")
+        for row in [first, second, third, first, fourth] { try database.record(row) }
+        #expect(try database.recent() == [fourth, third, second])
+    }
+
     @Test("bad files and malformed event data fail visibly")
     func errorsAreVisible() throws {
         let corruptURL = temporaryDatabaseURL()

@@ -357,3 +357,13 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   feed items remain. Installed Bloomy and the provider stayed running unchanged;
   real installed-app restart/profiling awaits saved-edit confirmation. See
   `RELEASE_1_9_17_VERIFICATION_20261003.md`. The broader goal remains open.
+
+- Read-only profiling of installed build 140 finds a busy SQLite Action History
+  retention branch during natural inference. Retention now deletes expired and
+  excess rowids directly; 144 platform-SQLite comparisons preserve exact rows
+  and order, and two 5,000-row component fixtures improve 3.86–5.75×. Public-API
+  boundary/replay tests, 1,577 reported full-suite tests and Release compilation
+  pass. This source optimization follows 1.9.17 and is not yet distributed.
+  No installed-app savings are claimed; saved-edit confirmation is still pending
+  for replacement and comparable profiling. Evidence and reproduction are in
+  `ACTION_RETENTION_PRODUCTION_PROFILE_20261003.md`.

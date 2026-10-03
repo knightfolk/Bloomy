@@ -280,12 +280,18 @@ public final class ActionHistoryDatabase: @unchecked Sendable {
         guard Self.isValidTimestamp(time.timeIntervalSince1970) else {
             throw ActionHistoryDatabaseError.unavailable
         }
+        // Select only rows to remove. Building a set of every retained UUID
+        // for each replayed earning makes bounded history unnecessarily costly.
+        // One statement preserves atomic age/count retention and rowid tie order.
         let statement = try prepare("""
-            DELETE FROM action_history WHERE occurred_at < ?
-               OR id NOT IN (
-                   SELECT id FROM action_history
-                   ORDER BY occurred_at DESC, rowid DESC LIMIT ?
-               )
+            DELETE FROM action_history WHERE rowid IN (
+                SELECT rowid FROM action_history WHERE occurred_at < ?
+                UNION ALL
+                SELECT rowid FROM (
+                    SELECT rowid FROM action_history
+                    ORDER BY occurred_at DESC, rowid DESC LIMIT -1 OFFSET ?
+                )
+            )
             """)
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_double(statement, 1, time.addingTimeInterval(-Double(retentionDays) * 86_400).timeIntervalSince1970)

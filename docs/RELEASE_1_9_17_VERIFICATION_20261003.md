@@ -27,6 +27,11 @@ The prior build-141 archive remains preserved and was not reused as this release
   macOS 14, arm64, the exact final ZIP length and matching HTTPS asset URL.
   All 27 older items were preserved. Automatic checks and installation remain
   off in packaged defaults; existing opt-ins were not rewritten.
+- After the feed commit was pushed, GitHub's API returned identical feed bytes.
+  The configured historical public feed returned HTTP 200 with identical bytes,
+  first item build 142 and 28 total items. Source tag and remote main were
+  verified against `88181f8` and feed commit `ec13027`, respectively; the exact
+  result is retained in `remote-feed-verification.json` in the release directory.
 
 ## Isolated update checks and preserved runtime
 
