@@ -65,11 +65,12 @@ struct ModelVisitSection: View {
 
     private var heading: some View { Label("Model visits", systemImage: "clock.arrow.circlepath").font(.headline) }
     private var filter: some View {
-        Picker("Visit filter", selection: $withoutWorkOnly) {
-            Text("All visits").tag(false)
-            Text("Without work").tag(true)
-        }
-        .labelsHidden().pickerStyle(.segmented).frame(width: 225)
+        MetricsSegmentedPicker(title: "Visit filter", selection: withoutWorkOnly,
+            selectionBinding: $withoutWorkOnly, options: [
+                .init(title: "All visits", value: false),
+                .init(title: "Without work", value: true),
+            ])
+        .equatable().frame(width: 225)
         .onChange(of: withoutWorkOnly) { _, _ in visibleLimit = 8 }
         .modifier(MetricsKeyboardReveal(target: .visitFilter))
     }

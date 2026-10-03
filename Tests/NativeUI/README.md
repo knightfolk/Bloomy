@@ -571,3 +571,14 @@ empty results. Copy stage evidence before saving over it. The inert reader has
 no live endpoint, credentials or provider mutations. Final bounded observations
 and the subsequent native focus-section repair are in
 `docs/METRICS_SCOPE_KEYBOARD_NATIVE_REVIEW_20261002.md`.
+
+### Streaming Metrics segment choices
+
+Keep synthetic observations running. In Activity → Metrics, use native Right
+to highlight an uncommitted period, hold across the normal read cadence until
+sample count and latest observation advance, and verify the highlight remains.
+Space must then commit the period and update coverage. Repeat independently for
+All visits → Without work; confirmation removes Show more and Tab reaches the
+recording disclosure directly. Test compact/light and wide/dark layouts.
+Unchanged reads alone do not exercise this regression. Native91 provenance and
+limits are in `docs/METRICS_SCOPE_KEYBOARD_NATIVE_REVIEW_20261002.md`.

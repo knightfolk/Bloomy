@@ -264,11 +264,11 @@ struct PerformanceMetricsContent: View {
     }
 
     private var periodPicker: some View {
-        Picker("Metrics period", selection: $period) {
-            ForEach(PerformanceMetricsPeriod.allCases) { Text($0.rawValue).tag($0) }
-        }
-        .labelsHidden()
-        .pickerStyle(.segmented)
+        MetricsSegmentedPicker(title: "Metrics period", selection: period,
+            selectionBinding: $period, options: PerformanceMetricsPeriod.allCases.map {
+                .init(title: $0.rawValue, value: $0)
+            })
+        .equatable()
         .frame(width: 240)
         .modifier(MetricsKeyboardReveal(target: .period))
     }

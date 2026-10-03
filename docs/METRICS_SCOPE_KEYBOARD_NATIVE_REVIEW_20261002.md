@@ -168,3 +168,76 @@ no unit test that merely checks presence of the modifier was added.
    Right/Space and model Tab remain native and that no provider action occurs.
 6. Save bounded diagnostics, quit normally and verify process absence without
    observing the closed app binding. Retain the exact source manifest.
+
+## Streaming keyboard-choice follow-up — Native91
+
+New measurements previously reset a pending native segment highlight before
+Space confirmed it. Reopened Native88 baseline session
+`D4B02E04-EB72-4B0F-BFC5-74CD9AEC9BAF` reproduced the visit reset when the sample
+count advanced 361 → 362. A shorter eight-second publication hold preserved
+it. With synthetic observations paused, a 35-second hold crossing the ordinary
+30-second read cadence also preserved it. This distinguishes changed results
+from unchanged reads or simple view invalidation; it does not establish a
+universal macOS picker defect.
+
+Both Metrics period and visit filter now use one Equatable native Picker leaf.
+Its comparison uses an immutable selection snapshot and stable options, while
+writes flow through the existing parent's Binding. Comparing two live bindings
+would falsely compare both against the same new storage value. Two regression
+tests cover this distinction and write-through ownership for Boolean and period
+selections. The current callers retain stable state owners and unique option
+IDs; changing binding ownership beneath an equal persistent view would require
+revisiting that contract. No new state owner, key handler, timer, or view ID was
+introduced. Read-only source review found no actionable defect in these callers.
+
+Native89 was a rejected compile: actor-isolated Equatable conformance and a
+callback conversion were repaired before any launch. Native90's visit-only
+candidate preserved Without work through a 35-second changed-result hold but
+its original period picker still reset pending 7 days to 24 hours. This is
+intermediate evidence, not acceptance of the final source. Its session
+`5988BFA3-00F0-429A-991B-659668F00A06` saved eight starts/eight completed reads.
+
+**Native91**, session `A8713D47-E1EB-4894-9C77-0028BAD5020D`, verifies both final
+controls with synthetic observations and the normal Metrics cadence running:
+
+- Compact light Right highlights 7 days while 24 hours remains committed.
+  After a real 35-second hold, samples increase 361 → 362 and latest observation
+  advances 17:42:16 → 17:42:47; focus remains on uncommitted 7 days. Space then
+  commits it and coverage describes seven days.
+- Tab reaches model, Refresh and All visits. Right highlights uncommitted
+  Without work. A second 35-second hold advances 363 → 364 and latest observation
+  17:43:19 → 17:43:50 while preserving that highlight. Space commits Without work,
+  removes Show more and retains the filtered visit.
+- Tab reaches recording disclosure directly; Space expands it and Shift-Tab
+  returns to the selected filter with its ring visible. Wide dark restores All
+  visits and its rows/Show more, with aligned controls. Reverse traversal returns
+  through Refresh, model and the selected period. Native88's separately recorded
+  full Activity-selector boundary remains earlier evidence.
+
+Final saved proof has seven starts/seven completions, zero failures,
+cancellations or empty reads, and no held read. Native90 and Native91 proofs are
+preserved in their corresponding `.build/native-dashboard-fixture-20261002-N/`
+outputs. Both were quit normally and their processes were absent afterward.
+Native91's manifest has **95** source hashes, all matching the checkout.
+Executable SHA-256:
+`f0945282b82700f1d7df9ef527671ae09f9172b605b16e567b821ff3cef5295d`.
+Linked telemetry library SHA-256 remains
+`0da0aed0eee0f3ace173ccbcbc1b413cc64f7d4f1ec2d78658e059fff593d102`.
+The substitutions remain the documented inert dependencies; this is locally
+signed review evidence, not distribution evidence.
+
+The final full suite passes **1,427 tests**, exit 0: 1,378 app/telemetry tests in
+182 suites (19.863s), 21 protocol tests (0.013s), and 28 companion-host tests
+(11.603s). Log: `/tmp/bloomy-metrics-focus-update-20261002-full-01.log`.
+Final release compilation exits 0 in 39.82s; log:
+`/tmp/bloomy-metrics-focus-update-20261002-release-01.log`.
+Production PID 61760 and provider/watchdog PIDs 67163/67169 retain their earlier
+launch times, and the installed executable hash is unchanged. No real provider
+mutation, inference, credentials, privacy or installed-app replacement occurred.
+Mounted slow-analysis timing, other displays, actual VoiceOver, long production
+history/profiling and the broader native/distribution gates remain open.
+
+For repeatable streaming checks, keep synthetic observations running, establish
+an uncommitted Right-arrow highlight, hold across a changed sample count and
+latest timestamp, then confirm with Space. Test both pickers independently;
+unchanged reads alone do not exercise the regression.
