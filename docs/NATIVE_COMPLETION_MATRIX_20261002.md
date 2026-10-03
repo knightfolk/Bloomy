@@ -221,7 +221,19 @@ Native164 checks expanded missing/mixed long reasons and identifiers, summary
 scanning and leading alignment. Real Sparkle protocol tests cover deferred
 callback replacement/resumption and owner release; production installation and
 spoken source state remain open. Final 1,574 reported tests and Release build
-pass. These changes postdate published 1.9.16 and are not yet distributed.
+pass. These changes postdate 1.9.16 and are distributed in 1.9.17/build 142.
 [HealthLong]
 
 [HealthLong]: HEALTH_LONG_REASONS_UPDATER_REVIEW_20261003.md
+
+## October 3 distribution checkpoint
+
+Signed and notarized 1.9.17/build 142 passed exact-commit checks and four isolated
+update scenarios with the real app/provider preserved. GitHub asset digests
+match final local bytes. [Release142] records the proof and its boundary:
+synthetic target quit/relaunch and real-protocol callback tests do not establish
+production dirty-editor installation. The installed app remains on build 140;
+saved-edit confirmation is pending for restart and comparable profiling.
+Every broader surface remains partial overall.
+
+[Release142]: RELEASE_1_9_17_VERIFICATION_20261003.md

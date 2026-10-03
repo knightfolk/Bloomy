@@ -3,6 +3,23 @@
     <channel>
         <title>Bloomy</title>
         <item>
+            <title>1.9.17</title>
+            <pubDate>Sat, 03 Oct 2026 06:07:27 -0700</pubDate>
+            <sparkle:version>142</sparkle:version>
+            <sparkle:shortVersionString>1.9.17</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Bloomy v1.9.17
+
+Health & Logs is easier to scan when a source fails or stops refreshing. Needs attention uses a concise status summary, while complete diagnostic messages remain selectable in Source freshness and available in expanded details and tooltips. Expanded daemon and thermal panels now align with their headings in wide windows. Long error paragraphs and model identifiers remain readable in compact layouts.
+
+Deferred app updates now cancel replaced callbacks reliably. A waiting install handler cannot run after its updater owner has been released, and blocked polling no longer keeps that owner alive. Existing protection for unfinished edits and pending actions remains in place.
+
+For Apple Silicon Macs running macOS 14 or newer. Provider settings, running models and Autopilot enrollment are preserved. The broader native polish, accessibility and performance review continues.
+]]></description>
+            <enclosure url="https://github.com/knightfolk/Bloomy/releases/download/v1.9.17/Bloomy-1.9.17-mac-arm64.zip" length="9740104" type="application/octet-stream" sparkle:edSignature="T1vZx/eCiRxgMGpugLG6EjhZ/RBhigq9CcUlM6e83f0x53N+gKV4HmG/FgPrbiWqx4MUt+L1QMaxUlCE0XGnCQ=="/>
+        </item>
+        <item>
             <title>1.9.16</title>
             <pubDate>Sat, 03 Oct 2026 05:28:02 -0700</pubDate>
             <sparkle:version>141</sparkle:version>

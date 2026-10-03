@@ -346,6 +346,14 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   bounded long-reason/identifier and missing/mixed layouts. Deferred updater
   callbacks cancel replaced work and cannot install after their owner disappears;
   six real-protocol regressions and the final 1,574-test run/Release build pass.
-  These source changes follow published 1.9.16 and are not yet a newer release.
+  These source changes follow published 1.9.16 and are included in 1.9.17.
   See `docs/HEALTH_LONG_REASONS_UPDATER_REVIEW_20261003.md`; full native/VoiceOver,
   production integration and comparable profiling remain open.
+
+- Version 1.9.17/build 142 distributes the Health and updater ownership fixes.
+  Exact-commit checks report 1,574 tests, 17 packaging tests and a successful
+  Release build. Apple notarization, Gatekeeper, four isolated signed update
+  scenarios and pre/post-publication GitHub asset digests pass. All 27 older
+  feed items remain. Installed Bloomy and the provider stayed running unchanged;
+  real installed-app restart/profiling awaits saved-edit confirmation. See
+  `RELEASE_1_9_17_VERIFICATION_20261003.md`. The broader goal remains open.
