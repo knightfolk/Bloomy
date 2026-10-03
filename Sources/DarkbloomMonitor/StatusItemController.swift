@@ -84,6 +84,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                 store: store,
                 visibility: popoverVisibility,
                 controlStore: controlStore,
+                hostingStore: hostingStore,
                 openSettings: { [weak self] page in self?.showSettings(page: page) },
                 openDashboard: { [weak self] in self?.showDashboard() },
                 openModels: { [weak self] in self?.showDashboard(section: .models) },
@@ -254,6 +255,7 @@ private struct PopoverRootView: View {
     @ObservedObject var store: MonitorStore
     @ObservedObject var visibility: PopoverVisibility
     let controlStore: ProviderControlStore?
+    let hostingStore: HostingSettingsStore?
     let openSettings: (SettingsPage?) -> Void
     let openDashboard: () -> Void
     let openModels: () -> Void
@@ -264,7 +266,7 @@ private struct PopoverRootView: View {
     @ViewBuilder
     var body: some View {
         if let controlStore {
-            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting, updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft)
+            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting, hostingStore: hostingStore, updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft)
                 .environmentObject(controlStore)
         } else {
             VStack(alignment: .leading, spacing: 12) {

@@ -16,6 +16,7 @@ The linked reviews record the inspections; this matrix is their evidence index.
 
 | Route / surface | Rendered light/dark, compact/wide evidence | Keyboard / accessibility / motion | Truth / draft safety | Prioritized remaining route proof |
 | --- | --- | --- | --- | --- |
+| Popup — Hosting summary | **Partial:** Native114 light empty discovery; dark reported URL/auth/check time and expiry. [PopupHosting] | AX labels present; CUA action targeting dismisses this transient popup, so Refresh/navigation are unconfirmed. | **Covered unit:** configured/discovered distinction, mismatch, stale/future/undated state and URL-secret filtering; no new polling timer. | Native action activation, coordinator/unified rendering, shorter budgets and VoiceOver. |
 | Popup: Available, Cooling, Auto, Nudge | **Partial:** dark/grayscale actual screen; 80/240/360-point budgets; later light/dark icons; Native104 light Cooling editor. [Popup], [History], [Provider] | Native scrolling reaches footer; Fan policy Tab/Space. Motion 13/14; genuine occlusion fails. [Charts] | **Covered fixture:** Auto readback; fan draft survives Refresh/reopen; Native104 retains edits during delayed control reads and updates helper action gates in the open sheet; Nudge guide without credentials. [Popup], [Provider] | Physical-wheel/keyboard nested scrolling; moved anchors and other displays. |
 | Overview | **Partial:** early wide fresh/light, compact offline/light; compact light/dark mixed cooling; Native67 wide dark expanded Running/saved selection. [Base], [Resources], [Wide] | Tab-to-sidebar/Down-to-Activity; qualified request/thermal AX labels; outer scrolling reaches expanded footer. [Nav], [Resources], [Wide] | **Covered fixture:** missing earnings unavailable; current/retained/absent request and fan readings distinct. [Resources] | Sustained source updates; broader expanded/missing-state keyboard paths. |
 | Activity — Earnings | **Partial:** compact light/dark retained filters; wide dark thirty-day Bars/Lines/Area; final wide light/compact dark scalar Area points. [CAM], [Charts], [Wide] | Native From/Through/filter/chart key paths; shapes, line styles and numbered cues. Custom per-point amount not individually exposed by CUA. [Wide] | **Covered fixture/unit:** selected model retained; signed stacks/unknown gaps; finite tiny axes and original-point amount precision. [CAM], [Wide] | Native empty/negative/known-zero overlap and micro-value cues; complete key loop and spoken point labels. |
@@ -122,3 +123,5 @@ Each table's linked shorthand resolves to the exact repository review below.
 [ProviderKeys]: PROVIDER_KEYBOARD_DRAFT_NATIVE_REVIEW_20261002.md
 
 [FanKeys]: FAN_KEYBOARD_NATIVE_REVIEW_20261002.md
+
+[PopupHosting]: POPUP_HOSTING_NATIVE_REVIEW_20261002.md

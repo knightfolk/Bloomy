@@ -457,6 +457,7 @@ struct MonitorPopover: View {
     let openDashboard: () -> Void
     let openModels: () -> Void
     let openHosting: () -> Void
+    let hostingStore: HostingSettingsStore?
     let updateProtection: AppUpdateEditorProtection?
     @StateObject private var popupSettingsDraft: ProviderSettingsDraftState
     @State private var showsFans = false
@@ -473,6 +474,7 @@ struct MonitorPopover: View {
         openDashboard: @escaping () -> Void = {},
         openModels: @escaping () -> Void = {},
         openHosting: @escaping () -> Void = {},
+        hostingStore: HostingSettingsStore? = nil,
         updateProtection: AppUpdateEditorProtection? = nil,
         popupSettingsDraft: ProviderSettingsDraftState? = nil
     ) {
@@ -483,6 +485,7 @@ struct MonitorPopover: View {
         self.openDashboard = openDashboard
         self.openModels = openModels
         self.openHosting = openHosting
+        self.hostingStore = hostingStore
         self.updateProtection = updateProtection
         _popupSettingsDraft = StateObject(wrappedValue: popupSettingsDraft ?? ProviderSettingsDraftState())
     }
@@ -557,6 +560,11 @@ struct MonitorPopover: View {
                                 .foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityIdentifier("popover.attention")
+                        }
+                        if let hostingStore {
+                            PopupHostingSummary(store: hostingStore, isVisible: isVisible, now: currentTime,
+                                coordinator: providerRunning(at: currentTime) == true ? store.snapshot.state.value?.coordinatorURL : nil,
+                                openHosting: openHosting)
                         }
                         compactModels(currentTime: currentTime)
                         financePanel(currentTime: currentTime)

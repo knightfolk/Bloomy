@@ -152,3 +152,11 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   The Fan keyboard review retains both intermediate candidates and exact proof.
   Standalone/stale, full-window continuation after Discard, VoiceOver, real helper
   actions and broader optimization/distribution remain open.
+
+- Native114 adds the requested popup Hosting summary: selected mode, qualified
+  discovery state, local base URL/authentication/check time and a sanitized
+  coordinator hostname from fresh running telemetry. No extra periodic reader
+  is added. Light empty discovery, dark reported listener and report expiry are
+  visibly checked; CUA dismisses the transient popup when targeting its actions,
+  leaving native Refresh/navigation proof open. All 1,436 tests and Release
+  compilation pass. See `docs/POPUP_HOSTING_NATIVE_REVIEW_20261002.md`.

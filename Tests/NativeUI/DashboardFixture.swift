@@ -1280,6 +1280,7 @@ private struct FixturePopoverContent: View {
         MonitorPopover(store: store, isVisible: visibility.isVisible,
             ownsVisibleFanPolling: false, openSettings: openSettings,
             openDashboard: openDashboard, openModels: openModels, openHosting: openHosting,
+            hostingStore: model.hosting,
             updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft)
             .environmentObject(control)
             .defaultAppStorage(defaults)
