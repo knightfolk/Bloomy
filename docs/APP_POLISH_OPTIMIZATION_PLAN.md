@@ -188,3 +188,15 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   process baseline are recorded in `docs/HOSTING_KEYBOARD_NATIVE_REVIEW_20261002.md`.
   Full window-entry order, state-specific controls, VoiceOver, current-source
   profiling and distribution remain open.
+
+- Banner-free Native122 proves the light compact window-entry path and reveals
+  LAN/custom-address controls. Malformed-address validation retains visible
+  focus. Saving a valid custom address disables the focused Use-address button
+  and resets subsequent navigation; Native123 repairs this with editor-owned
+  native focus and verifies light/dark save and reverse traversal. Confirmation
+  AX/default Cancel/Escape pass, but repeated blank sheet images leave rendering
+  unaccepted. Exact accepted and rejected observations are appended to the
+  Hosting keyboard review; broad completion remains unproven.
+  The normal suite, explicitly isolated editor-focus regression and Release
+  compile pass; their separate invocation and initial parallel-focus failures
+  are preserved in that review and `Tests/NativeUI/README.md`.

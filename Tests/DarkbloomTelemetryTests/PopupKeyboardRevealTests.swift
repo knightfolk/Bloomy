@@ -7,6 +7,38 @@ import Testing
 @Suite("Popup keyboard reveal")
 @MainActor
 struct PopupKeyboardRevealTests {
+    // There is one native keyboard focus owner. Run this explicitly in an
+    // isolated process; parallel AppKit window tests can legitimately take it.
+    @Test("editor-owned focus reveals its input through the shared anchor",
+          .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_ISOLATED_FOCUS_PROOF"] == "1"))
+    func editorOwnedFocus() async throws {
+        let probe = EditorFocusRevealProbe()
+        let host = NSHostingController(rootView: EditorFocusRevealFixture(probe: probe))
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.setContentSize(NSSize(width: 300, height: 80))
+        window.orderBack(nil)
+        host.view.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
+        let anchor = try #require(anchors(in: host.view).first)
+        let scroll = try #require(anchor.enclosingScrollView)
+        let document = try #require(scroll.documentView)
+        #expect(!scroll.documentVisibleRect.contains(document.convert(anchor.bounds, from: anchor)))
+
+        probe.requestsFocus = true
+        // Focus, SwiftUI layout and the native scroll reveal are separate main
+        // queue turns. Await their result rather than sampling a fixed delay
+        // while the full suite is also mounting native windows.
+        for _ in 0..<30 {
+            if probe.hasFocus,
+               scroll.documentVisibleRect.contains(document.convert(anchor.bounds.insetBy(dx: -6, dy: -6), from: anchor)) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(probe.hasFocus)
+        #expect(scroll.documentVisibleRect.contains(document.convert(anchor.bounds.insetBy(dx: -6, dy: -6), from: anchor)))
+    }
+
     @Test("shared controls register native reveal anchors only in the popup", arguments: [false, true])
     func scopedRegistration(enabled: Bool) async {
         let root = Button("Shared control") {}.modifier(PopupKeyboardReveal())
@@ -100,5 +132,32 @@ struct PopupKeyboardRevealTests {
 
     private func anchors(in view: NSView) -> [KeyboardFocusRevealAnchorView] {
         (view as? KeyboardFocusRevealAnchorView).map { [$0] } ?? view.subviews.flatMap { anchors(in: $0) }
+    }
+}
+
+@MainActor
+private final class EditorFocusRevealProbe: ObservableObject {
+    @Published var requestsFocus = false
+    var hasFocus = false
+}
+
+private struct EditorFocusRevealFixture: View {
+    @ObservedObject var probe: EditorFocusRevealProbe
+    @FocusState private var inputFocused: Bool
+    @State private var text = "Address"
+
+    var body: some View {
+        ScrollView {
+            VStack {
+                Color.clear.frame(height: 500)
+                TextField("Address", text: $text)
+                    .modifier(ScrollControlKeyboardReveal(documentSpace: "editor.proof", focus: $inputFocused))
+                    .padding(12)
+                Color.clear.frame(height: 100)
+            }
+            .coordinateSpace(name: "editor.proof")
+        }
+        .onChange(of: probe.requestsFocus) { _, value in inputFocused = value }
+        .onChange(of: inputFocused) { _, value in probe.hasFocus = value }
     }
 }

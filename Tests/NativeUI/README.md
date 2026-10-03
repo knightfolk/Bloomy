@@ -1,5 +1,23 @@
 # Native export fixture
 
+## Isolated keyboard focus regression
+
+Run the editor-owned focus regression separately from the parallel window tests:
+
+```sh
+BLOOMY_ISOLATED_FOCUS_PROOF=1 swift test --filter PopupKeyboardRevealTests.editorOwnedFocus
+```
+
+The test requests focus for an offscreen field and checks that its shared native
+anchor reveals the complete focus-ring margin. There is one native keyboard
+focus owner, so concurrent AppKit windows can take focus and invalidate this
+assertion. The normal suite intentionally skips this opt-in test. Run both the
+normal suite and this command when changing the shared reveal modifier or Hosting
+address focus. Close other task-owned review fixtures first. This test does not
+replace rendered keyboard traversal in the isolated dashboard fixture.
+
+## Export review
+
 This opt-in app hosts the production export view with a fixed synthetic snapshot.
 It does not start a provider or read credentials/log files. It is not shipped.
 The Swift test runner renders the view but does not expose its windows reliably

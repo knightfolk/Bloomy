@@ -7,20 +7,25 @@ import SwiftUI
 /// publications and manual scrolling do not move the control's document frame.
 struct ScrollControlKeyboardReveal: ViewModifier {
     var documentSpace: String? = nil
+    /// Let an editor own focus restoration while using the same reveal anchor.
+    /// One binding owns each control; do not stack competing focused modifiers.
+    var focus: FocusState<Bool>.Binding? = nil
     @FocusState private var isFocused: Bool
 
+    private var controlFocus: FocusState<Bool>.Binding { focus ?? $isFocused }
+
     func body(content: Content) -> some View {
-        content.focused($isFocused)
+        content.focused(controlFocus)
             .background {
                 if let documentSpace {
                     GeometryReader { geometry in
-                        KeyboardFocusRevealAnchor(isFocused: isFocused,
+                        KeyboardFocusRevealAnchor(isFocused: controlFocus.wrappedValue,
                             documentFrame: geometry.frame(in: .named(documentSpace)))
                             .accessibilityHidden(true)
                     }
                     .accessibilityHidden(true)
                 } else {
-                    KeyboardFocusRevealAnchor(isFocused: isFocused, documentFrame: nil)
+                    KeyboardFocusRevealAnchor(isFocused: controlFocus.wrappedValue, documentFrame: nil)
                         .accessibilityHidden(true)
                 }
             }

@@ -13,6 +13,7 @@ struct HostingSettingsView: View {
     @State private var bindSelection = HostingBindSelectionState()
     @State private var customAddressError: String?
     @State private var bearerTokenText = ""
+    @FocusState private var customAddressIsFocused: Bool
 
     init(
         store: HostingSettingsStore,
@@ -369,7 +370,7 @@ struct HostingSettingsView: View {
                                     .font(.callout.monospacedDigit())
                                     .accessibilityLabel("Custom local interface address")
                                     .accessibilityIdentifier("hosting.bind.customAddress")
-                                    .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
+                                    .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document", focus: $customAddressIsFocused))
                                 Button("Use address") { useCustomAddress() }
                                     .disabled(draft.customAddressText == store.options.bindAddress)
                                     .accessibilityIdentifier("hosting.bind.useCustomAddress")
@@ -819,6 +820,9 @@ struct HostingSettingsView: View {
         }
         _ = store.setBindAddress(draft.customAddressText)
         customAddressError = nil
+        // Saving disables Use address. Keep keyboard navigation in this editor
+        // instead of leaving first responder on a disappearing focus target.
+        customAddressIsFocused = true
     }
 }
 
