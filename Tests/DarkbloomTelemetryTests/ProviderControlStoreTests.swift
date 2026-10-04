@@ -1407,6 +1407,16 @@ struct ProviderControlStoreTests {
             "The local model could not be matched safely",
             "The active model cannot be deleted",
             "A loaded model cannot be deleted",
+            "Refresh current provider state before uninstalling a model",
+            "Wait for the current model switch to finish before uninstalling a model",
+            "Finish the current provider lifecycle action before uninstalling a model",
+            "Wait for model loading to finish before uninstalling a model",
+            "The running provider's advertised models are unknown. Refresh or stop the provider before uninstalling a model.",
+            "This model is still advertised. Apply the saved selection live or stop the provider before uninstalling it.",
+            "Provider state still reports loaded models or accepted work. Refresh or stop the provider before uninstalling a model.",
+            "The model cache changed. Refresh model controls and confirm uninstall again.",
+            "This controller cannot verify the model cache before uninstalling.",
+            "Refresh model controls to confirm the model cache before uninstalling.",
             "Provider activity is unavailable; deletion was not attempted",
             "Provider activity timestamp is invalid; deletion was not attempted",
             "Provider activity is stale; deletion was not attempted",
@@ -1435,6 +1445,33 @@ struct ProviderControlStoreTests {
         await unsafeStore.refresh()
         await unsafeStore.delete("second-model")
         #expect(unsafeStore.errorMessage == "The model cannot be deleted safely.")
+    }
+
+    @Test("cache-bound delete fails closed for a legacy controller without fresh-cache verification")
+    func deletionRequiresCacheVerificationCapability() async throws {
+        let controller = FakeProviderController.fixture()
+        let store = ProviderControlStore(controller: controller)
+        await store.refresh()
+        await store.delete("second-model", expectedCacheDirectory: "/inert/reviewed-cache")
+        #expect(await controller.deletedModels.isEmpty)
+        #expect(store.errorMessage == "This controller cannot verify the model cache before uninstalling.")
+        #expect(store.operation == .idle)
+    }
+
+    @Test("store forwards reviewed cache into fresh service preflight and preserves mismatch diagnostic")
+    func storeBindsDeletionToReviewedCache() async throws {
+        let harness = try PostExitProviderHarness.make(mutation: .delete)
+        defer { harness.cleanup() }
+        let store = ProviderControlStore(controller: harness.service)
+        await store.refresh()
+        let reviewedCache = try #require(store.snapshot?.effectiveCacheDirectory)
+        let changed = String(decoding: postExitLocalInitialJSON, as: UTF8.self)
+            .replacingOccurrences(of: "/inert/cache", with: "/inert/changed-cache")
+        try Data(changed.utf8).write(to: harness.directory.appendingPathComponent("local-initial.json"))
+        await store.delete("second-model", expectedCacheDirectory: reviewedCache)
+        #expect(!FileManager.default.fileExists(atPath: harness.sentinelURL.path))
+        #expect(store.errorMessage == "The model cache changed. Refresh model controls and confirm uninstall again.")
+        #expect(store.operation == .idle)
     }
 
     @Test("a failed refresh retains the last good snapshot and maps a secret error")
@@ -2177,7 +2214,8 @@ private func postExitDaemon(currentModel: String) -> DaemonState {
         startedAt: 0,
         writtenAt: providerControlTestNow.timeIntervalSince1970,
         pid: 1,
-        processIdentity: ProcessIdentity(pid: 1, startTimeMicros: 1)
+        processIdentity: ProcessIdentity(pid: 1, startTimeMicros: 1),
+        advertisedModels: currentModel.isEmpty ? [] : [currentModel]
     )
 }
 

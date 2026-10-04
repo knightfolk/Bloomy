@@ -536,7 +536,7 @@ struct MonitorPopoverLayoutTests {
     @Test("fresh and stale model settings fit without horizontal growth")
     func modelSettingsFitMinimumSize() async {
         let states: [(ProviderControlSourceStates, Bool, Bool, String)] = [
-            (.allFresh, true, true, "Shows a confirmation before deleting Downloaded Model."),
+            (.allFresh, true, true, "Shows a confirmation before removing the downloaded files for Downloaded Model."),
             (ProviderControlSourceStates(
                 catalog: .stale("Catalog refresh required"),
                 localModels: .fresh(evidenceAt: layoutNow),

@@ -60,8 +60,8 @@ struct DarkbloomCommandTests {
         #expect(DarkbloomCommand.download(executable: executable, config: config, modelID: "safe-id").arguments == [
             "models", "download", "--config", config.path, "safe-id",
         ])
-        #expect(DarkbloomCommand.remove(executable: executable, modelID: "safe-id").arguments == [
-            "models", "remove", "safe-id", "--force",
+        #expect(DarkbloomCommand.remove(executable: executable, config: config, modelID: "safe-id").arguments == [
+            "models", "remove", "--config", config.path, "safe-id", "--force",
         ])
     }
 }

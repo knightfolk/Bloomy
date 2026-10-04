@@ -45,7 +45,7 @@ struct SourcePolicyTests {
             DarkbloomCommand.catalog(executable: executable, config: config),
             DarkbloomCommand.localModels(executable: executable, config: config),
             DarkbloomCommand.download(executable: executable, config: config, modelID: "safe-id"),
-            DarkbloomCommand.remove(executable: executable, modelID: "safe-id"),
+            DarkbloomCommand.remove(executable: executable, config: config, modelID: "safe-id"),
             DarkbloomCommand.start(executable: executable, config: config, models: ["first", "second"]),
             DarkbloomCommand.stop(executable: executable),
             DarkbloomCommand.restart(executable: executable, config: config),
@@ -65,6 +65,16 @@ struct SourcePolicyTests {
             "--timeout", "600", "--startup-timeout", "180",
         ])
         #expect(!commands.flatMap(\.arguments).contains("--no-auth"))
+    }
+
+    @Test("remove passes a custom config path and model identifier as separate literal arguments")
+    func removeUsesExactConfig() {
+        let executable = URL(fileURLWithPath: "/inert/darkbloom")
+        let config = URL(fileURLWithPath: "/inert/custom cache/provider $(config).toml")
+        let modelID = "model;literal"
+        let command = DarkbloomCommand.remove(executable: executable, config: config, modelID: modelID)
+        #expect(command.executable == executable)
+        #expect(command.arguments == ["models", "remove", "--config", config.path, modelID, "--force"])
     }
 
     @Test("polling and byte bounds match the approved design")

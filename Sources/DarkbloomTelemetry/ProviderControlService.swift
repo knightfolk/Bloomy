@@ -117,6 +117,44 @@ public struct ProviderControlSnapshot: Equatable, Sendable {
         self.effectiveCacheDirectory = effectiveCacheDirectory
         self.liveSwitchAvailability = liveSwitchAvailability
     }
+
+    /// Read-only preflight evidence. This does not reserve the model against
+    /// an independent CLI load after the snapshot has been captured.
+    public func runtimeDeletionBlockReason(for modelID: String) -> String? {
+        guard let daemon = daemonState else {
+            return "Refresh current provider state before uninstalling a model"
+        }
+        if let modelSwitch = daemon.modelSwitch,
+           [.validating, .draining, .switching, .busy, .unknown].contains(modelSwitch.outcome) {
+            return "Wait for the current model switch to finish before uninstalling a model"
+        }
+        if let lifecycle = daemon.lifecycle,
+           [.draining, .drained, .busy, .timedOut, .unknown].contains(lifecycle.outcome) {
+            return "Finish the current provider lifecycle action before uninstalling a model"
+        }
+        if daemon.startupPreloadPendingModels?.isEmpty == false {
+            return "Wait for model loading to finish before uninstalling a model"
+        }
+        // Only explicit terminal lifecycle evidence permits an unknown serving
+        // set. A missing field or empty resident list does not prove a stop.
+        if daemon.lifecycle?.outcome == .stopped {
+            guard !daemon.inferenceActive, daemon.currentModel.isEmpty,
+                  daemon.warmModels.isEmpty, daemon.slots.isEmpty,
+                  residentModelIDs.isEmpty,
+                  (daemon.lifecycle?.remainingRequests ?? 0) == 0,
+                  (daemon.modelSwitch?.remainingRequests ?? 0) == 0 else {
+                return "Provider state still reports loaded models or accepted work. Refresh or stop the provider before uninstalling a model."
+            }
+            return nil
+        }
+        guard let advertised = daemon.advertisedModels else {
+            return "The running provider's advertised models are unknown. Refresh or stop the provider before uninstalling a model."
+        }
+        if advertised.contains(modelID) {
+            return "This model is still advertised. Apply the saved selection live or stop the provider before uninstalling it."
+        }
+        return nil
+    }
 }
 
 public enum ProviderMutationPhase: Equatable, Sendable {
@@ -179,6 +217,13 @@ public protocol ProviderControlling: Sendable {
     ) async throws -> ProviderMutationCompletion
     func performDelete(
         _ localModelID: String,
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderMutationCompletion
+    /// Cache-bound deletion must be verified against the fresh inventory that
+    /// authorizes dispatch, rather than a separate read by the caller.
+    func performDelete(
+        _ localModelID: String,
+        expectedCacheDirectory: String,
         onPhase: ProviderMutationPhaseObserver?
     ) async throws -> ProviderMutationCompletion
     func performLifecycle(
@@ -257,6 +302,18 @@ public extension ProviderControlling {
         try await delete(localModelID)
         await onPhase?(.reconciling)
         return .refreshUncertain
+    }
+
+    func performDelete(
+        _ localModelID: String,
+        expectedCacheDirectory: String,
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderMutationCompletion {
+        // Legacy controllers remain source compatible, but must explicitly
+        // implement the fresh cache guard before accepting bound confirmation.
+        throw ProviderControlError.deleteBlocked(
+            "This controller cannot verify the model cache before uninstalling."
+        )
     }
 
     func performLifecycle(
@@ -413,6 +470,27 @@ public actor ProviderControlService: ProviderControlling, ProviderSavedCapacityR
         _ localModelID: String,
         onPhase: ProviderMutationPhaseObserver?
     ) async throws -> ProviderMutationCompletion {
+        try await performDelete(localModelID, expectedCacheDirectory: nil, onPhase: onPhase)
+    }
+
+    public func performDelete(
+        _ localModelID: String,
+        expectedCacheDirectory: String,
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderMutationCompletion {
+        guard !expectedCacheDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ProviderControlError.deleteBlocked(
+                "Refresh model controls to confirm the model cache before uninstalling."
+            )
+        }
+        return try await performDelete(localModelID, expectedCacheDirectory: Optional(expectedCacheDirectory), onPhase: onPhase)
+    }
+
+    private func performDelete(
+        _ localModelID: String,
+        expectedCacheDirectory: String?,
+        onPhase: ProviderMutationPhaseObserver?
+    ) async throws -> ProviderMutationCompletion {
         try beginCommand()
         defer { endCommand() }
         let executable = try resolveExecutable()
@@ -421,6 +499,12 @@ public actor ProviderControlService: ProviderControlling, ProviderSavedCapacityR
             allowStaleModelSources: false,
             freshResidencyRequirement: .deletion
         )
+        if let expectedCacheDirectory,
+           snapshot.effectiveCacheDirectory != expectedCacheDirectory {
+            throw ProviderControlError.deleteBlocked(
+                "The model cache changed. Refresh model controls and confirm uninstall again."
+            )
+        }
         let matches = snapshot.inventory.myCatalog.filter { $0.localID == localModelID }
         guard matches.count <= 1 else {
             throw ProviderControlError.deleteBlocked("The local model identity is ambiguous")
@@ -451,8 +535,11 @@ public actor ProviderControlService: ProviderControlling, ProviderSavedCapacityR
         if item.isPreloaded {
             throw ProviderControlError.deleteBlocked("Remove the model from preload and save before deleting it")
         }
+        if let reason = snapshot.runtimeDeletionBlockReason(for: localModelID) {
+            throw ProviderControlError.deleteBlocked(reason)
+        }
         return try await runDispatchedMutation(
-            DarkbloomCommand.remove(executable: executable, modelID: localModelID),
+            DarkbloomCommand.remove(executable: executable, config: policy.providerConfig, modelID: localModelID),
             timeout: DarkbloomSourcePolicy.lifecycleTimeout,
             outputLimit: DarkbloomSourcePolicy.mutationOutputByteLimit,
             onOutput: nil,

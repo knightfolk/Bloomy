@@ -150,6 +150,21 @@ struct ModelInventoryTests {
         }
     }
 
+    @Test("duplicate local identities remain visible but are marked ambiguous for destructive controls")
+    func duplicateLocalIdentityIsAmbiguous() throws {
+        let catalog = try ModelCatalogDecoder.decode(fixture("model-catalog.json"))
+        let record = LocalModel(id: "gpt-oss-20b", modelType: "llm", sizeBytes: 123, estimatedMemoryGB: nil)
+        let inventory = ModelInventoryBuilder.build(catalog: catalog, local: [record, record],
+            selection: .init(enabled: [], preloaded: []), daemon: nil, loadedModels: [])
+        let item = try #require(inventory.myCatalog.first)
+        #expect(inventory.myCatalog.count == 1)
+        #expect(item.localID == record.id)
+        #expect(item.isDownloaded)
+        #expect(item.issue == "The local model identity is ambiguous")
+        #expect(item.downloadedSizeBytes == nil)
+        #expect(inventory.issues.contains("The local model identity is ambiguous"))
+    }
+
     @Test("matches a unique configured family alias without rewriting it")
     func matchesFamilyAlias() throws {
         let inventory = ModelInventoryBuilder.build(

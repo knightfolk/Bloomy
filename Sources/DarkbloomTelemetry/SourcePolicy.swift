@@ -110,7 +110,9 @@ public enum DarkbloomCommand {
     public static func catalog(executable: URL, config: URL) -> ProcessCommand { ProcessCommand(executable: executable, arguments: ["models", "catalog", "--config", config.path, "--json"]) }
     public static func localModels(executable: URL, config: URL) -> ProcessCommand { ProcessCommand(executable: executable, arguments: ["models", "list", "--config", config.path, "--json", "--all"]) }
     public static func download(executable: URL, config: URL, modelID: String) -> ProcessCommand { ProcessCommand(executable: executable, arguments: ["models", "download", "--config", config.path, modelID]) }
-    public static func remove(executable: URL, modelID: String) -> ProcessCommand { ProcessCommand(executable: executable, arguments: ["models", "remove", modelID, "--force"]) }
+    public static func remove(executable: URL, config: URL, modelID: String) -> ProcessCommand {
+        ProcessCommand(executable: executable, arguments: ["models", "remove", "--config", config.path, modelID, "--force"])
+    }
     /// Hosted start flags are appended exactly as documented by the official
     /// CLI reference. Bearer-token authentication remains the default; the
     /// user must explicitly opt out before `--no-auth` is dispatched.

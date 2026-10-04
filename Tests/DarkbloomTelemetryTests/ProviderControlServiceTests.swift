@@ -64,7 +64,7 @@ struct ProviderControlServiceTests {
         #expect(await harness.configStore.saveCount == 0)
         #expect(await harness.runner.mutationArguments == [
             ["models", "download", "--config", harness.configURL.path, "qwen3-8b"],
-            ["models", "remove", "gpt-oss-20b", "--force"],
+            ["models", "remove", "--config", harness.configURL.path, "gpt-oss-20b", "--force"],
         ])
     }
 
@@ -297,6 +297,143 @@ struct ProviderControlServiceTests {
         #expect(await preloaded.runner.mutationArguments.isEmpty)
     }
 
+    @Test("delete rejects an advertised cold model even after the saved selection changes")
+    func deleteRejectsAdvertisedColdModel() async throws {
+        let harness = try ServiceHarness.make(
+            daemonState: daemon(currentModel: "", inferenceActive: false, advertisedModels: ["gpt-oss-20b"]),
+            loadedModels: []
+        )
+        defer { harness.cleanup() }
+        await #expect(throws: ProviderControlError.deleteBlocked(
+            "This model is still advertised. Apply the saved selection live or stop the provider before uninstalling it."
+        )) {
+            try await harness.service.delete("gpt-oss-20b")
+        }
+        #expect(await harness.runner.mutationArguments.isEmpty)
+        #expect(await harness.configStore.saveCount == 0)
+    }
+
+    @Test("delete requires a known advertised set unless the provider explicitly stopped")
+    func deleteRequiresAdvertisedEvidence() async throws {
+        let unknown = try ServiceHarness.make(
+            daemonState: daemon(currentModel: "", inferenceActive: false, advertisedModels: nil), loadedModels: []
+        )
+        defer { unknown.cleanup() }
+        await #expect(throws: ProviderControlError.deleteBlocked(
+            "The running provider's advertised models are unknown. Refresh or stop the provider before uninstalling a model."
+        )) {
+            try await unknown.service.delete("gpt-oss-20b")
+        }
+        #expect(await unknown.runner.mutationArguments.isEmpty)
+
+        let stopped = try ServiceHarness.make(
+            daemonState: daemon(currentModel: "", inferenceActive: false, advertisedModels: nil,
+                lifecycle: .init(outcome: .stopped)), loadedModels: []
+        )
+        defer { stopped.cleanup() }
+        try await stopped.service.delete("gpt-oss-20b")
+        #expect(await stopped.runner.mutationArguments == [[
+            "models", "remove", "--config", stopped.configURL.path, "gpt-oss-20b", "--force"
+        ]])
+    }
+
+    @Test("delete waits for runtime loading switching and draining even when the model is cold")
+    func deleteRejectsRuntimeTransitions() async throws {
+        for outcome in [ProviderModelSwitchOutcome.validating, .draining, .switching, .busy, .unknown] {
+            let harness = try ServiceHarness.make(
+                daemonState: daemon(currentModel: "", inferenceActive: false,
+                    modelSwitch: .init(outcome: outcome, models: ["gpt-oss-20b"])), loadedModels: []
+            )
+            defer { harness.cleanup() }
+            await #expect(throws: ProviderControlError.deleteBlocked(
+                "Wait for the current model switch to finish before uninstalling a model"
+            )) { try await harness.service.delete("gpt-oss-20b") }
+            #expect(await harness.runner.mutationArguments.isEmpty)
+        }
+        for outcome in [ProviderLifecycleOutcome.draining, .drained, .busy, .timedOut, .unknown] {
+            let harness = try ServiceHarness.make(
+                daemonState: daemon(currentModel: "", inferenceActive: false,
+                    lifecycle: .init(outcome: outcome)), loadedModels: []
+            )
+            defer { harness.cleanup() }
+            await #expect(throws: ProviderControlError.deleteBlocked(
+                "Finish the current provider lifecycle action before uninstalling a model"
+            )) { try await harness.service.delete("gpt-oss-20b") }
+            #expect(await harness.runner.mutationArguments.isEmpty)
+        }
+        let loading = try ServiceHarness.make(
+            daemonState: daemon(currentModel: "", inferenceActive: false,
+                startupPreloadPendingModels: ["gpt-oss-20b"]), loadedModels: []
+        )
+        defer { loading.cleanup() }
+        await #expect(throws: ProviderControlError.deleteBlocked(
+            "Wait for model loading to finish before uninstalling a model"
+        )) { try await loading.service.delete("gpt-oss-20b") }
+        #expect(await loading.runner.mutationArguments.isEmpty)
+    }
+
+    @Test("stopped lifecycle does not override contradictory live serving and residency evidence")
+    func stoppedStateMustBeConsistentBeforeDeletion() async throws {
+        let message = "Provider state still reports loaded models or accepted work. Refresh or stop the provider before uninstalling a model."
+        let stopped = ProviderLifecycleState(outcome: .stopped)
+        let otherModel = "gemma-4-26b-qat-4bit"
+        let cases: [(DaemonState, [String])] = [
+            (daemon(currentModel: otherModel, inferenceActive: true,
+                advertisedModels: ["gpt-oss-20b"], lifecycle: stopped), []),
+            (daemon(currentModel: otherModel, inferenceActive: false, lifecycle: stopped), []),
+            (daemon(currentModel: "", inferenceActive: false, warmModels: [otherModel], lifecycle: stopped), []),
+            (daemon(currentModel: "", inferenceActive: false,
+                slots: [.init(model: otherModel, mtpEnabled: false, mtpActive: false,
+                    mtpReason: nil, kvBackend: "auto", requestedKVBackend: "auto")], lifecycle: stopped), []),
+            (daemon(currentModel: "", inferenceActive: false, lifecycle: stopped), [otherModel]),
+            (daemon(currentModel: "", inferenceActive: false,
+                lifecycle: .init(outcome: .stopped, remainingRequests: 1)), []),
+            (daemon(currentModel: "", inferenceActive: false, lifecycle: stopped,
+                modelSwitch: .init(outcome: .serving, models: [], remainingRequests: 1)), []),
+        ]
+        for (daemonState, loadedModels) in cases {
+            let harness = try ServiceHarness.make(daemonState: daemonState, loadedModels: loadedModels)
+            defer { harness.cleanup() }
+            await #expect(throws: ProviderControlError.deleteBlocked(message)) {
+                try await harness.service.delete("gpt-oss-20b")
+            }
+            #expect(await harness.runner.mutationArguments.isEmpty)
+        }
+    }
+
+    @Test("cache-bound deletion refuses a fresh cache change before dispatch despite matching model IDs")
+    func deletionConfirmationBindsToFreshCache() async throws {
+        let harness = try ServiceHarness.make()
+        defer { harness.cleanup() }
+        let reviewed = try await harness.service.refresh()
+        let cache = try #require(reviewed.effectiveCacheDirectory)
+        await harness.runner.useNextLocal(Data(String(decoding: localJSON, as: UTF8.self)
+            .replacingOccurrences(of: "/inert/cache", with: "/inert/new-cache").utf8))
+        await #expect(throws: ProviderControlError.deleteBlocked(
+            "The model cache changed. Refresh model controls and confirm uninstall again."
+        )) {
+            try await harness.service.performDelete("gpt-oss-20b", expectedCacheDirectory: cache, onPhase: nil)
+        }
+        #expect(await harness.runner.mutationArguments.isEmpty)
+        #expect(await harness.configStore.saveCount == 0)
+        // A new confirmation for the unchanged cache follows the ordinary,
+        // reconciled command path; the mismatch also releases serialization.
+        _ = try await harness.service.performDelete("gpt-oss-20b", expectedCacheDirectory: cache, onPhase: nil)
+        #expect(await harness.runner.mutationArguments.count == 1)
+    }
+
+    @Test("cache-bound deletion requires a known reviewed cache path")
+    func deletionRequiresReviewedCache() async throws {
+        let harness = try ServiceHarness.make()
+        defer { harness.cleanup() }
+        await #expect(throws: ProviderControlError.deleteBlocked(
+            "Refresh model controls to confirm the model cache before uninstalling."
+        )) {
+            try await harness.service.performDelete("gpt-oss-20b", expectedCacheDirectory: "  ", onPhase: nil)
+        }
+        #expect(await harness.runner.mutationArguments.isEmpty)
+    }
+
     @Test("delete fails closed when either live residency source is unavailable")
     func deleteRequiresLiveResidencySources() async throws {
         let daemonUnavailable = try ServiceHarness.make()
@@ -396,7 +533,7 @@ struct ProviderControlServiceTests {
         try await harness.service.delete("gpt-oss-20b")
 
         #expect(await harness.runner.mutationArguments.first == [
-            "models", "remove", "gpt-oss-20b", "--force",
+            "models", "remove", "--config", harness.configURL.path, "gpt-oss-20b", "--force",
         ])
     }
 
@@ -442,8 +579,20 @@ struct ProviderControlServiceTests {
             try await ambiguous.service.delete("gpt-oss-20b")
         }
 
+        let duplicatedLocal = try ServiceHarness.make(local: Data(#"""
+            {"cache_directory":"/inert/cache","filtered_by_config":false,"models":[
+              {"id":"gpt-oss-20b","model_type":"llm","size_bytes":10},
+              {"id":"gpt-oss-20b","model_type":"llm","size_bytes":20}
+            ]}
+            """#.utf8))
+        defer { duplicatedLocal.cleanup() }
+        await #expect(throws: ProviderControlError.deleteBlocked("The local model identity is ambiguous")) {
+            try await duplicatedLocal.service.delete("gpt-oss-20b")
+        }
+
         #expect(await unmatched.runner.mutationArguments.isEmpty)
         #expect(await ambiguous.runner.mutationArguments.isEmpty)
+        #expect(await duplicatedLocal.runner.mutationArguments.isEmpty)
     }
 
     @Test("lifecycle commands use exact arguments and policy bounds")
@@ -1269,7 +1418,7 @@ struct ProviderControlServiceTests {
         try await deletion.value
 
         #expect(await harness.runner.mutationArguments == [[
-            "models", "remove", "gpt-oss-20b", "--force",
+            "models", "remove", "--config", harness.configURL.path, "gpt-oss-20b", "--force",
         ]])
     }
 
@@ -1810,6 +1959,12 @@ private func daemon(
     startedAt: TimeInterval = 0,
     writtenAt: TimeInterval = serviceNow.timeIntervalSince1970,
     processIdentity: ProcessIdentity = ProcessIdentity(pid: 1, startTimeMicros: 1),
+    advertisedModels: [String]? = [],
+    warmModels: [String] = [],
+    slots: [ModelSlot] = [],
+    lifecycle: ProviderLifecycleState? = nil,
+    startupPreloadPendingModels: [String]? = nil,
+    modelSwitch: ProviderModelSwitchState? = nil,
     capacity: MemoryCapacity = MemoryCapacity(
         totalMemoryGB: 32,
         gpuMemoryActiveGB: 0,
@@ -1820,16 +1975,20 @@ private func daemon(
         schema: 1,
         version: "0.8.15",
         currentModel: currentModel,
-        warmModels: [],
+        warmModels: warmModels,
         stats: ProviderStats(tokensGenerated: 0, requestsServed: 0, usageGaps: 0),
         trust: TrustState(level: "local", status: "online", reason: "", receivedAt: 0),
         capacity: capacity,
-        slots: [],
+        slots: slots,
         inferenceActive: inferenceActive,
         startedAt: startedAt,
         writtenAt: writtenAt,
         pid: processIdentity.pid,
-        processIdentity: processIdentity
+        processIdentity: processIdentity,
+        advertisedModels: advertisedModels,
+        lifecycle: lifecycle,
+        startupPreloadPendingModels: startupPreloadPendingModels,
+        modelSwitch: modelSwitch
     )
 }
 

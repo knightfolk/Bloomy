@@ -960,17 +960,29 @@ final class ProviderControlStore: ObservableObject {
     }
 
     func delete(_ modelID: String) async {
+        await delete(modelID, expectedCacheDirectory: nil)
+    }
+
+    func delete(_ modelID: String, expectedCacheDirectory: String) async {
+        await delete(modelID, expectedCacheDirectory: Optional(expectedCacheDirectory))
+    }
+
+    private func delete(_ modelID: String, expectedCacheDirectory: String?) async {
         guard let generation = begin(.deleting(modelID)) else { return }
         let controller = self.controller
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let completion = try await controller.performDelete(
-                    modelID,
-                    onPhase: { [weak self] phase in
-                        await self?.advanceMutationPhase(phase, generation: generation)
-                    }
-                )
+                let onPhase: ProviderMutationPhaseObserver = { [weak self] phase in
+                    await self?.advanceMutationPhase(phase, generation: generation)
+                }
+                let completion: ProviderMutationCompletion
+                if let expectedCacheDirectory {
+                    completion = try await controller.performDelete(modelID,
+                        expectedCacheDirectory: expectedCacheDirectory, onPhase: onPhase)
+                } else {
+                    completion = try await controller.performDelete(modelID, onPhase: onPhase)
+                }
                 await reconcileCompletedMutation(
                     completion,
                     preserving: draft,
@@ -1761,6 +1773,16 @@ final class ProviderControlStore: ObservableObject {
             "The local model could not be matched safely",
             "The active model cannot be deleted",
             "A loaded model cannot be deleted",
+            "Refresh current provider state before uninstalling a model",
+            "Wait for the current model switch to finish before uninstalling a model",
+            "Finish the current provider lifecycle action before uninstalling a model",
+            "Wait for model loading to finish before uninstalling a model",
+            "The running provider's advertised models are unknown. Refresh or stop the provider before uninstalling a model.",
+            "This model is still advertised. Apply the saved selection live or stop the provider before uninstalling it.",
+            "Provider state still reports loaded models or accepted work. Refresh or stop the provider before uninstalling a model.",
+            "The model cache changed. Refresh model controls and confirm uninstall again.",
+            "This controller cannot verify the model cache before uninstalling.",
+            "Refresh model controls to confirm the model cache before uninstalling.",
         ]
         let residency = [
             "Provider activity is unavailable",

@@ -212,7 +212,7 @@ struct ModelManagerPresentationTests {
         #expect(row.availableMetadataText == nil)
         #expect(row.enableAction?.accessibilityLabel == "Enable Model Name")
         #expect(row.preloadAction?.accessibilityLabel == "Preload Model Name")
-        #expect(row.deleteAction?.accessibilityLabel == "Delete Model Name")
+        #expect(row.deleteAction?.accessibilityLabel == "Uninstall Model Name")
         var confirmationRequests = 0
         row.requestDeletion(of: item(isDownloaded: true)) { _ in
             confirmationRequests += 1
@@ -276,6 +276,22 @@ struct ModelManagerPresentationTests {
             #expect(row.enableAction?.accessibilityLabel == "Disable GPT OSS 20B")
             #expect(row.preloadAction?.accessibilityLabel == "Remove preload GPT OSS 20B")
         }
+    }
+
+    @Test("card uninstall honors fresh runtime blockers without hiding hosting controls")
+    func uninstallRuntimeBlocker() {
+        let reason = "This model is still advertised. Apply the saved selection live or stop the provider before uninstalling it."
+        let row = ModelRowPresentation.make(item: item(isDownloaded: true), draft: draft(),
+            operation: .idle, sources: sources(), currentTime: presentationNow,
+            canDownload: false, downloadUnavailableReason: nil, sanitize: { $0 },
+            runtimeDeletionBlockReason: reason)
+        #expect(row.showsDelete)
+        #expect(row.showsEnableToggle)
+        #expect(row.deleteAction?.isEnabled == false)
+        #expect(row.deleteAction?.accessibilityHint == reason)
+        var requested = false
+        row.requestDeletion(of: item(isDownloaded: true)) { _ in requested = true }
+        #expect(!requested)
     }
 
     @Test("available models offer only download")
@@ -560,7 +576,7 @@ struct ModelManagerPresentationTests {
 
         #expect(row.enableAction?.accessibilityLabel == "Disable Model Name")
         #expect(row.preloadAction?.accessibilityLabel == "Remove preload Model Name")
-        #expect(row.deleteAction?.accessibilityLabel == "Delete Model Name")
+        #expect(row.deleteAction?.accessibilityLabel == "Uninstall Model Name")
     }
 
     @Test("freshness disables download with an accessible reason")

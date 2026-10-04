@@ -399,3 +399,12 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   No installed-app savings are claimed; saved-edit confirmation is still pending
   for replacement and comparable profiling. Evidence and reproduction are in
   `ACTION_RETENTION_PRODUCTION_PROFILE_20261003.md`.
+
+- Downloaded model cards now expose Uninstall directly, with observed size and
+  cache location in confirmation. Removal rechecks serving/residency and the
+  captured cache, and passes the inventory configuration to the CLI. The full
+  suite reports 1,592 tests with seven opt-in skips and no failures; Release
+  compilation and inert native Cancel/busy/retry proof pass. Compact light/dark
+  content is checked at 650 points. Alert pixels retain the documented capture
+  limitation; installed-app delivery, menu-bar motion and the broader matrix
+  remain open. See `MODEL_UNINSTALL_CARDS_REVIEW_20261003.md`.

@@ -469,7 +469,8 @@ struct ModelRowPresentation: Equatable {
         currentTime: Date,
         canDownload: Bool,
         downloadUnavailableReason: String?,
-        sanitize: (String) -> String
+        sanitize: (String) -> String,
+        runtimeDeletionBlockReason: String? = nil
     ) -> Self {
         let isDownloaded = item.isDownloaded
         let displayedIssue = item.issue.map(sanitize)
@@ -488,6 +489,7 @@ struct ModelRowPresentation: Equatable {
                 currentTime: currentTime,
                 sanitize: sanitize
             )
+            ?? runtimeDeletionBlockReason.map(sanitize)
             : nil
         let isEnabled = draft.map {
             contains(
@@ -533,9 +535,9 @@ struct ModelRowPresentation: Equatable {
                 : nil,
             deleteAction: isDownloaded
                 ? ModelActionPresentation(
-                    accessibilityLabel: "Delete \(item.displayName)",
+                    accessibilityLabel: "Uninstall \(item.displayName)",
                     accessibilityHint: deleteBlockReason
-                        ?? "Shows a confirmation before deleting \(item.displayName).",
+                        ?? "Shows a confirmation before removing the downloaded files for \(item.displayName).",
                     isEnabled: deleteBlockReason == nil
                 )
                 : nil,
@@ -744,7 +746,7 @@ struct ModelManagerView: View {
     @State private var modelSheetScreenBudget: CGFloat?
     @State private var presentationCache = ModelManagerPresentationCache()
     @State private var freshnessRevision: UInt64 = 0
-    @State private var deletion: ModelDeletionConfirmation?
+    @State private var deletion: ModelUninstallConfirmation?
     @State private var search = ""
     @State private var inspectedModel: ModelInventoryItem?
     @State private var whatIfRunPercent: [String: Int] = [:]
@@ -788,12 +790,10 @@ struct ModelManagerView: View {
         }
         .alert(item: $deletion) { confirmation in
             Alert(
-                title: Text("Delete \(confirmation.displayName)?"),
-                message: Text(
-                    "This removes approximately \(confirmation.formattedSize) of downloaded model data."
-                ),
-                primaryButton: .destructive(Text("Delete")) {
-                    Task { await store.delete(confirmation.localID) }
+                title: Text("Uninstall \(confirmation.displayName)?"),
+                message: Text(confirmation.message),
+                primaryButton: .destructive(Text("Uninstall")) {
+                    Task { await store.delete(confirmation.localID, expectedCacheDirectory: confirmation.cacheDirectory) }
                 },
                 secondaryButton: .cancel()
             )
@@ -1128,10 +1128,27 @@ struct ModelManagerView: View {
     private func requestDelete(_ item: ModelInventoryItem) {
         guard case .current(let current) = ModelManagerSheetPresentation.make(catalogID: item.catalogID,
             inventory: store.snapshot?.inventory), current.isDownloaded,
-              let localID = current.localID, localID == item.localID else { return }
+              let localID = current.localID, localID == item.localID,
+              let snapshot = store.snapshot,
+              let cacheDirectory = snapshot.effectiveCacheDirectory,
+              !cacheDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let row = ModelRowPresentation.make(item: current, draft: store.draft,
+            operation: store.operation, sources: snapshot.sources, currentTime: Date(),
+            canDownload: false, downloadUnavailableReason: nil, sanitize: store.sanitizedDiagnostic,
+            runtimeDeletionBlockReason: deletionBlockReason(in: snapshot, for: localID))
+        guard row.deleteAction?.isEnabled == true else { return }
         inspectedModel = nil
-        deletion = ModelDeletionConfirmation(localID: localID,
-            displayName: current.displayName, sizeGB: current.sizeGB)
+        deletion = ModelUninstallConfirmation(localID: localID,
+            displayName: current.displayName, downloadedSizeBytes: current.downloadedSizeBytes,
+            cacheDirectory: cacheDirectory)
+    }
+
+    private func deletionBlockReason(in snapshot: ProviderControlSnapshot, for localID: String) -> String? {
+        guard let cacheDirectory = snapshot.effectiveCacheDirectory,
+              !cacheDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "Refresh model controls to confirm the model cache before uninstalling."
+        }
+        return snapshot.runtimeDeletionBlockReason(for: localID)
     }
 
     @ViewBuilder
@@ -1165,7 +1182,8 @@ struct ModelManagerView: View {
                         currentTime: date, sanitize: store.sanitizedDiagnostic,
                         setEnabled: { setEnabled($0, selector: $1, catalogID: item.catalogID) },
                         setPreloaded: { setPreloaded($0, selector: $1, catalogID: item.catalogID) },
-                        requestDelete: requestDelete)
+                        requestDelete: requestDelete,
+                        runtimeDeletionBlockReason: deletionBlockReason(in: snapshot, for: item.localID ?? item.catalogID))
                 } else {
                     AvailableModelRow(item: item, store: store)
                 }
@@ -1198,14 +1216,15 @@ struct ModelManagerView: View {
     @ViewBuilder
     func cardControls(item: ModelInventoryItem, at date: Date) -> some View {
         if item.isDownloaded, let snapshot = store.snapshot {
-            HStack(alignment: .center, spacing: 12) {
+            HStack(alignment: .center, spacing: 8) {
                 DownloadedModelRow(item: item, draft: store.draft,
                     operation: store.operation, sources: snapshot.sources,
                     currentTime: date, sanitize: store.sanitizedDiagnostic,
                     setEnabled: { setEnabled($0, selector: $1, catalogID: item.catalogID) },
                     setPreloaded: { setPreloaded($0, selector: $1, catalogID: item.catalogID) },
-                    requestDelete: requestDelete, compact: true)
-                Spacer(minLength: 8)
+                    requestDelete: requestDelete, compact: true,
+                    runtimeDeletionBlockReason: deletionBlockReason(in: snapshot, for: item.localID ?? item.catalogID))
+                Spacer(minLength: 4)
                 Button(ModelManagerPresentation.compactEntryActionLabel(for: item)) { inspectedModel = item }
                     .accessibilityLabel(ModelManagerPresentation.compactEntryAccessibilityLabel(for: item))
                     .help("Open the what-if forecast, model details, and additional controls for \(item.displayName).")
@@ -2210,6 +2229,7 @@ struct DownloadedModelRow: View {
     let setPreloaded: (Bool, String) -> Void
     let requestDelete: (ModelInventoryItem) -> Void
     var compact = false
+    var runtimeDeletionBlockReason: String? = nil
 
     private var presentation: ModelRowPresentation {
         .make(
@@ -2220,7 +2240,8 @@ struct DownloadedModelRow: View {
             currentTime: currentTime,
             canDownload: false,
             downloadUnavailableReason: nil,
-            sanitize: sanitize
+            sanitize: sanitize,
+            runtimeDeletionBlockReason: runtimeDeletionBlockReason
         )
     }
 
@@ -2231,11 +2252,11 @@ struct DownloadedModelRow: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             if compact {
-                // One horizontal row of real hosting controls keeps the
-                // compact card short; Delete stays in the Manage sheet.
-                HStack(spacing: 14) {
+                // Keep uninstall directly reachable without expanding the card.
+                HStack(spacing: 10) {
                     enableToggle(checkbox: true)
                     preloadToggle(checkbox: true)
+                    deleteButton
                 }
             } else {
                 VStack(alignment: .leading, spacing: 1) {
@@ -2287,12 +2308,18 @@ struct DownloadedModelRow: View {
             Button(role: .destructive) {
                 presentation.requestDeletion(of: item, using: requestDelete)
             } label: {
-                Label("Delete", systemImage: "trash")
+                if compact {
+                    Image(systemName: "trash")
+                } else {
+                    Label("Uninstall", systemImage: "trash")
+                }
             }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
             .disabled(presentation.deleteAction?.isEnabled != true)
-            .help(presentation.deleteAction?.accessibilityHint ?? "Delete \(item.displayName)")
+            .help(presentation.deleteBlockReason ?? "Uninstall \(item.displayName) from the model cache")
             .accessibilityLabel(
-                presentation.deleteAction?.accessibilityLabel ?? "Delete \(item.displayName)"
+                presentation.deleteAction?.accessibilityLabel ?? "Uninstall \(item.displayName)"
             )
             .accessibilityHint(
                 presentation.deleteAction?.accessibilityHint ?? ""
@@ -2634,15 +2661,6 @@ private struct LiveStatePill: View {
         case .unloaded: .secondary
         }
     }
-}
-
-private struct ModelDeletionConfirmation: Identifiable {
-    let localID: String
-    let displayName: String
-    let sizeGB: Double
-
-    var id: String { localID }
-    var formattedSize: String { ModelFormatting.size(sizeGB) }
 }
 
 enum ModelFormatting {

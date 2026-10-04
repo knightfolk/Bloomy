@@ -1,5 +1,16 @@
 # Native export fixture
 
+## Model uninstall cards
+
+After `swift test` refreshes the Debug products, run
+`python3 Tests/NativeUI/build-model-uninstall-fixture.py`. Open the emitted
+isolated app. It hosts the production Models view with synthetic unloaded,
+resident and undownloaded models. Uninstall can remove only its own temporary
+sentinel; Cancel and the writer-busy toggle preserve it. Check the 650-point
+content layout and light/dark appearance with the fixture toggles. The header
+and its status JSON record attempts and file state. No real provider is used.
+See `docs/MODEL_UNINSTALL_CARDS_REVIEW_20261003.md` for proof and limitations.
+
 ## Large Action History
 
 Choose **5,000 action records** in the isolated dashboard Scenario picker. It

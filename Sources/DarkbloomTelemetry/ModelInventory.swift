@@ -317,6 +317,11 @@ public enum ModelInventoryBuilder {
         }
         let activeID = daemon.flatMap { $0.inferenceActive ? $0.currentModel : nil }
         let localRecords = Dictionary(grouping: local, by: \.id)
+        for (modelID, records) in localRecords.sorted(by: { $0.key < $1.key }) where records.count > 1 {
+            let issue = "The local model identity is ambiguous"
+            itemIssues[modelID] = issue
+            issues.append(issue)
+        }
         let items = catalog.map { model in
             let downloaded = localIDs.contains(model.id)
             let records = localRecords[model.id] ?? []
