@@ -511,33 +511,7 @@ struct MonitorPopover: View {
                 bodyHeight: popupBodyHeight(currentTime: currentTime),
                 maximumHeight: contentHeightBudget.map { max(0, $0 - popupPadding * 2) }
             ) {
-                VStack(alignment: .leading, spacing: 12) {
-                    header
-                    providerHeader(currentTime: currentTime)
-                    HStack(spacing: 14) {
-                        CompactGPUGauge(usage: store.gpuUsage, now: currentTime)
-                        Divider().frame(height: 38)
-                        if let extras = store.providerExtras {
-                            PopupFanSummary(store: extras, now: currentTime, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling) { showsFans = true }
-                        } else {
-                            Label("Fan readings unavailable", systemImage: "fan")
-                                .font(.caption).foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(12)
-                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-                    HStack(spacing: 10) {
-                        PopupAutoModeControl(store: controlStore, openModels: openModels, updateProtection: updateProtection)
-                        if let nudge = store.inactivityNudge {
-                            PopupNudgeControl(store: nudge, updateProtection: updateProtection)
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                        }
-                        Spacer()
-                    }
-                    Divider()
-                }
+                commandBar(currentTime: currentTime)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         if case .available(.updateAvailable(_, let latest), let checkedAt) = cliUpdates.status,
@@ -566,14 +540,13 @@ struct MonitorPopover: View {
                         if let protection = store.hostGPUProtection {
                             HostGPUProtectionSummaryView(protection: protection, slowdownWarning: store.servingSlowdownWarning)
                         }
+                        financePanel(currentTime: currentTime)
                         if let hostingStore {
                             PopupHostingSummary(store: hostingStore, isVisible: isVisible, now: currentTime,
                                 coordinator: providerRunning(at: currentTime) == true ? store.snapshot.state.value?.coordinatorURL : nil,
                                 openHosting: openHosting)
                         }
                         compactModels(currentTime: currentTime)
-                        financePanel(currentTime: currentTime)
-                        compactJobs
                         if case .available(let capacity, _) = store.networkCapacity,
                            capacity.isDraining, capacity.isFresh(at: currentTime) {
                             Label("Network maintenance", systemImage: "wrench.and.screwdriver")
@@ -661,7 +634,7 @@ struct MonitorPopover: View {
         let available = availableIDs(excluding: advertised)
         let rows = (advertised.count + 2) / 3
             + (availableExpanded ? (available.count + 2) / 3 : 0)
-        return min(470, CGFloat(rows) * (CompactModelCard.popupHeight + 8) + 190)
+        return min(470, CGFloat(rows) * (CompactModelCard.popupHeight + 8) + 270)
     }
 
     private func advertisedIDs(at now: Date) -> [String]? {
@@ -795,23 +768,26 @@ struct MonitorPopover: View {
 
     private func financePanel(currentTime: Date) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Earnings", systemImage: "chart.line.uptrend.xyaxis")
-                .font(.subheadline.weight(.semibold))
+            HStack {
+                Label("Earnings", systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if let summary = jobSummary {
+                    Label("\(summary.completedToday) jobs", systemImage: "checkmark.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .help("Completed jobs today. \(averageJobsPerDay.map { String(format: "%.1f jobs per day on average", $0) } ?? "Daily average unavailable")")
+                }
+            }
             if earningsMetrics != nil || weekEarningsMetric != nil {
                 compactEarnings
             } else {
                 Text("Waiting for earnings history").font(.caption).foregroundStyle(.secondary)
             }
-            if UserDefaults.standard.bool(forKey: "electricity.enabled") {
+            if store.electricityEstimatesEnabled {
                 Divider()
                 EnergySummaryView(reading: store.currentEnergyReading,
                                   earnings: store.currentEnergyEarnings, now: currentTime,
                                   waitingMessage: store.energy?.issue ?? "Collecting matched earnings data")
-            } else {
-                Button { openSettings(.electricity) } label: {
-                    Label("Set up electricity estimate", systemImage: "bolt")
-                }.font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
-                    .modifier(PopupKeyboardReveal())
             }
         }
         .padding(12)
@@ -821,11 +797,11 @@ struct MonitorPopover: View {
     private var compactEarnings: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             if let metrics = earningsMetrics {
-                compactAmount("Observed today", value: metrics.totalUSD)
-                compactAmount("Per observed h", value: metrics.perHourUSD)
+                compactAmount("Today · recorded", value: metrics.totalUSD, symbol: "banknote", prominent: true)
+                compactAmount("Observed / h", value: metrics.perHourUSD, symbol: "clock")
             }
             if let week = weekEarningsMetric {
-                compactAmount(week.title, value: week.totalUSD)
+                compactAmount(week.title, value: week.totalUSD, symbol: "calendar")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -840,13 +816,14 @@ struct MonitorPopover: View {
         }
     }
 
-    private func compactAmount(_ label: String, value: Double) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Text(value, format: .currency(code: "USD").precision(.fractionLength(2...4)))
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
-                .monospacedDigit()
+    private func compactAmount(_ label: String, value: Double, symbol: String, prominent: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(label, systemImage: symbol).font(.caption2).foregroundStyle(.secondary)
+            Text(ActivityAmountPresentation.hourlyAmount(value))
+                .font(.system(size: prominent ? 25 : 18, weight: .semibold, design: .rounded))
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 
@@ -873,7 +850,8 @@ struct MonitorPopover: View {
             .frame(width: 22, height: 25)
 
             Text(MonitorApplicationIdentity.displayName)
-                .font(.system(size: 14, weight: .bold))
+                .help(Self.machineName)
+                .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
 
@@ -886,7 +864,7 @@ struct MonitorPopover: View {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.bordered)
-            .controlSize(.regular)
+            .controlSize(.small)
             .help("Settings")
             .accessibilityLabel("Settings")
             .accessibilityIdentifier("dashboard.settings")
@@ -898,7 +876,7 @@ struct MonitorPopover: View {
                 Image(systemName: "rectangle.portrait.and.arrow.right")
             }
             .buttonStyle(.bordered)
-            .controlSize(.regular)
+            .controlSize(.small)
             .help("Quit \(MonitorApplicationIdentity.displayName)")
             .accessibilityLabel("Quit \(MonitorApplicationIdentity.displayName)")
             .accessibilityIdentifier("dashboard.quit")
@@ -906,32 +884,67 @@ struct MonitorPopover: View {
         }
     }
 
-    private func providerHeader(currentTime: Date) -> some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 3) {
-                Label(Self.machineName, systemImage: "desktopcomputer")
-                    .font(.headline).lineLimit(1).help(Self.machineName)
-                Text(isOffline(at: currentTime) ? "Offline · selections ready for next start" : store.snapshot.menuStatus.accessibilityLabel)
-                    .font(.caption).foregroundStyle(.secondary)
+    private func commandBar(currentTime: Date) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            header
+            HStack(spacing: 5) {
+                ProviderLifecycleControls(store: controlStore, snapshot: store.snapshot,
+                    currentTime: currentTime, compact: true)
+                if let extras = store.providerExtras {
+                    PopupAutopilotControl(extras: extras, control: controlStore,
+                        draft: popupSettingsDraft, isVisible: isVisible)
+                } else {
+                    Button { openSettings(.provider) } label: { Label("Pilot —", systemImage: "sparkles") }
+                        .help("Autopilot status unavailable. Open provider settings.")
+                }
+                PopupAutoModeControl(store: controlStore, openModels: openModels, updateProtection: updateProtection)
+                if let nudge = store.inactivityNudge {
+                    PopupNudgeControl(store: nudge, updateProtection: updateProtection)
+                }
+                Spacer(minLength: 0)
+                Text(isOffline(at: currentTime) ? "Offline" : store.snapshot.menuStatus.accessibilityLabel)
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .help(store.snapshot.menuStatus.accessibilityLabel)
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 4) {
-                ProviderLifecycleControls(
-                    store: controlStore,
-                    snapshot: store.snapshot,
-                    currentTime: currentTime
-                )
-                if let feedback = ProviderLifecycleFeedbackPresentation.make(
-                    operation: controlStore.operation,
-                    errorMessage: controlStore.errorMessage
-                ), feedback.isError {
-                    Text(feedback.message)
-                        .font(.caption)
-                        .foregroundStyle(feedback.isError ? Color.red : Color.secondary)
-                        .multilineTextAlignment(.trailing)
+            .font(.caption.weight(.medium))
+            .buttonStyle(.bordered).controlSize(.small)
+            Divider()
+            HStack(spacing: 14) {
+                CompactGPUGauge(usage: store.gpuUsage, now: currentTime, compact: true)
+                Divider().frame(height: 24)
+                Button { openSettings(.electricity) } label: {
+                    Label(powerCommandTitle(at: currentTime), systemImage: "bolt.fill")
+                        .font(.caption.weight(.medium)).monospacedDigit()
+                }
+                .buttonStyle(.plain)
+                .help("Energy settings · whole-Mac adapter input, not provider-only or wall power. Missing readings are not zero.")
+                .accessibilityIdentifier("popup.energy.open")
+                .modifier(PopupKeyboardReveal())
+                Spacer(minLength: 0)
+                if let extras = store.providerExtras {
+                    PopupFanSummary(store: extras, now: currentTime, isVisible: isVisible,
+                        ownsVisibleFanPolling: ownsVisibleFanPolling, compact: true) { showsFans = true }
+                } else {
+                    Button { openSettings(.fans) } label: { Label("Cooling —", systemImage: "fan") }
+                        .buttonStyle(.plain).font(.caption)
                 }
             }
         }
+        .padding(10)
+        .tint(.primary)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.quaternary, lineWidth: 1))
+        .padding(.bottom, 10)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Provider commands and Mac readings")
+    }
+
+    private func powerCommandTitle(at now: Date) -> String {
+        guard let reading = store.currentEnergyReading,
+              (0...30).contains(now.timeIntervalSince(reading.date)) else {
+            return !store.electricityEstimatesEnabled ? "Energy setup" : "Power —"
+        }
+        return String(format: "%.0f W", reading.watts)
     }
 
     private var throughputSection: some View {

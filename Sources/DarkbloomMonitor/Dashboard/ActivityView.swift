@@ -28,7 +28,7 @@ struct ActivityView: View {
     @State private var selectedDate = Date()
     @State private var endDate = Date()
     @State private var read = ActivityReadState()
-    @State private var showsModelHourlyAverages = true
+    @State private var showsModelHourlyAverages = false
     @State private var refreshID = 0
     @State private var model: String?
     @State private var chartMetric = ActivityChartMetric.earnings
@@ -109,28 +109,18 @@ struct ActivityView: View {
                 if period == .date || period == .dateRange { dateControls }
                 modelFilters
                 chartControls
-                DisclosureGroup("About this activity") {
-                    Text("Recorded ledger events · \((read.completed?.query.calendar ?? query.calendar).timeZone.identifier)")
-                    Text(renderedMetric == .estimatedProfit
-                         ? "Estimated per earning model-hour. Whole-Mac electricity is shared evenly among models with recorded work; other Mac use is included. Incomplete power hours are omitted."
-                         : renderedModel == nil
-                            ? "Company shades stay related; base rewards are separate. Gaps are unknown, not zero. Recorded totals may be incomplete."
-                            : "Showing recorded work for this model only. Base rewards are excluded; gaps are unknown, not zero.")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
-                .padding(.leading, 6)
                 if let completed = read.completed, let range = completed.query.range {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(completed.query.scopeSummary)
+                    HStack(spacing: 8) {
+                        Label(completed.query.scopeSummary, systemImage: "calendar")
                             .accessibilityIdentifier("activity.earnings.completedScope")
-                            .help(completed.query.model ?? "All models")
-                        Text("\(read.status) · \(completed.query.calendar.timeZone.identifier)")
+                            .lineLimit(2).help(completed.query.scopeSummary)
+                        Spacer(minLength: 0)
+                        Image(systemName: read.pending == nil && read.message == nil ? "checkmark.circle" : "clock")
+                            .accessibilityLabel(read.status)
                             .accessibilityIdentifier("activity.earnings.readStatus")
+                            .help("\(read.status) · \(completed.query.calendar.timeZone.identifier)")
                     }
                     .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
                     if !completed.hasRecordedActivity && !completed.hasBoundaryUncertainty {
                         ContentUnavailableView(
                             "No recorded activity",
@@ -151,14 +141,31 @@ struct ActivityView: View {
                                 description: Text("Profit estimates need saved whole-Mac power readings for a complete hour with recorded model work. Enable electricity cost in Settings and allow readings to accumulate.")
                             )
                         } else {
+                            if renderedMetric == .earnings {
+                                ActivityEarningsGraphic(values: chartValues, buckets: buckets, color: chartColor(for:))
+                            }
                             activityChart(query: completed.query, range: range)
+                                .padding(16)
+                                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
                         }
                         if renderedMetric == .estimatedProfit && !visibleModelHourlyProfitAverages.isEmpty {
                             profitAveragesDisclosure
                         } else if renderedMetric == .earnings && !visibleModelHourlyAverages.isEmpty {
                             earningsAveragesDisclosure
                         }
-                        activityTable(query: completed.query)
+                        DisclosureGroup {
+                            activityTable(query: completed.query)
+                            Text("Recorded ledger events · \(completed.query.calendar.timeZone.identifier). Gaps are unknown, not zero. Recorded totals may be incomplete.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if renderedMetric == .estimatedProfit {
+                                Text("Estimated per earning model-hour. Whole-Mac electricity is shared evenly among models with recorded work; other Mac use is included. Incomplete power hours are omitted.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        } label: {
+                            Label("Ledger & coverage", systemImage: "list.bullet.rectangle")
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
                     }
                 } else if let message = read.message {
                     ContentUnavailableView("History unavailable", systemImage: "chart.bar", description: Text(message))
@@ -229,8 +236,7 @@ struct ActivityView: View {
     private var modelFilters: some View {
         if !models.isEmpty || model != nil {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Models").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                AdaptiveChoiceLayout(minimumWidth: 145, spacing: 8, maximumWidth: 190) {
+                AdaptiveChoiceLayout(minimumWidth: 125, spacing: 6, maximumWidth: 180) {
                     modelFilterChip(
                         title: "All models",
                         color: .secondary,
@@ -267,47 +273,36 @@ struct ActivityView: View {
     }
 
     private var chartControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            chartControlRow("Measure") {
-                Picker("Activity measure", selection: $chartMetric) {
-                    ForEach(ActivityChartMetric.allCases) { metric in Text(metric.rawValue).tag(metric) }
-                }
-                .labelsHidden().pickerStyle(.segmented)
-                .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
-            }
-            chartControlRow("Chart") {
-                Picker("Chart style", selection: $chartStyle) {
-                    ForEach(ActivityChartStyle.allCases) { style in Text(style.rawValue).tag(style) }
-                }
-                .labelsHidden().pickerStyle(.segmented)
-                .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
-            }
-            chartControlRow("Layout") {
-                Picker("Bar layout", selection: $barArrangement) {
-                    ForEach(ActivityBarArrangement.allCases) { arrangement in Text(arrangement.rawValue).tag(arrangement) }
-                }
-                .labelsHidden().pickerStyle(.segmented)
-                .disabled(chartStyle != .bars)
-                .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
-            }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { measurePicker; Spacer(minLength: 8); chartOptions }
+            VStack(alignment: .leading, spacing: 8) { measurePicker; chartOptions }
         }
-        .frame(maxWidth: 520, alignment: .leading)
-        .controlSize(.regular)
+        .controlSize(.small)
     }
 
-    private func chartControlRow<Control: View>(
-        _ title: String,
-        @ViewBuilder control: () -> Control
-    ) -> some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 64, alignment: .leading)
-            control()
-                .frame(maxWidth: .infinity, alignment: .leading)
+    private var measurePicker: some View {
+        Picker("Activity measure", selection: $chartMetric) {
+            Text("Gross earnings").tag(ActivityChartMetric.earnings)
+            Text("Est. profit / h").tag(ActivityChartMetric.estimatedProfit)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .labelsHidden().pickerStyle(.segmented).frame(width: 280)
+        .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
+    }
+
+    private var chartOptions: some View {
+        Menu {
+            Picker("Chart style", selection: $chartStyle) {
+                ForEach(ActivityChartStyle.allCases) { style in Text(style.rawValue).tag(style) }
+            }
+            Picker("Bar layout", selection: $barArrangement) {
+                ForEach(ActivityBarArrangement.allCases) { arrangement in Text(arrangement.rawValue).tag(arrangement) }
+            }.disabled(chartStyle != .bars)
+        } label: {
+            Label(chartStyle.rawValue, systemImage: chartStyle == .bars ? "chart.bar" : "chart.xyaxis.line")
+        }
+        .help("Chart style and bar layout")
+        .accessibilityLabel("Chart options, \(chartStyle.rawValue), \(barArrangement.rawValue)")
+        .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
     }
 
     private var profitAveragesDisclosure: some View {
@@ -615,7 +610,7 @@ struct ActivityView: View {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 }
-                .frame(height: 242)
+                .frame(height: 260)
             ChartSeriesLegend(entries: styles.visibleEntries(in: visibleSeries),
                 showsLine: chartStyle == .lines, color: chartColor(for:))
                 .padding(.top, 6)

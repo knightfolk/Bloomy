@@ -1,5 +1,14 @@
 # Native polish completion matrix — October 2, 2026
 
+October 3 Earnings and common popup bar follow-up:
+[bounded native review](EARNINGS_POPUP_COMMAND_BAR_REVIEW_20261003.md).
+The icon-first header and graphical Earnings summary have wide/light and
+compact/dark review, signed/reward-filter recovery, reachable ledger detail,
+synthetic Autopilot pause/resume, Cooling Refresh/Auto/Nudge/Energy entries,
+and 80/360-point popup scrolling proof. Full tests and Release build pass.
+This adds bounded coverage; the full display, large-text, VoiceOver and real
+integration matrix remains partial, and no production update was performed.
+
 The [active plan](APP_POLISH_OPTIMIZATION_PLAN.md) remains open. This is an
 index of recorded evidence, not completion of the full goal. **Covered** applies
 only to the named bounded assertion; **partial** means requirements remain;

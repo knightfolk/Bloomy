@@ -213,6 +213,7 @@ struct CompactModelCard: View {
 struct CompactGPUGauge: View {
     @ObservedObject var usage: SystemGPUUsageStore
     let now: Date
+    var compact = false
 
     var body: some View {
         // A sample can arrive after TimelineView's date but before this render.
@@ -227,14 +228,22 @@ struct CompactGPUGauge: View {
                                 style: StrokeStyle(lineWidth: 5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                 }
+                if compact {
+                    Image(systemName: "cpu").font(.caption)
+                } else {
                 Text(current.map { String(format: "%.0f", $0) } ?? "—")
                     .font(.system(.subheadline, design: .rounded, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(reading.isStale ? .secondary : .primary)
-            }.frame(width: 43, height: 43)
+                }
+            }.frame(width: compact ? 26 : 43, height: compact ? 26 : 43)
             VStack(alignment: .leading, spacing: 2) {
-                Text("GPU %").font(.caption.weight(.semibold))
+                Text(compact ? "GPU \(current.map { String(format: "%.0f%%", $0) } ?? "—")" : "GPU %").font(.caption.weight(.semibold))
+                if !compact {
                 Text(current == nil ? "Unavailable" : reading.isStale ? "Last sample" : "Whole Mac")
                     .font(.caption2).foregroundStyle(.secondary)
+                } else if reading.isStale {
+                    Text("Last sample").font(.caption2).foregroundStyle(.secondary)
+                }
             }
         }
         .help("Whole-Mac GPU use, including other apps. Unavailable readings are not zero.")

@@ -17,6 +17,8 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case emptyCatalog = "Empty model catalog", unavailableCatalog = "Unavailable model catalog"
     case healthLongMixed = "Health long mixed", healthLongMissing = "Health long missing"
     case largeActionHistory = "5,000 action records"
+    case acceptedWork = "Accepted work confirmation"
+    case matchedEnergy = "Matched electricity graphics"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
@@ -360,7 +362,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
     }
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .largeActionHistory:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .largeActionHistory, .acceptedWork, .matchedEnergy:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -699,7 +701,7 @@ private actor FixtureController: ProviderControlling {
     }
     func download(_ modelID: String, onOutput: (@Sendable (ProcessOutputChunk) -> Void)?) async throws {}
     func delete(_ localModelID: String) async throws {}
-    func activityRisk() async -> ProviderActivityRisk { .idle }
+    func activityRisk() async -> ProviderActivityRisk { scenario == .acceptedWork ? .active : .idle }
     func execute(_ action: ProviderLifecycleAction, enabledModels: [String]) async throws { lifecycleCount += 1 }
     func performAutopilotEnrollment(hosting: HostingOptions,
         onPhase: ProviderMutationPhaseObserver?) async throws -> ProviderAutopilotEnrollmentCompletion {
@@ -1064,6 +1066,8 @@ private final class FixtureModel: ObservableObject {
         capacityCapturedAt: Date? = nil) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore, FixtureExtras, FixtureController, FixtureEarnings, FixtureLogFeed) {
         let tokens = FixtureTokens()
         let autopilot = FixtureAutopilot()
+        defaults.set(scenario == .matchedEnergy, forKey: "electricity.enabled")
+        defaults.set("1", forKey: "electricity.usdPerKWh")
         let controller = FixtureController(scenario: scenario, autopilot: autopilot)
         let control = ProviderControlStore(controller: controller, homeDirectory: directory, hostingOptions: { .default })
         let extrasClient = FixtureExtras(scenario: scenario, autopilot: autopilot)
@@ -1072,9 +1076,12 @@ private final class FixtureModel: ObservableObject {
         let seededAt = Date()
         let events = FixtureData.logEvents(scenario, now: seededAt)
         let logFeed = FixtureLogFeed(events: events)
+        let savedEnergy = FixtureActivityRead.savedPower(now: seededAt, calendar: .current)
+        let fixtureEnergy = scenario == .matchedEnergy
+            ? EnergyRecordingSnapshot(reading: nil, intervals: savedEnergy.intervals, issue: nil) : savedEnergy
         let monitor = MonitorStore(service: TelemetryService(source: FixtureTelemetrySource(scenario: scenario, logFeed: logFeed)),
             initial: FixtureData.snapshot(scenario, now: seededAt, events: events), providerExtras: extras,
-            initialEnergy: FixtureActivityRead.savedPower(now: seededAt, calendar: .current),
+            initialEnergy: fixtureEnergy,
             earningsClient: earningsClient,
             networkCapacityClient: FixtureCapacity(scenario: scenario, fixedCapture: capacityCapturedAt), publicCatalogClient: FixtureCatalog(scenario: scenario),
             publicPricingClient: FixturePricing(scenario: scenario), networkSeriesClient: FixtureSeries(scenario: scenario),
@@ -1408,6 +1415,9 @@ private final class FixtureModel: ObservableObject {
             preparedMonitor.actionHistory = history; preparedControl.actionHistory = history
             await preparedControl.refresh(); await preparedMonitor.providerExtras?.refresh()
             await preparedMonitor.refreshEarnings(); await preparedMonitor.refreshPublicCatalog(); await preparedMonitor.refreshPublicPricing()
+            if requestedScenario == .matchedEnergy, let energy = preparedMonitor.energy {
+                await preparedMonitor.updateEnergyEarnings(using: energy, enabled: true, at: Date())
+            }
             if requestedScenario != .offline { await preparedMonitor.refreshNetworkCapacity(); await preparedMonitor.refreshNetworkSeries() }
             if requestedScenario == .stale {
                 await preparedMonitor.refreshNetworkCapacity(); await preparedMonitor.refreshNetworkSeries()

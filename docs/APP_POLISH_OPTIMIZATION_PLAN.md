@@ -1,5 +1,15 @@
 # Bloomy native polish and efficiency
 
+October 3 Earnings/popup checkpoint: Kevin's icon-first redesign now has a
+graphic earnings total, model/reward composition, jobs and ledger intervals,
+with chart options and ledger detail on demand. One shared popup header groups
+provider, guarded Autopilot, Auto/Nudge, GPU, energy and cooling controls.
+Native dark/compact, signed, action and 80/360-point scrolling checks,
+1,597 reported tests (seven opt-in skips) and the Release build passed. This is
+a local review checkpoint; installed build 143 and the provider are preserved.
+See `EARNINGS_POPUP_COMMAND_BAR_REVIEW_20261003.md`. It does not complete the
+broader native/VoiceOver, performance or real integration matrix below.
+
 October 3 distribution checkpoint: version 1.9.18/build 143 was rebuilt from
 the verified current source, signed, notarized, stapled and published with
 matching asset digests and four exact-ZIP isolated updater gates. The running

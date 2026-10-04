@@ -173,6 +173,21 @@ enum ProviderLifecycleControl: CaseIterable {
     case stop
     case restart
 
+    var title: String {
+        switch self { case .start: "Start"; case .stop: "Stop"; case .restart: "Restart" }
+    }
+
+    var progressTitle: String {
+        switch self { case .start: "Starting"; case .stop: "Stopping"; case .restart: "Restarting" }
+    }
+
+    static func compactControl(running: Bool?, operation: ProviderOperation) -> Self {
+        if case .lifecycle(let action) = operation {
+            switch action { case .start: return .start; case .stop: return .stop; case .restart: return .restart }
+        }
+        return running == false ? .start : .stop
+    }
+
     var action: ProviderLifecycleAction {
         switch self {
         case .start: .start
@@ -301,15 +316,18 @@ struct ProviderLifecycleControls: View {
     @State private var dismissalCoordinator = LifecycleConfirmationDismissalCoordinator()
     let snapshot: TelemetrySnapshot
     let currentTime: Date?
+    var compact = false
 
     init(
         store: ProviderControlStore,
         snapshot: TelemetrySnapshot,
-        currentTime: Date? = nil
+        currentTime: Date? = nil,
+        compact: Bool = false
     ) {
         self.store = store
         self.snapshot = snapshot
         self.currentTime = currentTime
+        self.compact = compact
     }
 
     private func presentation(currentTime: Date) -> ProviderLifecyclePresentation {
@@ -359,8 +377,11 @@ struct ProviderLifecycleControls: View {
 
     private func controls(currentTime: Date) -> some View {
         let presentation = presentation(currentTime: currentTime)
+        let running = ProviderLifecycleSourceInput(daemonState: snapshot.state, status: snapshot.status,
+            controlDaemonState: store.snapshot?.sources.daemon, currentTime: currentTime).providerKnownRunning
+        let compactControl = ProviderLifecycleControl.compactControl(running: running, operation: store.operation)
         return VStack(alignment: .trailing, spacing: 4) {
-            if case .lifecycle(let action) = store.operation {
+            if !compact, case .lifecycle(let action) = store.operation {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text(action == .stop ? "Stopping…" : action == .restart ? "Restarting…" : "Starting…")
@@ -373,31 +394,37 @@ struct ProviderLifecycleControls: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 6) {
-                ForEach(ProviderLifecycleControl.allCases, id: \.self) { control in
+                ForEach(compact ? [compactControl] : ProviderLifecycleControl.allCases, id: \.self) { control in
                     Button {
                         Task { await store.request(control.action) }
                     } label: {
-                        Group {
-                            if control.isActive(in: store.operation) {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: control.systemImage)
+                        HStack(spacing: 5) {
+                            Group {
+                                if control.isActive(in: store.operation) {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: control.systemImage)
+                                }
+                            }
+                            .frame(width: 14, height: 14)
+                            if compact {
+                                Text(control.isActive(in: store.operation) ? control.progressTitle : control.title)
+                                    .font(.caption.weight(.medium))
                             }
                         }
-                        .frame(width: 14, height: 14)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(!control.isEnabled(in: presentation))
-                    .help(control.accessibilityLabel)
+                    .help(presentation.unavailableReason ?? control.accessibilityLabel)
                     .accessibilityLabel(control.accessibilityLabel)
+                    .accessibilityHint(presentation.unavailableReason ?? "")
                     .accessibilityIdentifier(control.accessibilityIdentifier)
                     .modifier(PopupKeyboardReveal())
                 }
             }
 
-            if store.operation == .idle, let reason = ProviderLifecycleUnavailableReasonPresentation.make(
+            if !compact, store.operation == .idle, let reason = ProviderLifecycleUnavailableReasonPresentation.make(
                 from: presentation
             ) {
                 Label(reason.message, systemImage: reason.systemImage)
@@ -417,7 +444,7 @@ struct ProviderLifecycleControls: View {
 
         }
         .frame(
-            maxWidth: ProviderLifecycleUnavailableReasonPresentation.maxWidth,
+            maxWidth: compact ? nil : ProviderLifecycleUnavailableReasonPresentation.maxWidth,
             alignment: .trailing
         )
     }

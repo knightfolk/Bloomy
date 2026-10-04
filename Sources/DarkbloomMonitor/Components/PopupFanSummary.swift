@@ -7,6 +7,7 @@ struct PopupFanSummary: View {
     let now: Date
     var isVisible: Bool = true
     var ownsVisibleFanPolling: Bool = true
+    var compact = false
     let open: () -> Void
 
     private var status: ProviderFanStatus? {
@@ -35,6 +36,22 @@ struct PopupFanSummary: View {
 
     var body: some View {
         Button(action: open) {
+            if compact {
+                HStack(spacing: 6) {
+                    Image(systemName: "fan").font(.system(size: 16))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(status?.displayedTemperatureCelsius.map { String(format: "%.0f°C", $0) } ?? "Cooling —")
+                            .font(.caption.weight(.medium))
+                        Text(readingsAreFresh ? status?.displayedFans.compactMap(\.actualRPM).max().map { "\(Int($0)) RPM" } ?? state : state)
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }.monospacedDigit()
+                    Image(systemName: "chevron.right").font(.system(size: 8)).foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(readingsAreFresh ? Color.primary : .secondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Cooling, \(state)")
+                .accessibilityValue(compactReadings)
+            } else {
             HStack(spacing: 10) {
                 Image(systemName: "fan")
                     .font(.system(size: 22)).foregroundStyle(.secondary)
@@ -70,14 +87,23 @@ struct PopupFanSummary: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+            }
         }
         .buttonStyle(.plain)
-        .help("Fan helper and cooling readings")
+        .help("Fan helper and cooling readings · \(state)")
         .accessibilityIdentifier("popup.fans")
         .modifier(PopupKeyboardReveal())
         .task(id: isVisible && ownsVisibleFanPolling) {
             guard isVisible && ownsVisibleFanPolling else { return }
             await store.observeVisibleFan()
         }
+    }
+
+    private var compactReadings: String {
+        let temperature = status?.displayedTemperatureCelsius.map { String(format: "%.0f degrees Celsius", $0) }
+            ?? "Temperature unavailable"
+        let speed = status?.displayedFans.compactMap(\.actualRPM).max().map { "Highest fan speed \(Int($0)) RPM" }
+            ?? "Fan speed unavailable"
+        return "\(readingsAreFresh ? "" : "Last readings, ")\(temperature), \(speed)"
     }
 }

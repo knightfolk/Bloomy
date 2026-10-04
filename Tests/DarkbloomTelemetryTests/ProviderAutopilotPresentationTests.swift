@@ -51,6 +51,7 @@ struct ProviderAutopilotPresentationTests {
     func shadow() {
         let observed = presentation(status())
         #expect(observed.stateTitle == "Observing · shadow mode")
+        #expect(observed.compactStateTitle == "Shadow")
         #expect(observed.explanation.contains("recorded only"))
         #expect(!observed.canEnroll)
         #expect(observed.canPerform(.pause))
@@ -65,6 +66,7 @@ struct ProviderAutopilotPresentationTests {
             matches: mode != "oldRevision", phase: mode == "unknownPhase" ? nil : .active,
             livePresent: mode != "noLive"))
         #expect((observed.stateTitle == "Actively managing") == (mode == "valid"))
+        #expect((observed.compactStateTitle == "Live") == (mode == "valid"))
     }
 
     @Test("Configured pause or resume is distinguishable from observed control")
@@ -72,6 +74,7 @@ struct ProviderAutopilotPresentationTests {
         #expect(presentation(status(paused: true)).stateTitle == "Pause requested")
         let paused = presentation(status(paused: true, livePaused: true, phase: .paused))
         #expect(paused.stateTitle == "Paused")
+        #expect(paused.compactStateTitle == "Paused")
         #expect(paused.canPerform(.resume))
         #expect(!paused.canPerform(.pause))
         let resume = presentation(status(livePaused: true))
@@ -105,6 +108,7 @@ struct ProviderAutopilotPresentationTests {
         #expect(observed.canPerform(.pause) == fresh)
         #expect(observed.canPerform(.disable) == fresh)
         #expect(observed.stateTitle.hasPrefix("Last known:") == !fresh)
+        #expect(observed.compactStateTitle == (fresh ? "Shadow" : "Stale"))
         #expect(presentation(status(enabled: false), age: age).canEnroll == fresh)
     }
 

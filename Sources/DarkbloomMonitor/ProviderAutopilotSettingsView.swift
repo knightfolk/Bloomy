@@ -42,6 +42,24 @@ struct ProviderAutopilotPresentation {
         return isFresh ? title : "Last known: \(title)"
     }
 
+    /// Short enough for the popup rail; full state and explanation remain in help.
+    var compactStateTitle: String {
+        guard status != nil else { return "—" }
+        guard isFresh else { return "Stale" }
+        switch stateTitle {
+        case "Off": return "Off"
+        case "Paused": return "Paused"
+        case "Actively managing": return "Live"
+        case "Observing · shadow mode": return "Shadow"
+        case "Leaving Autopilot": return "Leaving"
+        case "Setup incomplete": return "Setup"
+        case "Pause requested", "Resume requested": return "Pending"
+        case "Changing models": return "Changing"
+        case "Recovering": return "Recovery"
+        default: return "Waiting"
+        }
+    }
+
     var explanation: String {
         guard isFresh else { return "Refresh to check Autopilot before changing it." }
         guard let status else { return "Autopilot status could not be checked. Use a supported provider version and refresh." }

@@ -5,6 +5,14 @@ import Testing
 
 @Suite("Provider lifecycle presentation")
 struct ProviderLifecyclePresentationTests {
+    @Test("compact lifecycle action follows confirmed state and ongoing restart")
+    func compactAction() {
+        #expect(ProviderLifecycleControl.compactControl(running: false, operation: .idle) == .start)
+        #expect(ProviderLifecycleControl.compactControl(running: true, operation: .idle) == .stop)
+        #expect(ProviderLifecycleControl.compactControl(running: nil, operation: .idle) == .stop)
+        #expect(ProviderLifecycleControl.compactControl(running: false, operation: .lifecycle(.restart)) == .restart)
+        #expect(ProviderLifecycleControl.restart.progressTitle == "Restarting")
+    }
     @Test("running provider offers stop and restart")
     func runningActions() {
         let value = ProviderLifecyclePresentation.make(

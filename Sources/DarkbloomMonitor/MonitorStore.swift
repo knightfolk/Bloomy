@@ -24,6 +24,8 @@ final class MonitorStore: ObservableObject {
     private var energyActivityKey: EnergyActivityKey?
     private var energyActivityBuckets: [ActivityBucket]?
 
+    var electricityEstimatesEnabled: Bool { energyPreferences.bool(forKey: "electricity.enabled") }
+
     var currentEnergyReading: EnergyReading? {
         guard energyPreferences.bool(forKey: "electricity.enabled"),
               ElectricityCost.rate(energyPreferences.string(forKey: "electricity.usdPerKWh") ?? "") != nil,
