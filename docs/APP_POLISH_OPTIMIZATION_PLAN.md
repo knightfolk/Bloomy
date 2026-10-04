@@ -1,5 +1,14 @@
 # Bloomy native polish and efficiency
 
+October 4 read-ownership follow-up: native reverse-reference evidence isolated
+an obsolete large raw read in saved SwiftUI state/task captures. A shared read
+owner removes that tested 22.4 MB allocation after narrowing, without changing
+filter/error/timer ownership. Four native heap gates and full, failed, empty,
+hidden and filtered-reopen recovery passed; all 1,637 reported Release tests
+pass. See `METRICS_READ_OWNERSHIP_REVIEW_20261004.md`. This resolves the specific
+raw-buffer question from the capacity checkpoint below, while broader resource,
+accessibility, motion and production proof remain open.
+
 October 4 Metrics capacity follow-up: a shorter query reserves its actual
 membership rather than the former large scope. Paired synthetic component runs
 reduce the shrinking sample buffer from 21.375 to 0.750 MiB with exact field/order

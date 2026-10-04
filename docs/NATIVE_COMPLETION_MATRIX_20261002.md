@@ -1,5 +1,13 @@
 # Native polish completion matrix — October 2, 2026
 
+October 4 raw-read ownership follow-up: four stable native heap gates confirm
+obsolete large raw buffers disappear after narrowing and empty/hidden release.
+Held-failed, filtered reopen and compact dark Metrics recovery were inspected;
+24 presentation tests and the full 1,637-test Release run pass. The specific
+raw-read retention case from the capacity follow-up is resolved in the inert
+fixture; broader production, accessibility and motion proof remains partial.
+See [ownership review](METRICS_READ_OWNERSHIP_REVIEW_20261004.md).
+
 October 4 Metrics capacity follow-up: exact-source native 100,000-row navigation,
 shorter period, manual Refresh, minimized heap release and fresh reopen passed.
 Paired component probes reduce shorter-query sample storage with complete

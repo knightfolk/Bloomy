@@ -52,14 +52,26 @@ struct PerformanceMetricsView: View {
     }
 }
 
+/// Copies of a mounted view/task must share one current raw read. Large value
+/// State can retain obsolete arrays in saved values and long-lived task captures.
+@MainActor
+private final class PerformanceMetricsReadStorage: ObservableObject {
+    @Published var value = PerformanceMetricsRead.empty
+}
+
 private struct RecordedPerformanceMetricsView: View {
     @ObservedObject var history: PerformanceHistoryStore
     let isVisible: Bool
-    @State private var read = PerformanceMetricsRead.empty
+    @StateObject private var readStorage = PerformanceMetricsReadStorage()
     @State private var loading = false
     @State private var readError: String?
     @State private var period = PerformanceMetricsPeriod.last24Hours
     @State private var refreshID = 0
+
+    private var read: PerformanceMetricsRead {
+        get { readStorage.value }
+        nonmutating set { readStorage.value = newValue }
+    }
 
     var body: some View {
         TimelineView(MetricsTimelineSchedule(isVisible: isVisible)) { context in

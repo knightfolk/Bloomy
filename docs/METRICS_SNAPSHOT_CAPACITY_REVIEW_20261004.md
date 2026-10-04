@@ -1,5 +1,10 @@
 # Metrics snapshot capacity and native heap investigation
 
+Follow-up: the specific mounted obsolete-read ownership described below was
+diagnosed and resolved with bounded native proof in
+[Metrics read ownership](METRICS_READ_OWNERSHIP_REVIEW_20261004.md). The capacity
+measurements and broader resource limits in this earlier checkpoint still apply.
+
 The immutable Metrics snapshot now reserves its sample and row-ID arrays for
 the current query membership. Previously, a smaller period or model filter
 reserved the prior snapshot's row count. A 24-hour query could therefore keep
