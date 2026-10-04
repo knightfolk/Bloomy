@@ -25,62 +25,80 @@ struct PopupEarningsGraphic: View {
     let week: PopupWeekEarningsMetric?
 
     var body: some View {
-        HStack(spacing: 16) {
-            amountComparison
-            VStack(alignment: .leading, spacing: 8) {
-                if let metrics {
-                    amount("Today · observed", value: metrics.totalUSD, symbol: "banknote", prominent: true)
-                }
-                HStack(spacing: 20) {
-                    if let metrics {
-                        amount("Per observed h", value: metrics.perHourUSD, symbol: "clock")
-                    }
-                    if let week {
-                        amount(week.title, value: week.totalUSD, symbol: "calendar")
-                    }
-                }
-            }.frame(maxWidth: .infinity, alignment: .leading)
+        let comparison = PopupEarningsComparison(today: metrics?.totalUSD, week: week?.totalUSD)
+        HStack(alignment: .top, spacing: 8) {
+            amountTile("Today", qualifier: "observed", value: metrics?.totalUSD,
+                symbol: "sun.max.fill", color: .green,
+                fraction: comparison.fraction(comparison.today))
+            rateTile
+            amountTile("Week", qualifier: week?.title == "This week" ? "this week" : "observed",
+                value: week?.totalUSD, symbol: "calendar", color: .accentColor,
+                fraction: comparison.fraction(comparison.week))
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Observed earnings")
     }
 
-    private var amountComparison: some View {
-        let comparison = PopupEarningsComparison(today: metrics?.totalUSD, week: week?.totalUSD)
-        return HStack(alignment: .bottom, spacing: 9) {
-            comparisonColumn(fraction: comparison.fraction(comparison.today),
-                symbol: "sun.max", title: "Today", color: .green)
-            comparisonColumn(fraction: comparison.fraction(comparison.week),
-                symbol: "calendar", title: "Week", color: .accentColor)
+    private func amountTile(_ title: String, qualifier: String, value: Double?,
+                            symbol: String, color: Color, fraction: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol).foregroundStyle(color).font(.system(size: 18))
+                Text(title).font(.caption.weight(.medium))
+                Spacer(minLength: 0)
+            }
+            amount(value)
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4).fill(color.opacity(0.10))
+                    if let fraction, fraction > 0 {
+                        RoundedRectangle(cornerRadius: 4).fill(color.gradient)
+                            .frame(width: max(1, geometry.size.width * fraction))
+                    }
+                    if fraction == nil {
+                        Image(systemName: "questionmark").font(.caption2).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }.frame(height: 14).accessibilityHidden(true)
+            Text(qualifier).font(.caption2).foregroundStyle(.secondary)
         }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Recorded amount comparison")
-        .accessibilityValue("Today \(metrics.map { ActivityAmountPresentation.hourlyAmount($0.totalUSD) } ?? "unavailable"), week \(week.map { ActivityAmountPresentation.hourlyAmount($0.totalUSD) } ?? "unavailable")")
-        .help("Today and week amounts on the same dollar scale. Each period can have partial observation coverage. Bars compare recorded amounts; they do not indicate a target, trend or guaranteed payout.")
+        .accessibilityLabel("\(title), \(qualifier) earnings")
+        .accessibilityValue(value.map { ActivityAmountPresentation.hourlyAmount($0) } ?? "Unavailable")
+        .help("Recorded \(title.lowercased()) earnings. Today and week bars use the same dollar scale, with partial observation coverage. They are not targets or payout guarantees.")
     }
 
-    private func comparisonColumn(fraction: Double?, symbol: String, title: String, color: Color) -> some View {
-        VStack(spacing: 4) {
-            ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: 5).fill(.quaternary)
-                if let fraction, fraction > 0 {
-                    RoundedRectangle(cornerRadius: 5).fill(color.opacity(0.8))
-                        .frame(height: max(1, 66 * fraction))
-                }
-                if fraction == nil {
-                    Image(systemName: "questionmark").font(.caption2).foregroundStyle(.secondary)
-                }
-            }.frame(width: 23, height: 66)
-            Image(systemName: symbol).font(.caption2).foregroundStyle(.secondary)
-        }.help(title).accessibilityHidden(true)
+    private var rateTile: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: "clock").foregroundStyle(.orange).font(.system(size: 18))
+                Text("Per hour").font(.caption.weight(.medium))
+                Spacer(minLength: 0)
+            }
+            amount(metrics?.perHourUSD)
+            HStack(spacing: 3) {
+                Image(systemName: "dollarsign.circle")
+                Image(systemName: "divide").font(.system(size: 9))
+                Image(systemName: "clock")
+            }.font(.caption2).foregroundStyle(.secondary).frame(height: 14)
+            Text("observed hours").font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Earnings per observed hour")
+        .accessibilityValue(metrics.map { ActivityAmountPresentation.hourlyAmount($0.perHourUSD) } ?? "Unavailable")
+        .help("Recorded earnings divided by observed hours today. This is not a forecast or a guaranteed hourly rate.")
     }
 
-    private func amount(_ title: String, value: Double, symbol: String, prominent: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Label(title, systemImage: symbol).font(.caption2).foregroundStyle(.secondary)
-            Text(ActivityAmountPresentation.hourlyAmount(value))
-                .font(.system(size: prominent ? 27 : 16, weight: .semibold, design: .rounded))
-                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
-        }.accessibilityElement(children: .combine)
+    private func amount(_ value: Double?) -> some View {
+        Text(value.map { ActivityAmountPresentation.hourlyAmount($0) } ?? "—")
+            .font(.system(size: 23, weight: .semibold, design: .rounded))
+            .monospacedDigit().lineLimit(1).minimumScaleFactor(0.65)
     }
 }

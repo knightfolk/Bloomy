@@ -15,7 +15,7 @@ struct PopupNudgeControl: View {
         .accessibilityIdentifier("popup.nudge.open")
         .modifier(PopupKeyboardReveal())
         .sheet(isPresented: $showsSheet) {
-            sheetContent
+            sheetContent.labelStyle(.titleAndIcon).buttonStyle(.bordered)
         }
     }
 

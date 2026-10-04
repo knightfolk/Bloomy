@@ -1,5 +1,13 @@
 # Bloomy native polish and efficiency
 
+October 4 popup command-tile follow-up: Hosting, Start/Stop, Autopilot, Auto,
+Nudge and More now share consistent icon-first controls above the live Mac
+readings. Earnings uses three equal-width graphic tiles. An observed native
+More-popover navigation failure was corrected with a standard Mac menu.
+Final Release tests pass; exact-source light/dark, Auto/Nudge/Cooling,
+Available and accepted-work confirmation proof is recorded in
+`POPUP_COMMAND_TILES_REVIEW_20261004.md`. This remains local review work.
+
 October 4 large-history follow-up: Metrics releases hidden raw rows while
 retaining its completed summary and scope. Released buffers cannot be analyzed
 as empty results. The opt-in 100,000-record seed, optimized native evidence,

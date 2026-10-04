@@ -22,7 +22,7 @@ struct MonitorPopoverLayoutTests {
         let host = NSHostingController(rootView: view)
         let fitted = host.sizeThatFits(in: NSSize(width: 528, height: 0))
         #expect(fitted.width == 528)
-        #expect(fitted.height < 130)
+        #expect(fitted.height < 130, "Reported earnings height: \(fitted.height)")
     }
 
     @Test("post-switch feedback fits the popup and distinguishes success from missing key")

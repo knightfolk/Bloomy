@@ -541,11 +541,6 @@ struct MonitorPopover: View {
                             HostGPUProtectionSummaryView(protection: protection, slowdownWarning: store.servingSlowdownWarning)
                         }
                         financePanel(currentTime: currentTime)
-                        if let hostingStore {
-                            PopupHostingSummary(store: hostingStore, isVisible: isVisible, now: currentTime,
-                                coordinator: providerRunning(at: currentTime) == true ? store.snapshot.state.value?.coordinatorURL : nil,
-                                openHosting: openHosting)
-                        }
                         compactModels(currentTime: currentTime)
                         if case .available(let capacity, _) = store.networkCapacity,
                            capacity.isDraining, capacity.isFresh(at: currentTime) {
@@ -821,41 +816,48 @@ struct MonitorPopover: View {
         }
     }
 
-    private var navigationControls: some View {
-        HStack(spacing: 4) {
-            Button(action: openDashboard) { Image(systemName: "rectangle.grid.2x2") }
-                .help("Open dashboard").accessibilityLabel("Open dashboard")
-                .modifier(PopupKeyboardReveal())
-            Button { openSettings(nil) } label: { Image(systemName: "gearshape") }
-                .help("Settings").accessibilityLabel("Settings")
-                .accessibilityIdentifier("dashboard.settings")
-                .modifier(PopupKeyboardReveal())
-            Button(role: .destructive) { Task { await store.quit() } } label: {
-                Image(systemName: "rectangle.portrait.and.arrow.right")
-            }
-            .help("Quit \(MonitorApplicationIdentity.displayName)")
-            .accessibilityLabel("Quit \(MonitorApplicationIdentity.displayName)")
-            .accessibilityIdentifier("dashboard.quit")
-            .modifier(PopupKeyboardReveal())
-        }
-    }
-
     private func commandBar(currentTime: Date) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(spacing: 9) {
+            HStack(spacing: 5) {
+                if let hostingStore {
+                    PopupHostingControl(store: hostingStore, isVisible: isVisible, now: currentTime,
+                        coordinator: providerRunning(at: currentTime) == true ? store.snapshot.state.value?.coordinatorURL : nil,
+                        openHosting: openHosting)
+                } else {
+                    Button(action: openHosting) { Label("Hosting", systemImage: "network") }
+                }
+                ProviderLifecycleControls(store: controlStore, snapshot: store.snapshot,
+                    currentTime: currentTime, compact: true, commandTile: true)
+                if let extras = store.providerExtras {
+                    PopupAutopilotControl(extras: extras, control: controlStore,
+                        draft: popupSettingsDraft, isVisible: isVisible)
+                } else {
+                    Button { openSettings(.provider) } label: { Label("Pilot —", systemImage: "sparkles") }
+                        .help("Autopilot status unavailable. Open provider settings.")
+                }
+                PopupAutoModeControl(store: controlStore, openModels: openModels,
+                    updateProtection: updateProtection, commandTile: true)
+                if let nudge = store.inactivityNudge {
+                    PopupNudgeControl(store: nudge, updateProtection: updateProtection)
+                }
+                PopupMoreControl(openDashboard: openDashboard,
+                    openSettings: { openSettings(nil) }, quit: { Task { await store.quit() } })
+            }
+            .labelStyle(PopupCommandLabelStyle())
+            .buttonStyle(PopupCommandButtonStyle())
+            Divider()
             HStack(spacing: 12) {
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     DarkbloomLogo(image: DarkbloomLogoAsset.sourceImage, tint: logoColor)
-                        .frame(width: 20, height: 22)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Bloomy").font(.subheadline.weight(.semibold))
-                        Text(providerRunning(at: currentTime).map { $0 ? "Online" : "Offline" } ?? "Unknown")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
+                        .frame(width: 18, height: 20)
+                    Text(providerRunning(at: currentTime).map { $0 ? "Online" : "Offline" } ?? "Unknown")
+                        .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
                 }
                 .help("\(Self.machineName) · \(store.snapshot.menuStatus.accessibilityLabel)")
                 .accessibilityElement(children: .combine)
                 Spacer(minLength: 0)
                 CompactGPUGauge(usage: store.gpuUsage, now: currentTime, compact: true)
+                Divider().frame(height: 24)
                 Button { openSettings(.electricity) } label: {
                     Label(powerCommandTitle(at: currentTime), systemImage: "bolt.fill")
                         .font(.caption.weight(.medium)).monospacedDigit()
@@ -864,6 +866,7 @@ struct MonitorPopover: View {
                 .help("Energy settings · whole-Mac adapter input, not provider-only or wall power. Missing readings are not zero.")
                 .accessibilityIdentifier("popup.energy.open")
                 .modifier(PopupKeyboardReveal())
+                Divider().frame(height: 24)
                 if let extras = store.providerExtras {
                     PopupFanSummary(store: extras, now: currentTime, isVisible: isVisible,
                         ownsVisibleFanPolling: ownsVisibleFanPolling, compact: true) { showsFans = true }
@@ -872,31 +875,11 @@ struct MonitorPopover: View {
                         .buttonStyle(.plain).font(.caption)
                 }
             }
-            HStack(spacing: 5) {
-                ProviderLifecycleControls(store: controlStore, snapshot: store.snapshot,
-                    currentTime: currentTime, compact: true)
-                if let extras = store.providerExtras {
-                    PopupAutopilotControl(extras: extras, control: controlStore,
-                        draft: popupSettingsDraft, isVisible: isVisible)
-                } else {
-                    Button { openSettings(.provider) } label: { Label("Pilot —", systemImage: "sparkles") }
-                        .help("Autopilot status unavailable. Open provider settings.")
-                }
-                PopupAutoModeControl(store: controlStore, openModels: openModels, updateProtection: updateProtection)
-                if let nudge = store.inactivityNudge {
-                    PopupNudgeControl(store: nudge, updateProtection: updateProtection)
-                }
-                Spacer(minLength: 0)
-                navigationControls
-            }
-            .font(.caption.weight(.medium))
-            .buttonStyle(.bordered).controlSize(.small)
         }
         .padding(10)
         .tint(.primary)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.quaternary, lineWidth: 1))
-        .padding(.bottom, 6)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Provider commands and Mac readings")
     }

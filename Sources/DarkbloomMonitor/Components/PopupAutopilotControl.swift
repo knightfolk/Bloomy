@@ -31,7 +31,7 @@ struct PopupAutopilotControl: View {
                             await control.performSettingsMutation(label, mutation: mutation)
                         }, isVisible: showsControls && isVisible, draft: draft)
                 }.formStyle(.grouped)
-            }.padding(16).frame(width: 420)
+            }.labelStyle(.titleAndIcon).buttonStyle(.bordered).padding(16).frame(width: 420)
         }
     }
 }

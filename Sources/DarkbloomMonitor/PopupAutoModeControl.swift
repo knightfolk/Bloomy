@@ -6,6 +6,7 @@ struct PopupAutoModeControl: View {
     @ObservedObject var store: ProviderControlStore
     let openModels: () -> Void
     var updateProtection: AppUpdateEditorProtection? = nil
+    var commandTile = false
     @State private var showsSetup = false
 
     var body: some View {
@@ -14,13 +15,14 @@ struct PopupAutoModeControl: View {
         } label: {
             Label("Auto…", systemImage: "arrow.triangle.2.circlepath")
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(PopupAdaptiveCommandButtonStyle(commandTile: commandTile))
         .controlSize(.small)
         .help("Advertise selected models with one slot and a chosen startup model")
         .accessibilityIdentifier("popover.auto")
         .modifier(PopupKeyboardReveal())
         .sheet(isPresented: $showsSetup) {
             PopupAutoModeSetup(store: store, openModels: openModels, updateProtection: updateProtection)
+                .labelStyle(.titleAndIcon).buttonStyle(.bordered)
         }
     }
 }

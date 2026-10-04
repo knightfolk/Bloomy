@@ -1,5 +1,13 @@
 # Native polish completion matrix — October 2, 2026
 
+October 4 popup command-tile follow-up: equal icon-first commands and equal
+Earnings tiles have exact-source native light/dark proof; Auto, Nudge,
+Cooling refresh, Available collapse and guarded Stop were inspected.
+The rejected nested More popover was replaced by a native menu with verified
+parent closure and Settings navigation. See
+[command-tile review](POPUP_COMMAND_TILES_REVIEW_20261004.md).
+Production delivery and the remaining matrix gaps stay open.
+
 October 4 large-history follow-up: an optimized inert Metrics fixture exercises
 the 100,000-record retention cap and qualified displayed/minimized process
 windows. Hidden raw rows are released without treating the buffer as a

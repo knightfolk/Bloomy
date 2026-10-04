@@ -317,17 +317,20 @@ struct ProviderLifecycleControls: View {
     let snapshot: TelemetrySnapshot
     let currentTime: Date?
     var compact = false
+    var commandTile = false
 
     init(
         store: ProviderControlStore,
         snapshot: TelemetrySnapshot,
         currentTime: Date? = nil,
-        compact: Bool = false
+        compact: Bool = false,
+        commandTile: Bool = false
     ) {
         self.store = store
         self.snapshot = snapshot
         self.currentTime = currentTime
         self.compact = compact
+        self.commandTile = commandTile
     }
 
     private func presentation(currentTime: Date) -> ProviderLifecyclePresentation {
@@ -398,22 +401,27 @@ struct ProviderLifecycleControls: View {
                     Button {
                         Task { await store.request(control.action) }
                     } label: {
-                        HStack(spacing: 5) {
-                            Group {
-                                if control.isActive(in: store.operation) {
-                                    ProgressView().controlSize(.small)
-                                } else {
-                                    Image(systemName: control.systemImage)
+                        if commandTile {
+                            Label(control.isActive(in: store.operation) ? control.progressTitle : control.title,
+                                  systemImage: control.isActive(in: store.operation) ? "hourglass" : control.systemImage)
+                        } else {
+                            HStack(spacing: 5) {
+                                Group {
+                                    if control.isActive(in: store.operation) {
+                                        ProgressView().controlSize(.small)
+                                    } else {
+                                        Image(systemName: control.systemImage)
+                                    }
                                 }
-                            }
-                            .frame(width: 14, height: 14)
-                            if compact {
-                                Text(control.isActive(in: store.operation) ? control.progressTitle : control.title)
-                                    .font(.caption.weight(.medium))
+                                .frame(width: 14, height: 14)
+                                if compact {
+                                    Text(control.isActive(in: store.operation) ? control.progressTitle : control.title)
+                                        .font(.caption.weight(.medium))
+                                }
                             }
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(PopupAdaptiveCommandButtonStyle(commandTile: commandTile))
                     .controlSize(.small)
                     .disabled(!control.isEnabled(in: presentation))
                     .help(presentation.unavailableReason ?? control.accessibilityLabel)
