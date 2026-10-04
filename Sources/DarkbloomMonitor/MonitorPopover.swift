@@ -781,11 +781,7 @@ struct MonitorPopover: View {
                         .help("Completed jobs today. \(averageJobsPerDay.map { String(format: "%.1f jobs per day on average", $0) } ?? "Daily average unavailable")")
                 }
             }
-            if earningsMetrics != nil || weekEarningsMetric != nil {
-                compactEarnings
-            } else {
-                Text("Waiting for earnings history").font(.caption).foregroundStyle(.secondary)
-            }
+            compactEarnings
             if store.electricityEstimatesEnabled {
                 Divider()
                 EnergySummaryView(reading: store.currentEnergyReading,

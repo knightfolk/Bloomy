@@ -1,5 +1,11 @@
 # Native polish completion matrix — October 2, 2026
 
+October 4 missing Earnings layout follow-up: equal tiles preserve model-card
+placement across missing/partial and zero states. Native light/dark, retained
+recovery and 240-point scroll-action/Available checks pass. Physical wheel,
+VoiceOver and the broader route matrix remain open. See
+[missing Earnings review](POPUP_UNKNOWN_EARNINGS_REVIEW_20261004.md).
+
 October 4 calendar Earnings follow-up: retained same-period values preserve
 graphic tiles with explicit clock/last-read qualifiers. Native failure, expiry,
 independent day/week, zero/empty and recovery checks pass in the inert fixture.

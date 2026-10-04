@@ -1,5 +1,11 @@
 # Bloomy native polish and efficiency
 
+October 4 missing Earnings layout follow-up: the popup preserves three equal
+graphic tiles across missing/partial reads, with neutral unavailable cues and
+known-zero distinction. Native light/dark and short-popup scroll/disclosure
+checks pass; all 1,643 reported Release tests pass. Physical wheel proof remains
+open. See `POPUP_UNKNOWN_EARNINGS_REVIEW_20261004.md`.
+
 October 4 calendar Earnings follow-up: failed/expired reads retain same-period
 graphics with explicit last-read qualifiers, while current-value rules stay
 strict. Native light/dark, independent failures, expiry, zero/empty and recovery

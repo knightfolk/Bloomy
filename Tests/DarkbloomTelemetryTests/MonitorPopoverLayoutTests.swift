@@ -26,6 +26,28 @@ struct MonitorPopoverLayoutTests {
         #expect(fitted.height < 130, "Reported earnings height: \(fitted.height)")
     }
 
+    @Test("unknown and partial earnings preserve populated tile height", arguments: [false, true])
+    func earningsUnknownLayout(dark: Bool) {
+        let metrics = PopupEarningsMetrics.make(from: ObservedEarningsWindow(microUSD: 6_420_000,
+            observedSeconds: 10_800))
+        let week = PopupWeekEarningsMetric(title: "Observed this week", totalUSD: 42.4)
+        let cases: [(PopupEarningsMetrics?, PopupWeekEarningsMetric?)] = [
+            (metrics, week), (nil, nil), (metrics, nil), (nil, week),
+            (PopupEarningsMetrics.make(from: ObservedEarningsWindow(microUSD: 0, observedSeconds: 60)),
+             PopupWeekEarningsMetric(title: "Observed this week", totalUSD: 0))
+        ]
+        var baseline: CGFloat?
+        for (day, week) in cases {
+            let host = NSHostingController(rootView: PopupEarningsGraphic(metrics: day, week: week)
+                .padding(12).frame(width: 528).environment(\.colorScheme, dark ? .dark : .light))
+            let fitted = host.sizeThatFits(in: NSSize(width: 528, height: 0))
+            #expect(fitted.width == 528)
+            #expect(fitted.height < 130)
+            if let baseline { #expect(abs(fitted.height - baseline) < 0.5) }
+            else { baseline = fitted.height }
+        }
+    }
+
     @Test("post-switch feedback fits the popup and distinguishes success from missing key")
     func postSwitchFeedback() async throws {
         let view = VStack(alignment: .leading, spacing: 8) {
