@@ -364,3 +364,14 @@ Full 1,621 reported Release tests pass. See
 [Metrics summary review](METRICS_SUMMARY_NATIVE_REVIEW_20261004.md).
 Spoken VoiceOver, all larger-text/localized variants, production performance,
 menu-motion and installed delivery remain open. The temporary fixture quit.
+
+October 4 History accessibility follow-up: nine selected-job fields and the
+heading are separately exposed in the native tree; full amounts, earning IDs,
+account scope and selectable text remain intact. The exact optimized fixture
+passes wide light/compact dark checks and selected earning retention through a
+new synthetic action at the 5,000-record limit. Native proof and the full 1,621
+reported Release tests pass. See
+[History fields review](HISTORY_FIELD_ACCESSIBILITY_REVIEW_20261004.md).
+An unfiltered table observation timeout is documented separately; genuine spoken
+VoiceOver, large-table enumeration cost, real account arrivals, other locales/
+displays, production performance and broader delivery/motion gates remain open.

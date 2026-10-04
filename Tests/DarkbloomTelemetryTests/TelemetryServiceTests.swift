@@ -512,7 +512,9 @@ struct TelemetryServiceTests {
         let stream = await service.snapshots()
 
         await service.start()
-        let endedSnapshot = await firstSnapshot(in: stream) { snapshot in
+        // This checks EOF publication, not a 100 ms scheduling guarantee.
+        // Leave room for the concurrent native UI suite on a busy host.
+        let endedSnapshot = await firstSnapshot(in: stream, timeout: .seconds(2)) { snapshot in
             snapshot.diagnostics.contains {
                 $0.id == "unified-events"
                     && $0.message == "Unified log stream ended unexpectedly"

@@ -213,7 +213,7 @@ struct ActionHistoryView: View {
 
     private func details(for event: ActionHistoryEvent) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Entry details").font(.headline)
+            Text("Entry details").font(.headline).accessibilityAddTraits(.isHeader)
             VStack(alignment: .leading, spacing: 7) {
                 detailRow("Time", event.occurredAt.formatted(date: .complete, time: .complete))
                 detailRow("Action", Self.actionLabel(event))
@@ -251,6 +251,7 @@ struct ActionHistoryView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("actionHistory.details")
     }
 
@@ -265,6 +266,11 @@ struct ActionHistoryView: View {
                 .textSelection(.enabled)
                 .help(help ?? value)
         }
+        // Keep the native label and selectable value together as one field
+        // group, without collapsing the whole entry or relabeling selectable
+        // text (which can recurse through the macOS accessibility bridge).
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("actionHistory.field.\(label)")
     }
 
     private static func actionLabel(_ event: ActionHistoryEvent) -> String {

@@ -518,3 +518,13 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   unknown/idle checks pass. See `METRICS_SUMMARY_NATIVE_REVIEW_20261004.md`.
   This local checkpoint adds no acquisition cadence or CPU-savings claim;
   broader accessibility, production, motion and delivery gates remain open.
+
+- Selected History entries now expose a heading and independent native field
+  groups while retaining selectable values and the current visual layout.
+  An exact-source optimized fixture passes nine field/value checks, wide light
+  and compact dark inspection, and selected-earning retention through a new
+  recorded action at the 5,000-entry limit. Final 1,621 reported Release tests
+  pass; see `HISTORY_FIELD_ACCESSIBILITY_REVIEW_20261004.md`. Tool observation
+  timeouts and rejected test hosts remain documented. Spoken VoiceOver, real
+  arrivals, large-table enumeration cost and broader delivery/performance gates
+  remain open.

@@ -1320,6 +1320,29 @@ private final class FixtureModel: ObservableObject {
     func showHighIdleGPU() async { await gpuProtectionProof?.highIdle() }
     func showRecoveredGPU() async { await gpuProtectionProof?.recover() }
     func saveGPUProtectionProof() { gpuProtectionProof?.save() }
+    func recordHistoryArrival() {
+        guard ready, !isTerminating, let history = monitor.actionHistory else { return }
+        let before = history.events.count
+        let id = history.record(action: .nudge, trigger: .manual, outcome: .succeeded,
+            model: FixtureData.modelIDs[0], reason: .completed)
+        let receipt: [String: Any] = ["synthetic": true, "id": id.uuidString,
+            "before": before, "after": history.events.count,
+            "recorded": history.events.contains { $0.id == id }]
+        if let data = try? JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys]) {
+            try? data.write(to: directory.appendingPathComponent("history-arrival-proof.json"), options: .atomic)
+        }
+    }
+    func runHistoryFieldsProof() {
+        guard !proofRunning, ready, !isTerminating else { return }
+        nativeProofStatus = "History fields running…"
+        // Reuse the owned proof task so Reload/quit joins its cancellation,
+        // and simultaneous native proof runs cannot overlap.
+        nativeProofTask = Task { @MainActor in
+            let result = await HistoryDetailsAccessibilityProof.run(outputDirectory: directory)
+            nativeProofStatus = result["success"] as? Bool == true ? "History fields passed" : "History fields failed"
+            nativeProofTask = nil
+        }
+    }
     func prependLogEvent(count: Int = 1) async {
         guard canPrependLogEvent else { return }
         let generation = loadGeneration
@@ -2283,6 +2306,19 @@ private struct FixtureChatVerificationControls: View {
     }
 }
 
+private struct FixtureHistoryReviewControls: View {
+    @ObservedObject var model: FixtureModel
+    var body: some View {
+        Menu("Synthetic History") {
+            Button("Record one synthetic history action") { model.recordHistoryArrival() }
+                .disabled(!model.ready || model.monitor.actionHistory == nil)
+                .help("Adds one inert history entry through the production recorder. No network nudge is sent.")
+            Button("History field accessibility proof") { model.runHistoryFieldsProof() }
+                .disabled(!model.ready || model.proofRunning)
+        }
+    }
+}
+
 private struct FixtureReviewView: View {
     @ObservedObject var model: FixtureModel
     @ObservedObject private var navigation: DashboardNavigation
@@ -2380,6 +2416,7 @@ private struct FixtureReviewView: View {
                             Button("Save read counts") { Task { await model.saveMetricsReadProof() } }
                         }
                         Divider()
+                        FixtureHistoryReviewControls(model: model)
                         Button("Prepend one synthetic log event") {
                             Task { await model.prependLogEvent() }
                         }
