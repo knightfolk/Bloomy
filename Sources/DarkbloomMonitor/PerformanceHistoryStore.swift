@@ -9,6 +9,7 @@ private actor PerformanceJournal {
     private var database: PerformanceHistoryDatabase?
     private var pending: [PerformanceSample] = []
     private var lostSamples = false
+    private var readSnapshot: PerformanceHistoryReadSnapshot?
 
     init(url: URL) { self.url = url }
 
@@ -36,11 +37,15 @@ private actor PerformanceJournal {
 
     func samples(in interval: DateInterval) throws -> [PerformanceSample] {
         try Task.checkCancellation()
-        return try opened().samples(in: interval)
+        let next = try opened().readSnapshot(in: interval, reusing: readSnapshot)
+        try Task.checkCancellation()
+        readSnapshot = next
+        return next.samples
     }
 
     func clearReadCache() {
         // Hiding Metrics must not open a journal solely to clear derived state.
+        readSnapshot = nil
         database?.clearDecodedReadCache()
     }
 }

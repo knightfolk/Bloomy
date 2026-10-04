@@ -31,6 +31,10 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
     private let decoder = JSONDecoder()
     private var decodedRows = PerformanceHistoryDecodedCache.Generation.empty
     private var decodedDiagnostics = PerformanceHistoryDecodedCache.Diagnostics.empty
+    private var snapshotSourceID = UUID()
+    private var insertionSequence: UInt64 = 0
+    private var insertions: [(sequence: UInt64, rowID: Int64)] = []
+    private static let insertionJournalLimit = 512
 
     var decodedCacheDiagnostics: PerformanceHistoryDecodedCache.Diagnostics {
         lock.lock()
@@ -117,6 +121,7 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
         guard PerformanceSample.validTimestamp(time), sample.observedAt <= time.addingTimeInterval(86_400) else {
             throw PerformanceHistoryDatabaseError.invalidSample
         }
+        var insertedRowID: Int64?
         try transaction {
             let statement = try prepare("INSERT OR IGNORE INTO performance_history (id, observed_at, model, sample) VALUES (?, ?, ?, ?)")
             defer { sqlite3_finalize(statement) }
@@ -133,10 +138,175 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
                 try bind(sample.id.uuidString, existing, 1)
                 guard sqlite3_step(existing) == SQLITE_ROW else { throw PerformanceHistoryDatabaseError.unavailable }
                 guard try Self.encode(decode(existing)) == payload else { throw PerformanceHistoryDatabaseError.conflictingID }
+            } else {
+                insertedRowID = sqlite3_last_insert_rowid(connection.pointer)
             }
             try prune(at: time)
             try makePrivateFiles()
         }
+        // Publish only committed inserts. Retention may recycle a rowid (and
+        // even an expired UUID), so these rows must be decoded on the next read.
+        if let insertedRowID {
+            if insertionSequence == .max {
+                snapshotSourceID = UUID()
+                insertionSequence = 0
+                insertions.removeAll(keepingCapacity: true)
+            }
+            insertionSequence += 1
+            insertions.append((insertionSequence, insertedRowID))
+            if insertions.count > Self.insertionJournalLimit { insertions.removeFirst() }
+        }
+    }
+
+    /// Reuses validated payloads while always querying current indexed
+    /// membership and order. Outside commits, foreign tokens and expired local
+    /// insertion history force a full read. No second decoded cache is created.
+    public func readSnapshot(
+        in interval: DateInterval, model: String? = nil,
+        reusing previous: PerformanceHistoryReadSnapshot? = nil
+    ) throws -> PerformanceHistoryReadSnapshot {
+        try Task.checkCancellation()
+        guard PerformanceSample.validTimestamp(interval.start), PerformanceSample.validTimestamp(interval.end),
+              interval.duration.isFinite, interval.duration >= 0 else { throw PerformanceHistoryDatabaseError.invalidInterval }
+        if let model, !PerformanceSample(model: model).isValid { throw PerformanceHistoryDatabaseError.invalidSample }
+        lock.lock()
+        defer { lock.unlock() }
+        try prune()
+        let before = try dataVersion()
+        // Unmanaged triggers can change earlier payloads during our own insert
+        // or prune without advancing data_version. The normal schema has none;
+        // an extended schema remains supported through fully validated reads.
+        let hasTriggers = try hasUnmanagedTriggers()
+        let eligible = previous.flatMap { snapshot -> PerformanceHistoryReadSnapshot? in
+            guard !hasTriggers, snapshot.sourceID == snapshotSourceID, snapshot.dataVersion == before,
+                  snapshot.insertionSequence <= insertionSequence,
+                  insertionSequence - snapshot.insertionSequence <= UInt64(insertions.count) else { return nil }
+            return snapshot
+        }
+        let result = try snapshotRows(in: interval, model: model, previous: eligible)
+        let after = try dataVersion()
+        if eligible != nil, before != after {
+            // Metadata and payload SELECTs were pinned to one WAL snapshot,
+            // but an outside commit may invalidate reused payloads. Discard the
+            // attempt and read every payload in a new consistent transaction.
+            let freshBefore = try dataVersion()
+            let fresh = try snapshotRows(in: interval, model: model, previous: nil)
+            let freshAfter = try dataVersion()
+            try Task.checkCancellation()
+            return makeSnapshot(fresh, version: !hasTriggers && freshBefore == freshAfter ? freshAfter : nil)
+        }
+        try Task.checkCancellation()
+        return makeSnapshot(result, version: !hasTriggers && before == after ? after : nil)
+    }
+
+    private func makeSnapshot(
+        _ result: (samples: [PerformanceSample], rowIDs: [Int64], reused: Int), version: Int64?
+    ) -> PerformanceHistoryReadSnapshot {
+        .init(samples: result.samples, reusedSampleCount: result.reused, rowIDs: result.rowIDs,
+              sourceID: snapshotSourceID, dataVersion: version, insertionSequence: insertionSequence)
+    }
+
+    private func dataVersion() throws -> Int64 {
+        let statement = try prepare("PRAGMA data_version")
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW, sqlite3_column_type(statement, 0) == SQLITE_INTEGER else {
+            throw PerformanceHistoryDatabaseError.unavailable
+        }
+        return sqlite3_column_int64(statement, 0)
+    }
+
+    private func hasUnmanagedTriggers() throws -> Bool {
+        let statement = try prepare("SELECT 1 FROM sqlite_schema WHERE type = 'trigger' LIMIT 1")
+        defer { sqlite3_finalize(statement) }
+        let step = sqlite3_step(statement)
+        guard step == SQLITE_ROW || step == SQLITE_DONE else { throw PerformanceHistoryDatabaseError.unavailable }
+        // Finalize before BEGIN so this probe never holds an implicit read
+        // transaction across the external-write fence.
+        return step == SQLITE_ROW
+    }
+
+    private func snapshotRows(
+        in interval: DateInterval, model: String?, previous: PerformanceHistoryReadSnapshot?
+    ) throws -> (samples: [PerformanceSample], rowIDs: [Int64], reused: Int) {
+        // BEGIN pins membership and per-row payload reads together. The lock
+        // prevents same-connection writes until COMMIT and the version fence.
+        try Self.execute(connection.pointer, "BEGIN")
+        do {
+            let statement = try prepare("""
+                SELECT id, observed_at, model, \(previous == nil ? "sample, rowid" : "rowid")
+                FROM performance_history WHERE observed_at >= ? AND observed_at <= ?
+                \(model == nil ? "" : "AND model = ?") ORDER BY observed_at DESC, rowid DESC
+                """)
+            defer { sqlite3_finalize(statement) }
+            try checked(sqlite3_bind_double(statement, 1, interval.start.timeIntervalSince1970))
+            try checked(sqlite3_bind_double(statement, 2, interval.end.timeIntervalSince1970))
+            if let model { try bind(model, statement, 3) }
+            let lookup = previous == nil ? nil : try prepare(
+                "SELECT id, observed_at, model, sample FROM performance_history WHERE rowid = ?")
+            defer { if let lookup { sqlite3_finalize(lookup) } }
+            var indices: [Int64: Int] = [:]
+            if let previous {
+                indices.reserveCapacity(previous.rowIDs.count)
+                for (index, rowID) in previous.rowIDs.enumerated() { indices[rowID] = index }
+            }
+            let previousSequence = previous?.insertionSequence ?? insertionSequence
+            let dirty = Set(insertions.lazy.filter { $0.sequence > previousSequence }.map(\.rowID))
+            var samples: [PerformanceSample] = []
+            var rowIDs: [Int64] = []
+            if let previous { samples.reserveCapacity(previous.samples.count); rowIDs.reserveCapacity(previous.rowIDs.count) }
+            var reused = 0
+            while true {
+                if samples.count.isMultiple(of: 64) { try Task.checkCancellation() }
+                let step = sqlite3_step(statement)
+                if step == SQLITE_DONE { break }
+                guard step == SQLITE_ROW else { throw PerformanceHistoryDatabaseError.unavailable }
+                let rowColumn: Int32 = previous == nil ? 4 : 3
+                guard sqlite3_column_type(statement, rowColumn) == SQLITE_INTEGER else {
+                    throw PerformanceHistoryDatabaseError.corruptRecord
+                }
+                let rowID = sqlite3_column_int64(statement, rowColumn)
+                let sample: PerformanceSample
+                if let previous, let index = indices[rowID], !dirty.contains(rowID),
+                   try metadataMatches(statement, sample: previous.samples[index]) {
+                    sample = previous.samples[index]
+                    reused += 1
+                } else if let lookup {
+                    try checked(sqlite3_reset(lookup))
+                    try checked(sqlite3_bind_int64(lookup, 1, rowID))
+                    guard sqlite3_step(lookup) == SQLITE_ROW else { throw PerformanceHistoryDatabaseError.corruptRecord }
+                    sample = try decode(lookup)
+                } else {
+                    sample = try decode(statement)
+                }
+                samples.append(sample)
+                rowIDs.append(rowID)
+            }
+            try Task.checkCancellation()
+            samples.reverse()
+            rowIDs.reverse()
+            try Task.checkCancellation()
+            try Self.execute(connection.pointer, "COMMIT")
+            return (samples, rowIDs, reused)
+        } catch {
+            try? Self.execute(connection.pointer, "ROLLBACK")
+            throw error
+        }
+    }
+
+    private func metadataMatches(_ statement: OpaquePointer, sample: PerformanceSample) throws -> Bool {
+        guard sqlite3_column_type(statement, 0) == SQLITE_TEXT,
+              sqlite3_column_type(statement, 1) == SQLITE_FLOAT || sqlite3_column_type(statement, 1) == SQLITE_INTEGER,
+              sqlite3_column_type(statement, 2) == SQLITE_NULL || sqlite3_column_type(statement, 2) == SQLITE_TEXT,
+              let idText = text(statement, 0), let id = UUID(uuidString: idText) else {
+            throw PerformanceHistoryDatabaseError.corruptRecord
+        }
+        let model: String?
+        if sqlite3_column_type(statement, 2) == SQLITE_TEXT {
+            guard let value = text(statement, 2) else { throw PerformanceHistoryDatabaseError.corruptRecord }
+            model = value
+        } else { model = nil }
+        return id == sample.id && sqlite3_column_double(statement, 1) == sample.observedAt.timeIntervalSince1970
+            && model == sample.model
     }
 
     /// Chronological order, including unavailable/stale rows so callers can

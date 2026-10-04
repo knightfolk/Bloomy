@@ -383,3 +383,13 @@ reported Release tests pass. See
 An unfiltered table observation timeout is documented separately; genuine spoken
 VoiceOver, large-table enumeration cost, real account arrivals, other locales/
 displays, production performance and broader delivery/motion gates remain open.
+
+October 4 validated Metrics reuse: the exact-source optimized 100,000-row
+fixture keeps measured totals, gaps and model-filter qualifications through
+held/failing/empty/replacement reads. Minimization releases 100,000 snapshot
+rows and starts no reads during the verified hidden window. Full 1,636 reported
+Release tests pass. Component repeat median is 74.87 ms from 925.32 ms; native
+one-refresh visible windows measure 2.5000% from 4.4047% of one core. Memory
+results are mixed, so allocation/leak and production profiling remain open.
+See [Metrics read reuse](METRICS_READ_REUSE_REVIEW_20261004.md). All broader
+accessibility, locale/display, motion and distribution gates remain open.

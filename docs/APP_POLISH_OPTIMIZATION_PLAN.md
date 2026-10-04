@@ -536,3 +536,15 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   timeouts and rejected test hosts remain documented. Spoken VoiceOver, real
   arrivals, large-table enumeration cost and broader delivery/performance gates
   remain open.
+
+- Metrics retains one validated read snapshot only while visible, always
+  querying current indexed membership/order and validating new/recycled rows.
+  Outside commits, unmanaged triggers, foreign tokens and expired bounded
+  insertion history force full validation. Fifteen new regressions and the
+  full 1,636 reported Release tests pass. Exact-source 100,000-row native proof
+  covers filter/recovery, held reopening, empty results, hidden release and
+  no-Refresh source replacement. Component repeats improve 925.32 → 74.87 ms;
+  native matched one-refresh windows improve 4.4047 → 2.5000% of one CPU core.
+  Memory readings are mixed, so no memory reduction is claimed. See
+  `METRICS_READ_REUSE_REVIEW_20261004.md`; allocation profiling, production
+  collectors/traffic, spoken accessibility, motion and delivery remain open.

@@ -11,6 +11,7 @@ struct FixtureMetricsReadTiming: Codable, Sendable {
     let readID: UInt64
     let intervalSeconds: Double
     let rows: Int
+    let reusedRows: Int
     let milliseconds: Double
 }
 
@@ -27,6 +28,8 @@ struct FixtureMetricsReadSnapshot: Codable, Sendable {
     let cacheReleases: UInt64
     let lastReleasedDecodedRows: Int
     let totalReleasedDecodedRows: UInt64
+    let retainedSnapshotRows: Int
+    let lastReleasedSnapshotRows: Int
     let recentReads: [FixtureMetricsReadTiming]
 }
 
@@ -48,6 +51,8 @@ actor FixtureMetricsReads {
     private var lastReleasedDecodedRows = 0
     private var totalReleasedDecodedRows: UInt64 = 0
     private var recentReads: [FixtureMetricsReadTiming] = []
+    private var readSnapshot: PerformanceHistoryReadSnapshot?
+    private var lastReleasedSnapshotRows = 0
 
     init(url: URL, proofURL: URL? = nil) throws {
         database = try PerformanceHistoryDatabase(url: url)
@@ -62,6 +67,8 @@ actor FixtureMetricsReads {
     func setNext(_ mode: FixtureMetricsReadMode) { nextMode = mode }
 
     func clearReadCache() {
+        lastReleasedSnapshotRows = readSnapshot?.samples.count ?? 0
+        readSnapshot = nil
         lastReleasedDecodedRows = database.clearDecodedReadCache()
         totalReleasedDecodedRows &+= UInt64(lastReleasedDecodedRows)
         cacheReleases &+= 1
@@ -82,15 +89,21 @@ actor FixtureMetricsReads {
             try Task.checkCancellation()
             let began = ContinuousClock.now
             let rows: [PerformanceSample]
+            let next: PerformanceHistoryReadSnapshot?
             switch mode {
             case .fail: throw FixtureMetricsReadError.synthetic
-            case .empty: rows = []
-            case .normal, .hold: rows = try database.samples(in: interval)
+            case .empty: rows = []; next = nil
+            case .normal, .hold:
+                let snapshot = try database.readSnapshot(in: interval, reusing: readSnapshot)
+                rows = snapshot.samples
+                next = snapshot
             }
             try Task.checkCancellation()
+            readSnapshot = next
             let duration = began.duration(to: .now).components
             recentReads.append(.init(readID: readID, intervalSeconds: interval.duration,
-                rows: rows.count, milliseconds: Double(duration.seconds) * 1_000 + Double(duration.attoseconds) / 1e15))
+                rows: rows.count, reusedRows: next?.reusedSampleCount ?? 0,
+                milliseconds: Double(duration.seconds) * 1_000 + Double(duration.attoseconds) / 1e15))
             if recentReads.count > 12 { recentReads.removeFirst(recentReads.count - 12) }
             completed &+= 1
             if rows.isEmpty { empty &+= 1 }
@@ -125,7 +138,9 @@ actor FixtureMetricsReads {
               cancelled: cancelled, empty: empty, heldReadID: pending?.id,
               lastStartedAt: lastStartedAt, lastCompletedAt: lastCompletedAt,
               cacheReleases: cacheReleases, lastReleasedDecodedRows: lastReleasedDecodedRows,
-              totalReleasedDecodedRows: totalReleasedDecodedRows, recentReads: recentReads)
+              totalReleasedDecodedRows: totalReleasedDecodedRows,
+              retainedSnapshotRows: readSnapshot?.samples.count ?? 0,
+              lastReleasedSnapshotRows: lastReleasedSnapshotRows, recentReads: recentReads)
     }
 
     private func hold(_ readID: UInt64) async throws -> FixtureMetricsReadMode {
