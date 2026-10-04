@@ -1,5 +1,11 @@
 # Native polish completion matrix — October 2, 2026
 
+October 4 current Metrics resource follow-up: three 100k-record visible windows
+include a refresh; two minimized windows remain read-free. Integrated read-phase
+guards, 11 regressions and preserved production processes add bounded resource
+evidence. Production/collector/energy proof remains open. See
+[current phase review](METRICS_CURRENT_RESOURCE_PHASE_REVIEW_20261004.md).
+
 October 4 raw-read ownership follow-up: four stable native heap gates confirm
 obsolete large raw buffers disappear after narrowing and empty/hidden release.
 Held-failed, filtered reopen and compact dark Metrics recovery were inspected;

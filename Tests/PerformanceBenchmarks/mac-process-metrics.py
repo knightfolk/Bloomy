@@ -13,6 +13,7 @@ import sys
 import statistics
 import time
 from pathlib import Path
+from metrics_read_phase import MetricsReadPhase
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--pid', type=int)
@@ -22,6 +23,9 @@ parser.add_argument('--output', type=Path)
 parser.add_argument('--visibility-proof', type=Path,
                     help='Owned fixture visibility event file; verify state throughout the window')
 parser.add_argument('--visibility-mode', choices=['visible', 'minimized', 'hidden'])
+parser.add_argument('--metrics-read-proof', type=Path,
+                    help='Inert fixture Metrics read proof; qualify refresh or quiet work')
+parser.add_argument('--metrics-read-mode', choices=['refresh', 'quiet'])
 parser.add_argument('--self-check', action='store_true', help='Check Mach time conversion against getrusage using one second of owned CPU work')
 args = parser.parse_args()
 if not 1 <= args.seconds <= 60:
@@ -30,6 +34,10 @@ if args.output and args.output.exists():
     parser.error('Preserve existing evidence; choose a fresh output file')
 if bool(args.visibility_proof) != bool(args.visibility_mode):
     parser.error('Use --visibility-proof and --visibility-mode together')
+if bool(args.metrics_read_proof) != bool(args.metrics_read_mode):
+    parser.error('Use --metrics-read-proof and --metrics-read-mode together')
+if args.self_check and args.metrics_read_proof:
+    parser.error('Calibration cannot qualify another process Metrics read phase')
 
 class Usage(ctypes.Structure):
     _fields_ = [('uuid', ctypes.c_uint8 * 16)] + [(name, ctypes.c_uint64) for name in (
@@ -108,6 +116,8 @@ if args.self_check:
     sys.exit(0 if result['passed'] else 1)
 
 samples = []
+metrics_phase = (MetricsReadPhase(json.loads(args.metrics_read_proof.read_text()), args.metrics_read_mode)
+                 if args.metrics_read_proof else None)
 start = time.monotonic()
 initial_visibility = visibility()
 first = read()
@@ -117,6 +127,8 @@ while time.monotonic() - start < args.seconds:
     elapsed = time.monotonic() - start
     current = read()
     current_visibility = visibility()
+    if metrics_phase:
+        metrics_phase.observe(json.loads(args.metrics_read_proof.read_text()))
     if initial_visibility and current_visibility != initial_visibility:
         raise RuntimeError('Visibility events changed during the window; reject this observation')
     if current['proc_start_abstime'] != first['proc_start_abstime'] or current['proc_exit_abstime']:
@@ -135,6 +147,8 @@ result = {'mach_timebase_numer': timebase.numer, 'mach_timebase_denom': timebase
           'idle_wakeups_per_second': (last['pkg_idle_wkups'] - first['pkg_idle_wkups']) / wall,
           'interrupt_wakeups_per_second': (last['interrupt_wkups'] - first['interrupt_wkups']) / wall,
           'samples': samples}
+if metrics_phase:
+    result['metrics_read_phase'] = metrics_phase.finish()
 if args.visibility_mode:
     result['visibility_mode'] = args.visibility_mode
     result['visibility_evidence'] = initial_visibility

@@ -1,5 +1,12 @@
 # Bloomy native polish and efficiency
 
+October 4 current Metrics profile: three visible 45-second windows each include
+one 100k-record refresh and measure 2.60–2.68% of one CPU core. Two minimized
+windows start no reads and measure 0.005–0.011%; raw cached rows remain released.
+The process tool now qualifies read phases, with 11 regressions and integrated
+native quiet/refresh checks. These are inert process results, not production
+or battery savings. See `METRICS_CURRENT_RESOURCE_PHASE_REVIEW_20261004.md`.
+
 October 4 read-ownership follow-up: native reverse-reference evidence isolated
 an obsolete large raw read in saved SwiftUI state/task captures. A shared read
 owner removes that tested 22.4 MB allocation after narrowing, without changing
