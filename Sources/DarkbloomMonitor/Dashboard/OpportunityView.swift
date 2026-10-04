@@ -74,12 +74,20 @@ enum OpportunityPresentation {
         return metadata.displayName
     }
 
+    static func cardName(_ model: NetworkModelCapacity, metadata: CatalogModel?) -> String {
+        let short = ModelDisplayName.short(model.id)
+        let fallback = (model.id.split(separator: "/").last.map(String.init) ?? model.id)
+            .replacingOccurrences(of: "_", with: " ")
+        return short == fallback ? ModelDisplayName.short(name(model, metadata: metadata)) : short
+    }
+
     static func matchesSearch(_ search: String, model: NetworkModelCapacity, metadata: CatalogModel?) -> Bool {
         guard !search.isEmpty else { return true }
         let displayName = name(model, metadata: metadata)
         return model.id.localizedCaseInsensitiveContains(search)
             || displayName.localizedCaseInsensitiveContains(search)
             || ModelDisplayName.short(displayName).localizedCaseInsensitiveContains(search)
+            || cardName(model, metadata: metadata).localizedCaseInsensitiveContains(search)
     }
 }
 
@@ -101,6 +109,22 @@ enum OpportunityCardFreshness {
     }
 }
 
+struct OpportunityRequestMix: Equatable {
+    let activeFraction: Double
+    let waitingFraction: Double
+    let isValid: Bool
+
+    init(active: Int, waiting: Int) {
+        guard active >= 0, waiting >= 0 else {
+            activeFraction = 0; waitingFraction = 0; isValid = false; return
+        }
+        let total = Double(active) + Double(waiting)
+        activeFraction = total == 0 ? 0 : Double(active) / total
+        waitingFraction = total == 0 ? 0 : Double(waiting) / total
+        isValid = true
+    }
+}
+
 struct OpportunityView: View {
     @ObservedObject var store: MonitorStore
     let controlStore: ProviderControlStore?
@@ -108,11 +132,17 @@ struct OpportunityView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Opportunity").font(.largeTitle.bold())
-            Picker("View", selection: $showsHistory) {
-                Text("Models").tag(false)
-                Text("Network activity").tag(true)
-            }.pickerStyle(.segmented)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) {
+                    Text("Opportunity").font(.largeTitle.bold())
+                    Spacer(minLength: 8)
+                    sectionPicker
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Opportunity").font(.largeTitle.bold())
+                    sectionPicker
+                }
+            }
             if showsHistory {
                 HStack {
                     Spacer()
@@ -142,6 +172,15 @@ struct OpportunityView: View {
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
+    private var sectionPicker: some View {
+        Picker("Opportunity section", selection: $showsHistory) {
+            Text("Models").tag(false)
+            Text("Network activity").tag(true)
+        }
+        .labelsHidden().pickerStyle(.segmented).controlSize(.regular)
+        .frame(width: 246)
+    }
+
 }
 
 private struct OpportunityModelListView: View {
@@ -413,15 +452,16 @@ struct OpportunityModelCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: "cpu")
-                    .font(.headline)
-                    .foregroundStyle(tint)
-                    .frame(width: 22)
-                Text(ModelDisplayName.short(OpportunityPresentation.name(model, metadata: metadata)))
+                familyMark
+                    .frame(width: 28, height: 28)
+                    .padding(4)
+                    .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    .accessibilityHidden(true)
+                Text(OpportunityPresentation.cardName(model, metadata: metadata))
                     .font(.headline)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .help(model.id)
+                    .help(OpportunityPresentation.name(model, metadata: metadata) + " · " + model.id)
                 Spacer(minLength: 0)
             }
             HStack(spacing: 6) {
@@ -438,11 +478,14 @@ struct OpportunityModelCard: View {
                 Spacer(minLength: 0)
             }
             fitLabel.font(.caption)
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 8) {
-                metric("In progress", model.activeRequests)
-                metric("Waiting", model.queuedRequests)
-                metric("Loaded", model.warmProviders)
-                metric("Network tok/s", model.aggregateTokensPerSecond)
+            HStack(spacing: 12) {
+                metric("In progress", model.activeRequests, symbol: "bolt.horizontal")
+                metric("Waiting", model.queuedRequests, symbol: "tray")
+            }
+            requestMix
+            HStack(spacing: 12) {
+                metric("Loaded", model.warmProviders, symbol: "square.stack.3d.up")
+                metric("Network tok/s", model.aggregateTokensPerSecond, symbol: "speedometer")
             }
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 10) {
@@ -488,6 +531,36 @@ struct OpportunityModelCard: View {
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.07)))
     }
 
+    @ViewBuilder private var familyMark: some View {
+        let family = ModelFamilyIcon.select(status: .online, activeModel: model.id)
+        if family != .darkbloom, let image = DarkbloomLogoAsset.modelImage(family: family) {
+            Image(nsImage: image).renderingMode(.template).resizable().scaledToFit()
+                .foregroundStyle(networkIsCurrent ? tint : .secondary)
+        } else {
+            Image(systemName: "cpu").font(.headline).foregroundStyle(tint)
+        }
+    }
+
+    private var requestMix: some View {
+        let mix = OpportunityRequestMix(active: model.activeRequests, waiting: model.queuedRequests)
+        return GeometryReader { geometry in
+            HStack(spacing: 0) {
+                Rectangle().fill(networkIsCurrent ? Color.accentColor : Color.secondary.opacity(0.5))
+                    .frame(width: geometry.size.width * mix.activeFraction)
+                Rectangle().fill(networkIsCurrent ? Color.orange : Color.secondary.opacity(0.8))
+                    .frame(width: geometry.size.width * mix.waitingFraction)
+                Spacer(minLength: 0)
+            }
+            .background(.quaternary)
+            .clipShape(Capsule())
+        }
+        .frame(height: 5)
+        .accessibilityHidden(true)
+        .help(OpportunityCardFreshness.status(
+            mix.isValid ? "Share of reported requests: in progress and waiting. Empty when both are zero." : "Request mix unavailable.",
+            isCurrent: networkIsCurrent) + " Network-wide; not work on this Mac or an earnings estimate.")
+    }
+
     @ViewBuilder private var fitLabel: some View {
         switch ramFit {
         case .minimumMet:
@@ -503,9 +576,12 @@ struct OpportunityModelCard: View {
         }
     }
 
-    private func metric(_ title: String, _ value: Int) -> some View {
+    private func metric(_ title: String, _ value: Int, symbol: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(value, format: .number).font(.headline).monospacedDigit()
+            Label { Text(value, format: .number).monospacedDigit() } icon: { Image(systemName: symbol).foregroundStyle(
+                networkIsCurrent && title == "In progress" ? Color.accentColor
+                    : networkIsCurrent && title == "Waiting" ? Color.orange : .secondary)
+            }.font(.headline)
             Text(title).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -516,10 +592,10 @@ struct OpportunityModelCard: View {
         .help(OpportunityCardFreshness.metricHelp(isCurrent: networkIsCurrent))
     }
 
-    private func metric(_ title: String, _ value: Double) -> some View {
+    private func metric(_ title: String, _ value: Double, symbol: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(value, format: .number.precision(.fractionLength(0...1)))
-                .font(.headline).monospacedDigit()
+            Label { Text(value, format: .number.precision(.fractionLength(0...1))).monospacedDigit() }
+                icon: { Image(systemName: symbol).foregroundStyle(.secondary) }.font(.headline)
             Text(title).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

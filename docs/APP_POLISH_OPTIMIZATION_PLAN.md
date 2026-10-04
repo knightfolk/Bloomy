@@ -462,3 +462,13 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   The final 1,606 reported tests and Release build pass. See
   `POPUP_SIZING_COALESCING_REVIEW_20261003.md`. Production savings and the full
   native/accessibility/motion matrix remain unproven; this checkpoint is local.
+
+
+- Opportunity now shares cached model marks and canonical short aliases with
+  popup/Models cards, adds compact metric symbols and a network-only active/
+  waiting share graphic, and aligns its native section picker with the title.
+  Dark template contrast was corrected after actual rendering. Native compact/
+  wide, quiet loaded-provider, retained/missing, alias search and expanded
+  details checks pass. Final 1,609 reported tests and Release compilation pass;
+  see `OPPORTUNITY_VISUAL_IDENTITY_REVIEW_20261003.md`. Full varied/large-text,
+  spoken accessibility, production performance and broader gates remain open.

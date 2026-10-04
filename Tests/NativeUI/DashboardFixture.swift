@@ -8,6 +8,7 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case fresh = "Fresh", stale = "Stale", staleCatalog = "Stale catalog", offline = "Offline"
     case expiredSettings = "Expired settings", expiredHelper = "Expired helper", unavailableSettings = "Unavailable settings"
     case coolingHelperError = "Cooling helper error"
+    case quietNetwork = "Quiet network"
     case partialCooling = "Partial cooling", disabledHelper = "Disabled helper", unavailableRuntime = "Unavailable runtime"
     case aliasStartup = "Aliased startup", liveHosting = "Reported local endpoint"
     case frozenSettings = "Frozen settings"
@@ -363,7 +364,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
     }
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .largeActionHistory, .acceptedWork, .matchedEnergy:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .largeActionHistory, .acceptedWork, .matchedEnergy:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -487,8 +488,8 @@ private actor FixtureCapacity: NetworkCapacityFetching {
         let models = FixtureData.modelIDs.enumerated().map { index, id in
             ["id": id, "ready": true, "can_accept": true, "routable_providers": 8 + index,
              "warm_providers": 4 + index, "running_providers": 9, "cold_providers": 2,
-             "active_requests": 14 - index * 3, "queued_requests": index, "queue_limit": 16,
-             "aggregate_tps": 420, "estimated_ttft_ms": 180, "token_budget_remaining": 8_000,
+             "active_requests": scenario == .quietNetwork ? 0 : 14 - index * 3, "queued_requests": scenario == .quietNetwork ? 0 : index, "queue_limit": 16,
+             "aggregate_tps": scenario == .quietNetwork ? 0 : 420, "estimated_ttft_ms": 180, "token_budget_remaining": 8_000,
              "token_budget_total": 16_000] as [String: Any]
         }
         return try NetworkCapacityParser.parse(JSONSerialization.data(withJSONObject: ["models": models]), capturedAt: fixedCapture ?? capturedAt)

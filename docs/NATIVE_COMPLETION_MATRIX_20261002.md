@@ -310,3 +310,14 @@ comparisons, 1,606 reported tests and Release compilation pass. See
 [Sizing review](POPUP_SIZING_COALESCING_REVIEW_20261003.md).
 Component fitting reductions do not prove whole-app CPU savings; all broader
 native/accessibility, menu-motion and production gates remain open.
+
+
+October 3 Opportunity visual follow-up: shared cached model marks/short aliases,
+metric symbols and request shares retain full details and network-only scope.
+The final template rendering corrects an observed dark contrast failure.
+Compact light/dark, wide dark, quiet/retained/missing demand, exact alias search,
+expanded details and Network activity navigation pass in the exact fixture.
+The final 1,609 reported tests and Release build pass. See
+[Opportunity review](OPPORTUNITY_VISUAL_IDENTITY_REVIEW_20261003.md).
+Large-text/localization, long capability/number variants, spoken accessibility,
+production efficiency/integration and all broader gates remain open.
