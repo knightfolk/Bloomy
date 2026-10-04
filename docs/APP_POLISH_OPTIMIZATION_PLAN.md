@@ -44,6 +44,17 @@ checks, 1,579 reported tests (seven skips) and Release compilation pass.
 See `MENU_BAR_ANIMATION_CANCELLATION_REVIEW_20261003.md` for rejected candidates,
 finite traces, provenance and the next restoration/commit-boundary investigation.
 
+October 3 resumed host comparison: the unchanged production SwiftUI label again
+passes active rotation, ordinary/rapid reopening and actual dismantle. A fifth
+case uses a separate app with an ordinary opaque window. Its WindowServer
+front ordering and full target coverage pass, but the target never loses its
+actual compositor-visible flag: terminal 4/5, genuine cover still unproven.
+Both owned test processes exited, with no production lifecycle action. This
+rules out different bundle identity alone as the explanation and does not
+repair or supersede the standalone fifteen-case gate. Exact source, binary,
+cleanup and evidence boundaries are in
+`MENU_BAR_SWIFTUI_HOST_DIAGNOSTIC_20261003.md`.
+
 ## Current review priorities
 
 Kevin questioned the emphasis on keyboard controls on October 2. Keep ordinary

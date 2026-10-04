@@ -3,7 +3,7 @@
 
 Uses existing current Debug telemetry products; never runs SwiftPM, launches an
 app, connects to the provider, changes preferences, or downloads dependencies.
-This four-case comparison does not replace the standalone 15-case motion gate.
+This five-case comparison does not replace the standalone 15-case motion gate.
 """
 import argparse
 import hashlib
@@ -120,7 +120,24 @@ extension Bundle {
     staged_fixture = stage / fixture.name
     staged_fixture.write_bytes(fixture_bytes)
 
+    cover_source = ROOT / "Tests/NativeUI/MenuBarOpaqueCoverFixture.swift"
+    staged_cover = stage / cover_source.name
+    staged_cover.write_bytes(cover_source.read_bytes())
+    source_hashes[str(cover_source.relative_to(ROOT))] = sha256(cover_source)
+    cover_app = output / "Bloomy Menu Cover Fixture.app"
+    cover_contents = cover_app / "Contents"
+    cover_binary = cover_contents / "MacOS/MenuBarOpaqueCoverFixture"
+    cover_binary.parent.mkdir(parents=True)
+    cover_info = {"CFBundleIdentifier": args.bundle_id + ".cover",
+                  "CFBundleName": "Bloomy Menu Cover Fixture",
+                  "CFBundleExecutable": "MenuBarOpaqueCoverFixture",
+                  "CFBundlePackageType": "APPL", "LSMinimumSystemVersion": "14.0"}
+    with (cover_contents / "Info.plist").open("wb") as handle:
+        plistlib.dump(cover_info, handle)
+
     arch = "arm64" if platform.machine() == "arm64" else "x86_64"
+    cover_command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6",
+                     "-parse-as-library", str(staged_cover), "-framework", "AppKit", "-o", str(cover_binary)]
     command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6",
                "-parse-as-library", "-D", "DEBUG", "-I", str(dependencies), "-F", str(frameworks),
                str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle",
@@ -139,8 +156,11 @@ extension Bundle {
         "telemetry_archive_sha256": sha256(staged_telemetry),
         "telemetry_archive_source": str(telemetry),
         "compiler_command": command,
+        "cover_fixture": str(cover_app), "cover_bundle_id": cover_info["CFBundleIdentifier"],
+        "cover_compiler_command": cover_command,
         "required_cases": ["visible_active_compositor_advances", "same_window_close_and_reopen",
-                           "rapid_same_window_close_and_reopen", "swiftui_dismantle_retained_view"],
+                           "rapid_same_window_close_and_reopen", "swiftui_dismantle_retained_view",
+                           "distinct_app_genuine_occlusion_and_restore"],
         "status_location_pattern": "NSTemporaryDirectory()/BloomyMenuHostLifecycle-<pid>-<uuid>/host-lifecycle-proof.json",
         "trigger": "Native Run lifecycle diagnostic button; one finite run per launch",
         "status": "staged",
@@ -148,6 +168,8 @@ extension Bundle {
     manifest_path = output / "fixture-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     try:
+        subprocess.run(cover_command, cwd=ROOT, check=True)
+        subprocess.run(["codesign", "--force", "--sign", "-", str(cover_app)], check=True)
         subprocess.run(command, cwd=ROOT, check=True)
         subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], check=True)
     except subprocess.CalledProcessError:
@@ -155,6 +177,7 @@ extension Bundle {
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
         raise
     manifest["binary_sha256"] = sha256(binary)
+    manifest["cover_binary_sha256"] = sha256(cover_binary)
     manifest["status"] = "built-local-diagnostic"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     print(app)

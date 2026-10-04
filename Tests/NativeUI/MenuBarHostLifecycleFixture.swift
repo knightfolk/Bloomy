@@ -234,9 +234,104 @@ private func angularDistance(_ first: Double, _ second: Double) -> Double {
 }
 
 @MainActor
+private final class OwnedOpaqueApplication {
+    let process = Process()
+    let statusURL: URL
+    private let input = Pipe()
+    private let log: FileHandle
+    private var launched = false
+    private var cleanupEvidence: [String: Any] = [:]
+
+    init(frame: NSRect, outputDirectory: URL) throws {
+        let app = Bundle.main.bundleURL.deletingLastPathComponent()
+            .appendingPathComponent("Bloomy Menu Cover Fixture.app", isDirectory: true)
+        let info = try Data(contentsOf: app.appendingPathComponent("Contents/Info.plist"))
+        let dictionary = try PropertyListSerialization.propertyList(from: info, format: nil) as? [String: Any]
+        try require(dictionary?["CFBundleIdentifier"] as? String != Bundle.main.bundleIdentifier,
+                    "Cover must have a different application identity")
+        statusURL = outputDirectory.appendingPathComponent("cover-\(UUID().uuidString).json")
+        let logURL = statusURL.deletingPathExtension().appendingPathExtension("log")
+        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        log = try FileHandle(forWritingTo: logURL)
+        process.executableURL = app.appendingPathComponent("Contents/MacOS/MenuBarOpaqueCoverFixture")
+        process.arguments = [frame.minX, frame.minY, frame.width, frame.height].map { String(Double($0)) }
+            + [statusURL.path]
+        process.standardInput = input
+        process.standardOutput = log
+        process.standardError = log
+    }
+
+    var status: [String: Any] {
+        guard let data = try? Data(contentsOf: statusURL),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return value
+    }
+
+    func start() async throws {
+        try process.run()
+        launched = true
+        try await waitUntil("Distinct-app cover did not publish readiness") {
+            self.process.isRunning && self.status["event"] as? String == "ready"
+        }
+        try require(status["processID"] as? Int == Int(process.processIdentifier), "Cover readiness has a different PID")
+        try require(status["opaque"] as? Bool == true && status["contentOpaque"] as? Bool == true
+                    && status["alpha"] as? Double == 1 && status["visible"] as? Bool == true,
+                    "Cover is not actually opaque and visible")
+    }
+
+    func serverEvidence(target: NSWindow) -> [[String: Any]] {
+        let coverNumber = status["windowNumber"] as? Int ?? -1
+        let entries = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+        return entries.enumerated().compactMap { index, entry in
+            guard let number = entry[kCGWindowNumber as String] as? Int,
+                  number == coverNumber || number == target.windowNumber else { return nil }
+            return ["windowNumber": number, "frontToBackIndex": index,
+                    "ownerPID": entry[kCGWindowOwnerPID as String] ?? -1,
+                    "bounds": entry[kCGWindowBounds as String] ?? [:],
+                    "alpha": entry[kCGWindowAlpha as String] ?? -1]
+        }
+    }
+
+    func covers(_ target: NSWindow) -> Bool {
+        let entries = serverEvidence(target: target)
+        guard let behind = entries.first(where: { $0["windowNumber"] as? Int == target.windowNumber }),
+              let front = entries.first(where: { $0["windowNumber"] as? Int == status["windowNumber"] as? Int }),
+              behind["ownerPID"] as? Int == Int(getpid()),
+              front["ownerPID"] as? Int == Int(process.processIdentifier),
+              let first = front["frontToBackIndex"] as? Int, let second = behind["frontToBackIndex"] as? Int,
+              first < second, front["alpha"] as? Double == 1,
+              let a = front["bounds"] as? [String: Any], let b = behind["bounds"] as? [String: Any],
+              let frontRect = CGRect(dictionaryRepresentation: a as CFDictionary),
+              let behindRect = CGRect(dictionaryRepresentation: b as CFDictionary) else { return false }
+        return frontRect.contains(behindRect)
+    }
+
+    func stop() async -> [String: Any] {
+        // A cancellation must still join exactly this owned child.
+        await Task { @MainActor in
+            try? self.input.fileHandleForWriting.close()
+            if self.launched {
+                do { try await waitUntil("Owned cover did not exit on EOF") { !self.process.isRunning } }
+                catch {
+                    if self.process.isRunning { self.process.terminate() }
+                    try? await waitUntil("Owned cover did not terminate") { !self.process.isRunning }
+                }
+            }
+            try? self.input.fileHandleForReading.close()
+            try? self.log.close()
+            self.cleanupEvidence = ["exited": self.launched && !self.process.isRunning,
+                    "exitStatus": self.launched && !self.process.isRunning ? Int(self.process.terminationStatus) : -1,
+                    "terminal": self.status]
+        }.value
+        return cleanupEvidence
+    }
+}
+
+@MainActor
 private final class HostLifecycleReport {
     static let requiredCases = ["visible_active_compositor_advances", "same_window_close_and_reopen",
-                                "rapid_same_window_close_and_reopen", "swiftui_dismantle_retained_view"]
+                                "rapid_same_window_close_and_reopen", "swiftui_dismantle_retained_view",
+                                "distinct_app_genuine_occlusion_and_restore"]
     let outputURL: URL
     private let startedAt = Date()
     private(set) var cases: [[String: Any]] = []
@@ -374,9 +469,53 @@ private final class HostLifecycleReport {
                     "retainedNativeViewAndArc": true, "retainedViewReattachedToVisibleWindow": true,
                     "lateCallbackSettleSeconds": CACurrentMediaTime() - settleStart]
         }
+        await check(Self.requiredCases[4]) { target in
+            try await target.clock()
+            let cover = try OwnedOpaqueApplication(frame: target.window.frame.insetBy(dx: -40, dy: -40),
+                outputDirectory: self.outputURL.deletingLastPathComponent())
+            do {
+                try await cover.start()
+                target.evidence["coverReady"] = cover.status
+                try await waitUntil("Distinct-app cover does not completely cover the target in WindowServer") {
+                    cover.process.isRunning && cover.covers(target.window)
+                }
+                target.evidence["windowServerCoverage"] = cover.serverEvidence(target: target.window)
+                try await waitUntil("Separate opaque app did not establish genuine compositor occlusion") {
+                    cover.process.isRunning && target.window.isVisible && !target.window.isMiniaturized
+                        && !target.window.occlusionState.contains(.visible)
+                }
+                try await waitUntil("Genuinely occluded production arc retained its clock") {
+                    target.arc?.animation(forKey: "inferenceRotation") == nil
+                }
+                target.record("genuine_occlusion_observed")
+                let holdStart = CACurrentMediaTime()
+                try await Task.sleep(for: .milliseconds(600))
+                try target.retainedIdentity()
+                try require(cover.process.isRunning && cover.covers(target.window) && target.window.isVisible
+                    && !target.window.isMiniaturized && !target.window.occlusionState.contains(.visible)
+                    && target.arc?.animation(forKey: "inferenceRotation") == nil,
+                    "The covered hold lost actual occlusion or restarted its clock")
+                target.evidence["occludedNative"] = target.snapshot()
+                target.evidence["occludedHoldSeconds"] = CACurrentMediaTime() - holdStart
+            } catch {
+                target.evidence["coverPartial"] = cover.status
+                target.evidence["windowServerAtFailure"] = cover.serverEvidence(target: target.window)
+                target.evidence["coverCleanup"] = await cover.stop()
+                throw error
+            }
+            let cleanup = await cover.stop()
+            target.evidence["coverCleanup"] = cleanup
+            let terminal = cleanup["terminal"] as? [String: Any] ?? [:]
+            try require(cleanup["exited"] as? Bool == true && cleanup["exitStatus"] as? Int == 0
+                && terminal["reason"] as? String == "parent-request" && terminal["windowClosed"] as? Bool == true,
+                "Owned cover must close and exit normally before restoration")
+            try await target.waitVisible()
+            target.record("uncovered_visibility_regained")
+            return try await target.stableClockEvidence()
+        }
         persist(terminal: true)
         let passed = failures.isEmpty && cases.count == Self.requiredCases.count
-        print("MenuHostLifecycle terminal: \(passed ? "passed" : "failed") cases=\(cases.count)/4 output=\(outputURL.path)")
+        print("MenuHostLifecycle terminal: \(passed ? "passed" : "failed") cases=\(cases.count)/\(Self.requiredCases.count) output=\(outputURL.path)")
         return passed
     }
 }
@@ -399,7 +538,7 @@ private final class HostLifecycleApplicationDelegate: NSObject, NSApplicationDel
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 230))
         window.contentView = content
         let explanation = NSTextField(wrappingLabelWithString:
-            "Diagnostic comparison: real production SwiftUI host. Four finite cases. The standalone 15-case release gate remains separate.")
+            "Diagnostic comparison: real production SwiftUI host. Five finite cases, including a separate opaque cover app. The standalone 15-case release gate remains separate.")
         explanation.frame = NSRect(x: 24, y: 164, width: 592, height: 44)
         content.addSubview(explanation)
         let button = NSButton(title: "Run lifecycle diagnostic", target: self, action: #selector(runDiagnostic))
@@ -425,7 +564,7 @@ private final class HostLifecycleApplicationDelegate: NSObject, NSApplicationDel
     @objc private func runDiagnostic() {
         guard task == nil, let report else { return }
         runButton?.isEnabled = false
-        statusField?.stringValue = "Running four finite native cases…\nReport: \(report.outputURL.path)"
+        statusField?.stringValue = "Running five finite native cases…\nReport: \(report.outputURL.path)"
         task = Task { @MainActor [weak self] in
             let passed = await report.run()
             self?.statusField?.stringValue = "Terminal: \(passed ? "passed" : "failed"). Diagnostic comparison only.\nReport: \(report.outputURL.path)"
