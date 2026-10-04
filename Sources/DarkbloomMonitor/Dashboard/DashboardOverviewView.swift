@@ -17,6 +17,7 @@ struct DashboardOverviewView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Overview").font(.largeTitle.bold())
+                            .accessibilityAddTraits(.isHeader)
                         Text(Host.current().localizedName ?? "This Mac").foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -24,12 +25,16 @@ struct DashboardOverviewView: View {
                         .font(.callout)
                         .foregroundStyle(store.snapshot.menuStatus == .online ? Color.green : Color.secondary)
                 }
+                .accessibilityElement(children: .contain)
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) { summaryMetrics }.frame(minWidth: 700)
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                         summaryMetrics
                     }
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Today's observed metrics")
+                .accessibilityIdentifier("overview.metrics")
                 ProviderResourcesView(store: store)
                 DashboardModelSummary(store: store, controlStore: controlStore)
                 if let controlStore {
@@ -48,11 +53,23 @@ struct DashboardOverviewView: View {
 
     private var summaryMetrics: some View {
         Group {
-                    let earnings = PopupEarningsMetrics.make(from: store.currentTodayEarnings)
-                    DashboardMetric(title: "Observed today", value: earnings.map { money($0.totalUSD) } ?? "—", unit: earnings == nil ? "Awaiting earnings" : "USD", symbol: "dollarsign.circle")
-                    DashboardMetric(title: "Per observed hour", value: earnings.map { money($0.perHourUSD) } ?? "—", unit: earnings == nil ? "Awaiting coverage" : "USD / hour", symbol: "clock")
-                    DashboardMetric(title: "Average speed today", value: store.currentDayAverageTokenRate.map(number) ?? "—", unit: store.currentDayAverageTokenRate == nil ? "Awaiting samples" : "tok/s", symbol: "speedometer")
-                    DashboardMetric(title: "Completed today", value: store.currentJobSummary.map { $0.completedToday.formatted() } ?? "—", unit: store.currentJobSummary == nil ? "Awaiting job history" : "jobs", symbol: "checkmark.circle")
+            let earnings = PopupEarningsMetrics.make(from: store.currentTodayEarnings)
+            DashboardMetric(id: "today", title: "Observed today",
+                value: earnings.map { money($0.totalUSD) } ?? "—",
+                unit: earnings == nil ? "Awaiting earnings" : "USD",
+                symbol: "dollarsign.circle", accessibilityUnit: "US dollars")
+            DashboardMetric(id: "hourly", title: "Per observed hour",
+                value: earnings.map { money($0.perHourUSD) } ?? "—",
+                unit: earnings == nil ? "Awaiting coverage" : "USD / hour",
+                symbol: "clock", accessibilityUnit: "US dollars per observed hour")
+            DashboardMetric(id: "speed", title: "Average speed today",
+                value: store.currentDayAverageTokenRate.map(number) ?? "—",
+                unit: store.currentDayAverageTokenRate == nil ? "Awaiting samples" : "tok/s",
+                symbol: "speedometer", accessibilityUnit: "tokens per second")
+            DashboardMetric(id: "jobs", title: "Completed today",
+                value: store.currentJobSummary.map { $0.completedToday.formatted() } ?? "—",
+                unit: store.currentJobSummary == nil ? "Awaiting job history" : "jobs",
+                symbol: "checkmark.circle")
         }
     }
 
@@ -61,10 +78,12 @@ struct DashboardOverviewView: View {
 }
 
 private struct DashboardMetric: View {
+    let id: String
     let title: String
     let value: String
     let unit: String
     var symbol: String = "chart.bar"
+    var accessibilityUnit: String? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Label(title, systemImage: symbol).font(.caption).foregroundStyle(.secondary)
@@ -74,7 +93,10 @@ private struct DashboardMetric: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 16))
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(value == "—" ? unit : "\(value) \(accessibilityUnit ?? unit)")
+        .accessibilityIdentifier("overview.metric.\(id)")
     }
 }
 

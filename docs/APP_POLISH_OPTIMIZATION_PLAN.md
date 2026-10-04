@@ -479,3 +479,10 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   exact inert fixture; 1,610 reported tests and Release compilation pass. See
   `OVERVIEW_EARNINGS_PRECISION_REVIEW_20261003.md`. This local checkpoint adds no
   production acquisition or timers; broader native and performance gates remain.
+
+- Overview's heading and summary cards no longer collapse into one native
+  accessibility readout. Four independently named values retain units and
+  unavailable qualifications in nine native checks, with unchanged visual
+  layout. Full 1,610 reported tests and Release compilation pass. See
+  `OVERVIEW_ACCESSIBILITY_REVIEW_20261003.md`; actual VoiceOver narration,
+  populated daily-speed and broader production/motion gates remain open.

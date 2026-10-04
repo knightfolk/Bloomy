@@ -329,3 +329,11 @@ tests and Release compilation pass. See
 [Overview precision review](OVERVIEW_EARNINGS_PRECISION_REVIEW_20261003.md).
 This bounded display fix does not close large-text/localization, spoken
 accessibility, live integration, menu-motion or production efficiency gates.
+
+October 3 Overview accessibility follow-up: the native heading and four summary
+elements are separate; names, numeric units and unavailable qualifications pass
+nine checks across fresh/tiny/offline/reload and compact/wide appearances. The
+rendered layout remains intact; full 1,610 reported tests and Release build pass.
+See [Overview accessibility review](OVERVIEW_ACCESSIBILITY_REVIEW_20261003.md).
+Actual VoiceOver narration/navigation, populated daily-speed and complete
+source/large-text/localization/production efficiency coverage remain open.
