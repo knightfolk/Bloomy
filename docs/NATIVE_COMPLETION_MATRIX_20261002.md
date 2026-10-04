@@ -1,5 +1,10 @@
 # Native polish completion matrix — October 2, 2026
 
+October 4 Metrics caption follow-up: fresh, real-aged, stale and unavailable
+native readings distinguish recorded quality from current freshness; compact
+light/dark fit and Refresh recovery pass. The broader route remains partial.
+See [caption review](METRICS_RECORDED_CAPTION_REVIEW_20261004.md).
+
 October 4 current Metrics resource follow-up: three 100k-record visible windows
 include a refresh; two minimized windows remain read-free. Integrated read-phase
 guards, 11 regressions and preserved production processes add bounded resource

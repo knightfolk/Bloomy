@@ -335,7 +335,12 @@ struct PerformanceMetricsContent: View {
                 if let storageError {
                     Text(storageError).font(.caption).foregroundStyle(.secondary)
                 } else if let last {
-                    Text("Latest observation \(last.observedAt.formatted(date: .abbreviated, time: .standard)) · \(last.quality.rawValue)")
+                    let recordedQuality = switch last.quality {
+                    case .current: "current when recorded"
+                    case .stale: "stale when recorded"
+                    case .unavailable: "unavailable when recorded"
+                    }
+                    Text("Observed \(last.observedAt.formatted(date: .abbreviated, time: .standard)) · \(recordedQuality)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

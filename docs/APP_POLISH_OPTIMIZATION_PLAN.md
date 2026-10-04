@@ -1,5 +1,11 @@
 # Bloomy native polish and efficiency
 
+October 4 Metrics caption follow-up: recorded quality is explicitly qualified
+at the timestamp, while the main label keeps its live 90-second freshness rule.
+Compact native fresh/aged light and dark, plus stale/unavailable dark and
+Refresh, pass. All 1,637 reported Release tests pass; see
+`METRICS_RECORDED_CAPTION_REVIEW_20261004.md`. Broader proof remains open.
+
 October 4 current Metrics profile: three visible 45-second windows each include
 one 100k-record refresh and measure 2.60–2.68% of one CPU core. Two minimized
 windows start no reads and measure 0.005–0.011%; raw cached rows remain released.

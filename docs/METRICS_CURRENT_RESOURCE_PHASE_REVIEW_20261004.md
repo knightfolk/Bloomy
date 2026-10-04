@@ -82,6 +82,9 @@ preserved. No push, install or release occurred. The broader goal stays open.
 
 ## Next observed UI issue
 
+This follow-up is now verified in
+[the recorded-caption review](METRICS_RECORDED_CAPTION_REVIEW_20261004.md).
+
 When recording ages, the main Metrics label correctly says “Waiting for fresh
 measurements,” but its timestamp caption appends stored quality “current.” This
 describes source quality when recorded, rather than current freshness. Clarify
