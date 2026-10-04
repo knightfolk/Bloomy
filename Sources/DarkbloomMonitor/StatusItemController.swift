@@ -67,7 +67,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         button.action = #selector(togglePopover(_:))
         button.sendAction(on: [.leftMouseUp])
 
-        let hostingView = PassthroughHostingView(rootView: MenuBarStatusView(store: store))
+        let hostingView = PassthroughHostingView(rootView: StatusItemRootView(store: store))
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         button.addSubview(hostingView)
         NSLayoutConstraint.activate([
@@ -182,17 +182,20 @@ private final class PassthroughHostingView<Content: View>: NSHostingView<Content
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// The same live indicators serve the status item and its Settings preview.
-/// Both observe existing stores; the preview starts no sampler or provider read.
-struct MenuBarStatusView: View {
+private struct StatusItemRootView: View {
     @ObservedObject var store: MonitorStore
-    var isVisible = true
+    @ObservedObject private var gpuUsage: SystemGPUUsageStore
+
+    init(store: MonitorStore) {
+        self.store = store
+        self.gpuUsage = store.gpuUsage
+    }
 
     var body: some View {
         if let extras = store.providerExtras {
-            ProviderExtrasStatusItemView(store: store, extras: extras, isVisible: isVisible)
+            ProviderExtrasStatusItemView(store: store, extras: extras)
         } else {
-            MenuBarStatusContent(store: store, fanStatus: nil, isVisible: isVisible)
+            MenuBarStatusContent(store: store, fanStatus: nil)
         }
     }
 }
@@ -202,10 +205,9 @@ struct MenuBarStatusView: View {
 private struct ProviderExtrasStatusItemView: View {
     let store: MonitorStore
     @ObservedObject var extras: ProviderExtrasStore
-    let isVisible: Bool
 
     var body: some View {
-        MenuBarStatusContent(store: store, fanStatus: extras.snapshot?.fanStatus, isVisible: isVisible)
+        MenuBarStatusContent(store: store, fanStatus: extras.snapshot?.fanStatus)
     }
 }
 
@@ -213,14 +215,12 @@ private struct MenuBarStatusContent: View {
     @ObservedObject var store: MonitorStore
     @ObservedObject private var gpuUsage: SystemGPUUsageStore
     let fanStatus: SourceAvailability<ProviderFanStatus>?
-    let isVisible: Bool
     @State private var freshnessCheckedAt = Date()
 
-    init(store: MonitorStore, fanStatus: SourceAvailability<ProviderFanStatus>?, isVisible: Bool) {
+    init(store: MonitorStore, fanStatus: SourceAvailability<ProviderFanStatus>?) {
         self.store = store
         self.gpuUsage = store.gpuUsage
         self.fanStatus = fanStatus
-        self.isVisible = isVisible
     }
 
     var body: some View {
@@ -242,8 +242,8 @@ private struct MenuBarStatusContent: View {
             indicators: values
         )
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: isVisible ? values.nextFreshnessChange : nil) {
-            guard isVisible, let deadline = values.nextFreshnessChange else { return }
+        .task(id: values.nextFreshnessChange) {
+            guard let deadline = values.nextFreshnessChange else { return }
             do { try await Task.sleep(for: .seconds(max(0.01, deadline.timeIntervalSinceNow))) }
             catch { return }
             freshnessCheckedAt = Date()
