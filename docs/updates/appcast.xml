@@ -3,6 +3,22 @@
     <channel>
         <title>Bloomy</title>
         <item>
+            <title>1.9.19</title>
+            <pubDate>Sat, 03 Oct 2026 20:48:57 -0700</pubDate>
+            <sparkle:version>144</sparkle:version>
+            <sparkle:shortVersionString>1.9.19</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<p>Free space directly from Models. Downloaded model cards now include an Uninstall button, with the observed downloaded size and cache location shown before removal. A removed model returns to Available with a Download action.</p>
+<p>Bloomy protects models that are enabled, loaded or still advertised by the provider, and checks current state again before removing files. If the cache location changes while confirmation is open, removal stops and requires a new confirmation. Cached revisions are removed too; backups can delay when freed space becomes available.</p>
+<p>The removal command now uses the same provider configuration as the model inventory, including custom cache locations. Ambiguous model identities and unknown provider state keep Uninstall unavailable.</p>
+<p>This patch preserves the provider&#x27;s running work and saved selections. Bloomy updates continue to use signed Sparkle packages; the provider CLI is separate.</p>
+<p>Apple Silicon Macs running macOS 14 or newer.</p>
+<p>This is a focused patch from the published 1.9.18 baseline. The unfinished menu-bar Settings preview remains in development and is excluded from this release; its animation diagnostic has not been declared fixed.</p>
+]]></description>
+            <enclosure url="https://github.com/knightfolk/Bloomy/releases/download/v1.9.19/Bloomy-1.9.19-mac-arm64.zip" length="9752308" type="application/octet-stream" sparkle:edSignature="YqI6+3VU9vEThD21wDsPIts158gI8fRzTYmfFIlEhUvSkisemozXFJthDSxlauZ9/Z/JFWEQ9j5bVV/U+HJwAg=="/>
+        </item>
+        <item>
             <title>1.9.18</title>
             <pubDate>Sat, 03 Oct 2026 07:31:00 -0700</pubDate>
             <sparkle:version>143</sparkle:version>
