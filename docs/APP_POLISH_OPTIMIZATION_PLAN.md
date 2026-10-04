@@ -486,3 +486,12 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   layout. Full 1,610 reported tests and Release compilation pass. See
   `OVERVIEW_ACCESSIBILITY_REVIEW_20261003.md`; actual VoiceOver narration,
   populated daily-speed and broader production/motion gates remain open.
+
+- The native builder now supports an optimized Release fixture with a testable
+  telemetry preflight. Visibility-qualified process sampling rejects restored
+  or otherwise mislabeled windows. Two 30-second Overview cycles measure
+  displayed 1.43–2.06% of one core versus minimized 0.32–0.39%, with roughly
+  157 MiB RSS. Full 1,610 reported Release tests pass. See
+  `OPTIMIZED_OVERVIEW_RESOURCE_BASELINE_20261004.md`; this is inert review-host
+  evidence, with production collectors, large histories, energy and all broader
+  UI/motion/accessibility gates still open. Temporary review processes stopped.

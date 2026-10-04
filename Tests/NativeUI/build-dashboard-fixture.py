@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Build a small isolated native review app using existing debug telemetry.
+"""Build a small isolated native review app using existing telemetry products.
 
 Production source files are never edited. The staged copies replace exactly
 three autonomous default dependencies; all destination view bodies are unchanged.
+Run swift test in the chosen configuration first for testable telemetry products.
 """
 import argparse
 import hashlib
@@ -18,17 +19,23 @@ parser.add_argument("--output", type=Path, default=ROOT / ".build/native-dashboa
 parser.add_argument("--hide-review-banner", action="store_true",
                     help="Omit fixture controls to inspect the dashboard's own keyboard entry.")
 parser.add_argument("--compact", action="store_true", help="Start the isolated window at 800 x 560.")
+parser.add_argument("--configuration", choices=["debug", "release"], default="debug",
+                    help="Release optimizes the fixture and production views for bounded profiling.")
 args = parser.parse_args()
 output = args.output.resolve()
 if output.exists():
     parser.error("Output already exists; preserve it for provenance and pass --output with a fresh task-owned path.")
-products = ROOT / ".build/out/Products/Debug"
+products = ROOT / ".build/out/Products" / args.configuration.title()
 telemetry = products / "libDarkbloomTelemetry.a"
 if not telemetry.is_file():
-    parser.error("Expected existing .build/out/Products/Debug/libDarkbloomTelemetry.a; run the project debug test/build first.")
+    parser.error(f"Expected existing {telemetry}; run swift test -c {args.configuration} first.")
 sparkle = products / "Sparkle.framework"
 if not sparkle.is_dir():
-    parser.error("Expected existing debug Sparkle.framework.")
+    parser.error(f"Expected existing {args.configuration} Sparkle.framework.")
+module_check = subprocess.run(["swiftc", "-I", str(products), "-typecheck", "-e",
+                               "@testable import DarkbloomTelemetry"], capture_output=True, text=True)
+if module_check.returncode:
+    parser.error(f"Telemetry must support the fixture's test-only constructors; run swift test -c {args.configuration} first.\n{module_check.stderr}")
 stage = output / "staged-sources"
 stage.mkdir(parents=True, exist_ok=True)
 app = output / "Bloomy Dashboard Fixture.app"
@@ -98,12 +105,12 @@ for helper in sorted((ROOT / "Tests/NativeUI").glob("*Proof.swift")):
     staged_helper.write_bytes(helper_bytes)
     sources.append(staged_helper)
 # Link the same immutable bytes that the manifest identifies, even if an
-# independent debug build refreshes the original products during compilation.
+# independent build refreshes the original products during compilation.
 staged_telemetry = stage / telemetry.name
 shutil.copy2(telemetry, staged_telemetry)
 arch = "arm64" if platform.machine() == "arm64" else "x86_64"
 command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6",
-           "-parse-as-library", "-D", "DEBUG",
+           "-parse-as-library", *(["-O"] if args.configuration == "release" else ["-Onone", "-D", "DEBUG"]),
            *(["-D", "FIXTURE_HIDE_REVIEW_BANNER"] if args.hide_review_banner else []),
            *(["-D", "FIXTURE_COMPACT"] if args.compact else []),
            "-I", str(products), "-F", str(products),
@@ -113,6 +120,8 @@ subprocess.run(command, cwd=ROOT, check=True)
 subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], check=True)
 manifest = {
     "fixture": str(app), "synthetic": True, "distribution": False,
+    "build_configuration": args.configuration,
+    "view_optimization": "-O" if args.configuration == "release" else "-Onone",
     "review_banner_visible": not args.hide_review_banner, "initial_compact": args.compact,
     "source_sha256": hashes,
     "dependency_substitutions": {name: {"before": pair[0], "after": pair[1]}

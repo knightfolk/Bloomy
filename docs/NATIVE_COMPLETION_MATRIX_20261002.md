@@ -337,3 +337,12 @@ rendered layout remains intact; full 1,610 reported tests and Release build pass
 See [Overview accessibility review](OVERVIEW_ACCESSIBILITY_REVIEW_20261003.md).
 Actual VoiceOver narration/navigation, populated daily-speed and complete
 source/large-text/localization/production efficiency coverage remain open.
+
+October 4 optimized resource baseline: Release view/fixture compilation and
+testable Release telemetry now support qualified native process windows. The
+sampler rejects state changes and wrong labels; two current Overview cycles
+confirm display-disabled minimization with lower CPU in the inert host. Full
+1,610 reported Release tests pass, and temporary review apps quit normally.
+See [Optimized baseline](OPTIMIZED_OVERVIEW_RESOURCE_BASELINE_20261004.md).
+This does not prove production collector/traffic costs, leak freedom, whole-app
+energy or genuine compositor occlusion. All broader completion gates remain.

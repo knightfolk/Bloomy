@@ -19,12 +19,17 @@ parser.add_argument('--pid', type=int)
 parser.add_argument('--seconds', type=float, default=30)
 parser.add_argument('--label')
 parser.add_argument('--output', type=Path)
+parser.add_argument('--visibility-proof', type=Path,
+                    help='Owned fixture visibility event file; verify state throughout the window')
+parser.add_argument('--visibility-mode', choices=['visible', 'minimized', 'hidden'])
 parser.add_argument('--self-check', action='store_true', help='Check Mach time conversion against getrusage using one second of owned CPU work')
 args = parser.parse_args()
 if not 1 <= args.seconds <= 60:
     parser.error('Use a bounded 1–60 second window')
 if args.output and args.output.exists():
     parser.error('Preserve existing evidence; choose a fresh output file')
+if bool(args.visibility_proof) != bool(args.visibility_mode):
+    parser.error('Use --visibility-proof and --visibility-mode together')
 
 class Usage(ctypes.Structure):
     _fields_ = [('uuid', ctypes.c_uint8 * 16)] + [(name, ctypes.c_uint64) for name in (
@@ -63,6 +68,26 @@ def read():
         raise OSError(ctypes.get_errno(), 'Cannot read the requested live process')
     return {name: getattr(usage, name) for name, _ in Usage._fields_ if name != 'uuid'}
 
+def visibility():
+    if not args.visibility_proof:
+        return None
+    events = json.loads(args.visibility_proof.read_text())
+    if not isinstance(events, list) or not events or not isinstance(events[-1], dict):
+        raise RuntimeError('Visibility evidence is missing; reject this observation')
+    latest = events[-1]
+    expected = {
+        'visible': {'applicationHidden': False, 'miniaturized': False,
+                    'windowVisible': True, 'displayEnabled': True},
+        'minimized': {'applicationHidden': False, 'miniaturized': True,
+                      'windowVisible': False, 'displayEnabled': False},
+        'hidden': {'applicationHidden': True, 'displayEnabled': False},
+    }[args.visibility_mode]
+    if any(latest.get(key) is not value for key, value in expected.items()):
+        raise RuntimeError(f'Fixture no longer matches {args.visibility_mode}; reject this observation')
+    return {'event_count': len(events), 'latest': {key: latest.get(key) for key in
+            ('phase', 'uptime', 'applicationHidden', 'miniaturized', 'windowVisible',
+             'compositorVisible', 'displayEnabled')}}
+
 if args.self_check:
     before = read()
     reference_before = resource.getrusage(resource.RUSAGE_SELF)
@@ -84,15 +109,20 @@ if args.self_check:
 
 samples = []
 start = time.monotonic()
+initial_visibility = visibility()
 first = read()
-samples.append({'elapsed_seconds': 0, **first})
+samples.append({'elapsed_seconds': 0, **first, **({'visibility': initial_visibility} if initial_visibility else {})})
 while time.monotonic() - start < args.seconds:
     time.sleep(min(1, max(0, args.seconds - (time.monotonic() - start))))
     elapsed = time.monotonic() - start
     current = read()
+    current_visibility = visibility()
+    if initial_visibility and current_visibility != initial_visibility:
+        raise RuntimeError('Visibility events changed during the window; reject this observation')
     if current['proc_start_abstime'] != first['proc_start_abstime'] or current['proc_exit_abstime']:
         raise RuntimeError('Process identity changed or exited; reject this observation')
-    samples.append({'elapsed_seconds': elapsed, **current})
+    samples.append({'elapsed_seconds': elapsed, **current,
+                    **({'visibility': current_visibility} if current_visibility else {})})
 last = samples[-1]
 wall = last['elapsed_seconds']
 cpu = cpu_seconds(first, last)
@@ -105,6 +135,9 @@ result = {'mach_timebase_numer': timebase.numer, 'mach_timebase_denom': timebase
           'idle_wakeups_per_second': (last['pkg_idle_wkups'] - first['pkg_idle_wkups']) / wall,
           'interrupt_wakeups_per_second': (last['interrupt_wkups'] - first['interrupt_wkups']) / wall,
           'samples': samples}
+if args.visibility_mode:
+    result['visibility_mode'] = args.visibility_mode
+    result['visibility_evidence'] = initial_visibility
 args.output.parent.mkdir(parents=True, exist_ok=True)
 args.output.write_text(json.dumps(result, indent=2) + '\n')
 print(json.dumps({k: v for k, v in result.items() if k != 'samples'}))
