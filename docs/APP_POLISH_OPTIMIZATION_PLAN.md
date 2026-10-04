@@ -419,3 +419,12 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   content is checked at 650 points. Alert pixels retain the documented capture
   limitation; installed-app delivery, menu-bar motion and the broader matrix
   remain open. See `MODEL_UNINSTALL_CARDS_REVIEW_20261003.md`.
+
+- A native grid-boundary follow-up corrects the compact downloaded footer's
+  7.5-point overgrowth at 300-point slots by shortening the preload label to
+  “Startup.” The expanded label and model-specific help remain complete. Six
+  light/dark geometry reports, actual rendered inspection, staged/reverted
+  controls and five focused rendering tests pass. The first overgrown-content
+  comparison was rejected and retained. See
+  `MODEL_CARD_GRID_BOUNDARY_REVIEW_20261003.md`; wider accessibility/localization,
+  full populated three-column and broader screen gates remain open.

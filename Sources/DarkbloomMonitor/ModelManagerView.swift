@@ -2291,7 +2291,7 @@ struct DownloadedModelRow: View {
     @ViewBuilder
     private func preloadToggle(checkbox: Bool) -> some View {
         if presentation.showsPreloadToggle {
-            ModelOptionToggle(title: "Load at startup", isOn: preloadedBinding, checkbox: checkbox,
+            ModelOptionToggle(title: checkbox ? "Startup" : "Load at startup", isOn: preloadedBinding, checkbox: checkbox,
                 accessibilityName: presentation.preloadAction?.accessibilityLabel ?? "Preload \(item.displayName)",
                 accessibilityHintText: presentation.preloadAction?.accessibilityHint ?? "",
                 accessibilityID: "model.\(item.catalogID).preload", keyboardFocusTarget: .preload)

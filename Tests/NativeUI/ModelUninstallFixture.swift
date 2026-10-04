@@ -1,5 +1,6 @@
 // Local-only native review fixture. The fake controller owns exactly one
 // temporary sentinel file and never reads or changes provider files.
+import AppKit
 import SwiftUI
 import DarkbloomTelemetry
 
@@ -345,7 +346,10 @@ struct ModelUninstallFixture: App {
     @StateObject private var store: ProviderControlStore
     @StateObject private var reviewStatus: UninstallFixtureStatus
     @State private var compactReview = false
+    @State private var thresholdReview = false
+    @State private var threeColumnReview = false
     @State private var lightReview = false
+    @State private var boundsReview = "Bounds not measured"
 
     init() {
         let reviewStatus = UninstallFixtureStatus()
@@ -382,6 +386,16 @@ struct ModelUninstallFixture: App {
                         Toggle("Light appearance", isOn: $lightReview)
                     }
                     .toggleStyle(.checkbox)
+                    HStack {
+                        Toggle("654 pt two-column boundary", isOn: $thresholdReview)
+                        Toggle("968 pt three-column boundary", isOn: $threeColumnReview)
+                        Button("Measure card controls") {
+                            boundsReview = ModelUninstallCardBounds.measure(outputDirectory: reviewStatus.rootURL,
+                                allocatedCardWidth: threeColumnReview || thresholdReview ? 300 : 460)
+                        }
+                        .disabled(!compactReview && !thresholdReview && !threeColumnReview)
+                    }.toggleStyle(.checkbox)
+                    Text(boundsReview).font(.caption).foregroundStyle(.secondary)
                     Text(reviewStatusLine)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -397,7 +411,7 @@ struct ModelUninstallFixture: App {
                 Divider()
 
                 ModelManagerView(store: store)
-                    .frame(width: compactReview ? 650 : nil)
+                    .frame(width: threeColumnReview ? 968 : thresholdReview ? 654 : compactReview ? 650 : nil)
                     .frame(maxWidth: .infinity)
             }
             .frame(minWidth: 650, idealWidth: 820, minHeight: 700, idealHeight: 780)
@@ -410,5 +424,98 @@ struct ModelUninstallFixture: App {
         let value = reviewStatus.document
         let file = value.weightsFileExists ? "present" : "removed"
         return "Uninstall calls: \(value.deleteCallCount) · fake weights file: \(file) · \(value.lastDeleteOutcome)"
+    }
+}
+
+/// A bounded, read-only inspection of the real native accessibility geometry.
+/// The production card group exposes its content width; controls must stay
+/// horizontally within that content. No control is pressed or focused here.
+@MainActor
+private enum ModelUninstallCardBounds {
+    static func measure(outputDirectory: URL, allocatedCardWidth: CGFloat) -> String {
+        let output = outputDirectory.appendingPathComponent("card-controls-bounds.json")
+        var measurements: [[String: Any]] = []
+        var failures: [String] = []
+        guard let window = NSApplication.shared.windows.first(where: { $0.isVisible && $0.title == "Model Uninstall Review" }),
+              let content = window.contentView else { return "No owned review window" }
+        var pending: [(NSObject, Int)] = [(content, 0)]
+        var seen = Set<ObjectIdentifier>()
+        var nodes: [NSObject] = []
+        while let (object, depth) = pending.popLast() {
+            guard seen.insert(ObjectIdentifier(object)).inserted else { continue }
+            guard nodes.count < 2_000, depth <= 128 else {
+                failures.append("Native accessibility traversal exceeded its bound")
+                break
+            }
+            nodes.append(object)
+            let children = attribute("accessibilityChildren", object) as? [NSObject] ?? []
+            pending.append(contentsOf: children.map { ($0, depth + 1) })
+            if let view = object as? NSView {
+                pending.append(contentsOf: view.subviews.map { ($0, depth + 1) })
+                if let accessible = NSAccessibility.unignoredDescendant(of: view) as? NSObject {
+                    pending.append((accessible, depth + 1))
+                }
+            }
+        }
+        let cases = [(UninstallFixtureModel.residentID, "Fixture Resident 4B"),
+                     (UninstallFixtureModel.eligibleID, "Fixture Unloaded 4B")]
+        for (id, name) in cases {
+            let headers = nodes.filter {
+                (attribute("accessibilityRole", $0) as? String) == NSAccessibility.Role.group.rawValue
+                    && (attribute("accessibilityLabel", $0) as? String ?? "").hasPrefix(id + ",")
+            }
+            guard headers.count == 1, let header = headers.first,
+                  let rect = (attribute("accessibilityFrame", header) as? NSValue)?.rectValue,
+                  rect.width.isFinite && rect.width > 0 else {
+                failures.append("\(id): expected one readable card content group; found \(headers.count)")
+                continue
+            }
+            measurements.append(["model": id, "kind": "content", "frame": NSStringFromRect(rect)])
+            // Do not accept controls merely fitting an already overgrown
+            // content group. The independent grid slot is the width oracle.
+            let contentWidth = allocatedCardWidth - 24
+            if rect.width > contentWidth + 2 {
+                failures.append("\(id): content exceeds its allotted width by \(Double(rect.width - contentWidth)) pt")
+            }
+            let allocated = NSRect(x: rect.midX - contentWidth / 2, y: rect.minY,
+                                   width: contentWidth, height: rect.height)
+            for role in ["enable", "preload", "uninstall", "manage"] {
+                let matches = nodes.filter { node in
+                    let label = attribute("accessibilityLabel", node) as? String ?? ""
+                    switch role {
+                    case "enable": return label == "Enable \(name)" || label == "Disable \(name)"
+                    case "preload": return label == "Preload \(name)"
+                    case "uninstall": return label == "Uninstall \(name)"
+                    default: return label == "Manage \(name)"
+                    }
+                }
+                guard matches.count == 1, let control = matches.first,
+                      let frame = (attribute("accessibilityFrame", control) as? NSValue)?.rectValue,
+                      frame.width.isFinite && frame.width > 0 else {
+                    failures.append("\(id).\(role): expected one readable control; found \(matches.count)")
+                    continue
+                }
+                let overflow = max(0, allocated.minX - frame.minX, frame.maxX - allocated.maxX)
+                measurements.append(["model": id, "kind": role, "frame": NSStringFromRect(frame),
+                                     "horizontalOverflowPoints": Double(overflow)])
+                if overflow > 2 { failures.append("\(id).\(role) overflows by \(Double(overflow)) pt") }
+            }
+        }
+        let record: [String: Any] = ["proof": "native-model-card-control-horizontal-bounds",
+            "passing": failures.isEmpty, "failures": failures, "measurements": measurements,
+            "nativeNodeCount": nodes.count, "windowFrame": NSStringFromRect(window.frame),
+            "allocatedCardWidth": Double(allocatedCardWidth), "allocatedContentWidth": Double(allocatedCardWidth - 24),
+            "providerConnected": false, "pressedAnyModelControl": false,
+            "limitations": "Horizontal card-content containment only; no vertical scroll or spoken accessibility proof."]
+        do {
+            try JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted, .sortedKeys])
+                .write(to: output, options: .atomic)
+        } catch { return "Bounds report write failed" }
+        return "Bounds \(failures.isEmpty ? "pass" : "FAIL"): \(measurements.count) measurements · \(failures.count) failures"
+    }
+
+    private static func attribute(_ name: String, _ object: NSObject) -> Any? {
+        guard object.responds(to: NSSelectorFromString(name)) else { return nil }
+        return object.value(forKey: name)
     }
 }

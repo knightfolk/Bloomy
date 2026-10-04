@@ -268,3 +268,12 @@ motion and release gates remain open. Final retained-source Native183 confirms
 12/15 motion cases and passing model/chart checks; all 110 source hashes match.
 The 1,579 reported tests (seven opt-in skips) and Release build pass. See
 [Cancellation review](MENU_BAR_ANIMATION_CANCELLATION_REVIEW_20261003.md).
+
+October 3 model-card grid follow-up: downloaded footer content no longer grows
+7.5 points beyond its allotted 300-point slot. Compact “Startup” preserves the
+full Manage label and accessible explanation. Native horizontal containment
+passes six light/dark width cases, with staging/reversion and no deletion. Five
+focused rendering tests pass. The fixture has two Available cards, so a filled
+three-column row, spoken VoiceOver and localization remain unproven; broader
+Models and menu-motion gates stay partial. See
+[Grid boundary review](MODEL_CARD_GRID_BOUNDARY_REVIEW_20261003.md).
