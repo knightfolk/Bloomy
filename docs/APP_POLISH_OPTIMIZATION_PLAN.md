@@ -1,5 +1,14 @@
 # Bloomy native polish and efficiency
 
+October 4 Metrics capacity follow-up: a shorter query reserves its actual
+membership rather than the former large scope. Paired synthetic component runs
+reduce the shrinking sample buffer from 21.375 to 0.750 MiB with exact field/order
+parity and essentially unchanged repeat-read timing. Native heap/visibility
+proof confirms hidden row release, while a mounted prior SwiftUI buffer remains
+a separate ownership question. Full Release checks report 1,637 passing tests.
+See `METRICS_SNAPSHOT_CAPACITY_REVIEW_20261004.md`. The icon-first popup and
+graphical Earnings layouts were freshly inspected; installation remains separate.
+
 October 4 popup command-tile follow-up: Hosting, Start/Stop, Autopilot, Auto,
 Nudge and More now share consistent icon-first controls above the live Mac
 readings. Earnings uses three equal-width graphic tiles. An observed native

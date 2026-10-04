@@ -232,10 +232,33 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
         // prevents same-connection writes until COMMIT and the version fence.
         try Self.execute(connection.pointer, "BEGIN")
         do {
+            let membership = """
+                FROM performance_history WHERE observed_at >= ? AND observed_at <= ?
+                \(model == nil ? "" : "AND model = ?")
+                """
+            // Count the current scope inside this same pinned read. Reserving
+            // the previous scope retains a large buffer after period/filter
+            // narrowing; geometric cold-read growth also overallocates.
+            let capacity: Int
+            do {
+                let count = try prepare("SELECT COUNT(*) \(membership)")
+                defer { sqlite3_finalize(count) }
+                try checked(sqlite3_bind_double(count, 1, interval.start.timeIntervalSince1970))
+                try checked(sqlite3_bind_double(count, 2, interval.end.timeIntervalSince1970))
+                if let model { try bind(model, count, 3) }
+                guard sqlite3_step(count) == SQLITE_ROW,
+                      sqlite3_column_type(count, 0) == SQLITE_INTEGER,
+                      sqlite3_column_int64(count, 0) >= 0 else {
+                    throw PerformanceHistoryDatabaseError.unavailable
+                }
+                // Bound reservation even if an outside writer exceeds our
+                // retention cap. The row loop still returns every valid row.
+                capacity = Int(min(sqlite3_column_int64(count, 0), Int64(historyLimit)))
+            }
+            try Task.checkCancellation()
             let statement = try prepare("""
                 SELECT id, observed_at, model, \(previous == nil ? "sample, rowid" : "rowid")
-                FROM performance_history WHERE observed_at >= ? AND observed_at <= ?
-                \(model == nil ? "" : "AND model = ?") ORDER BY observed_at DESC, rowid DESC
+                \(membership) ORDER BY observed_at DESC, rowid DESC
                 """)
             defer { sqlite3_finalize(statement) }
             try checked(sqlite3_bind_double(statement, 1, interval.start.timeIntervalSince1970))
@@ -253,7 +276,8 @@ public final class PerformanceHistoryDatabase: @unchecked Sendable {
             let dirty = Set(insertions.lazy.filter { $0.sequence > previousSequence }.map(\.rowID))
             var samples: [PerformanceSample] = []
             var rowIDs: [Int64] = []
-            if let previous { samples.reserveCapacity(previous.samples.count); rowIDs.reserveCapacity(previous.rowIDs.count) }
+            samples.reserveCapacity(capacity)
+            rowIDs.reserveCapacity(capacity)
             var reused = 0
             while true {
                 if samples.count.isMultiple(of: 64) { try Task.checkCancellation() }

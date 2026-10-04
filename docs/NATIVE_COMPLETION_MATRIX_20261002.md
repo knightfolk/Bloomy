@@ -1,5 +1,12 @@
 # Native polish completion matrix — October 2, 2026
 
+October 4 Metrics capacity follow-up: exact-source native 100,000-row navigation,
+shorter period, manual Refresh, minimized heap release and fresh reopen passed.
+Paired component probes reduce shorter-query sample storage with complete
+field/order parity; mounted SwiftUI ownership and production resource comparison
+remain open. Full Release checks report 1,637 passing tests. See
+[capacity and heap review](METRICS_SNAPSHOT_CAPACITY_REVIEW_20261004.md).
+
 October 4 popup command-tile follow-up: equal icon-first commands and equal
 Earnings tiles have exact-source native light/dark proof; Auto, Nudge,
 Cooling refresh, Available collapse and guarded Stop were inspected.

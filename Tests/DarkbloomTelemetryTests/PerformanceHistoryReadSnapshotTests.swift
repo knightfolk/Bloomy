@@ -55,6 +55,33 @@ struct PerformanceHistoryReadSnapshotTests {
         #expect(next.samples == (try db.samples(in: interval)))
     }
 
+    @Test("narrower snapshot membership releases large array capacity without losing rows or reuse")
+    func narrowingCapacity() throws {
+        let url = temporaryURL(); defer { removeFiles(url) }
+        let db = try database(url)
+        let rows = (0..<2_000).map { sample($0, model: $0.isMultiple(of: 2) ? "qwen" : "gemma") }
+        for row in rows { try db.record(row) }
+        let broadRange = DateInterval(start: interval.start, end: now.addingTimeInterval(2_000))
+        let broad = try db.readSnapshot(in: broadRange)
+        let narrowRange = DateInterval(start: rows[1_800].observedAt, end: rows[1_899].observedAt)
+        let narrow = try db.readSnapshot(in: narrowRange, reusing: broad)
+        #expect(narrow.samples == Array(rows[1_800...1_899]))
+        #expect(narrow.reusedSampleCount == 100)
+        // Allow allocator rounding; reject capacity inherited from the 2,000-row scope.
+        #expect(narrow.samples.capacity < 300)
+        #expect(narrow.rowIDs.capacity < 300)
+        let filtered = try db.readSnapshot(in: narrowRange, model: "gemma", reusing: broad)
+        #expect(filtered.samples == narrow.samples.filter { $0.model == "gemma" })
+        #expect(filtered.reusedSampleCount == 50)
+        #expect(filtered.samples.capacity < 150)
+        #expect(filtered.rowIDs.capacity < 150)
+        let emptyRange = DateInterval(start: now.addingTimeInterval(10_000), duration: 1)
+        let empty = try db.readSnapshot(in: emptyRange, reusing: broad)
+        #expect(empty.samples.isEmpty && empty.rowIDs.isEmpty)
+        #expect(empty.samples.capacity == 0 && empty.rowIDs.capacity == 0)
+        #expect(broad.samples == rows)
+    }
+
     @Test("replays and conflicts do not publish inserts or replace completed snapshots")
     func replayConflict() throws {
         let url = temporaryURL(); defer { removeFiles(url) }
