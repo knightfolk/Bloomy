@@ -72,12 +72,15 @@ private struct RecordedPerformanceMetricsView: View {
                 timelineDate: context.date,
                 readToken: read.token,
                 readPeriod: read.period,
+                samplesAreAvailable: read.samplesAreAvailable,
                 onRefresh: { refreshID += 1 },
                 onPeriodChange: { period = $0 }
             )
         }
         .task(id: PerformanceHistoryQuery(period: period, refreshID: refreshID, isVisible: isVisible)) {
             guard isVisible else {
+                read = read.releasingSamples()
+                loading = false
                 await history.releaseReadCache()
                 return
             }
@@ -102,6 +105,8 @@ private struct RecordedPerformanceMetricsView: View {
             }
         }
         .onDisappear {
+            read = read.releasingSamples()
+            loading = false
             Task { await history.releaseReadCache() }
         }
     }
@@ -135,6 +140,7 @@ struct PerformanceMetricsContent: View {
     var timelineDate: Date?
     var readToken: PerformanceMetricsReadToken?
     var readPeriod: PerformanceMetricsPeriod?
+    var samplesAreAvailable = true
     var onRefresh: (() -> Void)? = nil
     var onPeriodChange: (PerformanceMetricsPeriod) -> Void = { _ in }
     @State private var period = PerformanceMetricsPeriod.last24Hours
@@ -147,6 +153,7 @@ struct PerformanceMetricsContent: View {
         samples: [PerformanceSample], recordingStartedAt: Date?, storageError: String? = nil,
         loading: Bool = false, isVisible: Bool = true, now: Date = Date(), timelineDate: Date? = nil,
         readToken: PerformanceMetricsReadToken? = nil, readPeriod: PerformanceMetricsPeriod? = nil,
+        samplesAreAvailable: Bool = true,
         initialPeriod: PerformanceMetricsPeriod = .last24Hours, onRefresh: (() -> Void)? = nil,
         onPeriodChange: @escaping (PerformanceMetricsPeriod) -> Void = { _ in }
     ) {
@@ -159,6 +166,7 @@ struct PerformanceMetricsContent: View {
         self.timelineDate = timelineDate
         self.readToken = readToken
         self.readPeriod = readPeriod
+        self.samplesAreAvailable = samplesAreAvailable
         _period = State(initialValue: initialPeriod)
         _initialAnalysisEndingAt = State(initialValue: now)
         self.onRefresh = onRefresh
@@ -172,7 +180,7 @@ struct PerformanceMetricsContent: View {
         return PerformanceMetricsQuery(
             period: readPeriod ?? period, model: model, count: samples.count, lastID: samples.last?.id,
             readToken: readToken ?? PerformanceMetricsReadToken(generation: 0, endingAt: inputEndingAt),
-            isVisible: isVisible
+            isVisible: isVisible, samplesAreAvailable: samplesAreAvailable
         )
     }
     private var presentation: PerformanceMetricsSnapshot { rendered.snapshot }
@@ -246,7 +254,7 @@ struct PerformanceMetricsContent: View {
         }
         .onChange(of: period) { _, value in onPeriodChange(value) }
         .task(id: analysisQuery) {
-            guard isVisible else { return }
+            guard analysisQuery.canAnalyze else { return }
             let input = samples
             let query = analysisQuery
             guard let result = await PerformanceMetricsAnalysis.make(samples: input, range: query.range, model: query.model), !Task.isCancelled else { return }
@@ -585,14 +593,24 @@ struct PerformanceMetricsRead: Sendable {
     let samples: [PerformanceSample]
     let token: PerformanceMetricsReadToken?
     let period: PerformanceMetricsPeriod?
+    let samplesAreAvailable: Bool
 
-    init(samples: [PerformanceSample], token: PerformanceMetricsReadToken?, period: PerformanceMetricsPeriod? = nil) {
+    init(samples: [PerformanceSample], token: PerformanceMetricsReadToken?, period: PerformanceMetricsPeriod? = nil,
+         samplesAreAvailable: Bool = true) {
         self.samples = samples
         self.token = token
         self.period = period
+        self.samplesAreAvailable = samplesAreAvailable
     }
 
     static let empty = PerformanceMetricsRead(samples: [], token: nil)
+
+    /// Keep the successful read's identity while discarding hidden raw rows.
+    /// A released buffer is not a completed empty read: retained analysis must
+    /// stay visible until a new successful read supplies its replacement.
+    func releasingSamples() -> Self {
+        Self(samples: [], token: token, period: period, samplesAreAvailable: false)
+    }
 
     @MainActor
     func refreshing(endingAt: Date, period: PerformanceMetricsPeriod? = nil,
@@ -617,6 +635,9 @@ struct PerformanceMetricsQuery: Hashable, Sendable {
     let lastID: UUID?
     let readToken: PerformanceMetricsReadToken
     let isVisible: Bool
+    var samplesAreAvailable = true
+
+    var canAnalyze: Bool { isVisible && samplesAreAvailable }
 
     var range: DateInterval { period.range(endingAt: readToken.endingAt) }
 }

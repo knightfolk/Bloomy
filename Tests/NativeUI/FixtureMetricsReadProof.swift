@@ -7,6 +7,13 @@ enum FixtureMetricsReadMode: String, CaseIterable, Identifiable, Codable, Sendab
 }
 
 /// Small bounded evidence: no row payloads, paths, or raw error descriptions.
+struct FixtureMetricsReadTiming: Codable, Sendable {
+    let readID: UInt64
+    let intervalSeconds: Double
+    let rows: Int
+    let milliseconds: Double
+}
+
 struct FixtureMetricsReadSnapshot: Codable, Sendable {
     let nextMode: FixtureMetricsReadMode
     let started: UInt64
@@ -20,6 +27,7 @@ struct FixtureMetricsReadSnapshot: Codable, Sendable {
     let cacheReleases: UInt64
     let lastReleasedDecodedRows: Int
     let totalReleasedDecodedRows: UInt64
+    let recentReads: [FixtureMetricsReadTiming]
 }
 
 /// Owns only the explicitly supplied synthetic database. Modes affect one
@@ -39,6 +47,7 @@ actor FixtureMetricsReads {
     private var cacheReleases: UInt64 = 0
     private var lastReleasedDecodedRows = 0
     private var totalReleasedDecodedRows: UInt64 = 0
+    private var recentReads: [FixtureMetricsReadTiming] = []
 
     init(url: URL, proofURL: URL? = nil) throws {
         database = try PerformanceHistoryDatabase(url: url)
@@ -71,6 +80,7 @@ actor FixtureMetricsReads {
         do {
             if mode == .hold { mode = try await hold(readID) }
             try Task.checkCancellation()
+            let began = ContinuousClock.now
             let rows: [PerformanceSample]
             switch mode {
             case .fail: throw FixtureMetricsReadError.synthetic
@@ -78,6 +88,10 @@ actor FixtureMetricsReads {
             case .normal, .hold: rows = try database.samples(in: interval)
             }
             try Task.checkCancellation()
+            let duration = began.duration(to: .now).components
+            recentReads.append(.init(readID: readID, intervalSeconds: interval.duration,
+                rows: rows.count, milliseconds: Double(duration.seconds) * 1_000 + Double(duration.attoseconds) / 1e15))
+            if recentReads.count > 12 { recentReads.removeFirst(recentReads.count - 12) }
             completed &+= 1
             if rows.isEmpty { empty &+= 1 }
             lastCompletedAt = Date()
@@ -111,7 +125,7 @@ actor FixtureMetricsReads {
               cancelled: cancelled, empty: empty, heldReadID: pending?.id,
               lastStartedAt: lastStartedAt, lastCompletedAt: lastCompletedAt,
               cacheReleases: cacheReleases, lastReleasedDecodedRows: lastReleasedDecodedRows,
-              totalReleasedDecodedRows: totalReleasedDecodedRows)
+              totalReleasedDecodedRows: totalReleasedDecodedRows, recentReads: recentReads)
     }
 
     private func hold(_ readID: UInt64) async throws -> FixtureMetricsReadMode {

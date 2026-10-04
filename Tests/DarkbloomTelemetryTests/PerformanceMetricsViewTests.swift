@@ -8,6 +8,79 @@ import Testing
 @Suite("Performance metrics presentation", .serialized)
 @MainActor
 struct PerformanceMetricsViewTests {
+    @Test("hidden row release preserves completed totals and prevents false empty analysis on reopen")
+    func releasedRowsKeepCompletedAnalysis() async throws {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let samples = [metricSample(at: end.addingTimeInterval(-30), counter: 0), metricSample(at: end, counter: 900)]
+        let read = try await PerformanceMetricsRead.empty.refreshing(endingAt: end, period: .last30Days) { samples }
+        let original = metricsQuery(read: read, period: .last30Days)
+        let snapshot = try #require(await PerformanceMetricsAnalysis.make(samples: read.samples, range: original.range, model: nil))
+        let shown = PerformanceMetricsRender(snapshot: snapshot, completedQuery: original)
+        let released = read.releasingSamples()
+        #expect(released.samples.isEmpty)
+        #expect(!released.samplesAreAvailable)
+        #expect(released.token == read.token)
+        #expect(released.period == .last30Days)
+        for visible in [false, true] {
+            let content = PerformanceMetricsContent(samples: released.samples, recordingStartedAt: nil,
+                isVisible: visible, now: end, readToken: released.token, readPeriod: released.period,
+                samplesAreAvailable: released.samplesAreAvailable, initialPeriod: .last30Days)
+            #expect(!content.analysisQuery.canAnalyze)
+            #expect(shown.query(pending: content.analysisQuery) == original)
+            #expect(shown.snapshot.sampleCount == 2)
+            #expect(shown.snapshot.summary.generatedTokens == 900)
+            #expect(shown.snapshot.summary.coveredSeconds == 30)
+        }
+        let filtered = metricsQuery(read: released, period: .last7Days, model: "google/gemma-4-26b")
+        #expect(!filtered.canAnalyze)
+        #expect(shown.query(pending: filtered) == original)
+        #expect(released.releasingSamples().token == read.token)
+    }
+
+    @Test("successful empty read after release replaces retained results with an actual empty result")
+    func genuineEmptyReadAfterRelease() async throws {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let loaded = try await PerformanceMetricsRead.empty.refreshing(endingAt: end, period: .last30Days) { [metricSample(at: end)] }
+        let released = loaded.releasingSamples()
+        let empty = try await released.refreshing(endingAt: end.addingTimeInterval(30), period: .last7Days) { [] }
+        #expect(empty.samplesAreAvailable)
+        #expect(empty.token?.generation == 2)
+        #expect(empty.period == .last7Days)
+        let query = metricsQuery(read: empty, period: .last7Days)
+        #expect(query.canAnalyze)
+        let snapshot = try #require(await PerformanceMetricsAnalysis.make(samples: empty.samples, range: query.range, model: nil))
+        #expect(snapshot.sampleCount == 0)
+        #expect(snapshot.latest == nil)
+        #expect(snapshot.visits.isEmpty)
+    }
+
+    @Test("failed or cancelled reopen leaves released rows unavailable until a successful read")
+    func unsuccessfulReopenPreservesRelease() async throws {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let loaded = try await PerformanceMetricsRead.empty.refreshing(endingAt: end, period: .last30Days) { [metricSample(at: end)] }
+        var released = loaded.releasingSamples()
+        do {
+            released = try await released.refreshing(endingAt: end.addingTimeInterval(30), period: .last7Days) {
+                throw MetricsReadFailure.synthetic
+            }
+            Issue.record("Failed reopen must not publish an empty successful read")
+        } catch MetricsReadFailure.synthetic {}
+        let task = Task {
+            try await released.refreshing(endingAt: end.addingTimeInterval(60), period: .last7Days) { [] }
+        }
+        task.cancel()
+        do { released = try await task.value; Issue.record("Cancelled reopen published a result") }
+        catch is CancellationError {}
+        #expect(!released.samplesAreAvailable)
+        #expect(released.token == loaded.token)
+        #expect(released.period == .last30Days)
+        let recovered = try await released.refreshing(endingAt: end.addingTimeInterval(90), period: .last7Days) { loaded.samples }
+        #expect(recovered.samplesAreAvailable)
+        #expect(recovered.samples == loaded.samples)
+        #expect(recovered.token?.generation == 2)
+        #expect(recovered.period == .last7Days)
+    }
+
     @Test("pending period and model analysis cannot change retained chart axes or coverage scope")
     func renderedAnalysisKeepsItsQuery() async throws {
         let end = Date(timeIntervalSince1970: 1_800_000_000)
@@ -417,7 +490,7 @@ private func metricsQuery(
 ) -> PerformanceMetricsQuery {
     PerformanceMetricsQuery(
         period: period, model: model, count: read.samples.count, lastID: read.samples.last?.id,
-        readToken: read.token!, isVisible: isVisible
+        readToken: read.token!, isVisible: isVisible, samplesAreAvailable: read.samplesAreAvailable
     )
 }
 

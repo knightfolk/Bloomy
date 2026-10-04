@@ -1395,6 +1395,13 @@ private final class FixtureModel: ObservableObject {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try await FixtureNetworkCacheProbe.shared.configure(directory: directory)
             let performanceURL = directory.appendingPathComponent("performance-\(requestedScenario.id).sqlite")
+            // Copy only a completed bundled synthetic database into this app's
+            // own temporary directory. Never open or overwrite real history.
+            if requestedScenario == .fresh,
+               !FileManager.default.fileExists(atPath: performanceURL.path),
+               let seed = Bundle.main.url(forResource: "fixture-performance-seed", withExtension: "sqlite") {
+                try FileManager.default.copyItem(at: seed, to: performanceURL)
+            }
             let seedPerformance = !FileManager.default.fileExists(atPath: performanceURL.path)
             let database = try PerformanceHistoryDatabase(url: performanceURL)
             let now = Date()

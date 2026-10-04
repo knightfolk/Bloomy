@@ -10,6 +10,7 @@ import hashlib
 import json
 import platform
 import shutil
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -21,10 +22,23 @@ parser.add_argument("--hide-review-banner", action="store_true",
 parser.add_argument("--compact", action="store_true", help="Start the isolated window at 800 x 560.")
 parser.add_argument("--configuration", choices=["debug", "release"], default="debug",
                     help="Release optimizes the fixture and production views for bounded profiling.")
+parser.add_argument("--metrics-seed", type=Path,
+                    help="Bundle a completed synthetic performance SQLite seed for the Fresh scenario only.")
 args = parser.parse_args()
 output = args.output.resolve()
 if output.exists():
     parser.error("Output already exists; preserve it for provenance and pass --output with a fresh task-owned path.")
+metrics_seed = None
+if args.metrics_seed:
+    metrics_seed = args.metrics_seed.resolve()
+    if not metrics_seed.is_file() or Path(str(metrics_seed) + "-wal").exists():
+        parser.error("Pass a closed, checkpointed synthetic seed, without a live WAL writer.")
+    with sqlite3.connect(metrics_seed.as_uri() + "?mode=ro&immutable=1", uri=True) as connection:
+        if connection.execute("PRAGMA integrity_check").fetchone() != ("ok",):
+            parser.error("Synthetic seed integrity check failed.")
+        seed_rows = connection.execute("SELECT COUNT(*) FROM performance_history").fetchone()[0]
+        if not 1 <= seed_rows <= 100_000:
+            parser.error("Synthetic seed must contain 1–100,000 performance rows.")
 products = ROOT / ".build/out/Products" / args.configuration.title()
 telemetry = products / "libDarkbloomTelemetry.a"
 if not telemetry.is_file():
@@ -44,6 +58,8 @@ binary = contents / "MacOS/DashboardFixture"
 binary.parent.mkdir(parents=True, exist_ok=True)
 resources = contents / "Resources"
 resources.mkdir(exist_ok=True)
+if metrics_seed:
+    shutil.copy2(metrics_seed, resources / "fixture-performance-seed.sqlite")
 frameworks = contents / "Frameworks"
 frameworks.mkdir(exist_ok=True)
 shutil.copy2(ROOT / "Tests/NativeUI/DashboardFixture-Info.plist", contents / "Info.plist")
@@ -129,6 +145,8 @@ manifest = {
     "telemetry_library_sha256": hashlib.sha256(staged_telemetry.read_bytes()).hexdigest(),
     "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
     "compiler_command": command,
+    "metrics_seed": ({"sha256": hashlib.sha256((resources / "fixture-performance-seed.sqlite").read_bytes()).hexdigest(),
+                      "rows": seed_rows, "scenario": "Fresh"} if metrics_seed else None),
 }
 (output / "fixture-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 print(app)

@@ -1,5 +1,12 @@
 # Bloomy native polish and efficiency
 
+October 4 large-history follow-up: Metrics releases hidden raw rows while
+retaining its completed summary and scope. Released buffers cannot be analyzed
+as empty results. The opt-in 100,000-record seed, optimized native evidence,
+resource-window limits and 1,618 reported Release tests are recorded in
+`LARGE_METRICS_HISTORY_REVIEW_20261004.md`. This remains local review work;
+shipping-app resource improvements and the broader completion matrix stay open.
+
 October 4 follow-up: the popup common bar is reduced to two dense rows and
 earnings adds actual Today/Week amount bars. Activity contribution bars preserve
 signed corrections. Exact-source native review and the final 1,615 reported

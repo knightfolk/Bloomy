@@ -1,5 +1,13 @@
 # Native polish completion matrix — October 2, 2026
 
+October 4 large-history follow-up: an optimized inert Metrics fixture exercises
+the 100,000-record retention cap and qualified displayed/minimized process
+windows. Hidden raw rows are released without treating the buffer as a
+successful empty read. Evidence and limits are in
+[Large Metrics review](LARGE_METRICS_HISTORY_REVIEW_20261004.md).
+The full suite reports 1,618 Release tests passing. This bounded proof does not
+close production performance, accessibility, motion or installed delivery.
+
 October 3 Earnings and common popup bar follow-up:
 [bounded native review](EARNINGS_POPUP_COMMAND_BAR_REVIEW_20261003.md).
 The icon-first header and graphical Earnings summary have wide/light and
