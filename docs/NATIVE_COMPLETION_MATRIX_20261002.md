@@ -299,3 +299,14 @@ source hashes match. See
 [Cooling posture review](POPUP_COOLING_POSTURE_REVIEW_20261003.md).
 These local checkpoints do not close broader accessibility, production,
 menu-motion or performance gates.
+
+
+October 3 popup sizing follow-up: explicit sizing remains, with clustered
+updates coalesced and immediate width/layout fits preserved. The rejected
+notification-only candidate failed actual geometry checks. Final native
+360-point light/80-point dark scrolling, Available expansion/collapse and normal
+reopening pass; three geometry/lifecycle regressions, five finite burst
+comparisons, 1,606 reported tests and Release compilation pass. See
+[Sizing review](POPUP_SIZING_COALESCING_REVIEW_20261003.md).
+Component fitting reductions do not prove whole-app CPU savings; all broader
+native/accessibility, menu-motion and production gates remain open.

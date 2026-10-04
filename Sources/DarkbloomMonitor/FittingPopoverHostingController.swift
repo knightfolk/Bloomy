@@ -100,6 +100,8 @@ final class PopupScrollView<Content: View>: NSScrollView {
     private var maximumHeight: CGFloat?
     private var documentSize = NSSize.zero
     private var needsInitialScrollPosition = true
+    private var pendingMeasurement: Task<Void, Never>?
+    private var isInvalidated = false
 
     init(content: Content, environment: EnvironmentValues, width: CGFloat, maximumHeight: CGFloat?) {
         contentWidth = width
@@ -127,15 +129,32 @@ final class PopupScrollView<Content: View>: NSScrollView {
     required init?(coder: NSCoder) { fatalError("Use init(content:environment:width:maximumHeight:)") }
 
     func update(content: Content, environment: EnvironmentValues, width: CGFloat, maximumHeight: CGFloat?) {
+        guard !isInvalidated else { return }
         let oldSize = intrinsicContentSize
+        let widthChanged = contentWidth != width
         contentWidth = width
         self.maximumHeight = maximumHeight
         host.rootView = PopupScrollDocument(content: content, environment: environment, width: width)
-        measureDocument()
+        // Several observed sources can arrive in one UI cycle. Fit their latest
+        // content once, while keeping width changes and layout requests immediate.
+        if widthChanged { measureDocument() } else { scheduleMeasurement() }
         if intrinsicContentSize != oldSize { invalidateIntrinsicContentSize() }
     }
 
+    private func scheduleMeasurement() {
+        guard pendingMeasurement == nil else { return }
+        pendingMeasurement = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard !Task.isCancelled, let self, !self.isInvalidated else { return }
+            self.pendingMeasurement = nil
+            self.measureDocument()
+        }
+    }
+
     func measureDocument() {
+        guard !isInvalidated else { return }
+        pendingMeasurement?.cancel()
+        pendingMeasurement = nil
         setDocumentSize(host.sizeThatFits(in: NSSize(width: contentWidth, height: 0)))
     }
 
@@ -164,6 +183,9 @@ final class PopupScrollView<Content: View>: NSScrollView {
     }
 
     func invalidate() {
+        isInvalidated = true
+        pendingMeasurement?.cancel()
+        pendingMeasurement = nil
         host.sizeChanged = nil
         host.sizingOptions = []
         // Release the hosted SwiftUI subtree even if AppKit retains this view.

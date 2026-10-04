@@ -451,3 +451,14 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   `POPUP_COOLING_POSTURE_REVIEW_20261003.md`. Both checkpoints are local only;
   all-surface accessibility, production delivery and broader efficiency proof
   remain open.
+
+
+- A read-only installed build-143 stack sample identifies repeated popup fitting
+  during source updates. The native scroll bridge now coalesces clustered
+  updates while width/layout requests remain immediate and dismantling cancels
+  pending fits. Notification-only sizing was rejected after a real geometry
+  regression. Five native component bursts reduce explicit fits from 300 to one;
+  actual 360/80-point scrolling, disclosure recovery and normal reopening pass.
+  The final 1,606 reported tests and Release build pass. See
+  `POPUP_SIZING_COALESCING_REVIEW_20261003.md`. Production savings and the full
+  native/accessibility/motion matrix remain unproven; this checkpoint is local.
