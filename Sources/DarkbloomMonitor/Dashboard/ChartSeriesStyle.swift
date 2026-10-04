@@ -120,15 +120,7 @@ enum ChartSeriesCueSelection {
     /// Keep ordinary money compact, but never round nonzero evidence to zero.
     static func pointAmountLabel(_ amount: Double, locale: Locale = .current) -> String {
         guard amount.isFinite else { return "Amount unavailable" }
-        let magnitude = abs(amount)
-        if magnitude > 0, magnitude < 1e-12 {
-            // Double's scientific description preserves even subnormal values
-            // without hundreds of decimal places in a spoken currency label.
-            return "\(amount) USD"
-        }
-        let digits = magnitude > 0 ? max(4, Int(min(12, ceil(-log10(magnitude)) + 2))) : 4
-        return (amount == 0 ? 0 : amount).formatted(.currency(code: "USD").locale(locale)
-            .precision(.fractionLength(4...digits)))
+        return ActivityAmountPresentation.hourlyAmount(amount, locale: locale)
     }
 
     /// A single observation has no area polygon. Preserve its real stacked

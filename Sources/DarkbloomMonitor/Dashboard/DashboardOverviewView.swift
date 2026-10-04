@@ -57,7 +57,7 @@ struct DashboardOverviewView: View {
     }
 
     private func number(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(1))) }
-    private func money(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(4))) }
+    private func money(_ value: Double) -> String { ActivityAmountPresentation.numberAmount(value) }
 }
 
 private struct DashboardMetric: View {
@@ -115,7 +115,7 @@ private struct DashboardModelSummary: View {
         if let serving = store.modelServingProfitAverages.first(where: { $0.model == id }) {
             let value = serving.profitUSDPerActiveHour ?? serving.grossUSDPerActiveHour
             result.append(ModelCardMetric(id: "earnings", symbol: "dollarsign.circle",
-                value: value.formatted(.currency(code: "USD").precision(.fractionLength(2...4))),
+                value: ActivityAmountPresentation.hourlyAmount(value),
                 caption: serving.profitUSDPerActiveHour == nil ? "derived gross / active h" : "est. net / active h"))
         }
         if result.isEmpty {

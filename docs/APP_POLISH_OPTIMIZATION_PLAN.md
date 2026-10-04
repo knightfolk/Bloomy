@@ -472,3 +472,10 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   details checks pass. Final 1,609 reported tests and Release compilation pass;
   see `OPPORTUNITY_VISUAL_IDENTITY_REVIEW_20261003.md`. Full varied/large-text,
   spoken accessibility, production performance and broader gates remain open.
+
+- Overview now shares Activity's adaptive monetary precision: tiny recorded
+  earnings and signed model amounts stay visible instead of rounding to zero.
+  Native compact light/dark, wide dark, missing and ordinary states pass in the
+  exact inert fixture; 1,610 reported tests and Release compilation pass. See
+  `OVERVIEW_EARNINGS_PRECISION_REVIEW_20261003.md`. This local checkpoint adds no
+  production acquisition or timers; broader native and performance gates remain.

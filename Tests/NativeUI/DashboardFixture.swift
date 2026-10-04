@@ -21,6 +21,7 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case largeActionHistory = "5,000 action records"
     case acceptedWork = "Accepted work confirmation"
     case matchedEnergy = "Matched electricity graphics"
+    case microEarnings = "Overview micro-dollar earnings"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
@@ -241,6 +242,18 @@ private enum FixtureActivityRead: String, CaseIterable, Identifiable, Sendable {
         }
         return EnergyRecordingSnapshot(reading: nil, intervals: intervals, issue: "Synthetic saved power history")
     }
+
+    static func microEarningsPower(now: Date, calendar: Calendar) -> EnergyRecordingSnapshot {
+        let end = calendar.dateInterval(of: .hour, for: now)!.start
+        let start = end.addingTimeInterval(-7_200)
+        let intervals = (0..<720).map { index in
+            let date = start.addingTimeInterval(Double(index) * 10)
+            return EnergyInterval(start: date, end: date.addingTimeInterval(10),
+                kWh: 0.00001, usdPerKWh: 1, source: "Synthetic model power",
+                estimated: true, activeModelID: FixtureData.modelIDs[index < 360 ? 0 : 1], inferenceActive: true)
+        }
+        return EnergyRecordingSnapshot(reading: nil, intervals: intervals, issue: nil)
+    }
 }
 
 private enum FixtureEarningsReadMode: String, CaseIterable, Identifiable, Codable, Sendable {
@@ -364,6 +377,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
     }
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
+        case .microEarnings: .observed(microUSD: 1, observedSeconds: 10_800)
         case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .largeActionHistory, .acceptedWork, .matchedEnergy:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
@@ -377,7 +391,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
     }
     func todayEarningsSummary(now: Date, calendar: Calendar) async throws -> ObservedEarningsWindow? {
         guard scenario.hasCurrentRuntime else { return nil }
-        return ObservedEarningsWindow(microUSD: 6_420_000, observedSeconds: 10_800,
+        return ObservedEarningsWindow(microUSD: scenario == .microEarnings ? 1 : 6_420_000, observedSeconds: 10_800,
             calendarDayStart: calendar.startOfDay(for: now), capturedAt: now, coversDayToDate: false)
     }
     func weekEarningsSummary(now: Date, calendar: Calendar) async throws -> CalendarWeekEarningsSummary? {
@@ -429,6 +443,12 @@ private actor FixtureEarnings: AccountEarningsFetching {
             ? Array(FixtureData.modelIDs.prefix(limitedModels ? 1 : queryActivityRead == .signed ? 2 : 3)) : []
     }
     func activityByModel(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ModelActivityBucket]? {
+        if scenario == .microEarnings {
+            return try ActivityCalendar.intervals(in: range, unit: unit, calendar: calendar).flatMap { interval in
+                [ModelActivityBucket(interval: interval, model: FixtureData.modelIDs[0], workMicroUSD: 1),
+                 ModelActivityBucket(interval: interval, model: FixtureData.modelIDs[1], workMicroUSD: -1)]
+            }
+        }
         guard scenario.hasCurrentRuntime, queryActivityRead != .normal else { return nil }
         guard queryActivityRead != .empty, queryActivityRead != .unknown, queryActivityRead != .boundary else { return [] }
         return try ActivityCalendar.intervals(in: range, unit: unit, calendar: calendar).enumerated().flatMap { index, interval -> [ModelActivityBucket] in
@@ -1068,7 +1088,7 @@ private final class FixtureModel: ObservableObject {
         capacityCapturedAt: Date? = nil) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore, FixtureExtras, FixtureController, FixtureEarnings, FixtureLogFeed) {
         let tokens = FixtureTokens()
         let autopilot = FixtureAutopilot()
-        defaults.set(scenario == .matchedEnergy, forKey: "electricity.enabled")
+        defaults.set(scenario == .matchedEnergy || scenario == .microEarnings, forKey: "electricity.enabled")
         defaults.set("1", forKey: "electricity.usdPerKWh")
         let controller = FixtureController(scenario: scenario, autopilot: autopilot)
         let control = ProviderControlStore(controller: controller, homeDirectory: directory, hostingOptions: { .default })
@@ -1079,8 +1099,10 @@ private final class FixtureModel: ObservableObject {
         let events = FixtureData.logEvents(scenario, now: seededAt)
         let logFeed = FixtureLogFeed(events: events)
         let savedEnergy = FixtureActivityRead.savedPower(now: seededAt, calendar: .current)
-        let fixtureEnergy = scenario == .matchedEnergy
-            ? EnergyRecordingSnapshot(reading: nil, intervals: savedEnergy.intervals, issue: nil) : savedEnergy
+        let fixtureEnergy = scenario == .microEarnings
+            ? FixtureActivityRead.microEarningsPower(now: seededAt, calendar: .current)
+            : scenario == .matchedEnergy
+                ? EnergyRecordingSnapshot(reading: nil, intervals: savedEnergy.intervals, issue: nil) : savedEnergy
         let monitor = MonitorStore(service: TelemetryService(source: FixtureTelemetrySource(scenario: scenario, logFeed: logFeed)),
             initial: FixtureData.snapshot(scenario, now: seededAt, events: events), providerExtras: extras,
             initialEnergy: fixtureEnergy,

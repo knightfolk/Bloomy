@@ -321,3 +321,11 @@ The final 1,609 reported tests and Release build pass. See
 [Opportunity review](OPPORTUNITY_VISUAL_IDENTITY_REVIEW_20261003.md).
 Large-text/localization, long capability/number variants, spoken accessibility,
 production efficiency/integration and all broader gates remain open.
+
+October 3 Overview precision follow-up: shared formatting preserves signed
+micro-dollar model values and smaller derived hourly amounts. Exact native
+compact light/dark, wide dark, missing and ordinary states pass; 1,610 reported
+tests and Release compilation pass. See
+[Overview precision review](OVERVIEW_EARNINGS_PRECISION_REVIEW_20261003.md).
+This bounded display fix does not close large-text/localization, spoken
+accessibility, live integration, menu-motion or production efficiency gates.

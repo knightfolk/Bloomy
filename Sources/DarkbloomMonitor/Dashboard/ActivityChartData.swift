@@ -41,10 +41,29 @@ enum ActivityAmountPresentation {
     }
 
     /// Estimated hourly amounts can be smaller than one ledger micro-dollar.
-    /// Share the point formatter so cards never round nonzero evidence to zero.
+    /// Cards and chart points share precision so nonzero evidence stays visible.
     static func hourlyAmount(_ amountUSD: Double, locale: Locale = .current) -> String {
+        amount(amountUSD, locale: locale, currency: true)
+    }
+
+    /// Compact summaries show their currency separately from the number.
+    static func numberAmount(_ amountUSD: Double, locale: Locale = .current) -> String {
+        amount(amountUSD, locale: locale, currency: false)
+    }
+
+    private static func amount(_ amountUSD: Double, locale: Locale, currency: Bool) -> String {
         guard amountUSD.isFinite else { return "—" }
-        return ChartSeriesCueSelection.pointAmountLabel(amountUSD, locale: locale)
+        let magnitude = abs(amountUSD)
+        if magnitude > 0, magnitude < 1e-12 {
+            // Retain subnormal estimates without hundreds of decimal places.
+            return currency ? "\(amountUSD) USD" : String(amountUSD)
+        }
+        let digits = magnitude > 0 ? max(4, Int(min(12, ceil(-log10(magnitude)) + 2))) : 4
+        let value = amountUSD == 0 ? 0 : amountUSD
+        if currency {
+            return value.formatted(.currency(code: "USD").locale(locale).precision(.fractionLength(4...digits)))
+        }
+        return value.formatted(.number.locale(locale).precision(.fractionLength(4...digits)))
     }
 }
 

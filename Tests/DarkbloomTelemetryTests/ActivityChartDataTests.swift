@@ -5,6 +5,23 @@ import Testing
 
 @Suite("Activity chart model colors")
 struct ActivityChartDataTests {
+    @Test("summary numbers retain tiny signed earnings without adding a duplicate currency label")
+    func exactSummaryAmounts() {
+        let locale = Locale(identifier: "en_US")
+        #expect(ActivityAmountPresentation.numberAmount(6.42, locale: locale) == "6.4200")
+        #expect(ActivityAmountPresentation.numberAmount(0, locale: locale) == "0.0000")
+        #expect(ActivityAmountPresentation.numberAmount(-0.0, locale: locale) == "0.0000")
+        #expect(ActivityAmountPresentation.numberAmount(0.000001, locale: locale) == "0.000001")
+        #expect(ActivityAmountPresentation.numberAmount(-0.000001, locale: locale) == "-0.000001")
+        #expect(ActivityAmountPresentation.numberAmount(0.000001 / 3, locale: locale) == "0.000000333")
+        #expect(ActivityAmountPresentation.numberAmount(0.000001, locale: Locale(identifier: "de_DE")) == "0,000001")
+        for value in [Double.nan, .infinity, -.infinity] {
+            #expect(ActivityAmountPresentation.numberAmount(value, locale: locale) == "—")
+        }
+        for value in [1e-13, -2.5e-20, Double.leastNonzeroMagnitude, -Double.leastNonzeroMagnitude] {
+            #expect(Double(ActivityAmountPresentation.numberAmount(value, locale: locale)) == value)
+        }
+    }
     @Test("original accessibility amounts tolerate repeated custom-client identities")
     func originalAmountsDoNotTrap() {
         let interval = DateInterval(start: Date(timeIntervalSince1970: 0), duration: 3_600)
