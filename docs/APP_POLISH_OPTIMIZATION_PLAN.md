@@ -438,3 +438,16 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   comparison was rejected and retained. See
   `MODEL_CARD_GRID_BOUNDARY_REVIEW_20261003.md`; wider accessibility/localization,
   full populated three-column and broader screen gates remain open.
+
+
+- Earnings now presents recorded totals, model shares, signed corrections, jobs
+  and ledger coverage graphically, with detailed options and ledger on demand.
+  A common popup bar collects provider, Autopilot, Auto, Nudge, GPU, energy and
+  cooling entries. Native compact/wide light/dark and bounded popup scrolling
+  proof are recorded in `EARNINGS_POPUP_COMMAND_BAR_REVIEW_20261003.md`.
+  A follow-up keeps disabled/error helper posture visible even with numeric fan
+  readings, and qualifies retained sensors independently. Final 1,603 reported
+  tests, Release compilation and exact-source native state checks pass; see
+  `POPUP_COOLING_POSTURE_REVIEW_20261003.md`. Both checkpoints are local only;
+  all-surface accessibility, production delivery and broader efficiency proof
+  remain open.

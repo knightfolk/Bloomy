@@ -286,3 +286,16 @@ focused rendering tests pass. The fixture has two Available cards, so a filled
 three-column row, spoken VoiceOver and localization remain unproven; broader
 Models and menu-motion gates stay partial. See
 [Grid boundary review](MODEL_CARD_GRID_BOUNDARY_REVIEW_20261003.md).
+
+
+October 3 Earnings/common-bar checkpoint: recorded composition, signed series,
+job counts, ledger coverage and matched gross/cost graphics replace summary
+prose; compact/wide light/dark and bounded scrolling/control proof are in
+[Earnings/common bar review](EARNINGS_POPUP_COMMAND_BAR_REVIEW_20261003.md).
+The Cooling follow-up visibly distinguishes healthy, disabled, error, retained,
+partial and unavailable readings, preserving qualified numeric accessibility
+values. The final 1,603 reported tests and Release build pass; all 113 fixture
+source hashes match. See
+[Cooling posture review](POPUP_COOLING_POSTURE_REVIEW_20261003.md).
+These local checkpoints do not close broader accessibility, production,
+menu-motion or performance gates.

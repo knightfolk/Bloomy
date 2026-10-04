@@ -7,6 +7,7 @@ import SwiftUI
 enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case fresh = "Fresh", stale = "Stale", staleCatalog = "Stale catalog", offline = "Offline"
     case expiredSettings = "Expired settings", expiredHelper = "Expired helper", unavailableSettings = "Unavailable settings"
+    case coolingHelperError = "Cooling helper error"
     case partialCooling = "Partial cooling", disabledHelper = "Disabled helper", unavailableRuntime = "Unavailable runtime"
     case aliasStartup = "Aliased startup", liveHosting = "Reported local endpoint"
     case frozenSettings = "Frozen settings"
@@ -362,7 +363,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
     }
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .largeActionHistory, .acceptedWork, .matchedEnergy:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .largeActionHistory, .acceptedWork, .matchedEnergy:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -769,7 +770,7 @@ private actor FixtureExtras: ProviderExtrasProviding {
         }
         let observedPolicy = fanReadback == .matching ? submittedFanPolicy : nil
         let fan = ProviderFanStatus(capability: ProviderFanStatus.controlCapability, installed: true, loaded: true,
-            helper: ProviderFanHelperStatus(enabled: scenario != .disabledHelper, providerActive: true, mode: "automatic", chip: "Synthetic",
+            helper: ProviderFanHelperStatus(enabled: scenario != .disabledHelper, providerActive: true, mode: scenario == .coolingHelperError ? "error" : "automatic", chip: "Synthetic",
                 gpuTemperatureCelsius: 54, triggerTemperatureCelsius: observedPolicy?.triggerTemperatureCelsius ?? 65, releaseTemperatureCelsius: 55,
                 speedPercent: observedPolicy?.speedPercent ?? 80, fans: fans, updatedAt: helperDate),
             diagnostic: ProviderFanDiagnostic(chip: "Synthetic", supported: true,
@@ -778,7 +779,7 @@ private actor FixtureExtras: ProviderExtrasProviding {
                     ? [ProviderFanReading(index: 0, actualRPM: nil, targetRPM: nil, minimumRPM: 1_200, maximumRPM: 5_200, mode: "automatic"),
                        ProviderFanReading(index: 1, actualRPM: 1_200, targetRPM: nil, minimumRPM: 1_200, maximumRPM: 5_200, mode: "automatic")]
                     : helperExpired ? [] : fans),
-            helperErrorPresent: false, diagnosticErrorPresent: false)
+            helperErrorPresent: scenario == .coolingHelperError, diagnosticErrorPresent: false)
         let autopilotSource = await autopilot.read()
         let observedAutopilot = autopilotSource.value.map { scenario.availability($0, at: date) } ?? autopilotSource
         return ProviderExtrasSnapshot(capturedAt: date,
