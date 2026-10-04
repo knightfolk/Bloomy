@@ -1,5 +1,11 @@
 # Native polish completion matrix — October 2, 2026
 
+October 4 Hosting recovery follow-up: sanitized WebSocket coordinator display,
+nested Hosting navigation and Done/reopen pass in the native fixture. Configured
+unverified, empty/reported expiry with Refresh, and offline states were inspected.
+All 1,644 reported Release tests pass; broader real endpoint/accessibility proof
+remains partial. See [Hosting recovery review](POPUP_HOSTING_RECOVERY_REVIEW_20261004.md).
+
 October 4 missing Earnings layout follow-up: equal tiles preserve model-card
 placement across missing/partial and zero states. Native light/dark, retained
 recovery and 240-point scroll-action/Available checks pass. Physical wheel,

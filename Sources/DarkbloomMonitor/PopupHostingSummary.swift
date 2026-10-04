@@ -51,7 +51,7 @@ struct PopupHostingPresentation: Equatable {
 
     static func coordinatorHost(_ value: String?) -> String? {
         guard let value, value.utf8.count <= 512, let parts = URLComponents(string: value),
-              ["http", "https"].contains(parts.scheme?.lowercased() ?? ""),
+              ["http", "https", "ws", "wss"].contains(parts.scheme?.lowercased() ?? ""),
               let host = parts.host, !host.isEmpty,
               parts.user == nil, parts.password == nil else { return nil }
         return parts.port.map { "\(host):\($0)" } ?? host

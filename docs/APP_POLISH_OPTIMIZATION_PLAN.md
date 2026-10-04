@@ -1,5 +1,12 @@
 # Bloomy native polish and efficiency
 
+October 4 Hosting recovery follow-up: the popup displays sanitized WebSocket
+coordinator hosts and dismisses nested details before dashboard navigation.
+Native light/dark, Done/reopen, configured/unverified Refresh, observed expiry
+and offline checks pass; all 1,644 reported Release tests pass. See
+`POPUP_HOSTING_RECOVERY_REVIEW_20261004.md`. Broader proof remains open; Kevin
+requested pausing this improvement run after the next push.
+
 October 4 missing Earnings layout follow-up: the popup preserves three equal
 graphic tiles across missing/partial reads, with neutral unavailable cues and
 known-zero distinction. Native light/dark and short-popup scroll/disclosure

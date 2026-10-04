@@ -65,8 +65,19 @@ struct PopupHostingPresentationTests {
         #expect(PopupHostingPresentation.coordinatorHost("https://user:secret@coordinator.example") == nil)
     }
 
-    @Test("hosting summary fits the popup in both appearances", arguments: [false, true])
-    func popupFit(dark: Bool) async {
+    @Test("WebSocket coordinator reports expose only the hostname and optional port")
+    func websocketCoordinator() {
+        #expect(PopupHostingPresentation.coordinatorHost("wss://api.darkbloom.dev/ws/provider") == "api.darkbloom.dev")
+        #expect(PopupHostingPresentation.coordinatorHost("ws://127.0.0.1:8090/ws/provider") == "127.0.0.1:8090")
+        #expect(PopupHostingPresentation.coordinatorHost("wss://coordinator.example:8443/private?token=hidden#hidden") == "coordinator.example:8443")
+        for value in ["wss://user:secret@coordinator.example/ws/provider", "ws://user@coordinator.example",
+                      "file://coordinator.example/private", "ftp://coordinator.example/private", "wss:///private"] {
+            #expect(PopupHostingPresentation.coordinatorHost(value) == nil)
+        }
+    }
+
+    @Test("hosting summary fits detail and popup widths in both appearances", arguments: [false, true], [366.0, 526.0])
+    func popupFit(dark: Bool, width: Double) async {
         let suite = "PopupHostingFit.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -75,11 +86,11 @@ struct PopupHostingPresentationTests {
             cliVersionProvider: { nil }, defaults: defaults, lanScanner: { [] }, now: { now })
         await store.fetchEndpointDetails()
         let view = PopupHostingSummary(store: store, isVisible: false, now: now,
-            coordinator: "https://coordinator.example", openHosting: {})
-            .frame(width: 526).environment(\.colorScheme, dark ? .dark : .light)
+            coordinator: "wss://coordinator.example:8443/ws/provider", openHosting: {})
+            .frame(width: width).environment(\.colorScheme, dark ? .dark : .light)
         let host = NSHostingController(rootView: view)
-        let fitted = host.sizeThatFits(in: NSSize(width: 526, height: 0))
-        #expect(fitted.width == 526)
+        let fitted = host.sizeThatFits(in: NSSize(width: width, height: 0))
+        #expect(fitted.width == CGFloat(width))
         #expect(fitted.height > 60 && fitted.height < 140)
     }
 }

@@ -109,6 +109,8 @@ private enum FixtureData {
             writtenAt: date.timeIntervalSince1970, pid: 4242,
             processIdentity: ProcessIdentity(pid: 4242, startTimeMicros: 1_800_000_000),
             advertisedModels: scenario == .offline ? [] : Array(modelIDs.prefix(3)),
+            coordinatorURL: scenario == .offline || scenario == .liveHosting ? nil
+                : "wss://coordinator.example:8443/ws/provider?fixture=not-displayed#not-displayed",
             lifecycle: ProviderLifecycleState(outcome: scenario == .offline ? .stopped : .serving,
                 remainingRequests: scenario.hasCurrentRuntime ? 2 : 0, coordinatorAcknowledged: true),
             startupPreloadPendingModels: [], autopilotPhase: scenario == .offline ? nil : "shadow")

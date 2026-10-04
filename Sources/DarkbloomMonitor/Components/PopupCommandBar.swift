@@ -34,6 +34,7 @@ struct PopupHostingControl: View {
     let coordinator: String?
     let openHosting: () -> Void
     @State private var showsDetails = false
+    @State private var opensHostingAfterDismissal = false
 
     var body: some View {
         Button { showsDetails = true } label: {
@@ -44,13 +45,26 @@ struct PopupHostingControl: View {
         .popover(isPresented: $showsDetails) {
             VStack(alignment: .leading, spacing: 8) {
                 PopupHostingSummary(store: store, isVisible: isVisible && showsDetails,
-                    now: now, coordinator: coordinator, openHosting: openHosting)
+                    now: now, coordinator: coordinator, openHosting: {
+                        opensHostingAfterDismissal = true
+                        showsDetails = false
+                    })
                 Button("Done") { showsDetails = false }
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .labelStyle(.titleAndIcon)
             .buttonStyle(.bordered)
             .padding(12).frame(width: 390)
+            .onDisappear {
+                guard opensHostingAfterDismissal else { return }
+                opensHostingAfterDismissal = false
+                // Let the child finish dismissal before its parent closes.
+                // Otherwise AppKit consumes the parent's close request here.
+                Task { @MainActor in
+                    await Task.yield()
+                    openHosting()
+                }
+            }
         }
     }
 }
