@@ -1,5 +1,11 @@
 # Native polish completion matrix — October 2, 2026
 
+October 4 calendar Earnings follow-up: retained same-period values preserve
+graphic tiles with explicit clock/last-read qualifiers. Native failure, expiry,
+independent day/week, zero/empty and recovery checks pass in the inert fixture.
+Current eligibility and rollover regressions pass; the wider route stays partial.
+See [calendar review](RETAINED_CALENDAR_EARNINGS_REVIEW_20261004.md).
+
 October 4 Metrics caption follow-up: fresh, real-aged, stale and unavailable
 native readings distinguish recorded quality from current freshness; compact
 light/dark fit and Refresh recovery pass. The broader route remains partial.

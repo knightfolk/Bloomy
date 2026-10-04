@@ -53,15 +53,21 @@ struct DashboardOverviewView: View {
 
     private var summaryMetrics: some View {
         Group {
-            let earnings = PopupEarningsMetrics.make(from: store.currentTodayEarnings)
+            let reading = store.displayedTodayEarnings
+            let earnings = PopupEarningsMetrics.make(from: reading?.value, isRetained: reading?.isRetained == true)
+            let retained = earnings?.lastReadAt != nil
+            let help = earnings?.lastReadAt.map { "Last successful read \($0.formatted(date: .abbreviated, time: .standard)). This retained observation is not current." }
+                ?? "Recorded earnings with observed calendar coverage."
             DashboardMetric(id: "today", title: "Observed today",
                 value: earnings.map { money($0.totalUSD) } ?? "—",
-                unit: earnings == nil ? "Awaiting earnings" : "USD",
-                symbol: "dollarsign.circle", accessibilityUnit: "US dollars")
+                unit: earnings == nil ? "Awaiting earnings" : retained ? "USD · last read" : "USD",
+                symbol: "dollarsign.circle", accessibilityUnit: retained ? "US dollars, last read" : "US dollars")
+                .help(help)
             DashboardMetric(id: "hourly", title: "Per observed hour",
                 value: earnings.map { money($0.perHourUSD) } ?? "—",
-                unit: earnings == nil ? "Awaiting coverage" : "USD / hour",
-                symbol: "clock", accessibilityUnit: "US dollars per observed hour")
+                unit: earnings == nil ? "Awaiting coverage" : retained ? "USD / h · last read" : "USD / hour",
+                symbol: "clock", accessibilityUnit: retained ? "US dollars per observed hour, last read" : "US dollars per observed hour")
+                .help(help)
             DashboardMetric(id: "speed", title: "Average speed today",
                 value: store.currentDayAverageTokenRate.map(number) ?? "—",
                 unit: store.currentDayAverageTokenRate == nil ? "Awaiting samples" : "tok/s",

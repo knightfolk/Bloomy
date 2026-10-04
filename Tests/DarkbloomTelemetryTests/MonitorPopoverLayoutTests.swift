@@ -10,13 +10,14 @@ private let layoutNow = Date()
 @Suite("Monitor popover layout")
 @MainActor
 struct MonitorPopoverLayoutTests {
-    @Test("graphical popup earnings fit without truncating the compact layout", arguments: [false, true])
-    func earningsGraphic(dark: Bool) async throws {
+    @Test("graphical popup earnings fit without truncating the compact layout", arguments: [false, true], [false, true])
+    func earningsGraphic(dark: Bool, retained: Bool) async throws {
         let start = Calendar.current.startOfDay(for: layoutNow)
         let summary = ObservedEarningsWindow(microUSD: 6_420_000, observedSeconds: 10_800,
             calendarDayStart: start, capturedAt: start.addingTimeInterval(21_600))
-        let view = PopupEarningsGraphic(metrics: PopupEarningsMetrics.make(from: summary),
-            week: PopupWeekEarningsMetric(title: "Observed this week", totalUSD: 42.4))
+        let view = PopupEarningsGraphic(metrics: PopupEarningsMetrics.make(from: summary, isRetained: retained),
+            week: PopupWeekEarningsMetric(title: "Observed this week", totalUSD: 42.4,
+                lastReadAt: retained ? summary.capturedAt : nil))
             .padding(12).frame(width: 528)
             .environment(\.colorScheme, dark ? .dark : .light)
         let host = NSHostingController(rootView: view)

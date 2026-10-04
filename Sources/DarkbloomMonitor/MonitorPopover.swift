@@ -248,8 +248,9 @@ struct PopupModelSourceInput: Equatable {
 struct PopupEarningsMetrics: Equatable {
     let totalUSD: Double
     let perHourUSD: Double
+    let lastReadAt: Date?
 
-    static func make(from summary: ObservedEarningsWindow?) -> Self? {
+    static func make(from summary: ObservedEarningsWindow?, isRetained: Bool = false) -> Self? {
         guard let summary,
               summary.microUSD >= 0,
               let perHour = EarningsHourlyRate.derive(
@@ -259,7 +260,8 @@ struct PopupEarningsMetrics: Equatable {
         else { return nil }
         return Self(
             totalUSD: Double(summary.microUSD) / 1_000_000,
-            perHourUSD: perHour
+            perHourUSD: perHour,
+            lastReadAt: isRetained ? summary.capturedAt : nil
         )
     }
 }
@@ -267,12 +269,18 @@ struct PopupEarningsMetrics: Equatable {
 struct PopupWeekEarningsMetric: Equatable {
     let title: String
     let totalUSD: Double
+    let lastReadAt: Date?
 
-    static func make(from summary: CalendarWeekEarningsSummary?) -> Self? {
+    init(title: String, totalUSD: Double, lastReadAt: Date? = nil) {
+        self.title = title; self.totalUSD = totalUSD; self.lastReadAt = lastReadAt
+    }
+
+    static func make(from summary: CalendarWeekEarningsSummary?, isRetained: Bool = false) -> Self? {
         guard let summary, summary.microUSD >= 0 else { return nil }
         return Self(
-            title: summary.isComplete ? "This week" : "Observed this week",
-            totalUSD: Double(summary.microUSD) / 1_000_000
+            title: summary.isComplete && !isRetained ? "This week" : "Observed this week",
+            totalUSD: Double(summary.microUSD) / 1_000_000,
+            lastReadAt: isRetained ? summary.capturedAt : nil
         )
     }
 }
@@ -1116,11 +1124,13 @@ struct MonitorPopover: View {
     }
 
     private var earningsMetrics: PopupEarningsMetrics? {
-        PopupEarningsMetrics.make(from: store.currentTodayEarnings)
+        guard let reading = store.displayedTodayEarnings else { return nil }
+        return PopupEarningsMetrics.make(from: reading.value, isRetained: reading.isRetained)
     }
 
     private var weekEarningsMetric: PopupWeekEarningsMetric? {
-        PopupWeekEarningsMetric.make(from: store.currentWeekEarnings)
+        guard let reading = store.displayedWeekEarnings else { return nil }
+        return PopupWeekEarningsMetric.make(from: reading.value, isRetained: reading.isRetained)
     }
 
     private func modelPresentation(at currentTime: Date = Date()) -> PopupModelPresentation {

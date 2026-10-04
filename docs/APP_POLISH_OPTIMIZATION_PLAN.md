@@ -1,5 +1,11 @@
 # Bloomy native polish and efficiency
 
+October 4 calendar Earnings follow-up: failed/expired reads retain same-period
+graphics with explicit last-read qualifiers, while current-value rules stay
+strict. Native light/dark, independent failures, expiry, zero/empty and recovery
+checks pass; the full Release suite reports 1,642 passing tests. See
+`RETAINED_CALENDAR_EARNINGS_REVIEW_20261004.md`. Broader proof remains open.
+
 October 4 Metrics caption follow-up: recorded quality is explicitly qualified
 at the timestamp, while the main label keeps its live 90-second freshness rule.
 Compact native fresh/aged light and dark, plus stale/unavailable dark and

@@ -274,17 +274,29 @@ private struct FixtureEarningsReadSnapshot: Codable, Sendable {
     var heldReadID: UInt64?
 }
 
+private enum FixtureCalendarSummaryMode: String, CaseIterable, Identifiable, Sendable {
+    case normal = "Normal", accountFailure = "Account failure", dayFailure = "Day failure"
+    case weekFailure = "Week failure", empty = "No summaries", zero = "Recorded zero", expired = "Expired read"
+    var id: String { rawValue }
+}
+
 private actor FixtureEarnings: AccountEarningsFetching {
     let scenario: FixtureScenario
     private var limitedModels = false
     private var activityRead = FixtureActivityRead.normal
     private var queryActivityRead = FixtureActivityRead.normal
+    private var calendarSummaryMode = FixtureCalendarSummaryMode.normal
     private var readState = FixtureEarningsReadSnapshot()
     private var pending: (id: UInt64, continuation: CheckedContinuation<FixtureEarningsReadMode, Error>)?
     private var activeGateID: UInt64?
     private var gateWaiters: [CheckedContinuation<Void, Never>] = []
     private var stateChanged: (@Sendable (FixtureEarningsReadSnapshot) -> Void)?
     init(scenario: FixtureScenario) { self.scenario = scenario }
+    func setCalendarSummaryMode(_ mode: FixtureCalendarSummaryMode) -> Bool {
+        guard activeGateID == nil else { return false }
+        calendarSummaryMode = mode
+        return true
+    }
     func setLimitedModels(_ value: Bool) -> Bool {
         guard activeGateID == nil else { return false }
         limitedModels = value
@@ -377,7 +389,8 @@ private actor FixtureEarnings: AccountEarningsFetching {
         }
     }
     func fetch(now: Date) async throws -> EarningsPresentationValue {
-        switch scenario {
+        if calendarSummaryMode == .accountFailure { throw FixtureError.offline }
+        return switch scenario {
         case .microEarnings: .observed(microUSD: 1, observedSeconds: 10_800)
         case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .largeActionHistory, .acceptedWork, .matchedEnergy, .unmeasuredMetrics, .idleMetrics:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
@@ -391,14 +404,20 @@ private actor FixtureEarnings: AccountEarningsFetching {
             dayStart: calendar.startOfDay(for: now), capturedAt: now)
     }
     func todayEarningsSummary(now: Date, calendar: Calendar) async throws -> ObservedEarningsWindow? {
+        if calendarSummaryMode == .dayFailure { throw FixtureError.offline }
+        if calendarSummaryMode == .empty { return nil }
         guard scenario.hasCurrentRuntime else { return nil }
-        return ObservedEarningsWindow(microUSD: scenario == .microEarnings ? 1 : 6_420_000, observedSeconds: 10_800,
-            calendarDayStart: calendar.startOfDay(for: now), capturedAt: now, coversDayToDate: false)
+        return ObservedEarningsWindow(microUSD: calendarSummaryMode == .zero ? 0 : scenario == .microEarnings ? 1 : 6_420_000, observedSeconds: 10_800,
+            calendarDayStart: calendar.startOfDay(for: now),
+            capturedAt: calendarSummaryMode == .expired ? now.addingTimeInterval(-601) : now, coversDayToDate: false)
     }
     func weekEarningsSummary(now: Date, calendar: Calendar) async throws -> CalendarWeekEarningsSummary? {
+        if calendarSummaryMode == .weekFailure { throw FixtureError.offline }
+        if calendarSummaryMode == .empty { return nil }
         guard scenario.hasCurrentRuntime else { return nil }
-        return CalendarWeekEarningsSummary(microUSD: 42_400_000, isComplete: false,
-            weekStart: calendar.dateInterval(of: .weekOfYear, for: now)?.start, capturedAt: now)
+        return CalendarWeekEarningsSummary(microUSD: calendarSummaryMode == .zero ? 0 : 42_400_000, isComplete: false,
+            weekStart: calendar.dateInterval(of: .weekOfYear, for: now)?.start,
+            capturedAt: calendarSummaryMode == .expired ? now.addingTimeInterval(-601) : now)
     }
     func modelEarnings(since: Date) async throws -> [ModelEarnings] {
         guard scenario.hasCurrentRuntime else { return [] }
@@ -1035,6 +1054,7 @@ private final class FixtureModel: ObservableObject {
     private var logFeed: FixtureLogFeed
     @Published var limitedActivityModels = false
     @Published var activityRead = FixtureActivityRead.normal
+    @Published var calendarSummaryMode = FixtureCalendarSummaryMode.normal
     @Published private(set) var earningsRenderingReview = false
     @Published private(set) var earningsReadState = FixtureEarningsReadSnapshot()
     private var earningsReadSession = UUID()
@@ -1292,6 +1312,33 @@ private final class FixtureModel: ObservableObject {
             await tick()
         }
     }
+    func setCalendarSummaryMode(_ mode: FixtureCalendarSummaryMode) async {
+        guard ready, !isTerminating, !proofRunning else { return }
+        let client = earningsClient
+        let currentMonitor = monitor
+        guard await client.setCalendarSummaryMode(mode), client === earningsClient else { return }
+        calendarSummaryMode = mode
+        await currentMonitor.refreshEarnings()
+        guard currentMonitor === monitor else { return }
+        struct Proof: Encodable {
+            let synthetic = true
+            let mode: String
+            let dayMicroUSD: Int64?
+            let weekMicroUSD: Int64?
+            let currentDay: Bool
+            let currentWeek: Bool
+            let displayedDayRetained: Bool?
+            let displayedWeekRetained: Bool?
+        }
+        let proof = Proof(mode: mode.rawValue, dayMicroUSD: monitor.todayEarnings?.microUSD,
+            weekMicroUSD: monitor.weekEarnings?.microUSD,
+            currentDay: monitor.currentTodayEarnings != nil, currentWeek: monitor.currentWeekEarnings != nil,
+            displayedDayRetained: monitor.displayedTodayEarnings?.isRetained,
+            displayedWeekRetained: monitor.displayedWeekEarnings?.isRetained)
+        if let data = try? JSONEncoder().encode(proof) {
+            try? data.write(to: directory.appendingPathComponent("fixture-calendar-summary-proof.json"), options: .atomic)
+        }
+    }
     func setNextMetricsRead(_ mode: FixtureMetricsReadMode) async {
         guard ready, !isTerminating, metricsReview else { return }
         await metricsReads?.setNext(mode)
@@ -1503,6 +1550,7 @@ private final class FixtureModel: ObservableObject {
         logFeed = stores.7
         limitedActivityModels = false
         activityRead = .normal
+        calendarSummaryMode = .normal
         await observeEarningsReads()
         fanReadback = .held
         chatVerificationTest = nil
@@ -2461,6 +2509,13 @@ private struct FixtureReviewView: View {
                             Button("Save Earnings read counts") { Task { await model.saveEarningsReadProof() } }
                         }
                         .help("Inert first-query gate. Choose a next read, then use Earnings Refresh or change scope.")
+                        Menu("Calendar summaries: \(model.calendarSummaryMode.rawValue)") {
+                            ForEach(FixtureCalendarSummaryMode.allCases) { mode in
+                                Button(mode.rawValue) { Task { await model.setCalendarSummaryMode(mode) } }
+                            }
+                        }
+                        .disabled(!model.ready || model.proofRunning || model.earningsReadState.heldReadID != nil)
+                        .help("Review-only calendar history failures, expiry, empties and recovery; no network requests.")
                         Menu("Earnings read: \(model.activityRead.rawValue)") {
                             ForEach(FixtureActivityRead.allCases) { read in
                                 Button(read.rawValue) { Task { await model.setActivityRead(read) } }

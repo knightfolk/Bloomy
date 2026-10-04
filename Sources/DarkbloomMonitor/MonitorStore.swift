@@ -67,9 +67,11 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var alertHistoryAvailable = false
     @Published private(set) var thermalState: SystemThermalState
     @Published private(set) var earnings: EarningsPresentationValue
-    @Published private(set) var todayEarnings: ObservedEarningsWindow?
+    @Published private(set) var todayEarningsReading: SourceAvailability<ObservedEarningsWindow>
+    var todayEarnings: ObservedEarningsWindow? { todayEarningsReading.value }
     @Published private(set) var earningsPerHourUSD: Double?
-    @Published private(set) var weekEarnings: CalendarWeekEarningsSummary?
+    @Published private(set) var weekEarningsReading: SourceAvailability<CalendarWeekEarningsSummary>
+    var weekEarnings: CalendarWeekEarningsSummary? { weekEarningsReading.value }
     @Published private(set) var observedUptime: ObservedUptimeValue
     @Published private(set) var jobSummary: SourceAvailability<JobCompletionSummary>
     @Published private(set) var averageTokenRate: TokenRate
@@ -195,9 +197,9 @@ final class MonitorStore: ObservableObject {
         snapshot = initial
         thermalState = SystemThermalState(ProcessInfo.processInfo.thermalState)
         earnings = .unavailable(reason: "Waiting for authenticated account earnings")
-        todayEarnings = nil
+        todayEarningsReading = .unavailable(reason: "Waiting for today's observed earnings")
         earningsPerHourUSD = nil
-        weekEarnings = nil
+        weekEarningsReading = .unavailable(reason: "Waiting for this week's observed earnings")
         observedUptime = uptimeRecorder == nil
             ? .unavailable(reason: "Local observed-uptime storage unavailable")
             : .warming(observedSeconds: 0)
@@ -444,11 +446,11 @@ final class MonitorStore: ObservableObject {
             let refresh = await earningsRefreshTask.value
             accountEarningsCapturedAt = refresh.accountCapturedAt
             earnings = refresh.earnings
-            todayEarnings = refresh.todayEarnings
-            weekEarnings = refresh.weekEarnings
+            todayEarningsReading = refresh.todayEarnings
+            weekEarningsReading = refresh.weekEarnings
             modelEarnings = refresh.modelEarnings
             modelWorkEarnings = refresh.modelWorkEarnings
-            earningsPerHourUSD = refresh.todayEarnings.flatMap {
+            earningsPerHourUSD = refresh.freshlyReadToday.flatMap {
                 EarningsHourlyRate.derive(
                     microUSD: $0.microUSD,
                     observedSeconds: $0.observedSeconds
@@ -463,6 +465,8 @@ final class MonitorStore: ObservableObject {
         let previousEarnings = earnings
         let previousJobSummary = jobSummary
         let previousModelEarnings = modelEarnings
+        let previousToday = todayEarningsReading
+        let previousWeek = weekEarningsReading
         let refreshedAt = now()
         let calendar = Calendar.current
         let task = Task<AccountRefreshState, Never> {
@@ -506,8 +510,8 @@ final class MonitorStore: ObservableObject {
                     reason: error.localizedDescription
                 )
             }
-            let refreshedTodayEarnings: ObservedEarningsWindow?
-            let refreshedWeekEarnings: CalendarWeekEarningsSummary?
+            let refreshedTodayEarnings: SourceAvailability<ObservedEarningsWindow>
+            let refreshedWeekEarnings: SourceAvailability<CalendarWeekEarningsSummary>
             let refreshedModelEarnings = (try? await client.modelEarnings(
                 since: refreshedAt.addingTimeInterval(-7 * 86_400)
             )) ?? previousModelEarnings
@@ -517,17 +521,31 @@ final class MonitorStore: ObservableObject {
                 refreshedModelWork = (try? await client.modelWorkEarnings(
                     in: DateInterval(start: calendar.startOfDay(for: refreshedAt), end: refreshedAt),
                     calendar: calendar)) ?? []
-                refreshedTodayEarnings = try? await client.todayEarningsSummary(
-                    now: refreshedAt,
-                    calendar: calendar
-                )
-                refreshedWeekEarnings = try? await client.weekEarningsSummary(
-                    now: refreshedAt,
-                    calendar: calendar
-                )
+                do {
+                    if let value = try await client.todayEarningsSummary(now: refreshedAt, calendar: calendar) {
+                        refreshedTodayEarnings = .available(value: value, capturedAt: refreshedAt)
+                    } else {
+                        refreshedTodayEarnings = .unavailable(reason: "Today's observed earnings are unavailable")
+                    }
+                } catch {
+                    refreshedTodayEarnings = Self.staleOrUnavailable(previous: previousToday,
+                        reason: "Today's earnings refresh failed")
+                }
+                do {
+                    if let value = try await client.weekEarningsSummary(now: refreshedAt, calendar: calendar) {
+                        refreshedWeekEarnings = .available(value: value, capturedAt: refreshedAt)
+                    } else {
+                        refreshedWeekEarnings = .unavailable(reason: "This week's observed earnings are unavailable")
+                    }
+                } catch {
+                    refreshedWeekEarnings = Self.staleOrUnavailable(previous: previousWeek,
+                        reason: "This week's earnings refresh failed")
+                }
             case .stale, .unavailable:
-                refreshedTodayEarnings = nil
-                refreshedWeekEarnings = nil
+                refreshedTodayEarnings = Self.staleOrUnavailable(previous: previousToday,
+                    reason: "Account earnings could not be refreshed")
+                refreshedWeekEarnings = Self.staleOrUnavailable(previous: previousWeek,
+                    reason: "Account earnings could not be refreshed")
             }
             let accountCapturedAt: Date?
             switch refreshedEarnings {
@@ -548,11 +566,11 @@ final class MonitorStore: ObservableObject {
         let refresh = await task.value
         accountEarningsCapturedAt = refresh.accountCapturedAt
         earnings = refresh.earnings
-        todayEarnings = refresh.todayEarnings
-        weekEarnings = refresh.weekEarnings
+        todayEarningsReading = refresh.todayEarnings
+        weekEarningsReading = refresh.weekEarnings
         modelEarnings = refresh.modelEarnings
         modelWorkEarnings = refresh.modelWorkEarnings
-        earningsPerHourUSD = refresh.todayEarnings.flatMap {
+        earningsPerHourUSD = refresh.freshlyReadToday.flatMap {
             EarningsHourlyRate.derive(
                 microUSD: $0.microUSD,
                 observedSeconds: $0.observedSeconds
@@ -745,13 +763,23 @@ final class MonitorStore: ObservableObject {
     }
 
     var currentTodayEarnings: ObservedEarningsWindow? {
-        guard case .day = EarningsPresentationValue.calendarDay(todayEarnings, now: now(), calendar: .current) else { return nil }
+        guard case .available = todayEarningsReading,
+              case .day = EarningsPresentationValue.calendarDay(todayEarnings, now: now(), calendar: .current) else { return nil }
         return todayEarnings
     }
 
     var currentWeekEarnings: CalendarWeekEarningsSummary? {
-        guard weekEarnings?.isCurrent(at: now(), calendar: .current) == true else { return nil }
+        guard case .available = weekEarningsReading,
+              weekEarnings?.isCurrent(at: now(), calendar: .current) == true else { return nil }
         return weekEarnings
+    }
+
+    var displayedTodayEarnings: CalendarEarningsReading<ObservedEarningsWindow>? {
+        CalendarEarningsPresentation.day(todayEarningsReading, now: now(), calendar: .current)
+    }
+
+    var displayedWeekEarnings: CalendarEarningsReading<CalendarWeekEarningsSummary>? {
+        CalendarEarningsPresentation.week(weekEarningsReading, now: now(), calendar: .current)
     }
 
     var currentJobSummary: JobCompletionSummary? {
@@ -772,7 +800,7 @@ final class MonitorStore: ObservableObject {
         MenuBarPresentation.make(
             snapshot: snapshot,
             thermal: thermalState,
-            earnings: .calendarDay(todayEarnings, now: now(), calendar: .current),
+            earnings: .calendarDay(currentTodayEarnings, now: now(), calendar: .current),
             mode: mode,
             activeModelAverage: currentModelTokenRateAverages.first {
                 $0.model == snapshot.state.value?.currentModel
@@ -1226,10 +1254,10 @@ final class MonitorStore: ObservableObject {
         }
     }
 
-    private static func staleOrUnavailable(
-        previous: SourceAvailability<JobCompletionSummary>,
+    private static func staleOrUnavailable<Value: Equatable & Sendable>(
+        previous: SourceAvailability<Value>,
         reason: String
-    ) -> SourceAvailability<JobCompletionSummary> {
+    ) -> SourceAvailability<Value> {
         switch previous {
         case .available(let value, let capturedAt), .stale(let value, let capturedAt, _):
             .stale(value: value, capturedAt: capturedAt, reason: reason)
@@ -1243,8 +1271,11 @@ private struct AccountRefreshState: Sendable {
     let accountCapturedAt: Date?
     let earnings: EarningsPresentationValue
     let jobSummary: SourceAvailability<JobCompletionSummary>
-    let todayEarnings: ObservedEarningsWindow?
-    let weekEarnings: CalendarWeekEarningsSummary?
+    let todayEarnings: SourceAvailability<ObservedEarningsWindow>
+    let weekEarnings: SourceAvailability<CalendarWeekEarningsSummary>
+    var freshlyReadToday: ObservedEarningsWindow? {
+        if case .available(let value, _) = todayEarnings { value } else { nil }
+    }
     let modelEarnings: [ModelEarnings]
     let modelWorkEarnings: [ModelWorkEarnings]
 }
