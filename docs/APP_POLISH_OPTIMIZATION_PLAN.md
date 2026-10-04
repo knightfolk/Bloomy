@@ -508,3 +508,13 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   `OPTIMIZED_OVERVIEW_RESOURCE_BASELINE_20261004.md`; this is inert review-host
   evidence, with production collectors, large histories, energy and all broader
   UI/motion/accessibility gates still open. Temporary review processes stopped.
+
+- Metrics now groups its seven summary values into two time cards, three
+  performance cards and two work totals, with coverage bars and measured GPU
+  arcs. Missing and recorded-zero states remain distinct. Native review found
+  and fixed stale history after source replacement; a cancellation regression
+  and actual no-Refresh replacement checks pass. Full 1,621 reported Release
+  tests and exact-source optimized native wide/light, compact/dark, 100,000-row,
+  unknown/idle checks pass. See `METRICS_SUMMARY_NATIVE_REVIEW_20261004.md`.
+  This local checkpoint adds no acquisition cadence or CPU-savings claim;
+  broader accessibility, production, motion and delivery gates remain open.

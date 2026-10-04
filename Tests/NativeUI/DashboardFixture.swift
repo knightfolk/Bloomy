@@ -22,6 +22,7 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case acceptedWork = "Accepted work confirmation"
     case matchedEnergy = "Matched electricity graphics"
     case microEarnings = "Overview micro-dollar earnings"
+    case unmeasuredMetrics = "Unmeasured metrics", idleMetrics = "Recorded idle metrics"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
@@ -378,7 +379,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
     func fetch(now: Date) async throws -> EarningsPresentationValue {
         switch scenario {
         case .microEarnings: .observed(microUSD: 1, observedSeconds: 10_800)
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .largeActionHistory, .acceptedWork, .matchedEnergy:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .largeActionHistory, .acceptedWork, .matchedEnergy, .unmeasuredMetrics, .idleMetrics:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -1415,15 +1416,20 @@ private final class FixtureModel: ObservableObject {
                 let idleBoundary = index == 359
                 let modelIndex = idleVisit ? 3 : index < 180 ? 0 : 1
                 let modelID = FixtureData.modelIDs[modelIndex]
-                let active = !idleVisit && !idleBoundary && index % 12 != 0
+                let unmeasured = requestedScenario == .unmeasuredMetrics
+                let recordedIdle = requestedScenario == .idleMetrics
+                let active = !recordedIdle && !idleVisit && !idleBoundary && index % 12 != 0
                 let counterIndex = min(index, 355)
                 try database.record(PerformanceSample(observedAt: date, sourceCapturedAt: date,
                     quality: index % 80 == 0 ? .stale : .current, providerSession: "4242:1800",
                     model: modelID, residentModels: [modelID],
-                    advertisedModels: Array(FixtureData.modelIDs.prefix(3)), inferenceActive: active,
-                    activeRequests: active ? 2 : 0, tokensPerSecond: active ? 40 + Double(index % 20) : 0,
-                    tokensGenerated: Int64(counterIndex * 300), requestsServed: Int64(counterIndex / 3),
-                    gpuUtilizationPercent: Double(35 + index % 45), gpuMemoryGB: 32, powerWatts: 75 + Double(index % 20), autopilotPhase: index % 90 < 8 ? "waiting_inventory" : "shadow"))
+                    advertisedModels: Array(FixtureData.modelIDs.prefix(3)), inferenceActive: unmeasured ? nil : active,
+                    activeRequests: unmeasured ? nil : active ? 2 : 0, tokensPerSecond: unmeasured ? nil : active ? 40 + Double(index % 20) : 0,
+                    tokensGenerated: unmeasured ? nil : recordedIdle ? 0 : Int64(counterIndex * 300),
+                    requestsServed: unmeasured ? nil : recordedIdle ? 0 : Int64(counterIndex / 3),
+                    gpuUtilizationPercent: unmeasured ? nil : recordedIdle ? 0 : Double(35 + index % 45),
+                    gpuMemoryGB: unmeasured ? nil : 32, powerWatts: unmeasured ? nil : 75 + Double(index % 20),
+                    autopilotPhase: index % 90 < 8 ? "waiting_inventory" : "shadow"))
             }
             let reads = try FixtureMetricsReads(url: performanceURL,
                 proofURL: directory.appendingPathComponent("fixture-metrics-read-proof.json"))

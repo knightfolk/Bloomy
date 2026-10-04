@@ -8,6 +8,37 @@ import Testing
 @Suite("Performance metrics presentation", .serialized)
 @MainActor
 struct PerformanceMetricsViewTests {
+    @Test("replacing the history source cancels its pending read and reads the replacement immediately")
+    func historySourceReplacement() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let probe = MetricsSourceReplacementReads()
+        let now = Date()
+        let replacement = [metricSample(at: now.addingTimeInterval(-30)), metricSample(at: now)]
+        let first = PerformanceHistoryStore(url: directory.appendingPathComponent("first.sqlite"),
+            readSamples: { _ in try await probe.holdFirst() })
+        let second = PerformanceHistoryStore(url: directory.appendingPathComponent("second.sqlite"),
+            readSamples: { _ in await probe.readSecond(); return replacement })
+        let host = NSHostingController(rootView: PerformanceMetricsView(history: first))
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 550, height: 650))
+        window.orderBack(nil)
+        defer { window.close() }
+        for _ in 0..<100 where await probe.firstStarted == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(await probe.firstStarted == 1)
+        host.rootView = PerformanceMetricsView(history: second)
+        for _ in 0..<100 where await probe.replacementPending {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await probe.secondStarted == 1)
+        #expect(await probe.firstCancelled == 1)
+        #expect(first.storageError == nil)
+        #expect(second.storageError == nil)
+        host.rootView = PerformanceMetricsView(history: nil)
+        await probe.cancelFirstRead()
+    }
+
     @Test("hidden row release preserves completed totals and prevents false empty analysis on reopen")
     func releasedRowsKeepCompletedAnalysis() async throws {
         let end = Date(timeIntervalSince1970: 1_800_000_000)
@@ -483,6 +514,36 @@ struct PerformanceMetricsViewTests {
 }
 
 private enum MetricsReadFailure: Error { case synthetic }
+
+private actor MetricsSourceReplacementReads {
+    private(set) var firstStarted = 0
+    private(set) var firstCancelled = 0
+    private(set) var secondStarted = 0
+    var replacementPending: Bool { secondStarted == 0 || firstCancelled == 0 }
+    private var pending: CheckedContinuation<[PerformanceSample], Error>?
+
+    func holdFirst() async throws -> [PerformanceSample] {
+        firstStarted += 1
+        do {
+            return try await withTaskCancellationHandler {
+                try Task.checkCancellation()
+                return try await withCheckedThrowingContinuation { continuation in
+                    if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
+                    else { pending = continuation }
+                }
+            } onCancel: {
+                Task { await self.cancelFirstRead() }
+            }
+        }
+        catch { firstCancelled += 1; throw error }
+    }
+    func cancelFirstRead() {
+        guard let continuation = pending else { return }
+        pending = nil
+        continuation.resume(throwing: CancellationError())
+    }
+    func readSecond() { secondStarted += 1 }
+}
 
 private func metricsQuery(
     read: PerformanceMetricsRead, period: PerformanceMetricsPeriod = .last24Hours,

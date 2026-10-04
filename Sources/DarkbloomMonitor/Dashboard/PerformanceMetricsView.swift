@@ -43,6 +43,9 @@ struct PerformanceMetricsView: View {
     var body: some View {
         if let history {
             RecordedPerformanceMetricsView(history: history, isVisible: isVisible)
+                // A replaced journal is a new data scope. Cancel the old read
+                // and discard its retained summary instead of relabeling it.
+                .id(ObjectIdentifier(history))
         } else {
             PerformanceMetricsContent(samples: [], recordingStartedAt: nil)
         }
@@ -339,14 +342,31 @@ struct PerformanceMetricsContent: View {
     }
 
     private var summaryGrid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 10)], alignment: .leading, spacing: 10) {
-            metric("Covered time", symbol: "clock", value: duration(summary.coveredSeconds), detail: "\(coveragePercent) of \(renderedQuery.period.rawValue)")
-            metric("Active time", symbol: "bolt", value: activeTime, detail: "Observed inference intervals")
-            metric("Model speed", symbol: "speedometer", value: summary.averageTokenRate.map { "\(number($0)) tok/s" } ?? "Unknown", detail: "Average during measured work")
-            metric("GPU use", symbol: "cpu", value: summary.averageGPUUtilizationPercent.map { "\(number($0))%" } ?? "Unknown", detail: "Whole Mac · covered intervals")
-            metric("GPU while idle", symbol: "cpu", value: summary.averageIdleGPUUtilizationPercent.map { "\(number($0))%" } ?? "Unknown", detail: "Whole Mac · \(duration(summary.idleGPUCoveredSeconds)) observed")
-            metric("Requests completed", symbol: "checkmark.circle", value: summary.completedRequests.map { $0.formatted() } ?? "Unknown", detail: renderedQuery.model == nil ? "Provider-wide counter increases" : "Provider-wide · choose All models")
-            metric("Tokens generated", symbol: "text.word.spacing", value: summary.generatedTokens.map { $0.formatted() } ?? "Unknown", detail: renderedQuery.model == nil ? "Provider-wide counter increases" : "Provider-wide · choose All models")
+        VStack(spacing: 10) {
+            AdaptiveChoiceLayout(minimumWidth: 155, spacing: 10) {
+                PerformanceMetricCard(id: "covered", title: "Covered time", symbol: "clock",
+                    value: duration(summary.coveredSeconds), detail: "\(coveragePercent) of \(renderedQuery.period.rawValue)",
+                    graphic: .coverage(PerformanceMetricFraction.measured(summary.coveredSeconds, outOf: range.duration)))
+                PerformanceMetricCard(id: "active", title: "Active time", symbol: "bolt", value: activeTime,
+                    detail: summary.activeCoveredSeconds > 0 ? "Of \(duration(summary.activeCoveredSeconds)) measured activity" : "Activity coverage unavailable",
+                    graphic: .coverage(PerformanceMetricFraction.measured(summary.activeSeconds, outOf: summary.activeCoveredSeconds)))
+            }
+            AdaptiveChoiceLayout(minimumWidth: 115, spacing: 10) {
+                PerformanceMetricCard(id: "speed", title: "Model speed", symbol: "speedometer",
+                    value: summary.averageTokenRate.map { "\(number($0)) tok/s" } ?? "Unknown", detail: "Average during measured work")
+                PerformanceMetricCard(id: "gpu", title: "GPU use", symbol: "cpu",
+                    value: summary.averageGPUUtilizationPercent.map { "\(number($0))%" } ?? "Unknown", detail: "Whole Mac · covered intervals",
+                    graphic: .utilization(PerformanceMetricFraction.measured(summary.averageGPUUtilizationPercent, outOf: 100)))
+                PerformanceMetricCard(id: "idleGPU", title: "GPU while idle", symbol: "cpu",
+                    value: summary.averageIdleGPUUtilizationPercent.map { "\(number($0))%" } ?? "Unknown", detail: "Whole Mac · \(duration(summary.idleGPUCoveredSeconds)) observed",
+                    graphic: .utilization(PerformanceMetricFraction.measured(summary.averageIdleGPUUtilizationPercent, outOf: 100)))
+            }
+            AdaptiveChoiceLayout(minimumWidth: 155, spacing: 10) {
+                PerformanceMetricCard(id: "requests", title: "Requests completed", symbol: "checkmark.circle",
+                    value: summary.completedRequests.map { $0.formatted() } ?? "Unknown", detail: renderedQuery.model == nil ? "Provider-wide counter increases" : "Provider-wide · choose All models")
+                PerformanceMetricCard(id: "tokens", title: "Tokens generated", symbol: "text.word.spacing",
+                    value: summary.generatedTokens.map { $0.formatted() } ?? "Unknown", detail: renderedQuery.model == nil ? "Provider-wide counter increases" : "Provider-wide · choose All models")
+            }
         }
     }
 
@@ -357,18 +377,6 @@ struct PerformanceMetricsContent: View {
     private var activeTime: String {
         guard summary.activeCoveredSeconds > 0 else { return "Unknown" }
         return duration(summary.activeSeconds)
-    }
-
-    private func metric(_ title: String, symbol: String, value: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Label(title, systemImage: symbol).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            Text(value).font(.title3.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
-            Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-        }
-        .frame(maxWidth: .infinity, minHeight: 78, alignment: .topLeading)
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityElement(children: .combine)
     }
 
     private var speedChart: some View {

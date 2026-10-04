@@ -354,3 +354,13 @@ confirm display-disabled minimization with lower CPU in the inert host. Full
 See [Optimized baseline](OPTIMIZED_OVERVIEW_RESOURCE_BASELINE_20261004.md).
 This does not prove production collector/traffic costs, leak freedom, whole-app
 energy or genuine compositor occlusion. All broader completion gates remain.
+
+October 4 Metrics summary follow-up: semantic 2+3+2 rows, coverage bars and GPU
+arcs retain units, attribution and unknown/zero distinctions. The exact optimized
+fixture passes wide light, compact dark scrolling, 100,000-row rendering and
+automatic missing/idle source replacement without Refresh. The source identity
+fix cancels the old read and starts the new journal; its regression passes.
+Full 1,621 reported Release tests pass. See
+[Metrics summary review](METRICS_SUMMARY_NATIVE_REVIEW_20261004.md).
+Spoken VoiceOver, all larger-text/localized variants, production performance,
+menu-motion and installed delivery remain open. The temporary fixture quit.
