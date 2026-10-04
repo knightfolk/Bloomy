@@ -795,16 +795,7 @@ struct MonitorPopover: View {
     }
 
     private var compactEarnings: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 14) {
-            if let metrics = earningsMetrics {
-                compactAmount("Today · recorded", value: metrics.totalUSD, symbol: "banknote", prominent: true)
-                compactAmount("Observed / h", value: metrics.perHourUSD, symbol: "clock")
-            }
-            if let week = weekEarningsMetric {
-                compactAmount(week.title, value: week.totalUSD, symbol: "calendar")
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        PopupEarningsGraphic(metrics: earningsMetrics, week: weekEarningsMetric)
     }
 
     private func demandColor(_ band: NetworkDemandBand) -> Color {
@@ -814,17 +805,6 @@ struct MonitorPopover: View {
         case .moderate: .blue
         case .low: .secondary
         }
-    }
-
-    private func compactAmount(_ label: String, value: Double, symbol: String, prominent: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label(label, systemImage: symbol).font(.caption2).foregroundStyle(.secondary)
-            Text(ActivityAmountPresentation.hourlyAmount(value))
-                .font(.system(size: prominent ? 25 : 18, weight: .semibold, design: .rounded))
-                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private var compactJobs: some View {
@@ -841,42 +821,18 @@ struct MonitorPopover: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            DarkbloomLogo(
-                image: DarkbloomLogoAsset.sourceImage,
-                tint: logoColor
-            )
-            .frame(width: 22, height: 25)
-
-            Text(MonitorApplicationIdentity.displayName)
-                .help(Self.machineName)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-
-            Spacer()
-
+    private var navigationControls: some View {
+        HStack(spacing: 4) {
             Button(action: openDashboard) { Image(systemName: "rectangle.grid.2x2") }
                 .help("Open dashboard").accessibilityLabel("Open dashboard")
                 .modifier(PopupKeyboardReveal())
-            Button { openSettings(nil) } label: {
-                Image(systemName: "gearshape")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help("Settings")
-            .accessibilityLabel("Settings")
-            .accessibilityIdentifier("dashboard.settings")
-            .modifier(PopupKeyboardReveal())
-
-            Button(role: .destructive) {
-                Task { await store.quit() }
-            } label: {
+            Button { openSettings(nil) } label: { Image(systemName: "gearshape") }
+                .help("Settings").accessibilityLabel("Settings")
+                .accessibilityIdentifier("dashboard.settings")
+                .modifier(PopupKeyboardReveal())
+            Button(role: .destructive) { Task { await store.quit() } } label: {
                 Image(systemName: "rectangle.portrait.and.arrow.right")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
             .help("Quit \(MonitorApplicationIdentity.displayName)")
             .accessibilityLabel("Quit \(MonitorApplicationIdentity.displayName)")
             .accessibilityIdentifier("dashboard.quit")
@@ -885,8 +841,37 @@ struct MonitorPopover: View {
     }
 
     private func commandBar(currentTime: Date) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            header
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    DarkbloomLogo(image: DarkbloomLogoAsset.sourceImage, tint: logoColor)
+                        .frame(width: 20, height: 22)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Bloomy").font(.subheadline.weight(.semibold))
+                        Text(providerRunning(at: currentTime).map { $0 ? "Online" : "Offline" } ?? "Unknown")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                .help("\(Self.machineName) · \(store.snapshot.menuStatus.accessibilityLabel)")
+                .accessibilityElement(children: .combine)
+                Spacer(minLength: 0)
+                CompactGPUGauge(usage: store.gpuUsage, now: currentTime, compact: true)
+                Button { openSettings(.electricity) } label: {
+                    Label(powerCommandTitle(at: currentTime), systemImage: "bolt.fill")
+                        .font(.caption.weight(.medium)).monospacedDigit()
+                }
+                .buttonStyle(.plain)
+                .help("Energy settings · whole-Mac adapter input, not provider-only or wall power. Missing readings are not zero.")
+                .accessibilityIdentifier("popup.energy.open")
+                .modifier(PopupKeyboardReveal())
+                if let extras = store.providerExtras {
+                    PopupFanSummary(store: extras, now: currentTime, isVisible: isVisible,
+                        ownsVisibleFanPolling: ownsVisibleFanPolling, compact: true) { showsFans = true }
+                } else {
+                    Button { openSettings(.fans) } label: { Label("Fans —", systemImage: "fan") }
+                        .buttonStyle(.plain).font(.caption)
+                }
+            }
             HStack(spacing: 5) {
                 ProviderLifecycleControls(store: controlStore, snapshot: store.snapshot,
                     currentTime: currentTime, compact: true)
@@ -902,39 +887,16 @@ struct MonitorPopover: View {
                     PopupNudgeControl(store: nudge, updateProtection: updateProtection)
                 }
                 Spacer(minLength: 0)
-                Text(isOffline(at: currentTime) ? "Offline" : store.snapshot.menuStatus.accessibilityLabel)
-                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    .help(store.snapshot.menuStatus.accessibilityLabel)
+                navigationControls
             }
             .font(.caption.weight(.medium))
             .buttonStyle(.bordered).controlSize(.small)
-            Divider()
-            HStack(spacing: 14) {
-                CompactGPUGauge(usage: store.gpuUsage, now: currentTime, compact: true)
-                Divider().frame(height: 24)
-                Button { openSettings(.electricity) } label: {
-                    Label(powerCommandTitle(at: currentTime), systemImage: "bolt.fill")
-                        .font(.caption.weight(.medium)).monospacedDigit()
-                }
-                .buttonStyle(.plain)
-                .help("Energy settings · whole-Mac adapter input, not provider-only or wall power. Missing readings are not zero.")
-                .accessibilityIdentifier("popup.energy.open")
-                .modifier(PopupKeyboardReveal())
-                Spacer(minLength: 0)
-                if let extras = store.providerExtras {
-                    PopupFanSummary(store: extras, now: currentTime, isVisible: isVisible,
-                        ownsVisibleFanPolling: ownsVisibleFanPolling, compact: true) { showsFans = true }
-                } else {
-                    Button { openSettings(.fans) } label: { Label("Cooling —", systemImage: "fan") }
-                        .buttonStyle(.plain).font(.caption)
-                }
-            }
         }
         .padding(10)
         .tint(.primary)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.quaternary, lineWidth: 1))
-        .padding(.bottom, 10)
+        .padding(.bottom, 6)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Provider commands and Mac readings")
     }

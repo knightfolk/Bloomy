@@ -11,6 +11,10 @@ struct EarningsComposition: Equatable {
     let parts: [Part]
     let totalUSD: Double?
     var canShowShare: Bool { totalUSD.map { $0 > 0 } == true && parts.allSatisfy { $0.usd >= 0 } }
+    /// A signed comparison uses a shared zero at the midpoint. Positive-only
+    /// rows use the largest contribution as their scale, rather than a target.
+    var comparisonMaximum: Double { parts.map { abs($0.usd) }.max() ?? 0 }
+    var hasNegativeContribution: Bool { parts.contains { $0.usd < 0 } }
 
     init(values: [ActivityChartValue]) {
         // Use exactly the rendered series: filters and the reward switch apply here too.
@@ -119,14 +123,38 @@ struct ActivityEarningsGraphic: View {
     private func breakdown(_ composition: EarningsComposition) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(composition.parts) { part in
-                HStack(spacing: 7) {
-                    Circle().fill(color(part.name)).frame(width: 7, height: 7).accessibilityHidden(true)
-                    Text(ModelDisplayName.short(part.name)).lineLimit(1).help(part.name)
-                    Spacer(minLength: 6)
-                    Text(ActivityAmountPresentation.hourlyAmount(part.usd)).monospacedDigit()
-                }.font(.caption).accessibilityElement(children: .combine)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 7) {
+                        Circle().fill(color(part.name)).frame(width: 7, height: 7).accessibilityHidden(true)
+                        Text(ModelDisplayName.short(part.name)).lineLimit(1).help(part.name)
+                        Spacer(minLength: 6)
+                        Text(ActivityAmountPresentation.hourlyAmount(part.usd)).monospacedDigit()
+                    }.font(.caption)
+                    contributionBar(part, composition: composition)
+                }.accessibilityElement(children: .combine)
             }
         }
+    }
+
+    private func contributionBar(_ part: EarningsComposition.Part, composition: EarningsComposition) -> some View {
+        GeometryReader { geometry in
+            let signed = composition.hasNegativeContribution
+            let scale = signed ? geometry.size.width / 2 : geometry.size.width
+            let length = composition.comparisonMaximum > 0
+                ? scale * min(1, abs(part.usd) / composition.comparisonMaximum) : 0
+            ZStack(alignment: .leading) {
+                Capsule().fill(.quaternary)
+                Capsule().fill(color(part.name).opacity(0.85))
+                    .frame(width: length)
+                    .offset(x: signed ? scale - (part.usd < 0 ? length : 0) : 0)
+                if signed {
+                    Rectangle().fill(.secondary).frame(width: 1)
+                        .offset(x: scale)
+                }
+            }
+        }
+        .frame(height: 5)
+        .accessibilityHidden(true)
     }
 
     private var observations: some View {

@@ -1,5 +1,11 @@
 # Bloomy native polish and efficiency
 
+October 4 follow-up: the popup common bar is reduced to two dense rows and
+earnings adds actual Today/Week amount bars. Activity contribution bars preserve
+signed corrections. Exact-source native review and the final 1,615 reported
+tests are recorded in `DENSE_POPUP_EARNINGS_REVIEW_20261004.md`. This is local
+review work; broader optimization and production delivery remain open.
+
 October 3 Earnings/popup checkpoint: Kevin's icon-first redesign now has a
 graphic earnings total, model/reward composition, jobs and ledger intervals,
 with chart options and ledger detail on demand. One shared popup header groups

@@ -10,6 +10,21 @@ private let layoutNow = Date()
 @Suite("Monitor popover layout")
 @MainActor
 struct MonitorPopoverLayoutTests {
+    @Test("graphical popup earnings fit without truncating the compact layout", arguments: [false, true])
+    func earningsGraphic(dark: Bool) async throws {
+        let start = Calendar.current.startOfDay(for: layoutNow)
+        let summary = ObservedEarningsWindow(microUSD: 6_420_000, observedSeconds: 10_800,
+            calendarDayStart: start, capturedAt: start.addingTimeInterval(21_600))
+        let view = PopupEarningsGraphic(metrics: PopupEarningsMetrics.make(from: summary),
+            week: PopupWeekEarningsMetric(title: "Observed this week", totalUSD: 42.4))
+            .padding(12).frame(width: 528)
+            .environment(\.colorScheme, dark ? .dark : .light)
+        let host = NSHostingController(rootView: view)
+        let fitted = host.sizeThatFits(in: NSSize(width: 528, height: 0))
+        #expect(fitted.width == 528)
+        #expect(fitted.height < 130)
+    }
+
     @Test("post-switch feedback fits the popup and distinguishes success from missing key")
     func postSwitchFeedback() async throws {
         let view = VStack(alignment: .leading, spacing: 8) {

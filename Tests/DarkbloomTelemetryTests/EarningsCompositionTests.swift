@@ -26,6 +26,8 @@ struct EarningsCompositionTests {
         #expect(result.parts.first?.name == "Qwen")
         #expect(result.parts.last?.usd == -0.000001)
         #expect(!result.canShowShare)
+        #expect(result.hasNegativeContribution)
+        #expect(abs(result.comparisonMaximum - 0.075) < 1e-12)
     }
 
     @Test("The summary follows model and reward filtering, including micro-dollar work")
@@ -41,6 +43,8 @@ struct EarningsCompositionTests {
         #expect(abs((summary(model: nil, rewards: false).totalUSD ?? 0) - 0.000004) < 1e-15)
         #expect(summary(model: "Qwen", rewards: true).totalUSD == 0.000001)
         #expect(summary(model: "Qwen", rewards: true).parts.map(\.name) == ["Qwen"])
+        #expect(!summary(model: nil, rewards: true).hasNegativeContribution)
+        #expect(summary(model: nil, rewards: true).comparisonMaximum == 0.000003)
     }
 
     @Test("Invalid custom client values cannot form a misleading partial total", arguments: [Double.nan, .infinity, -.infinity])
