@@ -34,11 +34,15 @@ parser.add_argument("--motion-window-trace", action="store_true",
                     help="Bounded staged native callback trace; requires a target-lifetime comparison.")
 parser.add_argument("--production-status-item-proof", action="store_true",
                     help="Separate inert real-status-item diagnostic; does not replace the normal native gate.")
+parser.add_argument("--settings-preview-proof", action="store_true",
+                    help="Observe the actual dashboard Settings preview through navigation and retained-window reopening.")
 args = parser.parse_args()
 if args.motion_window_trace and not args.motion_target_lifetime:
     parser.error("Window trace requires an explicit diagnostic target-lifetime comparison.")
 if args.production_status_item_proof and (args.motion_target_lifetime or args.motion_window_trace or args.hide_review_banner):
     parser.error("Real status-item proof requires its visible review controls and no motion comparison overlays.")
+if args.settings_preview_proof and (args.production_status_item_proof or args.motion_target_lifetime or args.motion_window_trace or args.hide_review_banner):
+    parser.error("Settings preview proof requires visible controls and no other motion diagnostics.")
 output = args.output.resolve()
 if output.exists():
     parser.error("Output already exists; preserve it for provenance and pass --output with a fresh task-owned path.")
@@ -180,6 +184,7 @@ command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6
            *(["-D", "FIXTURE_RESET_BEFORE_DETACH"] if args.motion_target_lifetime == "reset-before-detach" else []),
            *(["-D", "FIXTURE_MOTION_WINDOW_TRACE"] if args.motion_window_trace else []),
            *(["-D", "FIXTURE_PRODUCTION_STATUS_ITEM_PROOF"] if args.production_status_item_proof else []),
+           *(["-D", "FIXTURE_SETTINGS_PREVIEW_PROOF"] if args.settings_preview_proof else []),
            "-I", str(products), "-F", str(products),
            str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle", "-lsqlite3",
            "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks", "-o", str(binary)]
@@ -194,6 +199,10 @@ manifest = {
     "motion_target_comparison": motion_comparison,
     "motion_window_trace": window_trace,
     "production_status_item_proof": status_item_access,
+    "settings_preview_proof": {"enabled": args.settings_preview_proof,
+                               "retains_window_after_close": args.settings_preview_proof,
+                               "production_source_overlay": False,
+                               "replaces_normal_native_gate": False},
     "dependency_substitutions": {name: {"before": pair[0], "after": pair[1]}
                                  for name, pair in substitutions.items()},
     "telemetry_library_sha256": hashlib.sha256(staged_telemetry.read_bytes()).hexdigest(),

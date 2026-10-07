@@ -161,6 +161,28 @@ Run **Native proof** and retain each terminal motion, Models, Charts and aggrega
 report. Staging guards can be checked without launching an app:
 `python3 -m unittest discover -s Tests/NativeUI -p test_motion_comparison_staging.py`.
 
+For the actual production Settings preview diagnostic, build a fresh output:
+
+```sh
+python3 Tests/NativeUI/build-dashboard-fixture.py --configuration release \
+  --settings-preview-proof --output .build/settings-preview-review
+```
+
+Choose **Settings preview proof** in the review console. It opens the unchanged
+`DashboardWindowController` and dashboard root with an isolated, never-started
+synthetic store and private preferences. The console keeps its own visibility
+owner. Seven bounded cases observe baseline motion, fresh publications, idle,
+page departure/return, minimize/restore, retained close/reopen and rapid reopen.
+Each successful case includes a publication-free compositor hold over 1.6
+seconds. No animation, display, layout or visibility notification is forced.
+Terminal/progress reports use a unique `settings-preview/<UUID>` directory in
+the fixture session. Success also requires stopped departed clocks and closure
+of the owned production window. Quit cancels and joins the finite proof.
+The option retains the console after last-window close and rejects other motion
+diagnostics or a hidden banner. Omission preserves the ordinary fixture policy;
+the original **Native proof** gate is separate. See
+`docs/MENU_BAR_SETTINGS_LIFECYCLE_REVIEW_20261007.md` for evidence and limits.
+
 For the separate production status-item host diagnostic, build a fresh output
 with `--configuration release --production-status-item-proof`, then choose
 **Status-item proof** in the fixture banner. The ordinary fixture status item

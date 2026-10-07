@@ -153,7 +153,7 @@ private enum FixtureData {
             capturedAt: now, menuStatus: scenario.hasCurrentRuntime ? .online : scenario == .stale ? .stale : .offline)
     }
 
-    #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF
+    #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF || FIXTURE_SETTINGS_PREVIEW_PROOF
     static func statusItemSnapshot(active: Bool) -> TelemetrySnapshot {
         let now = Date()
         let base = snapshot(.fresh, now: now)
@@ -1097,6 +1097,10 @@ private final class FixtureModel: ObservableObject {
     #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF
     @Published private(set) var statusItemProofStatus = "Status-item proof"
     #endif
+    #if FIXTURE_SETTINGS_PREVIEW_PROOF
+    @Published private(set) var settingsPreviewProofStatus = "Settings preview proof"
+    private var settingsPreviewProofRunning = false
+    #endif
     private var nativeProofTask: Task<Void, Never>?
     @Published private(set) var cacheProofStatus = "Cache visibility proof"
     private var cacheProofTask: Task<Void, Never>?
@@ -1293,6 +1297,9 @@ private final class FixtureModel: ObservableObject {
         }
     }
     func tick() async {
+        #if FIXTURE_SETTINGS_PREVIEW_PROOF
+        guard !settingsPreviewProofRunning else { return }
+        #endif
         guard ready, !isTerminating, !networkExpiryReview, !metricsReview, scenario != .frozenSettings,
               scenario.hasCurrentRuntime || scenario == .offline else { return }
         let currentScenario = scenario
@@ -1646,6 +1653,61 @@ private final class FixtureModel: ObservableObject {
                 FileHandle.standardError.write(Data("Fixture status-item diagnostic failed: \(error.localizedDescription)\n".utf8))
             }
             nativeProofTask = nil
+        }
+    }
+    #endif
+
+    #if FIXTURE_SETTINGS_PREVIEW_PROOF
+    func runSettingsPreviewProof() {
+        guard !proofRunning, ready, !isTerminating, loadTask == nil,
+              scenario == .fresh else { return }
+        settingsPreviewProofStatus = "Settings preview proof running…"
+        settingsPreviewProofRunning = true
+        nativeProofTask = Task { @MainActor in
+            defer { settingsPreviewProofRunning = false; nativeProofTask = nil }
+            let publication = telemetryPublicationTask
+            publication?.cancel()
+            await publication?.value
+            let output = directory.appendingPathComponent("settings-preview", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let suite = "dev.darkbloom.settings-preview-proof.\(UUID().uuidString)"
+            let proofDefaults = UserDefaults(suiteName: suite)!
+            defer { proofDefaults.removePersistentDomain(forName: suite) }
+            // A separate never-started store gives the actual production
+            // controller sole ownership of its dashboard visibility. The
+            // review console keeps its own store and visibility observer.
+            let testedStore = MonitorStore(
+                service: TelemetryService(source: FixtureTelemetrySource(scenario: .fresh, logFeed: FixtureLogFeed(events: []))),
+                initial: FixtureData.statusItemSnapshot(active: true), providerExtras: nil,
+                earningsClient: FixtureEarnings(scenario: .fresh), energyPreferences: proofDefaults,
+                energyRecorder: EnergyRecorder(file: output.appendingPathComponent("inert-energy.json"), readPower: { _ in nil }),
+                gpuUsage: SystemGPUUsageStore(read: { nil }), menuAttentionPreferences: proofDefaults)
+            // Use the actual production window controller and unwrapped root,
+            // not the review console's imitation presentation policy. The
+            // console remains open for controls and terminal evidence.
+            let controller = DashboardWindowController(store: testedStore, controlStore: nil,
+                frameAutosaveName: nil, defaults: proofDefaults)
+            defer { controller.close(); presentDashboard?(nil, nil) }
+            guard let window = controller.window else {
+                settingsPreviewProofStatus = "Settings preview window unavailable"
+                return
+            }
+            controller.present(section: .settings, settingsPage: .menuBar)
+            var result = await SettingsPreviewProof.run(window: window, navigation: controller.navigation,
+                store: testedStore, publish: { active in
+                    await testedStore.accept(FixtureData.statusItemSnapshot(active: active))
+                }, reopen: { controller.present() }, outputDirectory: output)
+            controller.close()
+            let closed = !window.isVisible && !testedStore.dashboardVisible
+            result["productionControllerClosed"] = closed
+            result["passed"] = result["passed"] as? Bool == true && closed
+            do {
+                try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+                let data = try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
+                try data.write(to: output.appendingPathComponent("settings-preview-result.json"), options: .atomic)
+                settingsPreviewProofStatus = result["passed"] as? Bool == true
+                    ? "Settings preview proof passed" : "Settings preview proof failed"
+            } catch { settingsPreviewProofStatus = "Settings preview proof write failed" }
         }
     }
     #endif
@@ -2628,6 +2690,10 @@ private struct FixtureReviewView: View {
                         .disabled(!model.ready || model.proofRunning)
                         .help("Separate real-status-item diagnostic; results: \(model.directory.path)/status-item-host")
                     #endif
+                    #if FIXTURE_SETTINGS_PREVIEW_PROOF
+                    Button(model.settingsPreviewProofStatus) { model.runSettingsPreviewProof() }
+                        .disabled(!model.ready || model.proofRunning || model.scenario != .fresh)
+                    #endif
                 }
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .background(Color.orange.opacity(0.08))
@@ -2824,7 +2890,15 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
         if let window { model.focusDiagnostics.captureWindowState(window, phase: "window.didDeminiaturize") }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        #if FIXTURE_SETTINGS_PREVIEW_PROOF
+        // The production dashboard retains its window while the menu-bar app
+        // continues running. This opt-in diagnostic must exercise that policy.
+        false
+        #else
+        true
+        #endif
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         terminationRequested = true

@@ -1,5 +1,14 @@
 # Bloomy native polish and efficiency
 
+October 7 Settings lifecycle follow-up: the actual production window controller
+and Settings root pass seven bounded synthetic cases, including navigation,
+minimize/restore and normal/rapid retained-window reopening. Cancelled Quit
+verifies clock cleanup, owned window closure and process exit. A preliminary
+imitation console host's visibility failures are retained separately; no
+production animation repair is inferred. See
+`MENU_BAR_SETTINGS_LIFECYCLE_REVIEW_20261007.md`. Genuine cover, the original
+standalone gate, dynamic extras/Reduce Motion and broader proof remain open.
+
 October 7 actual-host follow-up: the optimized production StatusItemController
 passes all five bounded synthetic lifecycle cases, including actual popover
 open/close and supported invalidation/recreation. A second invocation verifies
