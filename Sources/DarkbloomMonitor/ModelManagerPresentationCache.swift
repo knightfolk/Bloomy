@@ -113,6 +113,7 @@ struct ModelManagerPreparedPresentation {
     fileprivate var network = ModelTelemetryIndex<NetworkModelCapacity>([], model: \.id)
     var grades: [String: String] = [:]
     var networkIsCurrent = false
+    var demandScale = ModelDemandScale(models: [])
     var residencyEvidence = ModelManagerResidencyEvidence()
 
     func tokenRate(for item: ModelInventoryItem) -> ModelTokenRateAverage? {
@@ -186,6 +187,7 @@ final class ModelManagerPresentationCache {
             prepared.rates = ModelTelemetryIndex(telemetry.tokenRates, model: \.model)
             prepared.serving = ModelTelemetryIndex(telemetry.servingAverages, model: \.model)
             prepared.network = ModelTelemetryIndex(telemetry.networkCapacity?.models ?? [], model: \.id)
+            prepared.demandScale = ModelDemandScale(models: telemetry.networkCapacity?.models ?? [])
             indexedTelemetry = indexInput
             telemetryIndexBuildCount += 1
         }

@@ -1173,6 +1173,7 @@ struct ModelManagerView: View {
                 setRunPercent: { setWhatIfRunPercent($0, for: item) },
                 showsDetails: expanded,
                 demandPresentation: presentation.demand(for: item),
+                demandScale: presentation.demandScale,
                 residencyPresentation: presentation.residencyEvidence.presentation(for: item)
             )
             if expanded {
@@ -1515,6 +1516,7 @@ struct ModelCardSummary: View {
     let setRunPercent: (Int) -> Void
     var showsDetails = false
     var demandPresentation: ModelCardDemand? = nil
+    var demandScale: ModelDemandScale? = nil
     var residencyPresentation: ModelCardResidencyPresentation = .unavailable
 
     /// Informational content of not-yet-downloaded cards is muted, while the
@@ -1541,7 +1543,8 @@ struct ModelCardSummary: View {
             symbol: displayedResidency == .unavailable ? "questionmark.circle" : modelSymbol,
             tint: item.isDownloaded && displayedResidency != .unavailable ? accent : .secondary,
             metrics: compactMetrics, contentOnly: true,
-            demand: demandPresentation ?? ModelCardDemand(model: capacity, isCurrent: capacity != nil))
+            demand: demandPresentation ?? ModelCardDemand(model: capacity, isCurrent: capacity != nil),
+            demandScale: demandScale)
     }
 
     private var compactMetrics: [ModelCardMetric] {

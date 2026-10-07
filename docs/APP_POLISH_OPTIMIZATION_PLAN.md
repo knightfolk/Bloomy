@@ -1,5 +1,16 @@
 # Bloomy native polish and efficiency
 
+October 7 shared model demand ruler: Models and Opportunity compare network
+requests per loaded provider on one snapshot-wide scale that search/draft
+selection cannot stretch. Current, stale, missing and zero-denominator states
+remain distinct. Final wide/compact light/dark/grayscale, search, Available
+collapse/reopen and accessibility values are checked against 132 matching source
+hashes. Five new tests, 1,802 reported serial Release tests before the wording
+refinement, 16 final focused tests, 47 staging checks and final production build pass. Historical demand
+context and broad native/performance qualification remain open; no provider
+action, production app replacement, push or release occurred. See
+[demand ruler review](MODEL_DEMAND_RULER_REVIEW_20261007.md).
+
 October 7 retained action timeline: Activity Metrics aligns bounded action
 groups with residence and all-model provider activity. Exact event inspection
 reveals matching evidence immediately; canonical-model/global scope, no-work

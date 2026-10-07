@@ -81,6 +81,7 @@ struct CompactModelCard: View {
     var compactWidth: CGFloat? = nil
     var contentOnly = false
     var demand: ModelCardDemand? = nil
+    var demandScale: ModelDemandScale? = nil
     var activate: (() -> Void)? = nil
     var activationUnavailableReason: String? = nil
     var activationHelp: String = "Add this model to the provider selection"
@@ -123,6 +124,9 @@ struct CompactModelCard: View {
                 .help("Network-wide requests for this model. \(demand.isCurrent ? "Current reading." : "A fresh reading is unavailable; retained counts are last known.")")
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("model.\(modelID).demand")
+                if let demandScale {
+                    ModelDemandRuler(modelID: modelID, demand: demand, scale: demandScale)
+                }
             }
             if compact && metrics.count == 1 && metrics.first?.id == "unknown" {
                 Label("No history yet", systemImage: "clock")

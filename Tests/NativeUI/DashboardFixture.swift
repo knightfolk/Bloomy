@@ -25,6 +25,7 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case microEarnings = "Overview micro-dollar earnings"
     case unmeasuredMetrics = "Unmeasured metrics", idleMetrics = "Recorded idle metrics"
     case timelineActions = "Timeline actions"
+    case demandRulerStates = "Demand ruler states"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
@@ -633,7 +634,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
         if calendarSummaryMode == .accountFailure { throw FixtureError.offline }
         return switch scenario {
         case .microEarnings: .observed(microUSD: 1, observedSeconds: 10_800)
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .healthPartial, .largeActionHistory, .acceptedWork, .matchedEnergy, .unmeasuredMetrics, .idleMetrics, .timelineActions:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .healthPartial, .largeActionHistory, .acceptedWork, .matchedEnergy, .unmeasuredMetrics, .idleMetrics, .timelineActions, .demandRulerStates:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -767,8 +768,9 @@ private actor FixtureCapacity: NetworkCapacityFetching {
         if scenario == .offline || (scenario == .stale && attempts > 1) { throw FixtureError.offline }
         let models = FixtureData.modelIDs.enumerated().map { index, id in
             ["id": id, "ready": true, "can_accept": true, "routable_providers": 8 + index,
-             "warm_providers": 4 + index, "running_providers": 9, "cold_providers": 2,
-             "active_requests": scenario == .quietNetwork ? 0 : 14 - index * 3, "queued_requests": scenario == .quietNetwork ? 0 : index, "queue_limit": 16,
+             "warm_providers": scenario == .demandRulerStates && index == 1 ? 0 : 4 + index, "running_providers": 9, "cold_providers": 2,
+             "active_requests": scenario == .quietNetwork || (scenario == .demandRulerStates && index == 2) ? 0 : 14 - index * 3,
+             "queued_requests": scenario == .quietNetwork || (scenario == .demandRulerStates && index == 2) ? 0 : index, "queue_limit": 16,
              "aggregate_tps": scenario == .quietNetwork ? 0 : 420, "estimated_ttft_ms": 180, "token_budget_remaining": 8_000,
              "token_budget_total": 16_000] as [String: Any]
         }

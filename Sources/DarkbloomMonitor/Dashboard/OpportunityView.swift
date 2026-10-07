@@ -243,6 +243,7 @@ private struct OpportunityModelListView: View {
                                 ContentUnavailableView(current ? "Network maintenance" : "Last reported: maintenance",
                                     systemImage: "wrench.and.screwdriver", description: Text("Model capacity is temporarily withdrawn."))
                             } else {
+                                let demandScale = ModelDemandScale(models: capacity.models)
                                 let models = OpportunityPresentation.ordered(capacity.models).filter { model in
                                     OpportunityPresentation.matchesSearch(search, model: model, metadata: metadata(model.id))
                                 }
@@ -261,11 +262,13 @@ private struct OpportunityModelListView: View {
                                                 if let controlStore {
                                                     OpportunityLocalModelCard(model: model, controlStore: controlStore,
                                                         metadata: metadata(model.id), price: store.publicPricing.value?.price(for: model.id),
-                                                        metadataIsCurrent: catalogCurrent(now), priceIsCurrent: pricingCurrent(now), networkIsCurrent: current)
+                                                        metadataIsCurrent: catalogCurrent(now), priceIsCurrent: pricingCurrent(now), networkIsCurrent: current,
+                                                        demandScale: demandScale)
                                                 } else {
                                                     OpportunityModelCard(model: model, local: nil, metadata: metadata(model.id),
                                                         price: store.publicPricing.value?.price(for: model.id), metadataIsCurrent: catalogCurrent(now),
-                                                        priceIsCurrent: pricingCurrent(now), networkIsCurrent: current)
+                                                        priceIsCurrent: pricingCurrent(now), networkIsCurrent: current,
+                                                        demandScale: demandScale)
                                                 }
                                             }
                                         }
@@ -422,11 +425,13 @@ private struct OpportunityLocalModelCard: View {
     let metadataIsCurrent: Bool
     let priceIsCurrent: Bool
     let networkIsCurrent: Bool
+    let demandScale: ModelDemandScale
     var body: some View {
         let inventory = controlStore.snapshot?.inventory
         let local = ((inventory?.myCatalog ?? []) + (inventory?.available ?? [])).first { $0.catalogID == model.id }
         OpportunityModelCard(model: model, local: local, metadata: metadata, price: price,
-            metadataIsCurrent: metadataIsCurrent, priceIsCurrent: priceIsCurrent, networkIsCurrent: networkIsCurrent)
+            metadataIsCurrent: metadataIsCurrent, priceIsCurrent: priceIsCurrent, networkIsCurrent: networkIsCurrent,
+            demandScale: demandScale)
     }
 }
 
@@ -438,6 +443,7 @@ struct OpportunityModelCard: View {
     var metadataIsCurrent = false
     var priceIsCurrent = false
     var networkIsCurrent = true
+    var demandScale: ModelDemandScale? = nil
     var installedMemoryBytes = ProcessInfo.processInfo.physicalMemory
 
     private var tint: Color {
@@ -478,6 +484,9 @@ struct OpportunityModelCard: View {
                 Spacer(minLength: 0)
             }
             fitLabel.font(.caption)
+            if let demandScale {
+                ModelDemandRuler(modelID: model.id, demand: .init(model: model, isCurrent: networkIsCurrent), scale: demandScale)
+            }
             HStack(spacing: 12) {
                 metric("In progress", model.activeRequests, symbol: "bolt.horizontal")
                 metric("Waiting", model.queuedRequests, symbol: "tray")
