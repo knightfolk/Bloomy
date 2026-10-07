@@ -1,5 +1,18 @@
 # Bloomy native polish and efficiency
 
+October 7 scoped-report follow-up: exact credit reads now return atomic
+account/provider/model reports with separate signed work/rewards, exact-time
+buckets, balance endpoints and account-wide reconciliation. Missing intervals
+remain unknown unless a full reported page matches lifetime count and amount;
+large histories defer reconciliation explicitly rather than truncate money.
+In-flight cancellation and concurrent external commits are covered by fixtures.
+All 1,682 reported Release tests pass with seven existing opt-in skips, along
+with 45 focused database tests, 32 staging checks and the production build.
+Bounded read-only review is complete. Authentication/session generations, chart
+publication, legacy disclosure, provider mapping and retention remain open.
+The earlier native gate's three failures remain unresolved; no UI or release
+claim is made. See [scoped account report review](SCOPED_ACCOUNT_CREDIT_REPORT_REVIEW_20261007.md).
+
 October 7 credit-capture follow-up: exact account-scoped records now retain late
 IDs and signed corrections with provider/model/token/time dimensions, alongside
 preserved legacy aggregates in one transaction. Credentials are excluded and

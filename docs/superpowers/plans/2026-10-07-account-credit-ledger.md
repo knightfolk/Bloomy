@@ -25,6 +25,10 @@
 
 ## Stage 2: scoped presentation and reconciliation (not part of stage 1)
 
+The report/observation data prerequisite is now implemented and verified; see
+[scoped financial reads](2026-10-07-scoped-financial-reads.md). Authentication,
+chart publication, legacy disclosure and native proof below remain open.
+
 - [ ] Derive checked account/provider/model rollups from the ledger and persist scoped authoritative balance observations/coverage.
 - [ ] Present old aggregates as explicitly unattributed legacy evidence, without double-counting overlap or claiming complete history.
 - [ ] Wire explicit account scope through authenticated reads and financial charts, with account A → B → A and partial-history regressions.

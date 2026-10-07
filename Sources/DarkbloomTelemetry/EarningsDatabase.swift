@@ -269,6 +269,51 @@ public actor EarningsDatabase {
             from: from, to: to, limit: limit, database: requireConnection())
     }
 
+    /// One account-scoped exact-time report; no legacy or network fallback.
+    public func accountCreditReport(
+        accountID: String, providerID: String? = nil, model: String? = nil,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar
+    ) throws -> AccountCreditReport {
+        try accountCreditReport(accountID: accountID, providerID: providerID, model: model,
+            in: range, unit: unit, calendar: calendar, onReadProgress: nil)
+    }
+
+    // Internal observer allows deterministic profiling and interruption proof
+    // without a production UI control or exposing the connection.
+    func accountCreditReport(
+        accountID: String, providerID: String? = nil, model: String? = nil,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar,
+        onReadProgress: (@Sendable () -> Void)?
+    ) throws -> AccountCreditReport {
+        try Task.checkCancellation()
+        let database = try requireConnection()
+        // Interrupt SQLite scans as well as the Swift aggregation loop when a
+        // hidden/superseded chart cancels its read. This connection is isolated
+        // to the actor, and the synchronous transaction never suspends.
+        let observer = onReadProgress.map { Unmanaged.passRetained(ScopedCreditReadProgress(observer: $0)).toOpaque() }
+        sqlite3_progress_handler(database, 1_000, { context in
+            if let context { Unmanaged<ScopedCreditReadProgress>.fromOpaque(context).takeUnretainedValue().observer() }
+            return Task.isCancelled ? 1 : 0
+        }, observer)
+        defer {
+            sqlite3_progress_handler(database, 0, nil, nil)
+            if let observer { Unmanaged<ScopedCreditReadProgress>.fromOpaque(observer).release() }
+        }
+        do {
+            try Self.execute(database, sql: "BEGIN")
+            let report = try ScopedCreditReadPersistence.report(accountID: accountID, providerID: providerID, model: model,
+                range: range, unit: unit, calendar: calendar, database: database)
+            try Task.checkCancellation()
+            try Self.execute(database, sql: "COMMIT")
+            return report
+        } catch {
+            sqlite3_progress_handler(database, 0, nil, nil)
+            try? Self.execute(database, sql: "ROLLBACK")
+            if Task.isCancelled { throw CancellationError() }
+            throw error
+        }
+    }
+
     public func hourBucketCount() throws -> Int {
         let statement = try prepare("SELECT COUNT(*) FROM earnings_hourly")
         defer { sqlite3_finalize(statement) }
@@ -1005,3 +1050,8 @@ private final class SQLiteConnection: @unchecked Sendable {
 }
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+private final class ScopedCreditReadProgress: Sendable {
+    let observer: @Sendable () -> Void
+    init(observer: @escaping @Sendable () -> Void) { self.observer = observer }
+}

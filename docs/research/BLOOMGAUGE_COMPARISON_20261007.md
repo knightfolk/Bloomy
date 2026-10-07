@@ -74,3 +74,15 @@ The isolated native Bloomy fixture's Overview and Activity/Earnings screens were
 A concrete ingestion example illustrates the first priority: after recording IDs 101 and 103, the current `id > priorID` filter excludes a later page containing unseen ID 102. A changed amount on ID 101 is also excluded. This establishes the code's behavior under those inputs; it does not establish that Darkbloom delivered those inputs or explain a particular missing reward. A model switch and credit arrival close together are correlation, not sufficient evidence of lost payment.
 
 No product implementation, comparative resource benchmark or competitor binary test was performed for this follow-up. Keep SwiftUI/AppKit, native Charts and the existing telemetry/companion modules. Measure process-tree CPU, memory and wakeups in matched release conditions before claiming our stack is lighter.
+
+**Implementation follow-up, October 7.** The first financial prerequisite has
+now progressed beyond this research baseline: [exact credit capture](../ACCOUNT_CREDIT_LEDGER_CAPTURE_REVIEW_20261007.md)
+retains late arrivals/corrections, and [scoped financial reports](../SCOPED_ACCOUNT_CREDIT_REPORT_REVIEW_20261007.md)
+provide account/provider/model reads, authoritative observations and bounded
+reconciliation. The latter passes 1,682 reported Release tests, 45 focused
+database tests, 32 staging checks and the production build. Current authenticated
+chart reads still use legacy global aggregates; account-session invalidation,
+scoped chart publication and native financial proof remain open. This does not
+prove the cause of earlier missing rewards or establish comparative earnings
+or resource superiority. The website features/guide/changelog were checked again;
+published product claims remain separate from binary-tested behavior.

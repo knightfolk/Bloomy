@@ -47,6 +47,7 @@ enum CreditLedgerPersistence {
                 captured_at REAL NOT NULL
             );
             """)
+        try ScopedCreditReadPersistence.createSchema(database)
         // SQLite otherwise promotes overflowing integer additions to REAL.
         // Triggers protect old schemas as well as the legacy reward migration.
         for (table, columns) in [
@@ -68,7 +69,8 @@ enum CreditLedgerPersistence {
     /// participate in financial equality, and never enter SQL or error strings.
     static func normalized(_ response: AccountEarningsResponse, capturedAt: Date) throws -> AccountEarningsResponse {
         _ = try scope(response.accountID)
-        guard capturedAt.timeIntervalSince1970.isFinite, response.count >= 0,
+        guard capturedAt.timeIntervalSince1970.isFinite,
+              (floor(capturedAt.timeIntervalSince1970 / 3_600) * 3_600).isFinite, response.count >= 0,
               response.historyLimit >= 0, response.recentCount >= 0 else { throw invalidInput() }
         var unique: [Int64: AccountEarning] = [:]
         for row in response.earnings {
@@ -146,6 +148,8 @@ enum CreditLedgerPersistence {
             sqlite3_bind_double(write, 10, captured)
             guard sqlite3_step(write) == SQLITE_DONE else { throw error(database) }
         }
+        try ScopedCreditReadPersistence.observe(response, capturedAt: capturedAt,
+            previousCapture: previousCapture, database: database)
         if captured > (previousCapture ?? -.infinity) {
             let state = try prepare(database, """
                 INSERT INTO credit_observation_state(account_scope, captured_at) VALUES (?, ?)
@@ -192,7 +196,7 @@ enum CreditLedgerPersistence {
         return rows
     }
 
-    private static func scope(_ accountID: String) throws -> String {
+    static func scope(_ accountID: String) throws -> String {
         guard validIdentifier(accountID) else { throw invalidInput() }
         return SHA256.hash(data: Data(("Bloomy.account-credit-scope.v1\0" + accountID).utf8))
             .map { String(format: "%02x", $0) }.joined()
@@ -218,18 +222,18 @@ enum CreditLedgerPersistence {
             firstObservedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 7)),
             changedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 8)))
     }
-    private static func prepare(_ database: OpaquePointer, _ sql: String) throws -> OpaquePointer {
+    static func prepare(_ database: OpaquePointer, _ sql: String) throws -> OpaquePointer {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw error(database) }
         return statement
     }
-    private static func bind(_ value: String, to statement: OpaquePointer, at index: Int32, database: OpaquePointer) throws {
+    static func bind(_ value: String, to statement: OpaquePointer, at index: Int32, database: OpaquePointer) throws {
         guard sqlite3_bind_text(statement, index, value, -1, transient) == SQLITE_OK else { throw error(database) }
     }
     private static func execute(_ database: OpaquePointer, _ sql: String) throws {
         guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else { throw error(database) }
     }
-    private static func error(_ database: OpaquePointer) -> EarningsDatabaseError {
+    static func error(_ database: OpaquePointer) -> EarningsDatabaseError {
         // Codes are useful diagnostics; SQLite's text can include caller data in future schemas.
         .sqlite(message: "credit storage operation failed (SQLite \(sqlite3_extended_errcode(database)))")
     }

@@ -1,7 +1,8 @@
 import Foundation
 
 public enum ActivityCoverage: Equatable, Sendable {
-    /// Recorded events are a lower bound, not proof of complete account history.
+    /// Observed credits, not proof of complete account history. Signed
+    /// corrections mean this subtotal is not necessarily a lower bound.
     case recorded
     case unavailable
     /// UTC-hour persistence cannot be split precisely at this local boundary.
