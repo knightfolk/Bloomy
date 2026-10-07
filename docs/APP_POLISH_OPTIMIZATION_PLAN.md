@@ -1,5 +1,12 @@
 # Bloomy native polish and efficiency
 
+October 6 Health follow-up: four source statuses are grouped into compact rows;
+native disclosures retain full selectable diagnostics and stale capture times.
+Final compact/wide, light/dark and named accessibility checks pass after
+rejecting an accessibility-value regression. All 1,649 reported Release tests
+pass. See `HEALTH_SOURCE_DISCLOSURE_REVIEW_20261006.md`; broader proof remains
+open, including the healthy-state attention heading's wording.
+
 October 6 research: the BloomGauge comparison distinguishes implemented,
 released and proposed capabilities. Recommended follow-ups are ledger
 reconciliation tests, a compact readiness explanation, a model-switch outcome

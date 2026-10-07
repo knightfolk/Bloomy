@@ -1,5 +1,11 @@
 # Native polish completion matrix — October 2, 2026
 
+October 6 Health follow-up: final compact named capture text, mixed-source
+disclosure/reason/capture evidence, light/dark and wide independent expansion
+pass in the inert fixture. All 1,649 reported Release tests pass. The rejected
+accessibility candidate and remaining route gates are recorded in
+[Health source review](HEALTH_SOURCE_DISCLOSURE_REVIEW_20261006.md).
+
 October 6 Hosting evidence follow-up: light/dark unknown-version guidance,
 confirmed-old warning, actual Refresh recovery and local-only command gating
 pass in the exact-source fixture. All 1,648 reported Release tests pass.

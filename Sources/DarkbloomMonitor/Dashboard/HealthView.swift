@@ -135,42 +135,19 @@ struct HealthView: View {
     private var sourceFreshness: some View {
         VStack(alignment: .leading, spacing: 9) {
             sectionLabel("Source freshness", symbol: "clock.arrow.circlepath")
-            freshnessRow("Daemon state", store.snapshot.state)
-            freshnessRow("Loaded models", store.snapshot.loadedModels)
-            freshnessRow("CLI status", store.snapshot.status)
-            freshnessRow("Events", store.snapshot.eventFeed)
+            VStack(spacing: 0) {
+                HealthSourceFreshnessRow(title: "Daemon state", source: store.snapshot.state)
+                Divider()
+                HealthSourceFreshnessRow(title: "Loaded models", source: store.snapshot.loadedModels)
+                Divider()
+                HealthSourceFreshnessRow(title: "CLI status", source: store.snapshot.status)
+                Divider()
+                HealthSourceFreshnessRow(title: "Events", source: store.snapshot.eventFeed)
+            }
+            .padding(.horizontal, 12)
+            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
             Text("Captured time shows when data was read; it does not establish current health.")
                 .font(.callout).foregroundStyle(.secondary)
-        }
-    }
-
-    private func freshnessRow<Value>(_ title: String, _ source: SourceAvailability<Value>) -> some View
-    where Value: Equatable & Sendable {
-        let presentation = freshness(source)
-        return HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(title).font(.callout.weight(.medium))
-                .frame(width: 110, alignment: .leading)
-            Image(systemName: presentation.symbol)
-                .foregroundStyle(presentation.color)
-                .accessibilityHidden(true)
-            Text(presentation.text)
-                .font(.callout).foregroundStyle(presentation.color)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title): \(presentation.text)")
-    }
-
-    private func freshness<Value>(_ source: SourceAvailability<Value>) -> (text: String, symbol: String, color: Color)
-    where Value: Equatable & Sendable {
-        switch source {
-        case .available(_, let capturedAt):
-            return ("Captured \(TelemetryFormatting.timestamp(capturedAt))", "clock", .secondary)
-        case .stale(_, let capturedAt, let reason):
-            return ("Stale · \(TelemetryFormatting.timestamp(capturedAt)) · \(reason)", "clock.fill", .orange)
-        case .unavailable(let reason):
-            return ("Unavailable · \(reason)", "xmark.circle.fill", .red)
         }
     }
 
@@ -257,5 +234,89 @@ struct HealthView: View {
         case .offline: .red
         case .unavailable: .secondary
         }
+    }
+}
+
+/// Keep source status scannable without discarding its diagnostic evidence.
+struct HealthSourceFreshnessRow: View {
+    let title: String
+    private let capturedAt: Date?
+    private let reason: String?
+    private let isStale: Bool
+    @State private var isExpanded: Bool
+
+    init<Value>(title: String, source: SourceAvailability<Value>, isExpanded: Bool = false)
+    where Value: Equatable & Sendable {
+        self.title = title
+        switch source {
+        case .available(_, let capturedAt):
+            self.capturedAt = capturedAt; reason = nil; isStale = false
+        case .stale(_, let capturedAt, let reason):
+            self.capturedAt = capturedAt; self.reason = reason; isStale = true
+        case .unavailable(let reason):
+            capturedAt = nil; self.reason = reason; isStale = false
+        }
+        _isExpanded = State(initialValue: isExpanded)
+    }
+
+    var body: some View {
+        Group {
+            if let reason {
+                DisclosureGroup(isExpanded: $isExpanded) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        if let capturedAt {
+                            Text("Last capture: \(TelemetryFormatting.timestamp(capturedAt))")
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(reason)
+                    }
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 7)
+                    .padding(.bottom, 3)
+                } label: {
+                    heading
+                }
+            } else {
+                heading
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    private var heading: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                Text(title).fontWeight(.medium)
+                Spacer(minLength: 4)
+                status
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).fontWeight(.medium)
+                status
+            }
+        }
+        .font(.callout)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(statusText)")
+        .help(evidence)
+    }
+
+    private var status: some View {
+        Label(statusText, systemImage: reason == nil ? "clock" : (isStale ? "clock.fill" : "xmark.circle.fill"))
+            .foregroundStyle(reason == nil ? Color.secondary : (isStale ? .orange : .red))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var statusText: String {
+        if reason != nil { return isStale ? "Stale" : "Unavailable" }
+        return capturedAt.map { "Captured \(TelemetryFormatting.timestamp($0))" } ?? "Unavailable"
+    }
+
+    private var evidence: String {
+        [capturedAt.map { "Captured \(TelemetryFormatting.timestamp($0))" }, reason]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 }

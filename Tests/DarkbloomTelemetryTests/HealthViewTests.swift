@@ -7,6 +7,24 @@ import Testing
 @Suite("Health rendering", .serialized)
 @MainActor
 struct HealthViewTests {
+    @Test("long unavailable diagnostics remain compact until expanded", arguments: [300.0, 540.0])
+    func diagnosticDisclosure(width: Double) async throws {
+        let reason = String(repeating: "The source could not complete its read; retry when it is available. ", count: 12)
+        let source: SourceAvailability<String> = .unavailable(reason: reason)
+        let collapsed = NSHostingView(rootView: HealthSourceFreshnessRow(title: "Loaded models", source: source)
+            .frame(width: width))
+        let expanded = NSHostingView(rootView: HealthSourceFreshnessRow(title: "Loaded models", source: source, isExpanded: true)
+            .frame(width: width))
+        collapsed.setFrameSize(NSSize(width: width, height: 1_200))
+        expanded.setFrameSize(NSSize(width: width, height: 1_200))
+        collapsed.layoutSubtreeIfNeeded()
+        expanded.layoutSubtreeIfNeeded()
+        #expect(collapsed.fittingSize.height < 90)
+        #expect(expanded.fittingSize.height > collapsed.fittingSize.height + 100)
+        #expect(collapsed.fittingSize.width <= width)
+        #expect(expanded.fittingSize.width <= width)
+    }
+
     @Test("thermal and retained slot diagnostics render without acquiring CLI data", arguments: [false, true])
     func render(hasDaemon: Bool) async throws {
         let now = Date()
