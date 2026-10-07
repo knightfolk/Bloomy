@@ -135,6 +135,18 @@ python3 Tests/NativeUI/build-dashboard-fixture.py
 open -g '.build/native-dashboard-fixture/Bloomy Dashboard Fixture.app'
 ```
 
+For the opt-in native target-lifetime comparison, build separate fresh output
+paths with `--configuration release --motion-target-lifetime reused` and
+`--configuration release --motion-target-lifetime fresh`. Both stage the same
+guarded motion overlay; only the fresh compiler definition recreates direct
+targets between cases. Both receive the same visibility preflight. All fifteen
+original case bodies remain unchanged, and parent-label cases remain controls.
+Build and runtime metadata label these as diagnostics that cannot replace the
+normal native gate. Omitting the option keeps the original motion helper bytes.
+Run **Native proof** and retain each terminal motion, Models, Charts and aggregate
+report. Staging guards can be checked without launching an app:
+`python3 -m unittest discover -s Tests/NativeUI -p test_motion_comparison_staging.py`.
+
 The fixture uses `NSHostingController` inside an AppKit `NSWindow` with the same
 titled/closable/miniaturizable/resizable style and full-screen-primary policy as
 production `DashboardWindowController`. Its synthetic banner sits above the

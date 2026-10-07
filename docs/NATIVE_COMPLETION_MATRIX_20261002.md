@@ -1,5 +1,11 @@
 # Native polish completion matrix — October 2, 2026
 
+October 6 target-history comparison: reused targets fail both reopening cases
+in both run orders; fresh targets pass the unchanged sustained compositor checks.
+Models/Charts pass in each finite run. Genuine occlusion, the normal fifteen-case
+gate and actual status-item lifecycle remain open. This is diagnostic evidence,
+not a production repair. See [target reuse review](MENU_BAR_TARGET_REUSE_REVIEW_20261006.md).
+
 October 6 menu-motion comparison: controlled optimized titled/borderless
 SwiftUI hosts sustain normal/rapid reopening and actual dismantle. A cover-size
 setup defect is corrected, but genuine occlusion/restoration remains failed

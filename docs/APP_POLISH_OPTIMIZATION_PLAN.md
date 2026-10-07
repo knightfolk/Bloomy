@@ -1,5 +1,13 @@
 # Bloomy native polish and efficiency
 
+October 6 target-history investigation: a matched optimized comparison repeats
+in both run orders. Reused native targets fail both reopening cases (12/15);
+fresh targets sustain compositor motion (14/15). Models/Charts pass in all four
+finite runs; genuine occlusion remains failed. Seven staging regressions pass,
+and ordinary fixture builds retain the original helper. See
+`MENU_BAR_TARGET_REUSE_REVIEW_20261006.md`; isolate reset-before-detach next.
+No production animation change or replacement release gate is claimed.
+
 October 6 menu-motion investigation: optimized controlled titled/borderless
 SwiftUI hosts both pass sustained normal/rapid reopening and actual dismantle.
 The cover helper's small-window minimum-size defect is corrected; genuine

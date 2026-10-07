@@ -13,6 +13,7 @@ import shutil
 import sqlite3
 import subprocess
 from pathlib import Path
+from MenuBarMotionComparison import stage_comparison
 
 ROOT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -24,6 +25,8 @@ parser.add_argument("--configuration", choices=["debug", "release"], default="de
                     help="Release optimizes the fixture and production views for bounded profiling.")
 parser.add_argument("--metrics-seed", type=Path,
                     help="Bundle a completed synthetic performance SQLite seed for the Fresh scenario only.")
+parser.add_argument("--motion-target-lifetime", choices=["reused", "fresh"],
+                    help="Opt-in diagnostic overlay; compare original reused versus fresh native targets.")
 args = parser.parse_args()
 output = args.output.resolve()
 if output.exists():
@@ -114,11 +117,23 @@ fixture_bytes = fixture.read_bytes()
 hashes[str(fixture.relative_to(ROOT))] = hashlib.sha256(fixture_bytes).hexdigest()
 staged_fixture = stage / fixture.name
 staged_fixture.write_bytes(fixture_bytes)
+motion_comparison = None
 for helper in sorted((ROOT / "Tests/NativeUI").glob("*Proof.swift")):
     helper_bytes = helper.read_bytes()
     hashes[str(helper.relative_to(ROOT))] = hashlib.sha256(helper_bytes).hexdigest()
     staged_helper = stage / helper.name
-    staged_helper.write_bytes(helper_bytes)
+    if helper.name == "MenuBarMotionProof.swift" and args.motion_target_lifetime:
+        try:
+            comparison_bytes = stage_comparison(helper_bytes.decode("utf-8")).encode("utf-8")
+        except ValueError as error:
+            parser.error(str(error))
+        staged_helper.write_bytes(comparison_bytes)
+        motion_comparison = {"target_lifetime": args.motion_target_lifetime,
+                            "original_sha256": hashes[str(helper.relative_to(ROOT))],
+                            "staged_sha256": hashlib.sha256(comparison_bytes).hexdigest(),
+                            "diagnostic_only": True, "replaces_normal_native_gate": False}
+    else:
+        staged_helper.write_bytes(helper_bytes)
     sources.append(staged_helper)
 # Link the same immutable bytes that the manifest identifies, even if an
 # independent build refreshes the original products during compilation.
@@ -129,6 +144,7 @@ command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6
            "-parse-as-library", *(["-O"] if args.configuration == "release" else ["-Onone", "-D", "DEBUG"]),
            *(["-D", "FIXTURE_HIDE_REVIEW_BANNER"] if args.hide_review_banner else []),
            *(["-D", "FIXTURE_COMPACT"] if args.compact else []),
+           *(["-D", "FIXTURE_FRESH_MOTION_TARGETS"] if args.motion_target_lifetime == "fresh" else []),
            "-I", str(products), "-F", str(products),
            str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle", "-lsqlite3",
            "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks", "-o", str(binary)]
@@ -140,6 +156,7 @@ manifest = {
     "view_optimization": "-O" if args.configuration == "release" else "-Onone",
     "review_banner_visible": not args.hide_review_banner, "initial_compact": args.compact,
     "source_sha256": hashes,
+    "motion_target_comparison": motion_comparison,
     "dependency_substitutions": {name: {"before": pair[0], "after": pair[1]}
                                  for name, pair in substitutions.items()},
     "telemetry_library_sha256": hashlib.sha256(staged_telemetry.read_bytes()).hexdigest(),
