@@ -1,5 +1,15 @@
 # Bloomy native polish and efficiency
 
+October 7 supported Settings cover: a fresh optimized actual-host run passes
+eleven of twelve cases; opaque WindowServer containment does not remove AppKit's
+visible bit, so genuine occlusion and stopped/recovered motion remain unverified.
+The cover exits normally. A cancellation attempt lands after cover cleanup and
+does not qualify active-cover cancellation. Forty-seven staging checks and exact
+128-source matching pass; all finite work and owned process exits are verified.
+No product poller, delay or visibility override is added. Isolate actual AppKit
+delivery before another cover attempt; independent product polish continues.
+See [supported cover review](MENU_BAR_SETTINGS_OCCLUSION_REVIEW_20261007.md).
+
 October 7 immediate supported Settings reopening: two fresh optimized processes
 pass all eleven cases, six immediate navigation/reopen cycles and 34 compositor
 holds. Returned views are connected to the content layer before closing and

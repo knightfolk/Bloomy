@@ -20,6 +20,7 @@ from MenuBarDetachCadence import stage_detach_cadence
 from MenuBarRootLayer import stage_root_layer
 from MenuBarWindowTrace import stage_trace_report, stage_window_trace
 from StatusItemHostStaging import stage_status_item_access
+from SettingsCoverStaging import stage_settings_cover_access
 
 ROOT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -173,6 +174,7 @@ motion_comparison = None
 render_history = None
 detach_cadence = None
 root_layer = None
+settings_cover_access = None
 for helper in sorted((ROOT / "Tests/NativeUI").glob("*Proof.swift")):
     helper_bytes = helper.read_bytes()
     hashes[str(helper.relative_to(ROOT))] = hashlib.sha256(helper_bytes).hexdigest()
@@ -220,6 +222,15 @@ for helper in sorted((ROOT / "Tests/NativeUI").glob("*Proof.swift")):
                       "original_sha256": hashes[str(helper.relative_to(ROOT))],
                       "staged_sha256": hashlib.sha256(staged_bytes).hexdigest(),
                       "diagnostic_only": True, "replaces_normal_native_gate": False}
+    elif helper.name == "MenuBarMotionProof.swift" and args.settings_preview_proof:
+        try:
+            staged_bytes = stage_settings_cover_access(helper_bytes.decode("utf-8")).encode("utf-8")
+        except ValueError as error:
+            parser.error(str(error))
+        staged_helper.write_bytes(staged_bytes)
+        settings_cover_access = {"original_sha256": hashes[str(helper.relative_to(ROOT))],
+                                 "staged_sha256": hashlib.sha256(staged_bytes).hexdigest(),
+                                 "diagnostic_only": True, "original_cases_unchanged": True}
     else:
         staged_helper.write_bytes(helper_bytes)
     sources.append(staged_helper)
@@ -263,6 +274,7 @@ manifest = {
                                "retains_window_after_close": args.settings_preview_proof,
                                "production_source_overlay": False,
                                "replaces_normal_native_gate": False},
+    "settings_cover_access": settings_cover_access,
     "detach_history_proof": {"enabled": args.detach_history_proof, "replaces_normal_native_gate": False},
     "dependency_substitutions": {name: {"before": pair[0], "after": pair[1]}
                                  for name, pair in substitutions.items()},

@@ -1,5 +1,13 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 actual Settings cover: eleven of twelve cases pass; verified opaque
+front containment does not establish loss of the target's AppKit visible bit.
+Genuine occlusion/restoration remain unverified. The later cancelled run marks
+cancelled reopening correctly, but misses active-cover cancellation. Both covers
+exit normally; all owned processes are absent. Forty-seven staging checks and
+exact 128-source artifact matching pass. No ordinary gate or product repair is
+claimed. See [Settings occlusion review](MENU_BAR_SETTINGS_OCCLUSION_REVIEW_20261007.md).
+
 October 7 immediate Settings reopening: eleven cases pass in each of two fresh
 optimized processes, with six immediate navigation/reopen cycles, complete
 pre-close attachment, retained identity/geometry and 34 advancing motion holds.

@@ -221,6 +221,68 @@ enum SettingsPreviewProof {
             return ["cycles": cycles, "presentationObservedBeforeClose": false,
                     "supportedNavigationAndWindowController": true]
         }
+        await session.check("supported_opaque_cover_and_restore") {
+            try await fresh()
+            let originalFrame = window.frame
+            defer { window.setFrame(originalFrame, display: false) }
+            guard let screen = window.screen else { throw Failure(code: "cover_screen_missing") }
+            let available = screen.visibleFrame.insetBy(dx: 32, dy: 32)
+            let width = min(800, available.width), height = min(560, available.height)
+            try require(width >= 640 && height >= 480, "cover_screen_too_small")
+            window.setFrame(NSRect(x: available.midX - width / 2, y: available.midY - height / 2,
+                                   width: width, height: height), display: false)
+            let host = try await session.eligible()
+            let geometry = host.geometry
+            let coverFrame = window.frame.insetBy(dx: -32, dy: -32)
+            try require(screen.frame.contains(coverFrame)
+                        && (32...1_024).contains(coverFrame.width)
+                        && (32...1_024).contains(coverFrame.height), "cover_actual_frame_out_of_bounds")
+            let probe = await MenuBarMotionProof.settingsCoverProbe(frame: coverFrame) { number, process, ready in
+                var server = [[String: Any]]()
+                do {
+                    // One bounded prerequisite respects the child's existing
+                    // eight-second lifetime. Geometry alone cannot pass it.
+                    try await session.wait("supported_cover_not_genuinely_occluded") {
+                        try session.requireIdentity(host)
+                        try require(host.geometry == geometry, "covered_geometry_changed")
+                        server = session.windowServerEntries(numbers: [window.windowNumber, number])
+                        return process.isRunning && window.isVisible && !window.isMiniaturized
+                            && session.opaqueCoverage(server, coverNumber: number, coverPID: Int(process.processIdentifier))
+                            && !window.occlusionState.contains(.visible) && !store.dashboardVisible
+                            && (host.layer.animationKeys() ?? []).isEmpty
+                    }
+                    let before = session.windowState
+                    let started = CACurrentMediaTime()
+                    try await Task.sleep(for: .milliseconds(1_700))
+                    try session.requireIdentity(host)
+                    try require(process.isRunning && window.isVisible && !window.occlusionState.contains(.visible)
+                                && !store.dashboardVisible && host.geometry == geometry
+                                && (host.layer.animationKeys() ?? []).isEmpty, "covered_state_not_sustained")
+                    server = session.windowServerEntries(numbers: [window.windowNumber, number])
+                    try require(session.opaqueCoverage(server, coverNumber: number, coverPID: Int(process.processIdentifier)),
+                                "covered_order_or_geometry_lost")
+                    return ["beforeHold": before, "afterHold": session.windowState,
+                            "holdSeconds": CACurrentMediaTime() - started, "server": server, "ready": ready]
+                } catch {
+                    session.coverFailures.append(["window": session.windowState, "native": host.json,
+                                                  "server": server, "ready": ready])
+                    throw error
+                }
+            }
+            session.coverProbes.append(probe)
+            if probe["cancelled"] as? Bool == true { throw CancellationError() }
+            guard let cleanup = probe["cleanup"] as? [String: Any] else { throw Failure(code: "cover_cleanup_missing") }
+            try require(cleanup["exited"] as? Bool == true && cleanup["exitStatus"] as? Int == 0
+                        && cleanup["childTerminalReason"] as? String == "parent-request"
+                        && cleanup["childWindowClosed"] as? Bool == true, "cover_graceful_cleanup_failed")
+            try require(probe["passed"] as? Bool == true, "supported_cover_prerequisite_failed")
+            _ = try await session.eligible()
+            try session.requireIdentity(host)
+            try require(host.geometry == geometry, "uncovered_geometry_changed")
+            var evidence = try await session.motion(host, stage: "supported_cover_restored")
+            evidence["cover"] = probe
+            return evidence
+        }
         await session.check("minimize_restore") {
             try await fresh()
             let host = try await session.eligible()
@@ -356,6 +418,8 @@ enum SettingsPreviewProof {
         var cancelled = false
         var cleanupVerified = false
         var writeErrors = [String]()
+        var coverProbes = [[String: Any]]()
+        var coverFailures = [[String: Any]]()
         init(window: NSWindow, navigation: DashboardNavigation, store: MonitorStore, output: URL) {
             self.window = window; self.navigation = navigation; self.store = store; self.output = output
         }
@@ -394,18 +458,34 @@ enum SettingsPreviewProof {
              "route": navigation.selected.rawValue, "settingsPage": navigation.settingsPage.rawValue]
         }
         var ownedWindowServerEntries: [[String: Any]] {
+            windowServerEntries(numbers: [window.windowNumber])
+        }
+        func windowServerEntries(numbers: Set<Int>) -> [[String: Any]] {
             let entries = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
                 as? [[String: Any]] ?? []
             return entries.enumerated().compactMap { index, entry in
-                guard entry[kCGWindowNumber as String] as? Int == window.windowNumber,
-                      entry[kCGWindowOwnerPID as String] as? Int == Int(ProcessInfo.processInfo.processIdentifier) else { return nil }
-                return ["number": window.windowNumber, "frontToBackIndex": index,
+                guard let number = entry[kCGWindowNumber as String] as? Int, numbers.contains(number) else { return nil }
+                return ["number": number, "frontToBackIndex": index,
                         "ownerPID": entry[kCGWindowOwnerPID as String] ?? -1,
                         "layer": entry[kCGWindowLayer as String] ?? -1,
                         "alpha": entry[kCGWindowAlpha as String] ?? -1,
                         "bounds": entry[kCGWindowBounds as String] ?? [:],
                         "onScreen": entry[kCGWindowIsOnscreen as String] ?? false]
             }
+        }
+        func opaqueCoverage(_ entries: [[String: Any]], coverNumber: Int, coverPID: Int) -> Bool {
+            guard let target = entries.first(where: { $0["number"] as? Int == window.windowNumber }),
+                  let cover = entries.first(where: { $0["number"] as? Int == coverNumber }),
+                  target["ownerPID"] as? Int == Int(ProcessInfo.processInfo.processIdentifier),
+                  cover["ownerPID"] as? Int == coverPID,
+                  let targetIndex = target["frontToBackIndex"] as? Int,
+                  let coverIndex = cover["frontToBackIndex"] as? Int, coverIndex < targetIndex,
+                  cover["alpha"] as? Double == 1,
+                  let targetBounds = target["bounds"] as? [String: Any],
+                  let coverBounds = cover["bounds"] as? [String: Any],
+                  let targetRect = CGRect(dictionaryRepresentation: targetBounds as CFDictionary),
+                  let coverRect = CGRect(dictionaryRepresentation: coverBounds as CFDictionary) else { return false }
+            return coverRect.contains(targetRect)
         }
         func wait(_ code: String, _ predicate: () throws -> Bool) async throws {
             let start = CACurrentMediaTime()
@@ -522,11 +602,12 @@ enum SettingsPreviewProof {
             ["schemaVersion": 1, "proof": "actual_dashboard_settings_preview", "synthetic": true,
              "pid": ProcessInfo.processInfo.processIdentifier, "diagnosticOnly": true,
              "replacesNormalNativeGate": false, "terminal": terminal, "currentCase": currentCase,
-             "passed": terminal == "completed" && !cancelled && results.count == 11
+             "passed": terminal == "completed" && !cancelled && results.count == 12
                 && results.allSatisfy { $0["passed"] as? Bool == true } && cleanupVerified && writeErrors.isEmpty,
              "results": results, "cleanupVerified": cleanupVerified, "retainedHosts": hosts.map(\.json),
              "angleSamples": angleSamples,
-             "window": windowState, "source": source, "reportWriteErrors": writeErrors]
+             "window": windowState, "source": source, "reportWriteErrors": writeErrors,
+             "coverProbes": coverProbes, "coverFailures": coverFailures]
         }
         func write() {
             do {
