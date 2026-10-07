@@ -1,16 +1,18 @@
 # Bloomy and BloomGauge: product and stack review
 
-Reviewed October 6, 2026. Bloomy source baseline: `789b58e` on `main`.
+Initially reviewed October 6, 2026 at Bloomy `789b58e`. Refreshed October 7 at
+`f76a89af7f548459fe9a3d0df8c75fd2a40e9e40` on `main`; unfinished working-tree
+financial integration is explicitly excluded from completed-feature claims.
 
 Bloomy has a strong native Mac foundation and substantial controls already implemented. BloomGauge's most useful advantage is how it explains the relationship between readiness, model choices and earnings. It also documents a more complete first-run experience and usable remote access. We should improve those areas rather than assume that either product is better in every respect.
 
-This review uses the vendor's current documentation, four published screenshots, its public repository, Bloomy's source and release records, and a live read-only Darkbloom API check. It does **not** establish comparative CPU use, battery life, reliability or earnings. BloomGauge was not installed or exercised. Its public core is explicitly behind the current application; private features cannot be verified through that core. The site also has inconsistent version labels across its homepage, guide and changelog, so the comparison concerns documented capabilities on this date, not a verified installed competitor version. [Public repository](https://github.com/cookder/bloomgauge), [changelog](https://bloomgauge.io/changelog).
+This review uses vendor documentation, published screenshots, its public repository, Bloomy's source and release records, and the October 6 live read-only Darkbloom API check. It does **not** establish comparative CPU use, battery life, reliability or earnings. BloomGauge was not installed or exercised. The public repository is not proof of the current distributed application's complete implementation. The site also has inconsistent version labels across its homepage, guide and changelog, so the comparison concerns documented capabilities, not a verified installed competitor version. The October 7 follow-up inspects five screenshot assets and refreshes the source audit. [Public repository](https://github.com/cookder/bloomgauge), [changelog](https://bloomgauge.io/changelog).
 
 Bloomy's actual SwiftUI Overview, Activity/Earnings and Opportunity were inspected in an optimized, isolated fixture during this review. The source manifest matches 119 files; values are synthetic. This confirms that our current main branch already has native summary cards, earnings composition graphics and graphical demand cards, without implying those latest layouts are installed or released. See [native evidence](HOSTING_CLI_EVIDENCE_REVIEW_20261006.md).
 
 ## Built, delivered and proposed
 
-GitHub's latest published Bloomy release is **v1.9.19**, published October 4. Our main branch also contains subsequent popup, Earnings and Metrics polish. Those later changes are source work, not delivered improvements in that release. Native review fixtures demonstrate bounded behavior; they do not qualify every production route. The broader native completion matrix remains partial. [Bloomy v1.9.19](https://github.com/knightfolk/Bloomy/releases/tag/v1.9.19), [completion matrix](NATIVE_COMPLETION_MATRIX_20261002.md).
+At the original October 6 release check, GitHub's latest published Bloomy release was **v1.9.19**, published October 4. Our main branch also contains subsequent popup, Earnings and Metrics polish. Those later changes are source work, not delivered improvements in that release. Native review fixtures demonstrate bounded behavior; they do not qualify every production route. The broader native completion matrix remains partial. [Bloomy v1.9.19](https://github.com/knightfolk/Bloomy/releases/tag/v1.9.19), [completion matrix](NATIVE_COMPLETION_MATRIX_20261002.md).
 
 The underlying profit policy, model-visit tracking, Chat, Hosting and action history are already present in the released source. The iPhone Companion is different: its protocol and host components are development work, with packaging, operational wiring and physical-device proof still required. We should not advertise it as delivered remote access. [Companion operations](COMPANION_OPERATIONS.md).
 
@@ -58,7 +60,7 @@ Our inert Metrics profiling already shows visibility-dependent resource behavior
 
 ### 1. Establish trustworthy money and attribution
 
-Audit ledger reconciliation before adding more forecasts. `EarningsDatabase` normally ingests IDs above a saved watermark. Test late-arriving entries, corrections to older IDs, account changes and truncated pages explicitly. This is a source-derived test lead, **not a reproduced missing-reward bug**. Action history already has separate account/entry deduplication; reconcile the two paths rather than assuming they are interchangeable.
+The October 6 audit identified a maximum-ID ingestion assumption as a test lead, not a reproduced missing-reward bug. Since then, committed changes `56ab21c`, `f267c7d` and `f76a89a` have added exact account-scoped credits and corrections, bounded atomic reports/reconciliation, and authenticated session generations. Those foundations are verified in their respective checkpoint reviews. Established UI reads still use the older financial interfaces; session-aware publication, retained-chart clearing, local-provider mapping and retention remain unfinished. Finish that integration before adding more forecasts. See [ledger capture](ACCOUNT_CREDIT_LEDGER_CAPTURE_REVIEW_20261007.md), [scoped reports](SCOPED_ACCOUNT_CREDIT_REPORT_REVIEW_20261007.md) and [authentication](AUTHENTICATED_FINANCIAL_SESSION_REVIEW_20261007.md).
 
 Account earnings can cover multiple providers. Keep local model visits and throughput separate from account-wide money unless attribution is established. A fleet view must not sum the same account balance once per Mac. [Darkbloom API contracts](https://github.com/Layr-Labs/d-inference/blob/master/docs/reference/api-contracts.md).
 
@@ -96,4 +98,122 @@ For remote access, finish our native helper's packaging, registration and operat
 
 Ship the already-reviewed visual improvements through our normal signing/updater gates before advertising them. Update the public product description to explain Autopilot ownership, conservative automation, no-work tracking, host responsiveness, local/network Chat and guarded uninstall. A competitor-authored comparison still uses our former product name and describes a narrower manual-control tool; that page is not a current inventory of Bloomy. No outreach or external edits were performed. [Vendor comparison, dated September 29](https://bloomgauge.io/help/darkbloom-apps-for-mac).
 
-The first implementation slice should be the ledger audit plus a compact readiness explanation and a switch-outcome timeline. Those directly address Kevin's missing-reward and model-switch questions, reuse our existing architecture, and provide useful evidence before more automation is added.
+The next implementation slice should finish scoped financial presentation, then add a compact readiness explanation and a switch-outcome timeline. Those directly address Kevin's missing-reward and model-switch questions, reuse our existing architecture, and provide useful evidence before more automation is added.
+
+## October 7 deeper source and interface review
+
+The current public BloomGauge repository tree is
+`724ce679e407eba0806cd03e94f303c4fb728468`. Its retained source extracts and five
+published screenshots have a checksum manifest in
+`.build/bloomgauge-research-20261007/manifest.json`. The repository tree identity
+was rechecked against GitHub today. The homepage now advertises beta 54 while
+the changelog's latest entry is beta 53 and the guide shows beta 52; published
+documentation is not a verified installed version. Browser control was
+unavailable in this session. Screenshot inspection and public source review do
+not establish interactive behavior, comparative resource use or earnings.
+[Homepage](https://bloomgauge.io/), [changelog](https://bloomgauge.io/changelog),
+[public source](https://github.com/cookder/bloomgauge).
+
+### The most valuable interface ideas
+
+The screenshots put the user's question ahead of the instrumentation. Day replay
+starts with earnings, a short explanation and a colored residence timeline;
+the readiness screen highlights the first failing condition; demand bars show
+current pressure against a reference. These are useful information patterns.
+Their full screens also contain substantial small explanatory text and nested
+tabs, so they should not become our visual template.
+[Day replay](https://bloomgauge.io/media/features/day-replay.jpg),
+[readiness](https://bloomgauge.io/media/features/why-not-earning.jpg),
+[demand](https://bloomgauge.io/media/features/model-demand.jpg).
+
+For Bloomy, prioritize three native surfaces: a compact state summary above the
+existing command bar, an Activity day timeline, and one comparable demand strip
+per model. Reuse short aliases and consistent model colors. Put detailed
+reasoning in a selection inspector or disclosure; retain neutral unknown gaps,
+source ages and a stable layout. A money dial adds less value than a chart that
+explains when work, rewards and switches occurred. A visual reference baseline
+must have enough actual history; otherwise show insufficient evidence.
+
+### Account money and this Mac's money need separate paths
+
+BloomGauge's public `native/live_earnings.py:575–740` contains a concrete pattern
+worth independently implementing: it associates account, device, session and
+provider connections, then joins inference credits to those mappings. This is
+stronger than assuming a model name identifies the earning Mac. Its code also
+withholds a current-session rate without fresh matched evidence and enough
+covered time. This is source evidence for that module, not proof of all vendor
+screens. [Pinned implementation](https://github.com/cookder/bloomgauge/blob/724ce679e407eba0806cd03e94f303c4fb728468/native/live_earnings.py#L575).
+
+Bloomy's new ledger already stores provider IDs, but a provider filter alone
+does not prove local-machine identity. Persist a verified connection-to-machine
+mapping across restarts before calibrating local model profitability. Keep
+account-wide balance, local inferred work, credited inference and base rewards
+separate. A fleet total must deduplicate account balances. Count credit records
+as credits unless an actual request identifier establishes completed jobs.
+
+### Timeliness is a real tradeoff in our stack
+
+Our `MonitorStore.earningsPollingInterval` is currently 600 seconds. That is
+quiet, but cannot support a frequently updated confirmed-credit experience.
+The public competitor collector polls earnings every 20 seconds and its local
+UI can update each second. This describes cadence, not greater accuracy or
+lower resource consumption. [Architecture](https://github.com/cookder/bloomgauge/blob/724ce679e407eba0806cd03e94f303c4fb728468/docs/ARCHITECTURE.md).
+
+Evaluate a single shared, workload-aware earnings refresh: for example 30–60
+seconds while the earnings view is visible or accepted work has just completed,
+with slower hidden/idle polling, request coalescing, cancellation and backoff.
+Treat those values as proposed settings until the current API's cache and rate
+limits are qualified. Do not add independent pollers for cards or simulate
+credits between fetches. Measure requests/hour and idle CPU before choosing.
+
+### Historical demand is not current pressure
+
+The current official historical model-demand contract is more constrained than
+a generic live chart: its window ends at the preceding UTC hour, includes only
+publishable hourly cohorts, and null intervals mean unavailable data. A
+successful empty response does not mean zero network traffic. Keep that chart
+separate from fresh active/queued pressure. An equivalent-time baseline needs
+its own suitable observations; this endpoint alone does not provide a live
+requests-per-warm-Mac series. Cache bounded responses and expose the coverage
+and observation time. [Official contract](https://github.com/Layr-Labs/d-inference/blob/master/docs/reference/api-contracts.md#model-demand-response).
+
+### Recovery should respond to evidence, not just unpaid minutes
+
+BloomGauge's recent releases specifically address long requests that looked
+like stalls and quiet models whose peers also had no work. That is useful
+regression-test inspiration for our 15-minute nudge watcher: accepted/in-flight
+work, stale observations, a quiet network, a deliberate stop and an actual
+readiness failure must produce different outcomes. A synthetic probe must never
+reset the organic-work baseline or prove routing repaired. Keep every action
+within our existing serialized provider-control path and preserve Autopilot's
+ownership. [Recent fixes](https://bloomgauge.io/changelog),
+[recovery policy](https://bloomgauge.io/help/bloomgauge-guardian).
+
+Five-minute settlements are conditional on authorization, uptime, hardware and
+health/readiness gates. A day replay should mark observed qualification and
+missing evidence; it must not promise that every empty five-minute slot is a
+lost reward caused by a switch. [Official reward rules](https://github.com/Layr-Labs/d-inference/blob/master/docs/reference/pricing-model.md#base-rewards).
+
+### Stack changes with the best return
+
+Keep Swift 6, SwiftUI/AppKit, native Charts and SQLite. Add an immutable reporting
+layer that joins existing credits, model visits, action outcomes, readiness and
+energy evidence by explicit scope and timestamp. Views should consume one
+bounded report rather than independently reading changing datasets. Keep pure
+decision logic separate from the sole mutation owner. Retain exact money records;
+downsample high-frequency sensor history under an explicit retention policy.
+Use synthetic transition replays to check long jobs, failed switches,
+authentication changes and interrupted reads without touching the provider.
+
+For economics, add measured load-to-first-organic-work and return-load cost to
+the existing gain/hold/cooldown policy, then show estimated payback and the
+actual outcome together. Historical replay is a modeled scenario, not money
+the user would certainly have earned. For remote delivery, finish the existing
+Companion rather than add another local web server and controller; packaging,
+live integration and physical-device proof still block a shipped fleet claim.
+
+Recommended priority: scoped money/UI integration and machine attribution;
+readiness and switch replay; bounded demand history and explicit switch
+economics; resumable first-run setup; then Companion delivery. Measure the
+installed app before claiming an efficiency advantage. This update is research
+only and adds no competitor-inspired runtime behavior.
