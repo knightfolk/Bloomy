@@ -1,5 +1,10 @@
 # BloomGauge and Bloomy comparison — October 7, 2026
 
+For the current source assessment and prioritized roadmap, use
+[the updated assessment](BLOOMGAUGE_CURRENT_ASSESSMENT_20261007.md).
+The observations below retain their original source baselines; subsequent ledger
+and financial UI changes supersede the earlier missing-feature findings.
+
 Bloomy has a strong foundation for a native Mac control app. BloomGauge's clearest advantage is explaining earning outcomes: what happened during a day, why a model stays loaded, and why a Mac is not receiving work. The useful direction is to improve Bloomy's data attribution and explanations while retaining SwiftUI/AppKit.
 
 This is a research review, not a comparative performance or earnings benchmark. Bloomy source was inspected at `fa6d6abd8c8ffbdda8cbc2eb1452985e7151467f`. A bounded native reviewer audited the current implementation. BloomGauge's site, guide, changelog, five published screenshots and twelve public core files were inspected. Its public core was pinned to `724ce679e407eba0806cd03e94f303c4fb728468`; its README says the core lags the downloadable app and excludes newer features. No browser was available, so neither its live app interactions nor its current Guardian were tested. No provider commands, inference, downloads of models, production configuration changes or application changes were performed.
