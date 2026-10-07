@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build an isolated production-SwiftUI menu host lifecycle diagnostic.
 
-Uses existing current Debug telemetry products; never runs SwiftPM, launches an
+Uses existing current telemetry products; never runs SwiftPM, launches an
 app, connects to the provider, changes preferences, or downloads dependencies.
 This five-case comparison does not replace the standalone 15-case motion gate.
 """
@@ -39,24 +39,27 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--bundle-id", default="dev.darkbloom.menu-host-lifecycle-fixture-20261003")
+    parser.add_argument("--configuration", choices=["debug", "release"], default="debug")
+    parser.add_argument("--target-window-style", choices=["titled", "borderless"], default="titled",
+                        help="Change only the target window style for the controlled SwiftUI host comparison.")
     args = parser.parse_args()
     output = args.output.resolve()
     if output.exists():
         parser.error("Output already exists; preserve it and pass --output with a fresh task-owned path.")
 
-    products = ROOT / ".build/out/Products/Debug"
+    products = ROOT / ".build/out/Products" / args.configuration.title()
     telemetry = products / "libDarkbloomTelemetry.a"
     module = products / "DarkbloomTelemetry.swiftmodule"
     monitor_resources = products / "DarkbloomMonitor_DarkbloomMonitor.bundle"
     sparkle = products / "Sparkle.framework"
     for required in (telemetry, module, monitor_resources, sparkle):
         if not required.exists():
-            parser.error(f"Missing Debug product {required}; prepare current Debug products before building this fixture.")
+            parser.error(f"Missing {args.configuration} product {required}; prepare current products before building this fixture.")
     telemetry_sources = sorted((ROOT / "Sources/DarkbloomTelemetry").rglob("*.swift"))
     newer = [str(path.relative_to(ROOT)) for path in telemetry_sources
              if path.stat().st_mtime_ns > telemetry.stat().st_mtime_ns]
     if newer:
-        parser.error("Debug telemetry archive predates current source files; rebuild Debug products first: "
+        parser.error(f"{args.configuration.title()} telemetry archive predates current source files; rebuild products first: "
                      + ", ".join(newer))
 
     stage = output / "staged-sources"
@@ -140,6 +143,8 @@ extension Bundle {
                      "-parse-as-library", str(staged_cover), "-framework", "AppKit", "-o", str(cover_binary)]
     command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6",
                "-parse-as-library", "-D", "DEBUG", "-I", str(dependencies), "-F", str(frameworks),
+               *(["-O"] if args.configuration == "release" else []),
+               *(["-D", "FIXTURE_BORDERLESS_TARGET"] if args.target_window_style == "borderless" else []),
                str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle",
                "-lsqlite3", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks",
                "-o", str(binary)]
@@ -147,6 +152,7 @@ extension Bundle {
         "fixture": str(app), "bundle_id": args.bundle_id, "synthetic": True,
         "diagnostic_comparison_only": True, "replaces_standalone_15_case_gate": False,
         "distribution": False, "provider_connected": False,
+        "configuration": args.configuration, "target_window_style": args.target_window_style,
         "source_sha256": source_hashes,
         "telemetry_source_sha256": {str(path.relative_to(ROOT)): sha256(path) for path in telemetry_sources},
         "staged_source_sha256": file_hashes(stage),

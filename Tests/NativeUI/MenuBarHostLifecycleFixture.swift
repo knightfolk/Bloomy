@@ -31,8 +31,13 @@ private final class HostLifecycleTarget {
                 fanSpeed: .init(value: 50, freshness: .current), temperature: .init(value: 75, freshness: .current)))
         host = NSHostingController(rootView: AnyView(label.frame(maxWidth: .infinity, maxHeight: .infinity)))
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+        #if FIXTURE_BORDERLESS_TARGET
+        let targetStyle: NSWindow.StyleMask = .borderless
+        #else
+        let targetStyle: NSWindow.StyleMask = [.titled, .closable]
+        #endif
         window = NSWindow(contentRect: NSRect(x: screen.midX - 150, y: screen.midY - 70, width: 300, height: 140),
-            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            styleMask: targetStyle, backing: .buffered, defer: false)
         window.title = "Production SwiftUI Menu Label"
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = false
@@ -181,6 +186,11 @@ private final class HostLifecycleTarget {
         var result: [String: Any] = ["windowNumber": window.windowNumber, "windowVisible": window.isVisible,
             "miniaturized": window.isMiniaturized, "compositorVisible": window.occlusionState.contains(.visible),
             "occlusionState": window.occlusionState.rawValue, "windowLevel": window.level.rawValue,
+            "windowStyleMask": window.styleMask.rawValue,
+            "ownedWindowOrder": NSApp.orderedWindows.map { owned in
+                ["windowNumber": owned.windowNumber, "frame": NSStringFromRect(owned.frame),
+                 "visible": owned.isVisible] as [String: Any]
+            },
             "windowFrame": NSStringFromRect(window.frame), "hostIdentity": String(describing: ObjectIdentifier(host)),
             "hostViewIdentity": String(describing: ObjectIdentifier(host.view)), "nativeDescendantCount": nativeViews.count,
             "systemReduceMotion": NSWorkspace.shared.accessibilityDisplayShouldReduceMotion]
@@ -471,7 +481,17 @@ private final class HostLifecycleReport {
         }
         await check(Self.requiredCases[4]) { target in
             try await target.clock()
-            let cover = try OwnedOpaqueApplication(frame: target.window.frame.insetBy(dx: -40, dy: -40),
+            // NSHostingController can shrink to the label's intrinsic size.
+            // Keep the cover inside its helper's existing 100-point minimum;
+            // the WindowServer containment and genuine-occlusion gates still apply.
+            let targetFrame = target.window.frame
+            let coverSize = NSSize(width: max(100, targetFrame.width + 80),
+                                   height: max(100, targetFrame.height + 80))
+            let coverFrame = NSRect(x: targetFrame.midX - coverSize.width / 2,
+                                    y: targetFrame.midY - coverSize.height / 2,
+                                    width: coverSize.width, height: coverSize.height)
+            target.evidence["requestedCoverFrame"] = NSStringFromRect(coverFrame)
+            let cover = try OwnedOpaqueApplication(frame: coverFrame,
                 outputDirectory: self.outputURL.deletingLastPathComponent())
             do {
                 try await cover.start()
@@ -509,6 +529,7 @@ private final class HostLifecycleReport {
             try require(cleanup["exited"] as? Bool == true && cleanup["exitStatus"] as? Int == 0
                 && terminal["reason"] as? String == "parent-request" && terminal["windowClosed"] as? Bool == true,
                 "Owned cover must close and exit normally before restoration")
+            target.record("cover_exited_before_visibility_restore")
             try await target.waitVisible()
             target.record("uncovered_visibility_regained")
             return try await target.stableClockEvidence()

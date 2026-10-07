@@ -1,5 +1,12 @@
 # Native polish completion matrix — October 2, 2026
 
+October 6 menu-motion comparison: controlled optimized titled/borderless
+SwiftUI hosts sustain normal/rapid reopening and actual dismantle. A cover-size
+setup defect is corrected, but genuine occlusion/restoration remains failed
+and no production animation change is retained. This comparison does not
+replace the standalone fifteen-case gate or actual status-item proof. See
+[window-style investigation](MENU_BAR_WINDOW_STYLE_REVIEW_20261006.md).
+
 October 6 Health follow-up: final compact named capture text, mixed-source
 disclosure/reason/capture evidence, light/dark and wide independent expansion
 pass in the inert fixture. All 1,649 reported Release tests pass. The rejected

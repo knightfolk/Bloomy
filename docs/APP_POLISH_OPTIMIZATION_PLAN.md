@@ -1,5 +1,13 @@
 # Bloomy native polish and efficiency
 
+October 6 menu-motion investigation: optimized controlled titled/borderless
+SwiftUI hosts both pass sustained normal/rapid reopening and actual dismantle.
+The cover helper's small-window minimum-size defect is corrected; genuine
+occlusion/restoration remains inconsistent and failed. No production animation
+change or foreground workaround is retained. See
+`MENU_BAR_WINDOW_STYLE_REVIEW_20261006.md`; isolate manual-host target reuse next.
+The standalone fifteen-case gate and actual status-item proof remain open.
+
 October 6 Health follow-up: four source statuses are grouped into compact rows;
 native disclosures retain full selectable diagnostics and stale capture times.
 Final compact/wide, light/dark and named accessibility checks pass after
