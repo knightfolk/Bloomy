@@ -1141,7 +1141,12 @@ private final class FixtureModel: ObservableObject {
             defaults.set(HostingEndpointMode.standalone.rawValue, forKey: HostingSettingsStore.modeKey)
         }
         let hosting = HostingSettingsStore(controlStore: control, endpointClient: FixtureEndpoint(reportsEndpoint: scenario == .liveHosting), tokenFile: tokens,
-            cliVersionProvider: { scenario == .offline ? nil : "0.9.17" }, defaults: defaults,
+            cliVersionProvider: {
+                if let override = defaults.string(forKey: "fixture.hostingCLIVersion") {
+                    return override.isEmpty ? nil : override
+                }
+                return scenario == .offline ? nil : "0.9.17"
+            }, defaults: defaults,
             lanScanner: { scenario == .noLANAddresses ? [] : ["192.168.50.20"] }, copyToken: { _ in true }, copyCommand: { _ in true })
         let chat = ChatStore(localClient: FixtureChat(scenario: scenario), networkClient: FixtureChat(scenario: scenario),
             balanceClient: FixtureBalance(), pricingClient: FixturePricing(scenario: scenario), keyStore: tokens)
@@ -2424,6 +2429,17 @@ private struct FixtureReviewView: View {
                     .frame(width: 210)
                     .help("Synthetic popup height budget only; the Mac's screen and preferences stay unchanged.")
                     Menu("Data checks") {
+                        Menu("Next Hosting version read") {
+                            ForEach(["0.9.17", "0.9.6", "", "private-version-canary"], id: \.self) { version in
+                                Button(version.isEmpty ? "Unavailable" : version) {
+                                    model.defaults.set(version, forKey: "fixture.hostingCLIVersion")
+                                }
+                            }
+                            Button("Scenario default") {
+                                model.defaults.removeObject(forKey: "fixture.hostingCLIVersion")
+                            }
+                        }
+                        .help("Changes only the synthetic version source. Use Hosting's Refresh button to read it; no real CLI command runs.")
                         Button("Delay next control read for 20 seconds") {
                             Task { await model.delayNextControlRead() }
                         }

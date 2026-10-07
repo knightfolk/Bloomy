@@ -604,6 +604,63 @@ struct HostingSettingsStoreTests {
         #expect(store.errorMessage == HostingSettingsStore.unsupportedMessage(cliVersion: "0.8.15"))
     }
 
+    @Test("missing or malformed CLI evidence blocks apply without asking for an update",
+          arguments: [Optional<String>.none, "", "unknown", "private-version-canary"])
+    func unknownCLIHasNoUpdateClaim(cliVersion: String?) async throws {
+        let (store, controller) = try makeStore(defaults: makeDefaults(), cliVersion: cliVersion)
+        #expect(!store.cliSupportsHosting)
+        store.setMode(.unified)
+        await store.requestApply()
+        #expect(await controller.hostingExecutions.isEmpty)
+        let message = try #require(store.errorMessage)
+        #expect(!message.contains("Update"))
+        #expect(message.contains("Refresh"))
+        #expect(message.contains(HostingCapability.minimumCLIVersion))
+        #expect(!message.contains("private-version-canary"))
+    }
+
+    @Test("Hosting notices distinguish missing evidence, an old CLI and supported controls")
+    func capabilityNotice() throws {
+        let missing = try #require(HostingCLIRequirementPresentation.make(cliVersion: nil))
+        #expect(missing.title == "CLI version unavailable")
+        #expect(missing.symbol == "questionmark.circle")
+        #expect(!missing.requiresUpdate)
+        #expect(HostingCLIRequirementPresentation.make(cliVersion: "private-version-canary") == missing)
+        let old = try #require(HostingCLIRequirementPresentation.make(cliVersion: "0.9.6"))
+        #expect(old.requiresUpdate)
+        #expect(old.title == "Update Darkbloom CLI")
+        #expect(old.message.contains("observed CLI 0.9.6"))
+        #expect(HostingCLIRequirementPresentation.make(cliVersion: "0.9.17") == nil)
+    }
+
+    @Test("refresh recovers CLI capability without changing saved hosting preferences")
+    func capabilityRecovery() async throws {
+        var version: String?
+        let defaults = makeDefaults()
+        let store = HostingSettingsStore(controlStore: nil,
+            endpointClient: EndpointFetchFake(availability: .none("fixture")),
+            tokenFile: HostingTokenFileFake(), cliVersionProvider: { version },
+            defaults: defaults, lanScanner: { [] })
+        store.setMode(.standalone)
+        #expect(store.setPortText("8123"))
+        let saved = defaults.dictionaryRepresentation() as NSDictionary
+        store.refreshEnvironment()
+        #expect(!store.cliSupportsHosting)
+        #expect(!store.copyStandaloneCommandToPasteboard())
+        version = "0.9.17"
+        store.refreshEnvironment()
+        #expect(store.cliSupportsHosting)
+        #expect(store.standaloneStartCommand?.contains("8123") == true)
+        version = "0.9.6"
+        store.refreshEnvironment()
+        #expect(!store.cliSupportsHosting)
+        #expect(!store.copyStandaloneCommandToPasteboard())
+        version = nil
+        store.refreshEnvironment()
+        #expect(!store.cliSupportsHosting)
+        #expect(defaults.dictionaryRepresentation() as NSDictionary == saved)
+    }
+
     @Test("standalone mode is represented as unavailable and never dispatched")
     func standaloneIsNeverDispatched() async throws {
         let (store, controller) = try makeStore(defaults: makeDefaults())

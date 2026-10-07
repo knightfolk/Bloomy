@@ -216,13 +216,21 @@ public enum LANAddressScanner {
 /// has verified against that reference. Older or unknown CLI versions surface
 /// hosting as unavailable instead of attempting unverified flags.
 public enum HostingCapability: Equatable, Sendable {
+    public enum Status: Equatable, Sendable {
+        case supported, updateRequired, unknown
+    }
+
     public static let minimumCLIVersion = "0.9.7"
 
     public static func supportsHostServing(cliVersion: String?) -> Bool {
+        status(cliVersion: cliVersion) == .supported
+    }
+
+    public static func status(cliVersion: String?) -> Status {
         guard let own = versionTuple(minimumCLIVersion),
               let observed = versionTuple(cliVersion)
-        else { return false }
-        return observed >= own
+        else { return .unknown }
+        return observed >= own ? .supported : .updateRequired
     }
 
     /// Accepts a leading numeric `major.minor.patch` and ignores pre-release

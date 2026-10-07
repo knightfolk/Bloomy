@@ -106,4 +106,14 @@ struct HostingOptionsAndCapabilityTests {
         #expect(!HostingCapability.supportsHostServing(cliVersion: nil))
         #expect(!HostingCapability.supportsHostServing(cliVersion: ""))
     }
+
+    @Test("an unknown CLI version is distinct from a confirmed old one")
+    func unknownIsNotOld() {
+        #expect(HostingCapability.status(cliVersion: nil) == .unknown)
+        #expect(HostingCapability.status(cliVersion: "not-a-version") == .unknown)
+        #expect(HostingCapability.status(cliVersion: "") == .unknown)
+        #expect(HostingCapability.status(cliVersion: "0.9.6") == .updateRequired)
+        #expect(HostingCapability.status(cliVersion: "0.9.7") == .supported)
+        #expect(HostingCapability.status(cliVersion: "0.9.17-rc.1+build.3") == .supported)
+    }
 }

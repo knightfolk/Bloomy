@@ -2,6 +2,30 @@ import AppKit
 import DarkbloomTelemetry
 import Foundation
 
+/// A failed capability check does not establish that the installed CLI is old.
+struct HostingCLIRequirementPresentation: Equatable {
+    let title: String
+    let message: String
+    let symbol: String
+    let requiresUpdate: Bool
+
+    static func make(cliVersion: String?) -> Self? {
+        switch HostingCapability.status(cliVersion: cliVersion) {
+        case .supported:
+            return nil
+        case .updateRequired:
+            let observed = cliVersion.map { " (observed CLI \($0))" } ?? ""
+            return Self(title: "Update Darkbloom CLI",
+                message: "Hosting requires Darkbloom CLI \(HostingCapability.minimumCLIVersion) or newer\(observed). Update the CLI, then refresh.",
+                symbol: "arrow.down.circle", requiresUpdate: true)
+        case .unknown:
+            return Self(title: "CLI version unavailable",
+                message: "Bloomy has no usable CLI version reading. Refresh to recheck hosting controls. Hosting requires Darkbloom CLI \(HostingCapability.minimumCLIVersion) or newer.",
+                symbol: "questionmark.circle", requiresUpdate: false)
+        }
+    }
+}
+
 /// Owns the monitor's hosting start-flag preferences, the explicit network and
 /// authentication confirmation gate, and mode-appropriate endpoint details.
 ///
@@ -363,8 +387,8 @@ final class HostingSettingsStore: ObservableObject {
     }
 
     static func unsupportedMessage(cliVersion: String?) -> String {
-        let observed = cliVersion.map { " (observed CLI \($0))" } ?? ""
-        return "Hosting requires Darkbloom CLI \(HostingCapability.minimumCLIVersion) or newer\(observed). Update the CLI, then refresh."
+        HostingCLIRequirementPresentation.make(cliVersion: cliVersion)?.message
+            ?? "Hosting controls are unavailable. Refresh before trying again."
     }
 
     private func apply(_ options: HostingOptions) async {

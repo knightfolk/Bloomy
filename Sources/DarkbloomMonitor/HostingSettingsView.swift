@@ -70,12 +70,12 @@ struct HostingSettingsView: View {
                     .accessibilityIdentifier("hosting.error")
                 }
 
-                if !store.cliSupportsHosting {
+                if let requirement = HostingCLIRequirementPresentation.make(cliVersion: store.cliVersion) {
                     HostingNotice(
-                        title: "Update Darkbloom CLI",
-                        message: HostingSettingsStore.unsupportedMessage(cliVersion: store.cliVersion),
-                        style: .warning,
-                        symbol: "arrow.down.circle"
+                        title: requirement.title,
+                        message: requirement.message,
+                        style: requirement.requiresUpdate ? .warning : .information,
+                        symbol: requirement.symbol
                     )
                     .accessibilityIdentifier("hosting.cliUnavailable")
                 }
@@ -678,7 +678,7 @@ struct HostingSettingsView: View {
 
     private var standaloneCommandIssue: String {
         if !store.cliSupportsHosting {
-            return "Update Darkbloom CLI to use local-only serving."
+            return HostingSettingsStore.unsupportedMessage(cliVersion: store.cliVersion)
         }
         if !isPortValid {
             return "Enter a valid port to preview the updated command."

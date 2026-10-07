@@ -1,5 +1,11 @@
 # Native polish completion matrix — October 2, 2026
 
+October 6 Hosting evidence follow-up: light/dark unknown-version guidance,
+confirmed-old warning, actual Refresh recovery and local-only command gating
+pass in the exact-source fixture. All 1,648 reported Release tests pass.
+Production endpoint, VoiceOver and broader route proof remain partial. See
+[CLI evidence review](HOSTING_CLI_EVIDENCE_REVIEW_20261006.md).
+
 October 4 Hosting recovery follow-up: sanitized WebSocket coordinator display,
 nested Hosting navigation and Done/reopen pass in the native fixture. Configured
 unverified, empty/reported expiry with Refresh, and offline states were inspected.
