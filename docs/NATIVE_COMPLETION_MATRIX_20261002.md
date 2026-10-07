@@ -1,5 +1,12 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 rendering-history follow-up: both matched early-observation modes
+repeat 12/15 in both orders, with the same cover/reopening failures. Models and
+Charts pass; 22 staging regressions and owned cleanup are verified. Early
+display/flush is not required for failure. Next isolate detach-to-close cadence;
+all ordinary and broader gates remain open. See
+[rendering history review](MENU_BAR_RENDER_HISTORY_REVIEW_20261007.md).
+
 October 7 detach-pair follow-up: all sixteen attached/detached cases pass with
 sustained compositor motion and cancelled cleanup verified. The unchanged
 ordinary gate remains 12/15 with cover and both reopen cases failed. This

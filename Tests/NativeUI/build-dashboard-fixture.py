@@ -15,6 +15,7 @@ import sqlite3
 import subprocess
 from pathlib import Path
 from MenuBarMotionComparison import stage_comparison
+from MenuBarRenderHistory import stage_render_history
 from MenuBarWindowTrace import stage_trace_report, stage_window_trace
 from StatusItemHostStaging import stage_status_item_access
 
@@ -38,7 +39,11 @@ parser.add_argument("--settings-preview-proof", action="store_true",
                     help="Observe the actual dashboard Settings preview through navigation and retained-window reopening.")
 parser.add_argument("--detach-history-proof", action="store_true",
                     help="Separate counterbalanced native detach versus continuously attached diagnostic.")
+parser.add_argument("--motion-render-history", choices=["display-flush", "compositor-only"],
+                    help="Matched staged comparison of the four early angle observations only.")
 args = parser.parse_args()
+if args.motion_render_history and (args.detach_history_proof or args.settings_preview_proof or args.production_status_item_proof or args.motion_target_lifetime or args.motion_window_trace or args.hide_review_banner):
+    parser.error("Render history comparison requires visible controls and no other motion diagnostics.")
 if args.detach_history_proof and (args.settings_preview_proof or args.production_status_item_proof or args.motion_target_lifetime or args.motion_window_trace or args.hide_review_banner):
     parser.error("Detach history proof requires visible controls and no other motion diagnostics.")
 if args.motion_window_trace and not args.motion_target_lifetime:
@@ -155,6 +160,7 @@ hashes[str(fixture.relative_to(ROOT))] = hashlib.sha256(fixture_bytes).hexdigest
 staged_fixture = stage / fixture.name
 staged_fixture.write_bytes(fixture_bytes)
 motion_comparison = None
+render_history = None
 for helper in sorted((ROOT / "Tests/NativeUI").glob("*Proof.swift")):
     helper_bytes = helper.read_bytes()
     hashes[str(helper.relative_to(ROOT))] = hashlib.sha256(helper_bytes).hexdigest()
@@ -172,6 +178,16 @@ for helper in sorted((ROOT / "Tests/NativeUI").glob("*Proof.swift")):
                             "original_sha256": hashes[str(helper.relative_to(ROOT))],
                             "staged_sha256": hashlib.sha256(comparison_bytes).hexdigest(),
                             "diagnostic_only": True, "replaces_normal_native_gate": False}
+    elif helper.name == "MenuBarMotionProof.swift" and args.motion_render_history:
+        try:
+            staged_bytes = stage_render_history(helper_bytes.decode("utf-8")).encode("utf-8")
+        except ValueError as error:
+            parser.error(str(error))
+        staged_helper.write_bytes(staged_bytes)
+        render_history = {"early_angle_observation": args.motion_render_history,
+                          "original_sha256": hashes[str(helper.relative_to(ROOT))],
+                          "staged_sha256": hashlib.sha256(staged_bytes).hexdigest(),
+                          "diagnostic_only": True, "replaces_normal_native_gate": False}
     else:
         staged_helper.write_bytes(helper_bytes)
     sources.append(staged_helper)
@@ -190,6 +206,7 @@ command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6
            *(["-D", "FIXTURE_PRODUCTION_STATUS_ITEM_PROOF"] if args.production_status_item_proof else []),
            *(["-D", "FIXTURE_SETTINGS_PREVIEW_PROOF"] if args.settings_preview_proof else []),
            *(["-D", "FIXTURE_DETACH_HISTORY_PROOF"] if args.detach_history_proof else []),
+           *(["-D", "FIXTURE_COMPOSITOR_ONLY_HISTORY"] if args.motion_render_history == "compositor-only" else []),
            "-I", str(products), "-F", str(products),
            str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle", "-lsqlite3",
            "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks", "-o", str(binary)]
@@ -202,6 +219,7 @@ manifest = {
     "review_banner_visible": not args.hide_review_banner, "initial_compact": args.compact,
     "source_sha256": hashes,
     "motion_target_comparison": motion_comparison,
+    "motion_render_history": render_history,
     "motion_window_trace": window_trace,
     "production_status_item_proof": status_item_access,
     "settings_preview_proof": {"enabled": args.settings_preview_proof,

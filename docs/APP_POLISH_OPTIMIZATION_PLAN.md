@@ -1,5 +1,13 @@
 # Bloomy native polish and efficiency
 
+October 7 rendering-history follow-up: matched display/flush and compositor-only
+early observations both reproduce 12/15 in both run orders. All sixty motion
+cases are terminal; Models/Charts pass and all owned parent/cover processes exit.
+Twenty-two staging regressions pass. Early forced rendering is not necessary
+for the failures; next isolate immediate detach-to-close versus compositor
+settling. See `MENU_BAR_RENDER_HISTORY_REVIEW_20261007.md`. No production repair
+or replacement gate is claimed.
+
 October 7 detach-pair follow-up: both continuously attached and detached native
 hosts pass all sixteen counterbalanced compositor cases; cancelled Quit joins
 owned cleanup. A fresh ordinary gate still fails cover and both reopen cases

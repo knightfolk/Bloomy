@@ -58,6 +58,19 @@ motion diagnostics and hidden controls. It does not modify the original
 fifteen-case Native proof, production callbacks or genuine-cover acceptance,
 and does not replace a release gate.
 
+## Early rendering-history comparison
+
+Build two fresh Release outputs with `--motion-render-history display-flush`
+and `--motion-render-history compositor-only`, then use **Native proof** in
+each. An opt-in staging overlay changes only the four angle observations before
+self-hide: both variants share staged Swift, and one compiler definition selects
+whether those reads call `displayIfNeeded` and `CATransaction.flush`. All later
+visibility transitions, case assertions, target lifetime and compositor-only
+reopening holds remain unchanged. Counterbalance execution order and compare
+all fifteen terminal cases, including the cover prerequisite. The report and
+manifest explicitly label this diagnostic; ordinary builds receive no overlay.
+Conflicting motion modes and hidden controls reject before staging.
+
 The independent `ConfirmationReferenceFixture.swift` and matching Info plist
 compare AppKit sheet/modal and minimal SwiftUI confirmations with no real
 actions. October 3 captures reproduce the blank-alert symptom outside Bloomy;
