@@ -1,5 +1,14 @@
 # Bloomy native polish and efficiency
 
+October 7 detach-cadence follow-up: immediate controls fail both reopening
+cases (12/15) in both run orders; advancing-compositor treatment passes both
+unchanged reopening bodies and sustained holds (14/15). Cover remains failed;
+Models/Charts pass. Thirty staging checks and all owned cleanup are verified.
+This establishes a cadence dependency in the retained manual host, not a
+production repair. Next compare a 50 ms delay without presentation polling.
+See `MENU_BAR_DETACH_CADENCE_REVIEW_20261007.md`; all ordinary/broader gates remain
+open.
+
 October 7 rendering-history follow-up: matched display/flush and compositor-only
 early observations both reproduce 12/15 in both run orders. All sixty motion
 cases are terminal; Models/Charts pass and all owned parent/cover processes exit.

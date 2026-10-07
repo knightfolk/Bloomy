@@ -1,5 +1,12 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 detach-cadence follow-up: immediate 12/15 versus observed 14/15 repeats
+in both orders. Observed normal/rapid reopen holds pass with unchanged assertions;
+cover still fails and no original gate is replaced. Models/Charts, 30 staging
+checks and owned cleanup pass. Next separate short settling time from presentation
+polling; product causality remains unproven. See
+[detach cadence review](MENU_BAR_DETACH_CADENCE_REVIEW_20261007.md).
+
 October 7 rendering-history follow-up: both matched early-observation modes
 repeat 12/15 in both orders, with the same cover/reopening failures. Models and
 Charts pass; 22 staging regressions and owned cleanup are verified. Early

@@ -71,6 +71,22 @@ all fifteen terminal cases, including the cover prerequisite. The report and
 manifest explicitly label this diagnostic; ordinary builds receive no overlay.
 Conflicting motion modes and hidden controls reject before staging.
 
+## Detach-to-close cadence comparison
+
+Build two fresh Release outputs with `--motion-detach-cadence immediate` and
+`--motion-detach-cadence compositor-observed`, then choose **Native proof** in
+each. Both stage identical source; a compiler definition selects whether the
+detach case observes two advancing, eligible presentation angles before
+returning. The immediate arm keeps the original key-only wait. Both record
+the same synchronous before/after snapshots and elapsed time. No redraw,
+transaction flush, configuration, lifecycle recovery or extra hold is added.
+Both original reopening case bodies and their sustained-motion checks remain
+unchanged. Counterbalance order with fresh processes and retain all fifteen
+terminal cases. If only the observed arm passes, settling time and observation
+remain coupled; a delay-only control would be needed. Neither arm replaces the
+ordinary gate or proves a production defect. Other diagnostics/hidden controls
+are rejected before staging.
+
 The independent `ConfirmationReferenceFixture.swift` and matching Info plist
 compare AppKit sheet/modal and minimal SwiftUI confirmations with no real
 actions. October 3 captures reproduce the blank-alert symptom outside Bloomy;
