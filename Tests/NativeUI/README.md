@@ -40,6 +40,24 @@ separately from reported warnings. Compare its summary heading with **Fresh**,
 **Health long mixed** and **Health long missing**; the full missing-read reason
 remains in the Loaded models disclosure.
 
+## Isolated detach-history comparison
+
+Build with `--configuration release --detach-history-proof` and a fresh output
+directory, then choose **Detach history proof**. This separate diagnostic creates
+two matched 96-point native windows: one activity view remains attached and the
+other is removed/reinserted. A second round swaps both position and execution
+order. Each arm checks baseline, automatic post-treatment motion, normal reopen
+and rapid reopen, retaining view/layer identities and compositor-only holds
+longer than the 1.4-second rotation. No configuration or presentation rescues
+post-detach or reopened motion. Full native eligibility is required for each
+accepted angle. Each invocation has its own UUID report directory.
+
+Quit cancels and joins the finite task, explicitly records remaining cases as
+cancelled, and dismantles/closes only its owned targets. This mode rejects other
+motion diagnostics and hidden controls. It does not modify the original
+fifteen-case Native proof, production callbacks or genuine-cover acceptance,
+and does not replace a release gate.
+
 The independent `ConfirmationReferenceFixture.swift` and matching Info plist
 compare AppKit sheet/modal and minimal SwiftUI confirmations with no real
 actions. October 3 captures reproduce the blank-alert symptom outside Bloomy;

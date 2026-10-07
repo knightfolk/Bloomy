@@ -1,5 +1,14 @@
 # Bloomy native polish and efficiency
 
+October 7 detach-pair follow-up: both continuously attached and detached native
+hosts pass all sixteen counterbalanced compositor cases; cancelled Quit joins
+owned cleanup. A fresh ordinary gate still fails cover and both reopen cases
+(12/15), while Models/Charts pass. Detach alone is insufficient under the new
+probe's cadence; its post-detach compositor hold differs from the original
+key-only wait. Isolate transaction cadence and earlier rendering history next.
+See `MENU_BAR_DETACH_PAIR_REVIEW_20261007.md`; production and release gates remain
+open, with no animation repair claimed.
+
 October 7 Health summary follow-up: the heading now distinguishes reported
 health, incomplete readings and reported issues instead of always asking for
 attention. Exact-source optimized native checks cover fresh, partial, mixed,

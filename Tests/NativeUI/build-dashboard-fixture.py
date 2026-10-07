@@ -36,7 +36,11 @@ parser.add_argument("--production-status-item-proof", action="store_true",
                     help="Separate inert real-status-item diagnostic; does not replace the normal native gate.")
 parser.add_argument("--settings-preview-proof", action="store_true",
                     help="Observe the actual dashboard Settings preview through navigation and retained-window reopening.")
+parser.add_argument("--detach-history-proof", action="store_true",
+                    help="Separate counterbalanced native detach versus continuously attached diagnostic.")
 args = parser.parse_args()
+if args.detach_history_proof and (args.settings_preview_proof or args.production_status_item_proof or args.motion_target_lifetime or args.motion_window_trace or args.hide_review_banner):
+    parser.error("Detach history proof requires visible controls and no other motion diagnostics.")
 if args.motion_window_trace and not args.motion_target_lifetime:
     parser.error("Window trace requires an explicit diagnostic target-lifetime comparison.")
 if args.production_status_item_proof and (args.motion_target_lifetime or args.motion_window_trace or args.hide_review_banner):
@@ -185,6 +189,7 @@ command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6
            *(["-D", "FIXTURE_MOTION_WINDOW_TRACE"] if args.motion_window_trace else []),
            *(["-D", "FIXTURE_PRODUCTION_STATUS_ITEM_PROOF"] if args.production_status_item_proof else []),
            *(["-D", "FIXTURE_SETTINGS_PREVIEW_PROOF"] if args.settings_preview_proof else []),
+           *(["-D", "FIXTURE_DETACH_HISTORY_PROOF"] if args.detach_history_proof else []),
            "-I", str(products), "-F", str(products),
            str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle", "-lsqlite3",
            "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks", "-o", str(binary)]
@@ -203,6 +208,7 @@ manifest = {
                                "retains_window_after_close": args.settings_preview_proof,
                                "production_source_overlay": False,
                                "replaces_normal_native_gate": False},
+    "detach_history_proof": {"enabled": args.detach_history_proof, "replaces_normal_native_gate": False},
     "dependency_substitutions": {name: {"before": pair[0], "after": pair[1]}
                                  for name, pair in substitutions.items()},
     "telemetry_library_sha256": hashlib.sha256(staged_telemetry.read_bytes()).hexdigest(),

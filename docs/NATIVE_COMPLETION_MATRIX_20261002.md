@@ -1,5 +1,12 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 detach-pair follow-up: all sixteen attached/detached cases pass with
+sustained compositor motion and cancelled cleanup verified. The unchanged
+ordinary gate remains 12/15 with cover and both reopen cases failed. This
+narrows, but does not resolve, detach-to-close timing and prior rendering
+history. See [detach pair review](MENU_BAR_DETACH_PAIR_REVIEW_20261007.md).
+The original gate and broader application matrix remain open.
+
 October 7 Health summary follow-up: fresh, incomplete and reported-issue
 headings render correctly through synthetic recovery. Compact/wide light/dark
 observations retain named source states and complete expanded reasons; all

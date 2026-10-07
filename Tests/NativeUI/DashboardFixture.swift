@@ -1096,6 +1096,9 @@ private final class FixtureModel: ObservableObject {
     @Published var logTimeZone: FixtureLogTimeZone = .system
     @Published var popupHeightBudget: FixturePopupHeightBudget = .screen
     @Published private(set) var nativeProofStatus = "Native proof"
+    #if FIXTURE_DETACH_HISTORY_PROOF
+    @Published private(set) var detachHistoryProofStatus = "Detach history proof"
+    #endif
     #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF
     @Published private(set) var statusItemProofStatus = "Status-item proof"
     #endif
@@ -1622,6 +1625,24 @@ private final class FixtureModel: ObservableObject {
             self.nativeProofTask = nil
         }
     }
+
+    #if FIXTURE_DETACH_HISTORY_PROOF
+    func runDetachHistoryProof() {
+        guard !proofRunning, ready, !isTerminating else { return }
+        detachHistoryProofStatus = "Detach history proof running…"
+        nativeProofTask = Task { @MainActor in
+            defer { nativeProofTask = nil }
+            let output = directory.appendingPathComponent("detach-history", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+                let result = await DetachHistoryProof.run(output: output)
+                detachHistoryProofStatus = result["passed"] as? Bool == true
+                    ? "Detach history proof passed" : "Detach history proof failed"
+            } catch { detachHistoryProofStatus = "Detach history proof write failed" }
+        }
+    }
+    #endif
 
     #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF
     func runStatusItemHostProof() {
@@ -2687,6 +2708,11 @@ private struct FixtureReviewView: View {
                     Button(model.nativeProofStatus) { model.runNativeProof() }
                         .disabled(!model.ready || model.proofRunning)
                         .help("Run finite synthetic native checks; results: \(model.directory.path)")
+                    #if FIXTURE_DETACH_HISTORY_PROOF
+                    Button(model.detachHistoryProofStatus) { model.runDetachHistoryProof() }
+                        .disabled(!model.ready || model.proofRunning)
+                        .help("Separate detach/attached comparison: \(model.directory.path)/detach-history")
+                    #endif
                     #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF
                     Button(model.statusItemProofStatus) { model.runStatusItemHostProof() }
                         .disabled(!model.ready || model.proofRunning)
