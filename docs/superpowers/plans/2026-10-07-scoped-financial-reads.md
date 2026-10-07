@@ -27,7 +27,7 @@ rollups and disk retention are not complete.
 
 ## Auth and presentation integration
 
-- [ ] Add context-bearing authentication/read APIs with actor-owned in-memory identity and generation.
+- [x] Add context-bearing authentication/read APIs with actor-owned in-memory identity and generation.
 - [ ] Observe credential file/directory replacement; revoke/clear on missing, changed or unauthorized credentials, with no extra network polling.
 - [ ] Bind each complete chart read to one immutable context; check after suspension and reject obsolete A callbacks after B or a later A session.
 - [ ] Clear retained financial charts, balances, rates, energy/profit caches on switch/revocation; preserve same-scope transient failures as explicitly stale only.
@@ -55,5 +55,16 @@ separate until MonitorStore publication and retained-view clearing are verified.
 - [x] Run focused/full Release checks and production build, bounded review and prepare a coherent verified checkpoint. Commit/push identity and remote verification are reported at handoff.
 
 See [authenticated session review](../../AUTHENTICATED_FINANCIAL_SESSION_REVIEW_20261007.md).
-The client APIs are verified; the protocol, MonitorStore publication and retained
+The client and protocol APIs are verified; MonitorStore publication and retained
 view/cache clearing in the integration checklist remain unfinished.
+
+## Scoped projection milestone
+
+- [x] Expose authentication/session/report requirements through the financial protocol with unavailable defaults and success/error revalidation.
+- [x] Derive exact per-model counts/tokens/totals and actual earning-hour identities in the atomic raw-record read; preserve signed corrections and repeated DST hours.
+- [x] Provide pure projections and route production compatibility getters through scoped reports, preserving unknown and partial intervals.
+- [x] Add a context-checked MonitorStore report API and delegate existing activity query wrappers to it; reject mismatched account scopes.
+- [x] Verify SQLite fractional timestamp completeness, selected-model query budgets, default held success/error invalidation, exact projections and adapted synthetic read lifecycles.
+- [ ] Bind complete visible reads/publications/caches to one context and prove account clearing natively. Individual safe wrapper reads do not complete this requirement.
+
+See [scoped credit presentation review](../../ACCOUNT_CREDIT_PRESENTATION_REVIEW_20261007.md).

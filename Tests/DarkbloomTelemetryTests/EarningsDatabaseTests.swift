@@ -62,7 +62,8 @@ struct EarningsDatabaseTests {
         #expect(mismatched.workMicroUSD == nil)
         let client = AuthenticatedEarningsClient(homeDirectory: temporaryDatabaseURL().deletingLastPathComponent(), database: database)
         let clientValues = try await client.modelWorkEarnings(in: DateInterval(start: at, duration: 9000), calendar: calendar)
-        #expect(clientValues == [summary])
+        // Preserved legacy history is not authenticated financial evidence.
+        #expect(clientValues.isEmpty)
     }
 
     @Test("model activity returns distinct work series and leaves rewards out")
@@ -122,10 +123,7 @@ struct EarningsDatabaseTests {
         #expect(abs(values[0].averageWorkUSDPerEarningHour - 0.225) < 0.000_001)
 
         let client = AuthenticatedEarningsClient(homeDirectory: temporaryDatabaseURL().deletingLastPathComponent(), database: database)
-        #expect(try await client.modelHourlyEarningsAverages(in: DateInterval(start: firstHour, duration: 86_400)) == [
-            ModelHourlyEarningsAverage(model: "gemma", workMicroUSD: 450_000, earningHours: 2),
-            ModelHourlyEarningsAverage(model: "qwen", workMicroUSD: 400_000, earningHours: 1),
-        ])
+        #expect(try await client.modelHourlyEarningsAverages(in: DateInterval(start: firstHour, duration: 86_400)) == nil)
     }
 
     @Test("hourly model buckets stay compact while payout samples remain queryable")

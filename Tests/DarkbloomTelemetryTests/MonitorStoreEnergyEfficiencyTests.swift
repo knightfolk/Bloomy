@@ -66,7 +66,7 @@ struct MonitorStoreEnergyEfficiencyTests {
     }
 }
 
-private actor CountedEnergyActivityClient: AccountEarningsFetching {
+private actor CountedEnergyActivityClient: SyntheticAuthenticatedEarningsFixture {
     private(set) var activityReads = 0
     private var failActivity = false
     func failNextActivity() { failActivity = true }

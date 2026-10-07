@@ -377,15 +377,35 @@ final class MonitorStore: ObservableObject {
     }
 
     func activity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar, model: String? = nil) async throws -> [ActivityBucket]? {
-        try await earningsClient.modelActivity(in: range, unit: unit, calendar: calendar, model: model)
+        try await financialReport(in: range, unit: unit, calendar: calendar, model: model)?.activityBuckets(model: model)
     }
 
     func activityModels(in range: DateInterval) async throws -> [String] {
-        try await earningsClient.activityModels(in: range)
+        try await financialReport(in: range, unit: .day, calendar: .current)?.models ?? []
     }
 
     func activityByModel(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ModelActivityBucket]? {
-        try await earningsClient.activityByModel(in: range, unit: unit, calendar: calendar)
+        try await financialReport(in: range, unit: unit, calendar: calendar)?.modelActivity
+    }
+
+    /// One context-bound report. A complete view will capture and pass its
+    /// context explicitly; compatibility callers still resolve before reading.
+    func financialReport(context expectedContext: AccountEarningsContext? = nil,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar,
+        model: String? = nil) async throws -> AccountCreditReport? {
+        let state = await earningsClient.financialSessionState()
+        guard expectedContext == nil || expectedContext == state.context else { throw AccountEarningsClientError.sessionChanged }
+        guard let context = state.context, state.ledgerReady else { return nil }
+        do {
+            let report = try await earningsClient.financialReport(context: context, providerID: nil, model: model,
+                in: range, unit: unit, calendar: calendar)
+            try await earningsClient.validateFinancialContext(context)
+            guard report == nil || report?.accountScope == context.accountScope else { throw AccountEarningsClientError.sessionChanged }
+            return report
+        } catch {
+            try await earningsClient.validateFinancialContext(context)
+            throw error
+        }
     }
 
     func refreshModelServingProfitability() async {
@@ -422,7 +442,7 @@ final class MonitorStore: ObservableObject {
     }
 
     func modelHourlyEarningsAverages(in range: DateInterval) async throws -> [ModelHourlyEarningsAverage]? {
-        try await earningsClient.modelHourlyEarningsAverages(in: range)
+        try await financialReport(in: range, unit: .day, calendar: .current)?.hourlyEarningsAverages
     }
 
     func activityTokenRates(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar, model: String) async throws -> [ModelRateBucket]? {

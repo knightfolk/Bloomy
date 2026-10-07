@@ -18,6 +18,12 @@ public struct AccountCreditBucket: Equatable, Sendable, Identifiable {
     public var id: Date { interval.start }
 }
 
+public struct ModelAccountCreditBucket: Equatable, Sendable {
+    public let interval: DateInterval
+    public let model: String
+    public let totals: AccountCreditTotals
+}
+
 public struct AccountCreditObservation: Equatable, Sendable {
     public let balance: AccountBalanceSample
     public let pageCreditCount: Int64
@@ -59,6 +65,11 @@ public struct AccountCreditReport: Equatable, Sendable {
     public let buckets: [AccountCreditBucket]
     public let models: [String]
     public let modelActivity: [ModelActivityBucket]
+    public var modelBuckets: [ModelAccountCreditBucket] = []
+    public var hourlyEarningsAverages: [ModelHourlyEarningsAverage] = []
+    public var modelTotals: [ModelEarnings] = []
+    public var modelEarningHourStarts: [String: [Date]] = [:]
+    public var queryCalendar: Calendar? = nil
 }
 
 /// Synchronous work, owned by EarningsDatabase's actor and transaction.
@@ -192,7 +203,11 @@ enum ScopedCreditReadPersistence {
         var bucketTotals = Array(repeating: Accumulator(), count: intervals.count)
         var models = Set<String>()
         var contributions: [Int: [String: Int64]] = [:]
+        var modelBucketTotals: [Int: [String: Accumulator]] = [:]
+        var modelTotals: [String: Accumulator] = [:]
+        var earningHours: [String: Set<Date>] = [:]
         var intervalIndex = 0
+        var earningHour: DateInterval?
         var count = 0
         var step = sqlite3_step(rows)
         while step == SQLITE_ROW {
@@ -214,6 +229,17 @@ enum ScopedCreditReadPersistence {
                 models.insert(model)
                 guard models.count <= 128 else { throw ActivityCalendarError.tooManyBuckets }
                 contributions[intervalIndex, default: [:]][model] = try add(contributions[intervalIndex]?[model] ?? 0, amount)
+                try modelBucketTotals[intervalIndex, default: [:]][model, default: Accumulator()]
+                    .add(model: model, amount: amount, prompt: prompt, completion: completion)
+                try modelTotals[model, default: Accumulator()]
+                    .add(model: model, amount: amount, prompt: prompt, completion: completion)
+                if earningHour == nil || created >= earningHour!.end {
+                    earningHour = calendar.dateInterval(of: .hour, for: created)
+                }
+                guard let hour = earningHour else {
+                    throw ActivityCalendarError.invalidInterval
+                }
+                earningHours[model, default: []].insert(hour.start)
             }
             step = sqlite3_step(rows)
         }
@@ -221,7 +247,9 @@ enum ScopedCreditReadPersistence {
         try Task.checkCancellation()
         let buckets = intervals.enumerated().map { index, interval in
             let value = bucketTotals[index]
-            let known = value.hasRecords || completeThrough.map { interval.end <= $0 } == true
+            let known = value.hasRecords || completeThrough.map {
+                interval.end.timeIntervalSince1970 <= $0.timeIntervalSince1970
+            } == true
             return AccountCreditBucket(interval: interval, totals: known ? value.value : nil,
                                        coverage: known ? .recorded : .unavailable)
         }
@@ -230,12 +258,28 @@ enum ScopedCreditReadPersistence {
                 ModelActivityBucket(interval: interval, model: entry.key, workMicroUSD: entry.value)
             }
         }
-        let known = totals.hasRecords || (!intervals.isEmpty && completeThrough.map { range.end <= $0 } == true)
+        let known = totals.hasRecords || (!intervals.isEmpty && completeThrough.map {
+            range.end.timeIntervalSince1970 <= $0.timeIntervalSince1970
+        } == true)
+        let modelBuckets = intervals.enumerated().flatMap { index, interval in
+            (modelBucketTotals[index] ?? [:]).sorted { $0.key < $1.key }.map {
+                ModelAccountCreditBucket(interval: interval, model: $0.key, totals: $0.value.value)
+            }
+        }
+        let sortedModels = models.sorted()
         return AccountCreditReport(accountScope: scope, providerID: providerID, model: model, range: range,
             observation: observation, reconciliation: reconciliation,
             lifetimeBalanceChange: try balanceChange(scope: scope, range: range, database: database),
             totals: known ? totals.value : nil,
-            buckets: buckets, models: models.sorted(), modelActivity: modelActivity)
+            buckets: buckets, models: sortedModels, modelActivity: modelActivity,
+            modelBuckets: modelBuckets,
+            hourlyEarningsAverages: sortedModels.map {
+                ModelHourlyEarningsAverage(model: $0, workMicroUSD: modelTotals[$0]!.work,
+                    earningHours: earningHours[$0]?.count ?? 0)
+            },
+            modelTotals: sortedModels.map {
+                ModelEarnings(model: $0, microUSD: modelTotals[$0]!.work, jobs: modelTotals[$0]!.workCount)
+            }, modelEarningHourStarts: earningHours.mapValues { $0.sorted() }, queryCalendar: calendar)
     }
 
     static func observation(scope: String, database: OpaquePointer) throws -> AccountCreditObservation? {

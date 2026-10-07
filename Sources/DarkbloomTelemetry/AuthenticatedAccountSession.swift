@@ -6,12 +6,21 @@ import Foundation
 public struct AccountEarningsContext: Hashable, Sendable {
     public let accountScope: String
     public let generation: UUID
+    /// Constructing a value does not authenticate it; the session validates it.
+    public init(accountScope: String, generation: UUID) {
+        self.accountScope = accountScope; self.generation = generation
+    }
 }
 
 public struct AccountEarningsSessionState: Equatable, Sendable {
     public let context: AccountEarningsContext?
     public let ledgerReady: Bool
     public let revision: UUID
+    public init(context: AccountEarningsContext?, ledgerReady: Bool, revision: UUID) {
+        self.context = context; self.ledgerReady = ledgerReady; self.revision = revision
+    }
+    public static let unavailable = Self(context: nil, ledgerReady: false,
+        revision: UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)))
 }
 
 /// Owns authentication identity separately from successful ledger ingestion.
@@ -95,10 +104,16 @@ actor AuthenticatedAccountSession {
     }
 
     func identity(for context: AccountEarningsContext) throws -> String {
-        try Task.checkCancellation()
-        guard refreshCredential() != nil, state.context == context,
-              state.ledgerReady, let accountID else { throw AccountEarningsClientError.sessionChanged }
+        try validate(context)
+        guard state.ledgerReady, let accountID else { throw AccountEarningsClientError.sessionChanged }
         return accountID
+    }
+
+    func validate(_ context: AccountEarningsContext) throws {
+        try Task.checkCancellation()
+        guard refreshCredential() != nil, state.context == context else {
+            throw AccountEarningsClientError.sessionChanged
+        }
     }
 
     private func removeObserver(_ id: UUID) { observers[id] = nil }

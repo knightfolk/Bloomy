@@ -220,7 +220,7 @@ private enum ActivityFixtureModel {
     static let qwen = "qwen/qwen3.8-27b"
 }
 
-private struct ActivityFixtureClient: AccountEarningsFetching {
+private struct ActivityFixtureClient: SyntheticAuthenticatedEarningsFixture {
     func fetch(now: Date) async throws -> EarningsPresentationValue { .unavailable(reason: "Render fixture") }
     func activityModels(in range: DateInterval) async throws -> [String] { [ActivityFixtureModel.gemma, ActivityFixtureModel.qwen] }
 
@@ -275,16 +275,23 @@ private struct ActivityUnusedSource: TelemetrySource {
     func readLegacyEvents(limit: Int) async throws -> [LogEvent] { throw Unused() }
 }
 
-private actor ActivityHeldReadClient: AccountEarningsFetching {
+private actor ActivityHeldReadClient: SyntheticAuthenticatedEarningsFixture {
     private var started = 0
     private var cancelled = 0
     private var buckets = 0
     func counts() -> (started: Int, cancelled: Int, buckets: Int) { (started, cancelled, buckets) }
     func fetch(now: Date) async throws -> EarningsPresentationValue { .unavailable(reason: "Inert fixture") }
-    func activityModels(in range: DateInterval) async throws -> [String] {
+    func financialReport(context: AccountEarningsContext, providerID: String?, model: String?,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> AccountCreditReport? {
+        try await validateFinancialContext(context)
         started += 1
         do { try await Task.sleep(for: .seconds(60)) }
         catch { cancelled += 1; throw error }
+        try await validateFinancialContext(context)
+        return SyntheticAccountCreditReport.make(context: context, providerID: providerID, model: model, range: range)
+    }
+    func activityModels(in range: DateInterval) async throws -> [String] {
+        buckets += 1
         return []
     }
     func activity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ActivityBucket]? {

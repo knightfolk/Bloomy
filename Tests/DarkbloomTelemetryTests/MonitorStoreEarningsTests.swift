@@ -231,7 +231,7 @@ struct MonitorStoreEarningsTests {
     }
 }
 
-private struct StubEarningsClient: AccountEarningsFetching {
+private struct StubEarningsClient: SyntheticAuthenticatedEarningsFixture {
     let result: Result<EarningsPresentationValue, Error>
     var jobSummaryResult: Result<JobCompletionSummary?, Error> = .success(nil)
     var todayEarningsResult: Result<ObservedEarningsWindow?, Error> = .success(nil)
@@ -265,7 +265,7 @@ private struct StubEarningsClient: AccountEarningsFetching {
     }
 }
 
-private actor SequencedEarningsClient: AccountEarningsFetching {
+private actor SequencedEarningsClient: SyntheticAuthenticatedEarningsFixture {
     private var results: [Result<EarningsPresentationValue, Error>]
 
     init(results: [Result<EarningsPresentationValue, Error>]) {
@@ -295,7 +295,7 @@ private struct TestFailure: LocalizedError {
     var errorDescription: String? { "Network unavailable" }
 }
 
-private actor CalendarWorkClient: AccountEarningsFetching {
+private actor CalendarWorkClient: SyntheticAuthenticatedEarningsFixture {
     let expectedRange: DateInterval
     var reads = 0
     init(expectedRange: DateInterval) { self.expectedRange = expectedRange }
@@ -309,7 +309,7 @@ private actor CalendarWorkClient: AccountEarningsFetching {
     }
 }
 
-private actor ProfitSourceClient: AccountEarningsFetching {
+private actor ProfitSourceClient: SyntheticAuthenticatedEarningsFixture {
     let hour: DateInterval
     var calls = 0
     init(hour: DateInterval) { self.hour = hour }

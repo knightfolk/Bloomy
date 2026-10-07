@@ -112,7 +112,7 @@ struct RetainedCalendarEarningsTests {
     }
 }
 
-private actor CalendarHistoryClient: AccountEarningsFetching {
+private actor CalendarHistoryClient: SyntheticAuthenticatedEarningsFixture {
     enum Mode { case normal, accountFailure, dayFailure, weekFailure, empty, zero }
     private var mode = Mode.normal
     let day: ObservedEarningsWindow

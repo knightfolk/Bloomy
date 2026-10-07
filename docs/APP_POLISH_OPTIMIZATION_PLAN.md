@@ -1,5 +1,18 @@
 # Bloomy native polish and efficiency
 
+October 7 scoped-presentation follow-up: production financial query getters and
+MonitorStore's activity wrappers now delegate to authenticated atomic reports.
+Exact model counts/tokens, signed corrections and actual earning-hour averages
+come from one bounded raw-record pass; partial and future intervals stay unknown.
+SQLite timestamp precision, selected-model read budgets and suspended default
+fetch errors have regression coverage and repaired review findings. All 1,711
+reported Release tests pass with seven existing opt-in skips, plus 73 focused
+tests, 32 staging checks and the production build. Summary/coalesced publication,
+session/cache clearing and one-report visible reads still need integration and
+native account-switch proof. Earlier motion and distribution gates stay open;
+no installed update or release is claimed. See
+[scoped credit presentation review](ACCOUNT_CREDIT_PRESENTATION_REVIEW_20261007.md).
+
 October 7 authenticated-session follow-up: the earnings client now exposes
 opaque account contexts with unique session generations and guarded exact
 report reads. Filesystem events invalidate replaced/deleted credentials without

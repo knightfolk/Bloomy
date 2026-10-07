@@ -58,16 +58,23 @@ struct OverviewEarningsViewTests {
     }
 }
 
-private actor OverviewHeldReadClient: AccountEarningsFetching {
+private actor OverviewHeldReadClient: SyntheticAuthenticatedEarningsFixture {
     private var started = 0
     private var cancelled = 0
     private var otherReads = 0
     func counts() -> (started: Int, cancelled: Int, otherReads: Int) { (started, cancelled, otherReads) }
     func fetch(now: Date) async throws -> EarningsPresentationValue { .unavailable(reason: "Inert fixture") }
-    func activity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ActivityBucket]? {
+    func financialReport(context: AccountEarningsContext, providerID: String?, model: String?,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> AccountCreditReport? {
+        try await validateFinancialContext(context)
         started += 1
         do { try await Task.sleep(for: .seconds(30)) }
         catch { cancelled += 1; throw error }
+        try await validateFinancialContext(context)
+        return SyntheticAccountCreditReport.make(context: context, providerID: providerID, model: model, range: range)
+    }
+    func activity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ActivityBucket]? {
+        otherReads += 1
         return []
     }
     func activityModels(in range: DateInterval) async throws -> [String] { otherReads += 1; return [] }

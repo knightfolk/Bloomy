@@ -5,6 +5,73 @@ import Testing
 
 @Suite("Authenticated financial sessions")
 struct AuthenticatedAccountSessionTests {
+    @Test("compatibility financial queries require authentication and stay within the current account")
+    func compatibilityReadsAreScoped() async throws {
+        let fixture = try SessionFixture()
+        let database = try EarningsDatabase(url: fixture.home.appendingPathComponent("credits.sqlite3"))
+        let client = AuthenticatedEarningsClient(homeDirectory: fixture.home, database: database) { request in
+            let b = request.value(forHTTPHeaderField: "Authorization") == "Bearer token-B"
+            return try response(request, account: b ? "account-B" : "account-A", amount: b ? 20 : 10)
+        }
+        #expect(try await client.activity(in: range, unit: .hour, calendar: calendar) == nil)
+        #expect(try await client.activityModels(in: range).isEmpty)
+        _ = try await client.fetchWithContext(now: captured)
+        #expect(try await client.activity(in: range, unit: .hour, calendar: calendar)?.compactMap(\.totals).reduce(0) { $0 + $1.workMicroUSD } == 10)
+        #expect(try await client.activityModels(in: range) == ["gemma"])
+        #expect(try await client.modelActivity(in: range, unit: .hour, calendar: calendar, model: "gemma")?.compactMap(\.totals).reduce(0) { $0 + $1.jobs } == 1)
+        #expect(try await client.activityByModel(in: range, unit: .hour, calendar: calendar)?.first?.workMicroUSD == 10)
+        #expect(try await client.modelHourlyEarningsAverages(in: range)?.first?.workMicroUSD == 10)
+        #expect(try await client.modelWorkEarnings(in: range, calendar: calendar).first?.workMicroUSD == 10)
+        #expect(try await client.todayEarningsSummary(now: captured, calendar: calendar)?.microUSD == 10)
+        #expect(try await client.weekEarningsSummary(now: captured, calendar: calendar)?.microUSD == 10)
+        #expect(try await client.jobCompletionSummary(now: captured, calendar: calendar)?.completedToday == 1)
+        try fixture.token("token-B")
+        #expect(try await client.activity(in: range, unit: .hour, calendar: calendar) == nil)
+        #expect(try await client.todayEarningsSummary(now: captured, calendar: calendar) == nil)
+        #expect(try await client.modelWorkEarnings(in: range, calendar: calendar).isEmpty)
+        _ = try await client.fetchWithContext(now: captured)
+        #expect(try await client.activity(in: range, unit: .hour, calendar: calendar)?.compactMap(\.totals).reduce(0) { $0 + $1.workMicroUSD } == 20)
+        #expect(try await client.todayEarningsSummary(now: captured, calendar: calendar)?.microUSD == 20)
+    }
+
+    @Test("default context-bearing fetch binds before suspension and rejects a changed session")
+    func defaultFetchDoesNotRelabelOldResults() async throws {
+        for throwsTransport in [false, true] {
+            let gate = SessionHoldGate()
+            let fixture = DefaultScopedFetchFixture(gate: gate, throwsTransport: throwsTransport)
+            let read = Task { try await fixture.fetchWithContext(now: captured) }
+            let entered: Void? = await next(gate.entered)
+            #expect(entered != nil)
+            await fixture.changeAccount()
+            await gate.release()
+            await #expect(throws: AccountEarningsClientError.sessionChanged) { try await read.value }
+        }
+    }
+
+    @Test("a selected model does not read unrelated models through the account-wide range limit")
+    func selectedModelHasItsOwnReadBudget() async throws {
+        let fixture = try SessionFixture()
+        let database = try EarningsDatabase(url: fixture.home.appendingPathComponent("credits.sqlite3"))
+        let client = AuthenticatedEarningsClient(homeDirectory: fixture.home, database: database) { request in
+            let (data, http) = try response(request, account: "account-A", amount: 1)
+            var json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            let row = (json["earnings"] as! [[String: Any]])[0]
+            json["earnings"] = (1...129).map { id -> [String: Any] in
+                var next = row; next["id"] = id; next["model"] = id == 1 ? "gemma" : "other-\(id)"; return next
+            }
+            json["count"] = 129; json["recent_count"] = 129; json["total_micro_usd"] = 129
+            return (try JSONSerialization.data(withJSONObject: json), http)
+        }
+        _ = try await client.fetchWithContext(now: captured)
+        await #expect(throws: ActivityCalendarError.tooManyBuckets) {
+            try await client.activity(in: range, unit: .hour, calendar: calendar)
+        }
+        let selected = try await client.modelActivity(in: range, unit: .hour, calendar: calendar, model: "gemma")
+        #expect(selected?.compactMap(\.totals).reduce(0) { $0 + $1.workMicroUSD } == 1)
+        #expect(selected?.compactMap(\.totals).reduce(0) { $0 + $1.jobs } == 1)
+        #expect(try await client.modelActivity(in: range, unit: .hour, calendar: calendar, model: "base_reward") == nil)
+    }
+
     @Test("A to B to A creates distinct generations and failed B readiness cannot retain A")
     func accountGenerations() async throws {
         let fixture = try SessionFixture()
@@ -389,6 +456,22 @@ private actor SessionTestTransport {
     func setStatus(_ value: Int) { status = value }
     func read(_ request: URLRequest) throws -> (Data, URLResponse) {
         try response(request, account: "account-A", amount: 10, status: status)
+    }
+}
+
+private actor DefaultScopedFetchFixture: AccountEarningsFetching {
+    let gate: SessionHoldGate
+    let throwsTransport: Bool
+    var context = AccountEarningsContext(accountScope: "synthetic-A", generation: UUID())
+    init(gate: SessionHoldGate, throwsTransport: Bool) { self.gate = gate; self.throwsTransport = throwsTransport }
+    func changeAccount() { context = AccountEarningsContext(accountScope: "synthetic-B", generation: UUID()) }
+    func financialSessionState() -> AccountEarningsSessionState {
+        .init(context: context, ledgerReady: true, revision: context.generation)
+    }
+    func fetch(now: Date) async throws -> EarningsPresentationValue {
+        await gate.hold()
+        if throwsTransport { throw URLError(.timedOut) }
+        return .unavailable(reason: "synthetic held result")
     }
 }
 

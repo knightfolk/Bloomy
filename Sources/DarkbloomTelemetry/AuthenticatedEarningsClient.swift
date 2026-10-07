@@ -46,6 +46,12 @@ public enum AccountEarningsClientError: Error, LocalizedError, Equatable, Sendab
 }
 
 public protocol AccountEarningsFetching: Sendable {
+    func financialSessionState() async -> AccountEarningsSessionState
+    func financialSessionChanges() async -> AsyncStream<AccountEarningsSessionState>
+    func fetchWithContext(now: Date) async throws -> AccountEarningsFetchResult
+    func validateFinancialContext(_ context: AccountEarningsContext) async throws
+    func financialReport(context: AccountEarningsContext, providerID: String?, model: String?,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> AccountCreditReport?
     func modelWorkEarnings(in range: DateInterval, calendar: Calendar) async throws -> [ModelWorkEarnings]
     func fetch(now: Date) async throws -> EarningsPresentationValue
     func jobCompletionSummary(now: Date, calendar: Calendar) async throws -> JobCompletionSummary?
@@ -60,6 +66,28 @@ public protocol AccountEarningsFetching: Sendable {
 }
 
 public extension AccountEarningsFetching {
+    func financialSessionState() async -> AccountEarningsSessionState { .unavailable }
+    func financialSessionChanges() async -> AsyncStream<AccountEarningsSessionState> {
+        AsyncStream { $0.finish() }
+    }
+    func validateFinancialContext(_ context: AccountEarningsContext) async throws {
+        try Task.checkCancellation()
+        guard await financialSessionState().context == context else { throw AccountEarningsClientError.sessionChanged }
+    }
+    func fetchWithContext(now: Date) async throws -> AccountEarningsFetchResult {
+        guard let context = await financialSessionState().context else { throw AccountEarningsClientError.sessionChanged }
+        try await validateFinancialContext(context)
+        do {
+            let value = try await fetch(now: now)
+            try await validateFinancialContext(context)
+            return AccountEarningsFetchResult(context: context, value: value)
+        } catch {
+            try await validateFinancialContext(context)
+            throw error
+        }
+    }
+    func financialReport(context: AccountEarningsContext, providerID: String?, model: String?,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> AccountCreditReport? { nil }
     func modelWorkEarnings(in range: DateInterval, calendar: Calendar) async throws -> [ModelWorkEarnings] { [] }
     func modelActivity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar, model: String?) async throws -> [ActivityBucket]? {
         guard model == nil else { return nil }
@@ -89,29 +117,23 @@ public extension AccountEarningsFetching {
 
 public struct AuthenticatedEarningsClient: AccountEarningsFetching, Sendable {
     public func modelWorkEarnings(in range: DateInterval, calendar: Calendar) async throws -> [ModelWorkEarnings] {
-        guard let database else { return [] }
-        let models = try await database.activityModels(in: range)
-        var values: [ModelWorkEarnings] = []
-        for model in models {
-            try Task.checkCancellation()
-            values.append(try await database.modelWorkEarnings(model: model, in: range, calendar: calendar))
-        }
-        return values
+        try await currentReport(in: range, unit: .hour, calendar: calendar)?.modelWorkEarnings(calendar: calendar) ?? []
     }
     public func modelActivity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar, model: String?) async throws -> [ActivityBucket]? {
-        try await database?.activity(in: range, unit: unit, calendar: calendar, model: model)
+        guard model != "base_reward" else { return nil }
+        return try await currentReport(in: range, unit: unit, calendar: calendar, model: model)?.activityBuckets(model: model)
     }
     public func activityModels(in range: DateInterval) async throws -> [String] {
-        try await database?.activityModels(in: range) ?? []
+        try await currentReport(in: range, unit: .day, calendar: .current)?.models ?? []
     }
     public func activityByModel(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ModelActivityBucket]? {
-        try await database?.activityByModel(in: range, unit: unit, calendar: calendar)
+        try await currentReport(in: range, unit: unit, calendar: calendar)?.modelActivity
     }
     public func modelHourlyEarningsAverages(in range: DateInterval) async throws -> [ModelHourlyEarningsAverage]? {
-        try await database?.modelHourlyEarningsAverages(in: range)
+        try await currentReport(in: range, unit: .day, calendar: .current)?.hourlyEarningsAverages
     }
     public func activity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ActivityBucket]? {
-        try await database?.activity(in: range, unit: unit, calendar: calendar)
+        try await currentReport(in: range, unit: unit, calendar: calendar)?.activityBuckets()
     }
 
     private let tokenURL: URL
@@ -166,6 +188,10 @@ public struct AuthenticatedEarningsClient: AccountEarningsFetching, Sendable {
 
     public func financialSessionState() async -> AccountEarningsSessionState {
         await accountSession.snapshot()
+    }
+
+    public func validateFinancialContext(_ context: AccountEarningsContext) async throws {
+        try await accountSession.validate(context)
     }
 
     public func financialSessionChanges() async -> AsyncStream<AccountEarningsSessionState> {
@@ -247,25 +273,59 @@ public struct AuthenticatedEarningsClient: AccountEarningsFetching, Sendable {
         now: Date,
         calendar: Calendar
     ) async throws -> JobCompletionSummary? {
-        try await database?.jobCompletionSummary(now: now, calendar: calendar)
+        let today = calendar.startOfDay(for: now)
+        guard let start = calendar.date(byAdding: .day, value: -7, to: today),
+              let report = try await currentReport(in: DateInterval(start: start, end: now),
+                  unit: .day, calendar: calendar),
+              let capturedAt = report.observation?.balance.capturedAt,
+              calendar.startOfDay(for: capturedAt) == today else { return nil }
+        let past = report.buckets.filter { $0.interval.end <= today }
+        let current = report.buckets.first { $0.interval.start == today }
+        guard let currentCount = current?.totals?.workCreditCount else { return nil }
+        let complete = report.reconciliation == .matched
+            && capturedAt.timeIntervalSince1970 >= now.timeIntervalSince1970
+        let pastCount = past.reduce(Int64(0)) { $0 + ($1.totals?.workCreditCount ?? 0) }
+        // Compatibility type: these are observed work credit records. They do
+        // not independently establish completed serving requests.
+        return JobCompletionSummary(completedToday: currentCount,
+            averagePerDay: complete ? Double(pastCount) / 7 : nil,
+            averagingDays: 7, dayStart: today, capturedAt: capturedAt)
     }
 
     public func todayEarningsSummary(
         now: Date,
         calendar: Calendar
     ) async throws -> ObservedEarningsWindow? {
-        try await database?.todayEarningsSummary(now: now, calendar: calendar)
+        try await currentReport(in: DateInterval(start: calendar.startOfDay(for: now), end: now),
+            unit: .hour, calendar: calendar)?.observedEarningsWindow(calendar: calendar)
     }
 
     public func weekEarningsSummary(
         now: Date,
         calendar: Calendar
     ) async throws -> CalendarWeekEarningsSummary? {
-        try await database?.weekEarningsSummary(now: now, calendar: calendar)
+        guard let start = calendar.dateInterval(of: .weekOfYear, for: now)?.start else { return nil }
+        return try await currentReport(in: DateInterval(start: start, end: now),
+            unit: .day, calendar: calendar)?.calendarWeekSummary(calendar: calendar)
     }
 
     public func modelEarnings(since: Date) async throws -> [ModelEarnings] {
-        try await database?.earningsByModel(since: since) ?? []
+        let capture = await financialSessionState()
+        guard let context = capture.context, capture.ledgerReady else { return [] }
+        let end = Date()
+        guard since.timeIntervalSince1970.isFinite, since <= end else { throw ActivityCalendarError.invalidInterval }
+        // The compatibility API asks for an observed subtotal, not completeness
+        // through wall-clock now. It cannot read unattributed legacy aggregates.
+        let report = try await financialReport(context: context, in: DateInterval(start: since, end: end),
+            unit: .day, calendar: .current)
+        return report?.recentModelEarnings() ?? []
+    }
+
+    private func currentReport(in range: DateInterval, unit: ActivityCalendarUnit,
+        calendar: Calendar, model: String? = nil) async throws -> AccountCreditReport? {
+        let state = await financialSessionState()
+        guard let context = state.context, state.ledgerReady else { return nil }
+        return try await financialReport(context: context, model: model, in: range, unit: unit, calendar: calendar)
     }
 
     private func validate(_ response: URLResponse, authenticated: Bool = true) throws {
