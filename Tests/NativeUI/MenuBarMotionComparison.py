@@ -1,7 +1,7 @@
 """Opt-in staging overlay; never edits the source motion diagnostic.
 
-Both comparison modes receive identical staged Swift. Only the fresh mode's
-compiler definition changes target lifetime. Normal builds receive no overlay.
+All comparison modes receive identical staged Swift. Compiler definitions
+change target lifetime at known boundaries. Normal builds receive no overlay.
 """
 import re
 
@@ -26,6 +26,8 @@ METADATA = '''        payload["diagnosticComparisonOnly"] = true
         payload["replacesNormalNativeGate"] = false
         #if FIXTURE_FRESH_MOTION_TARGETS
         payload["targetLifetime"] = "fresh"
+        #elseif FIXTURE_RESET_BEFORE_DETACH
+        payload["targetLifetime"] = "reset-before-detach"
         #else
         payload["targetLifetime"] = "reused"
         #endif
@@ -45,14 +47,19 @@ COMPARISON = r'''        var view: MenuBarActivityArc.ActivityArcView { fixture.
                 var phase = "preparation"
                 do {
                     #if FIXTURE_FRESH_MOTION_TARGETS
-                    if name != "native_window_visible" {
+                    let replaceTarget = name != "native_window_visible"
+                    #elseif FIXTURE_RESET_BEFORE_DETACH
+                    let replaceTarget = name == "detach_and_restore"
+                    #else
+                    let replaceTarget = false
+                    #endif
+                    if replaceTarget {
                         phase = "close previous target"
                         fixture.window.close()
                         phase = "create fresh target"
                         fixture = try MotionArcFixture()
                         comparisonGeneration += 1
                     }
-                    #endif
                     // Match ordering/visibility preflight in both modes, so
                     // it cannot explain a difference attributed to lifetime.
                     phase = "visible starting state"

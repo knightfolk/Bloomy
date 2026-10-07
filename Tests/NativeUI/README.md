@@ -143,6 +143,11 @@ targets between cases. Both receive the same visibility preflight. All fifteen
 original case bodies remain unchanged, and parent-label cases remain controls.
 Build and runtime metadata label these as diagnostics that cannot replace the
 normal native gate. Omitting the option keeps the original motion helper bytes.
+The follow-up `--motion-target-lifetime reset-before-detach` recreates the target
+only before `detach_and_restore`, then retains it through both reopening cases
+and dismantling. Compare it to a contemporaneous reused build from the same
+staged bytes. Verify generation 1 and matching window/view/arc identities after
+the reset; a preparation failure invalidates the affected comparison.
 Run **Native proof** and retain each terminal motion, Models, Charts and aggregate
 report. Staging guards can be checked without launching an app:
 `python3 -m unittest discover -s Tests/NativeUI -p test_motion_comparison_staging.py`.

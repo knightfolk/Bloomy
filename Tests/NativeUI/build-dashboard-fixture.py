@@ -25,8 +25,8 @@ parser.add_argument("--configuration", choices=["debug", "release"], default="de
                     help="Release optimizes the fixture and production views for bounded profiling.")
 parser.add_argument("--metrics-seed", type=Path,
                     help="Bundle a completed synthetic performance SQLite seed for the Fresh scenario only.")
-parser.add_argument("--motion-target-lifetime", choices=["reused", "fresh"],
-                    help="Opt-in diagnostic overlay; compare original reused versus fresh native targets.")
+parser.add_argument("--motion-target-lifetime", choices=["reused", "fresh", "reset-before-detach"],
+                    help="Opt-in diagnostic overlay; compare reused targets, fresh targets or one reset before detach.")
 args = parser.parse_args()
 output = args.output.resolve()
 if output.exists():
@@ -145,6 +145,7 @@ command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6
            *(["-D", "FIXTURE_HIDE_REVIEW_BANNER"] if args.hide_review_banner else []),
            *(["-D", "FIXTURE_COMPACT"] if args.compact else []),
            *(["-D", "FIXTURE_FRESH_MOTION_TARGETS"] if args.motion_target_lifetime == "fresh" else []),
+           *(["-D", "FIXTURE_RESET_BEFORE_DETACH"] if args.motion_target_lifetime == "reset-before-detach" else []),
            "-I", str(products), "-F", str(products),
            str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle", "-lsqlite3",
            "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks", "-o", str(binary)]

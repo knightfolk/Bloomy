@@ -1,5 +1,11 @@
 # Bloomy native polish and efficiency
 
+October 6 detach-history follow-up: resetting once before detach still fails
+both reopening cases, as does the contemporaneous reused control (12/15 each).
+Generation and identity checks retain the replacement through all three cases;
+Models/Charts pass in both finite runs. See `MENU_BAR_DETACH_HISTORY_REVIEW_20261006.md`.
+Inspect actual window-observer restoration next; no production fix is claimed.
+
 October 6 target-history investigation: a matched optimized comparison repeats
 in both run orders. Reused native targets fail both reopening cases (12/15);
 fresh targets sustain compositor motion (14/15). Models/Charts pass in all four

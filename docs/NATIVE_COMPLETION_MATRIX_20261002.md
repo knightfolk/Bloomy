@@ -1,5 +1,10 @@
 # Native polish completion matrix — October 2, 2026
 
+October 6 detach-history follow-up: reset-before-detach and reused control both
+fail reopening (12/15 each), narrowing the per-target investigation to detach
+and subsequent restoration. Models/Charts pass; all normal/production gates
+remain open. See [detach history review](MENU_BAR_DETACH_HISTORY_REVIEW_20261006.md).
+
 October 6 target-history comparison: reused targets fail both reopening cases
 in both run orders; fresh targets pass the unchanged sustained compositor checks.
 Models/Charts pass in each finite run. Genuine occlusion, the normal fifteen-case
