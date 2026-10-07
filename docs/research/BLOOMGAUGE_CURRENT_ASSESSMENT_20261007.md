@@ -2,7 +2,7 @@
 
 ## Latest checkout refresh
 
-Rechecked October 7 against Bloomy `4589971`. The earlier `9a65f17` baseline below remains useful for the detailed research, but its readiness and timeline status is superseded here. This pass reread the live homepage, features, guide and privacy notice, and fetched the current public architecture and README directly from GitHub. Three retained vendor captures were visually re-inspected: demand, day replay and dashboard. These captures were not freshly downloaded, and no competitor binary or live interaction was tested. Unrelated native motion fixture work was preserved.
+Rechecked October 7 against Bloomy `646ee66`. A bounded read-only source audit confirmed the six product gaps below. The earlier `9a65f17` baseline remains useful for the detailed research, but its readiness and timeline status is superseded here. This pass reread the live homepage, features, guide, changelog and privacy notice, and fetched the current public architecture and README directly from GitHub. Four retained vendor captures were visually re-inspected: demand, day replay, dashboard and switch rules. These captures were not freshly downloaded. Computer Use reported that no browser was available, so no competitor binary or live interaction was tested. Unrelated native motion fixture work was preserved.
 
 Bloomy's committed source now includes a shared readiness presentation in Overview and Health, observed model-residence bands, and provider activity intervals aligned to the same time scale. The timeline inspector is committed with native click, drag and accessibility selection verification; its earlier mixed-input issue was corrected. This improves inspection but does not complete the earning-day replay: credit arrivals, actions, loading and model residence do not yet form one report.
 
@@ -30,6 +30,19 @@ Retain SwiftUI/AppKit, native Charts and the existing Swift telemetry/SQLite mod
 Improve Bloomy's shared data flow instead: one immutable screen report, coordinated refreshes, batched database reads, bounded raw history and longer-lived rollups. Adapt earnings refresh to visibility and recent work without introducing timers on every model card. Keep manual commands, Autopilot, nudges, profit switching and host-GPU protection under coordinated ownership. Measure matched Release builds, visible and hidden, before claiming resource savings.
 
 The vendor dashboard's strongest visual lesson is hierarchy: a clear earning summary, a trend and an explanation. For Bloomy, retain the dense icon-first popup and use the resizable dashboard for detailed history. A common model scale, stable card geometry and useful selection will add more clarity than more rings or credit animations.
+
+The retained captures also show substantial explanatory text and nested controls. Borrow their visual hierarchy, not their entire layout: one primary earning figure, compact hourly composition, a shared demand ruler, and details revealed through selection or disclosure. Keep confirmed credits, estimated pace and electricity-adjusted results visually distinct. Use shape or labels alongside color, short model aliases with full-name help, and stable control sizes. The menu-bar popup should remain the quick control surface; the dashboard should carry replay and policy explanations.
+
+### Current implementation boundaries
+
+- `AuthenticatedEarningsClient.swift:97` still supplies no verified historical local-provider report. `MonitorStore.swift:618` clears unsupported local profits. Provider IDs retained in credit records are useful evidence but do not alone complete machine attribution.
+- `ActivityView.swift:83` separates Earnings and Metrics; `DashboardRootView.swift:178` exposes History separately. Residence and provider activity are inspectable, but actions, loading and credits are not yet joined into one day report.
+- `MonitorStore.swift:980` replaces the current capacity snapshot. `NetworkHistoryView.swift:27` presents network totals rather than persisted per-model demand baselines.
+- `ProviderControlStore.swift:140` coordinates command admission; `ProfitSwitchStore.swift:257` yields model-choice ownership to live Autopilot. Add a decision explanation to this existing flow rather than another controller.
+- `NudgeSetupGuide.swift:17` provides a narrow setup guide. No complete resumable provider install, sign-in, download and startup journey was found.
+- `DarkbloomCompanionHelper/main.swift:5` does not start a service, and `MonitorSettingsView.swift:136` labels Companion unavailable. Protocol and transport code are foundations, not delivered remote access.
+
+Qualification should use matched optimized builds and history sizes, with the provider held in equivalent conditions: startup and refresh latency, process-tree memory, CPU and wakeups while visible and hidden, database size and query latency. These measurements are still outstanding; architecture alone establishes no performance winner. The existing native motion/occlusion proof gaps remain separate from this product comparison.
 
 Sources: [features](https://bloomgauge.io/features), [guide](https://bloomgauge.io/guide), [switch rules](https://bloomgauge.io/help/bloomgauge-switch-rules), [architecture](https://github.com/cookder/bloomgauge/blob/main/docs/ARCHITECTURE.md), [privacy](https://bloomgauge.io/privacy). Bloomy findings were refreshed against `Package.swift`, `ProviderReadinessSummaryView.swift`, `ModelVisitTimeline.swift`, `PerformanceActivityHistory.swift`, `ProfitSwitchPolicy.swift`, `AuthenticatedEarningsClient.swift` and the Companion availability UI. These are source capabilities, not claims that the current installed release includes or qualifies every feature.
 
