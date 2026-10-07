@@ -1,5 +1,18 @@
 # Bloomy native polish and efficiency
 
+October 6 research: the BloomGauge comparison distinguishes implemented,
+released and proposed capabilities. Recommended follow-ups are ledger
+reconciliation tests, a compact readiness explanation, a model-switch outcome
+timeline and bounded public demand history. No competitor-inspired features
+were implemented by this research. See `BLOOMGAUGE_COMPARISON_20261006.md`.
+
+October 6 Hosting follow-up: unknown CLI evidence now gives Refresh guidance,
+while confirmed old versions retain an update warning. Native light/dark,
+old/supported recovery and local-only action gating pass; all 1,648 reported
+Release tests pass. See `HOSTING_CLI_EVIDENCE_REVIEW_20261006.md`.
+The improvement goal was resumed on October 6; broader native and distribution
+proof remains open.
+
 October 4 Hosting recovery follow-up: the popup displays sanitized WebSocket
 coordinator hosts and dismisses nested details before dashboard navigation.
 Native light/dark, Done/reopen, configured/unverified Refresh, observed expiry
