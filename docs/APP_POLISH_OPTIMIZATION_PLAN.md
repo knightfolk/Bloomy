@@ -1,5 +1,16 @@
 # Bloomy native polish and efficiency
 
+October 7 retained action timeline: Activity Metrics aligns bounded action
+groups with residence and all-model provider activity. Exact event inspection
+reveals matching evidence immediately; canonical-model/global scope, no-work
+filtering, empty metrics, compact light/dark, chart selection/Clear, long periods
+and the 5,000-record cap are checked in the final 131-source-matched artifact.
+Twelve new tests, 1,797 reported serial Release tests before the final scroll
+repair, 40 final focused tests, 47 staging checks and final production build pass. Loading/credit replay,
+local financial attribution and broader native/performance qualification remain
+open. No provider action, push or release occurred. See
+[action timeline review](ACTION_TIMELINE_REVIEW_20261007.md).
+
 October 7 supported Settings cover: a fresh optimized actual-host run passes
 eleven of twelve cases; opaque WindowServer containment does not remove AppKit's
 visible bit, so genuine occlusion and stopped/recovered motion remain unverified.

@@ -7,17 +7,24 @@ struct ModelVisitSection: View {
     let summary: ModelVisitSummary
     let range: DateInterval?
     let activity: PerformanceActivityHistory?
+    let actionHistory: ActionHistoryStore?
+    let model: String?
+    let isVisible: Bool
     @State private var withoutWorkOnly = false
     @State private var visibleLimit = 8
     @State private var showsDetails = false
 
     init(visits: [ModelVisit], withoutWorkVisits: [ModelVisit]? = nil, summary: ModelVisitSummary? = nil,
-         range: DateInterval? = nil, activity: PerformanceActivityHistory? = nil) {
+         range: DateInterval? = nil, activity: PerformanceActivityHistory? = nil,
+         actionHistory: ActionHistoryStore? = nil, model: String? = nil, isVisible: Bool = true) {
         self.visits = visits
         self.withoutWorkVisits = withoutWorkVisits ?? visits.filter { $0.outcome == .noObservedWork }
         self.summary = summary ?? ModelVisitSummary(visits: visits)
         self.range = range ?? ModelVisitTimelineData.inferredRange(visits: visits)
         self.activity = activity
+        self.actionHistory = actionHistory
+        self.model = model
+        self.isVisible = isVisible
     }
     private var displayed: [ModelVisit] {
         Array((withoutWorkOnly ? withoutWorkVisits : visits).suffix(visibleLimit).reversed())
@@ -49,10 +56,15 @@ struct ModelVisitSection: View {
                 Text(withoutWorkOnly ? "No completed visits without observed work in this history." : "Model visits appear as fresh loaded-model observations arrive.")
                     .font(.callout).foregroundStyle(.secondary)
             }
-            if let range, !displayed.isEmpty || activity != nil {
-                ModelVisitTimeline(data: ModelVisitTimelineData(
-                    visits: withoutWorkOnly ? withoutWorkVisits : visits, range: range), withoutWorkOnly: withoutWorkOnly,
-                    activity: activity)
+            if let range, !displayed.isEmpty || activity != nil || actionHistory != nil {
+                let data = ModelVisitTimelineData(visits: withoutWorkOnly ? withoutWorkVisits : visits, range: range)
+                if let actionHistory {
+                    RecordedModelVisitTimeline(history: actionHistory, data: data, activity: activity,
+                        model: model, withoutWorkOnly: withoutWorkOnly, isVisible: isVisible)
+                        .id(ObjectIdentifier(actionHistory))
+                } else {
+                    ModelVisitTimeline(data: data, withoutWorkOnly: withoutWorkOnly, activity: activity)
+                }
             }
             if !displayed.isEmpty {
                 DisclosureGroup(isExpanded: $showsDetails) {

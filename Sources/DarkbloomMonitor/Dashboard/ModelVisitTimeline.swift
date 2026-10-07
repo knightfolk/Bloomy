@@ -89,11 +89,16 @@ struct ModelVisitTimeline: View {
     let data: ModelVisitTimelineData
     var withoutWorkOnly = false
     var activity: PerformanceActivityHistory? = nil
-    private var rowOffset: Int { activity == nil ? 0 : 1 }
+    var actions: ActionTimelineData? = nil
+    var actionNotice: String? = nil
+    var actionModel: String? = nil
+    private var actionRow: Int { activity == nil ? 0 : 1 }
+    private var rowOffset: Int { (activity == nil ? 0 : 1) + (actions == nil ? 0 : 1) }
     @State private var rawSelectedDate: Date?
     @State private var inspectedDate: Date?
+    @State private var actionInspectionRevision = 0
     private var selection: ModelVisitTimelineSelection? {
-        ModelVisitTimelineSelection(date: inspectedDate, data: data, activity: activity)
+        ModelVisitTimelineSelection(date: inspectedDate, data: data, activity: activity, actions: actions)
     }
 
     var body: some View {
@@ -115,6 +120,15 @@ struct ModelVisitTimeline: View {
                                   y: .value("Model row", 0))
                             .symbol(segment.evidence.shape).symbolSize(18)
                             .foregroundStyle(segment.evidence.color)
+                    }
+                }
+                if let actions {
+                    ForEach(actions.buckets) { bucket in
+                        PointMark(x: .value("Recorded action group", bucket.midpoint),
+                                  y: .value("Model row", actionRow))
+                            .symbol(bucket.events.count == 1 ? BasicChartSymbolShape.circle : .diamond)
+                            .symbolSize(bucket.events.count == 1 ? 24 : 40)
+                            .foregroundStyle(Color.accentColor)
                     }
                 }
                 ForEach(data.entries) { entry in
@@ -158,8 +172,10 @@ struct ModelVisitTimeline: View {
             .chartYAxis {
                 AxisMarks(position: .leading, values: Array(0..<max(1, data.models.count + rowOffset))) { value in
                     AxisValueLabel(centered: false) {
-                        if let row = value.as(Int.self), rowOffset == 1 && row == 0 {
+                        if let row = value.as(Int.self), activity != nil && row == 0 {
                             Text("Provider · all").font(.caption).help("Provider-wide activity, independent of the model and visit filters")
+                        } else if let row = value.as(Int.self), actions != nil && row == actionRow {
+                            Text("Actions").font(.caption).help("Retained action timestamps, grouped for readability; not operation duration")
                         } else if let row = value.as(Int.self), data.models.indices.contains(row - rowOffset) {
                             let model = data.models[row - rowOffset]
                             Text(ModelDisplayName.short(model)).font(.caption)
@@ -201,6 +217,18 @@ struct ModelVisitTimeline: View {
                                 .accessibilityIdentifier("activity.metrics.activity.\(segment.id.uuidString)")
                         }
                     }
+                    if let actions {
+                        ForEach(actions.buckets) { bucket in
+                            Button {
+                                let date = bucket.events[0].occurredAt
+                                rawSelectedDate = date
+                                inspectedDate = date
+                            } label: { Text(actionGroupLabel(bucket)) }
+                                .accessibilityLabel(actionGroupLabel(bucket))
+                                .accessibilityHint("Inspect every retained action in this interval")
+                                .accessibilityIdentifier("activity.metrics.actions.group.\(bucket.id)")
+                        }
+                    }
                     ForEach(data.entries) { entry in
                         Button {
                             rawSelectedDate = entry.start
@@ -240,13 +268,28 @@ struct ModelVisitTimeline: View {
                 Text("Provider row covers all models · activity between readings is approximate\(activity.totalSegmentCount > activity.segments.count ? " · latest \(activity.segments.count) of \(activity.totalSegmentCount) segments" : "")")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+            if actions != nil {
+                HStack(spacing: 12) {
+                    Label("One action", systemImage: "circle.fill")
+                    Label("Grouped actions", systemImage: "diamond.fill")
+                }.font(.caption).foregroundStyle(.secondary)
+                Text("\(actionModel == nil ? "All model and global actions" : "Selected model and global actions") · retained journal only · visit filter does not hide actions")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let actionNotice {
+                    Label(actionNotice, systemImage: "info.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("activity.metrics.actions.notice")
+                }
+            }
         }
         .help("Bands show observation times, not exact loading or inference times. Symbols describe evidence from the entire visit. Blank time can be unobserved, filtered out, or outside retained visit history. A last-loaded visit may already have ended. Short work between readings can be missed.")
     }
 
     private var selectionInspector: some View {
+        ScrollViewReader { reader in
         ScrollView(.vertical) {
-        VStack(alignment: .leading, spacing: 5) {
+        LazyVStack(alignment: .leading, spacing: 5) {
             if let selection {
                 HStack(alignment: .firstTextBaseline) {
                     Label(selection.date.formatted(date: .abbreviated, time: .standard), systemImage: "scope")
@@ -262,6 +305,7 @@ struct ModelVisitTimeline: View {
                         .accessibilityIdentifier("activity.metrics.inspection.clear")
                         .help("Clear the selected moment")
                 }
+                .id("activity.metrics.inspection.header")
                 if selection.visits.isEmpty {
                     Label("No displayed visit at this time", systemImage: "minus.circle")
                         .foregroundStyle(.secondary)
@@ -290,12 +334,22 @@ struct ModelVisitTimeline: View {
                     Label("No displayed provider activity at this time", systemImage: "minus.circle")
                         .foregroundStyle(.secondary)
                 }
+                if let bucket = selection.actionBucket {
+                    ActionTimelineInspector(bucket: bucket) { date in
+                        rawSelectedDate = date
+                        inspectedDate = date
+                        actionInspectionRevision &+= 1
+                    }
+                } else if actions != nil {
+                    Label(actionNotice == nil ? "No retained actions in this interval" : "Action evidence is not confirmed for this interval", systemImage: "minus.circle")
+                        .foregroundStyle(.secondary)
+                }
                 Text("Visit evidence describes the full visit; activity is approximate between readings.")
                     .font(.caption2).foregroundStyle(.secondary)
             } else {
                 Label("Click or drag a time to inspect", systemImage: "scope")
                     .foregroundStyle(.secondary)
-                Text("Visit evidence and all-model activity stay separate.")
+                Text(actions == nil ? "Visit evidence and all-model activity stay separate." : "Visit, provider activity and action timestamps stay separate.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -308,10 +362,18 @@ struct ModelVisitTimeline: View {
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("activity.metrics.inspection")
+        .onChange(of: actionInspectionRevision) { _, _ in
+            reader.scrollTo("activity.metrics.inspection.header", anchor: .top)
+        }
+        }
     }
 
     private func activityLabel(_ segment: PerformanceActivityHistory.Segment) -> String {
         "All-model provider activity, \(segment.start.formatted(date: .abbreviated, time: .standard)) to \(segment.end.formatted(date: .abbreviated, time: .standard)); \(segment.evidence.title). Based on adjacent readings, not exact request duration or payment."
+    }
+
+    private func actionGroupLabel(_ bucket: ActionTimelineData.Bucket) -> String {
+        "\(bucket.events.count) retained \(bucket.events.count == 1 ? "action" : "actions"), \(bucket.start.formatted(date: .abbreviated, time: .standard)) to \(bucket.end.formatted(date: .abbreviated, time: .standard)). Grouping interval, not action duration."
     }
 
     private func accessibilityLabel(_ entry: ModelVisitTimelineData.Entry) -> Text {

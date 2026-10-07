@@ -24,6 +24,7 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case matchedEnergy = "Matched electricity graphics"
     case microEarnings = "Overview micro-dollar earnings"
     case unmeasuredMetrics = "Unmeasured metrics", idleMetrics = "Recorded idle metrics"
+    case timelineActions = "Timeline actions"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
@@ -63,6 +64,27 @@ private enum FixtureData {
         "Synthetic \(source) diagnostic: the review source did not complete its expected read. Retained capture time describes the last observation and cannot confirm current provider health.\n\nThis second paragraph is review-only recovery guidance. No real permissions, model files, settings or provider processes have changed. End of \(source) diagnostic."
     }
     static let modelIDs = ["qwen3.8-27b", "gemma-4-26b-qat-4bit", "gpt-oss-20b", "ternary-bonsai-2-27b"]
+    static func seedTimelineActions(at url: URL, endingAt: Date) throws {
+        let database = try ActionHistoryDatabase(url: url)
+        guard try database.retainedRecordCount() == 0 else { return }
+        let rows: [(TimeInterval, ActionHistoryAction, ActionHistoryTrigger, ActionHistoryOutcome, String?)] = [
+            (-10_770, .startProvider, .manual, .succeeded, nil),
+            (-10_000, .swap, .manual, .succeeded, modelIDs[0]),
+            (-7_200, .nudge, .automatic, .skipped, modelIDs[0]),
+            (-5_370, .swap, .manual, .succeeded, modelIDs[1]),
+            (-5_370, .autopilotResume, .manual, .succeeded, nil),
+            (-90, .swap, .manual, .unconfirmed, modelIDs[3]),
+            (-75, .nudge, .automatic, .failed, modelIDs[3]),
+            (-73, .watcher, .automatic, .skipped, nil),
+            (-30, .swap, .manual, .succeeded, modelIDs[1]),
+            (-20, .servingSlowdown, .system, .succeeded, nil),
+        ]
+        for (index, row) in rows.enumerated() {
+            try database.record(.init(id: ActionHistoryEvent.deterministicID(namespace: "timeline-actions-fixture", key: String(index)),
+                occurredAt: endingAt.addingTimeInterval(row.0), action: row.1, trigger: row.2,
+                outcome: row.3, model: row.4, reason: row.3 == .failed ? .requestFailed : row.3 == .skipped ? .providerBusy : nil))
+        }
+    }
     static func seedLargeActionHistory(at url: URL) throws {
         let database = try ActionHistoryDatabase(url: url)
         guard try database.retainedRecordCount() == 0 else { return }
@@ -611,7 +633,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
         if calendarSummaryMode == .accountFailure { throw FixtureError.offline }
         return switch scenario {
         case .microEarnings: .observed(microUSD: 1, observedSeconds: 10_800)
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .healthPartial, .largeActionHistory, .acceptedWork, .matchedEnergy, .unmeasuredMetrics, .idleMetrics:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .healthPartial, .largeActionHistory, .acceptedWork, .matchedEnergy, .unmeasuredMetrics, .idleMetrics, .timelineActions:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -1778,6 +1800,8 @@ private final class FixtureModel: ObservableObject {
             let actionHistoryURL = directory.appendingPathComponent("actions-\(requestedScenario.id).sqlite")
             if requestedScenario == .largeActionHistory {
                 try FixtureData.seedLargeActionHistory(at: actionHistoryURL)
+            } else if requestedScenario == .timelineActions {
+                try FixtureData.seedTimelineActions(at: actionHistoryURL, endingAt: now)
             }
             let history = ActionHistoryStore(url: actionHistoryURL)
             if history.events.isEmpty {

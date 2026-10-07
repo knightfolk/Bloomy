@@ -39,15 +39,17 @@ enum MetricsRecordingFreshness {
 struct PerformanceMetricsView: View {
     let history: PerformanceHistoryStore?
     var isVisible = true
+    var actionHistory: ActionHistoryStore? = nil
 
     var body: some View {
         if let history {
-            RecordedPerformanceMetricsView(history: history, isVisible: isVisible)
+            RecordedPerformanceMetricsView(history: history, isVisible: isVisible, actionHistory: actionHistory)
                 // A replaced journal is a new data scope. Cancel the old read
                 // and discard its retained summary instead of relabeling it.
                 .id(ObjectIdentifier(history))
         } else {
-            PerformanceMetricsContent(samples: [], recordingStartedAt: nil)
+            PerformanceMetricsContent(samples: [], recordingStartedAt: nil, isVisible: isVisible,
+                actionHistory: actionHistory)
         }
     }
 }
@@ -62,6 +64,7 @@ private final class PerformanceMetricsReadStorage: ObservableObject {
 private struct RecordedPerformanceMetricsView: View {
     @ObservedObject var history: PerformanceHistoryStore
     let isVisible: Bool
+    let actionHistory: ActionHistoryStore?
     @StateObject private var readStorage = PerformanceMetricsReadStorage()
     @State private var loading = false
     @State private var readError: String?
@@ -88,6 +91,7 @@ private struct RecordedPerformanceMetricsView: View {
                 readToken: read.token,
                 readPeriod: read.period,
                 samplesAreAvailable: read.samplesAreAvailable,
+                actionHistory: actionHistory,
                 onRefresh: { refreshID += 1 },
                 onPeriodChange: { period = $0 }
             )
@@ -156,6 +160,7 @@ struct PerformanceMetricsContent: View {
     var readToken: PerformanceMetricsReadToken?
     var readPeriod: PerformanceMetricsPeriod?
     var samplesAreAvailable = true
+    var actionHistory: ActionHistoryStore? = nil
     var onRefresh: (() -> Void)? = nil
     var onPeriodChange: (PerformanceMetricsPeriod) -> Void = { _ in }
     @State private var period = PerformanceMetricsPeriod.last24Hours
@@ -168,7 +173,7 @@ struct PerformanceMetricsContent: View {
         samples: [PerformanceSample], recordingStartedAt: Date?, storageError: String? = nil,
         loading: Bool = false, isVisible: Bool = true, now: Date = Date(), timelineDate: Date? = nil,
         readToken: PerformanceMetricsReadToken? = nil, readPeriod: PerformanceMetricsPeriod? = nil,
-        samplesAreAvailable: Bool = true,
+        samplesAreAvailable: Bool = true, actionHistory: ActionHistoryStore? = nil,
         initialPeriod: PerformanceMetricsPeriod = .last24Hours, onRefresh: (() -> Void)? = nil,
         onPeriodChange: @escaping (PerformanceMetricsPeriod) -> Void = { _ in }
     ) {
@@ -182,6 +187,7 @@ struct PerformanceMetricsContent: View {
         self.readToken = readToken
         self.readPeriod = readPeriod
         self.samplesAreAvailable = samplesAreAvailable
+        self.actionHistory = actionHistory
         _period = State(initialValue: initialPeriod)
         _initialAnalysisEndingAt = State(initialValue: now)
         self.onRefresh = onRefresh
@@ -253,8 +259,13 @@ struct PerformanceMetricsContent: View {
                         }
                     } else {
                         summaryGrid
+                    }
+                    if presentation.sampleCount > 0 || actionHistory != nil {
                         ModelVisitSection(visits: presentation.visits, withoutWorkVisits: presentation.withoutWorkVisits,
-                            summary: presentation.visitSummary, range: range, activity: presentation.activity)
+                            summary: presentation.visitSummary, range: range, activity: presentation.activity,
+                            actionHistory: actionHistory, model: renderedQuery.model, isVisible: isVisible)
+                    }
+                    if presentation.sampleCount > 0 {
                         speedChart
                         modelTimeline
                     }
