@@ -148,6 +148,15 @@ only before `detach_and_restore`, then retains it through both reopening cases
 and dismantling. Compare it to a contemporaneous reused build from the same
 staged bytes. Verify generation 1 and matching window/view/arc identities after
 the reset; a preparation failure invalidates the affected comparison.
+Add `--motion-window-trace` to a lifetime comparison to record bounded native
+view callbacks, observer operations and synchronization state. It instruments
+only staged label/helper copies and adds no retries, redraws or timers. Runtime
+`nativeWindowTrace` contains cumulative per-view histories for all thirteen
+direct cases, including failures; check `droppedEvents` before interpreting it.
+The trace records no outgoing replacement-target cleanup or post-report final
+cleanup, and its timing overhead prevents production performance claims.
+Run the twelve overlay checks with
+`python3 -m unittest discover -s Tests/NativeUI -p '*staging.py'`.
 Run **Native proof** and retain each terminal motion, Models, Charts and aggregate
 report. Staging guards can be checked without launching an app:
 `python3 -m unittest discover -s Tests/NativeUI -p test_motion_comparison_staging.py`.

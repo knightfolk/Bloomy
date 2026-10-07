@@ -1,5 +1,12 @@
 # Bloomy native polish and efficiency
 
+October 6 callback follow-up: window observers and actual close/visibility
+callbacks restore an eligible rotation, which later disappears in the retained
+manual host. Fresh targets sustain motion. The matched traced pair reproduces
+12/15 versus 14/15; Models/Charts pass and twelve staging checks pass. See
+`MENU_BAR_WINDOW_CALLBACK_REVIEW_20261006.md`. Actual status-item host proof is
+next; do not add observer repairs or repeat rejected cancellation retries.
+
 October 6 detach-history follow-up: resetting once before detach still fails
 both reopening cases, as does the contemporaneous reused control (12/15 each).
 Generation and identity checks retain the replacement through all three cases;

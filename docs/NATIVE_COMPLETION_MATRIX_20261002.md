@@ -1,5 +1,11 @@
 # Native polish completion matrix — October 2, 2026
 
+October 6 callback comparison: actual observer registration operations and
+delivered close/visibility callbacks restore the clock before the retained
+manual-host failure. Fresh targets pass sustained motion. This diagnostic
+rules out lost observers for these runs but leaves actual status-item lifecycle
+and all normal gates open. See [callback review](MENU_BAR_WINDOW_CALLBACK_REVIEW_20261006.md).
+
 October 6 detach-history follow-up: reset-before-detach and reused control both
 fail reopening (12/15 each), narrowing the per-target investigation to detach
 and subsequent restoration. Models/Charts pass; all normal/production gates

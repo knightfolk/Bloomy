@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build a small isolated native review app using existing telemetry products.
 
-Production source files are never edited. The staged copies replace exactly
-three autonomous default dependencies; all destination view bodies are unchanged.
+Production source files are never edited. Normal staging replaces exactly
+three autonomous default dependencies without changing destination view bodies.
+Opt-in motion diagnostics additionally stage guarded lifetime/callback overlays.
 Run swift test in the chosen configuration first for testable telemetry products.
 """
 import argparse
@@ -14,6 +15,7 @@ import sqlite3
 import subprocess
 from pathlib import Path
 from MenuBarMotionComparison import stage_comparison
+from MenuBarWindowTrace import stage_trace_report, stage_window_trace
 
 ROOT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -27,7 +29,11 @@ parser.add_argument("--metrics-seed", type=Path,
                     help="Bundle a completed synthetic performance SQLite seed for the Fresh scenario only.")
 parser.add_argument("--motion-target-lifetime", choices=["reused", "fresh", "reset-before-detach"],
                     help="Opt-in diagnostic overlay; compare reused targets, fresh targets or one reset before detach.")
+parser.add_argument("--motion-window-trace", action="store_true",
+                    help="Bounded staged native callback trace; requires a target-lifetime comparison.")
 args = parser.parse_args()
+if args.motion_window_trace and not args.motion_target_lifetime:
+    parser.error("Window trace requires an explicit diagnostic target-lifetime comparison.")
 output = args.output.resolve()
 if output.exists():
     parser.error("Output already exists; preserve it for provenance and pass --output with a fresh task-owned path.")
@@ -83,6 +89,7 @@ substitutions = {
 }
 hashes = {}
 sources = []
+window_trace = None
 for source in sorted((ROOT / "Sources/DarkbloomMonitor").rglob("*.swift")):
     if source.name == "DarkbloomMonitorApp.swift":
         continue  # Production app entry point owns all live start-up wiring.
@@ -94,6 +101,14 @@ for source in sorted((ROOT / "Sources/DarkbloomMonitor").rglob("*.swift")):
         if text.count(before) != 1:
             parser.error(f"Safety substitution drifted: {source}")
         text = text.replace(before, after)
+    if source.name == "MenuBarLabel.swift" and args.motion_window_trace:
+        try:
+            text = stage_window_trace(text)
+        except ValueError as error:
+            parser.error(str(error))
+        window_trace = {"original_sha256": hashes[str(source.relative_to(ROOT))],
+                        "staged_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                        "capacity_per_view": 512, "diagnostic_only": True}
     destination = stage / source.relative_to(ROOT / "Sources/DarkbloomMonitor")
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(text)
@@ -124,7 +139,10 @@ for helper in sorted((ROOT / "Tests/NativeUI").glob("*Proof.swift")):
     staged_helper = stage / helper.name
     if helper.name == "MenuBarMotionProof.swift" and args.motion_target_lifetime:
         try:
-            comparison_bytes = stage_comparison(helper_bytes.decode("utf-8")).encode("utf-8")
+            comparison_text = stage_comparison(helper_bytes.decode("utf-8"))
+            if args.motion_window_trace:
+                comparison_text = stage_trace_report(comparison_text)
+            comparison_bytes = comparison_text.encode("utf-8")
         except ValueError as error:
             parser.error(str(error))
         staged_helper.write_bytes(comparison_bytes)
@@ -146,6 +164,7 @@ command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6
            *(["-D", "FIXTURE_COMPACT"] if args.compact else []),
            *(["-D", "FIXTURE_FRESH_MOTION_TARGETS"] if args.motion_target_lifetime == "fresh" else []),
            *(["-D", "FIXTURE_RESET_BEFORE_DETACH"] if args.motion_target_lifetime == "reset-before-detach" else []),
+           *(["-D", "FIXTURE_MOTION_WINDOW_TRACE"] if args.motion_window_trace else []),
            "-I", str(products), "-F", str(products),
            str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle", "-lsqlite3",
            "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks", "-o", str(binary)]
@@ -158,6 +177,7 @@ manifest = {
     "review_banner_visible": not args.hide_review_banner, "initial_compact": args.compact,
     "source_sha256": hashes,
     "motion_target_comparison": motion_comparison,
+    "motion_window_trace": window_trace,
     "dependency_substitutions": {name: {"before": pair[0], "after": pair[1]}
                                  for name, pair in substitutions.items()},
     "telemetry_library_sha256": hashlib.sha256(staged_telemetry.read_bytes()).hexdigest(),
