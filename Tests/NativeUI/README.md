@@ -936,3 +936,14 @@ enabled/preload selectors, slot/loading policy and Save/lifecycle call counts;
 it does not capture the pending editor draft. Copy each result before another
 save/scenario overwrites it. See
 `docs/MODEL_STARTUP_STATES_NATIVE_REVIEW_20261003.md` for the comparisons and limits.
+
+## Overview hourly credits checkpoint
+
+See `docs/OVERVIEW_HOURLY_CREDITS_REVIEW_20261007.md` for the exact optimized
+artifact, date/header correction, tests and remaining original-gate failures.
+Data checks → Earnings read supplies zero/unknown/signed/tiny/empty histories;
+press Overview's own Refresh after selecting a fixture. Scenario Offline plus
+Refresh exercises retained local-read failure without an endpoint. Hardware &
+cooling must collapse without hiding GPU notices; its expansion preference uses
+the fixture's private defaults. Bind each new artifact explicitly and pass that
+app to reusable CUA helpers; avoid retaining closures bound to a closed artifact.

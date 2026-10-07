@@ -1,5 +1,16 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 Overview follow-up: an hourly native account-credit chart now sits
+above models, and hardware/cooling details use a persisted disclosure. Collapsed
+GPU warnings remain visible; the resource CPU sampler is unmounted on collapse.
+Actual read-lifecycle regression and all 1,652 reported Release tests pass, with
+seven existing opt-in skips; 32 staging checks pass. Native review covers signed,
+zero, unknown, sparse and failed-refresh retention, captured dates, navigation
+and compact/wide appearances. Final source hashes and owned process exits are
+verified. The ordinary gate retains the same three failures (12/15), Models and
+Charts pass; accounting, broader polish and release remain open. See
+[Overview hourly credits review](OVERVIEW_HOURLY_CREDITS_REVIEW_20261007.md).
+
 October 7 appearance-only follow-up: cached native colors now follow AppKit
 appearance changes without new telemetry. The mounted unit regression, all
 1,651 reported Release tests and 32 staging checks pass, with seven existing

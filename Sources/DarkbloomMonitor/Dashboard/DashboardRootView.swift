@@ -137,7 +137,10 @@ struct DashboardRootView: View {
             .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 260)
         } detail: {
             if selectedRaw == DashboardDestination.overview.rawValue || DashboardDestination(rawValue: selectedRaw) == nil {
-                DashboardOverviewView(store: store, controlStore: controlStore)
+                DashboardOverviewView(store: store, controlStore: controlStore, openActivity: {
+                    navigation.sidebarSelection = .destination(.activity)
+                    navigation.revealSelectedSection()
+                })
             } else if navigation.selected == .chat {
                 if let chatStore {
                     ChatView(store: chatStore, openPopOut: openChatWindow, draft: chatDraft,

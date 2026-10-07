@@ -4,6 +4,8 @@ import SwiftUI
 struct DashboardOverviewView: View {
     @ObservedObject var store: MonitorStore
     let controlStore: ProviderControlStore?
+    var openActivity: (() -> Void)? = nil
+    @AppStorage("overview.hardwareExpanded") private var hardwareExpanded = false
 
     var body: some View {
         TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 1), isVisible: store.dashboardVisible)) { _ in
@@ -35,8 +37,18 @@ struct DashboardOverviewView: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Today's observed metrics")
                 .accessibilityIdentifier("overview.metrics")
-                ProviderResourcesView(store: store)
+                OverviewEarningsView(store: store, openActivity: openActivity)
                 DashboardModelSummary(store: store, controlStore: controlStore)
+                if !hardwareExpanded, let protection = store.hostGPUProtection {
+                    HostGPUProtectionSummaryView(protection: protection, slowdownWarning: store.servingSlowdownWarning)
+                }
+                DisclosureGroup("Hardware & cooling", isExpanded: $hardwareExpanded) {
+                    if hardwareExpanded {
+                        ProviderResourcesView(store: store)
+                            .padding(.top, 8)
+                    }
+                }
+                .accessibilityIdentifier("overview.hardware")
                 if let controlStore {
                     DisclosureGroup("Running and saved selection") {
                         ProviderSelectionView(store: store, controlStore: controlStore)
