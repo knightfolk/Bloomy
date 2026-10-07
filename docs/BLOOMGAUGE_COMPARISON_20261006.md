@@ -1,5 +1,86 @@
 # Bloomy and BloomGauge: product and stack review
 
+## Current decision brief — October 7
+
+The fresh review is anchored to Bloomy `b2251fe` plus explicitly unfinished
+working-tree financial UI changes. BloomGauge's public main remains
+`724ce679e407eba0806cd03e94f303c4fb728468`, confirmed through GitHub's API.
+Its current homepage, feature catalog, setup guide, release history and pinned
+architecture/README were rechecked. Four retained published screenshots were
+visually inspected: demand, day replay, switch rules and readiness. A fresh
+asset-byte check received HTTP 403, so those screenshots remain retained vendor
+captures, not a newly exercised installed build. No app installation, model
+change, provider command or comparative performance test was performed.
+
+**Recommendation:** keep Bloomy's native stack and strengthen the connection
+between evidence, decisions and graphics. BloomGauge presents a more complete
+earning-management journey. Bloomy has useful additional local controls, but
+feature count alone does not establish a better experience or higher earnings.
+
+| User question | What BloomGauge makes clear | Bloomy's next useful improvement |
+| --- | --- | --- |
+| Is this Mac ready to earn? | A readiness chain with one next action | One compact readiness strip shared by popup, Overview and Health; evidence age and unknown states included |
+| Why did today earn this amount? | A selected day's model timeline and earning breakdown | Join existing model visits, accepted-work observations, credits and actions in Activity; keep account money separate from local work |
+| Was the switch worthwhile? | Entry/return thresholds, round-trip cost and modeled replay | Show measured load time, time to first organic work, no-work residence and estimated payback next to the switch reason |
+| Which model has sustained demand? | A common ruler with current/usual markers and history | One demand strip and sparkline per model, consistent units, sample age and visible gaps |
+| How do I get started? | Documented graphical install, browser sign-in and resumable progress | A resumable first-run flow using verified official installation and authentication mechanisms |
+| Can I check another Mac? | Documented private phone access and a fleet view | Finish existing Companion packaging and physical-device qualification before claiming delivery parity |
+
+Sources: [features](https://bloomgauge.io/features),
+[setup](https://bloomgauge.io/help/how-to-set-up-darkbloom-mac),
+[switch presentation](https://bloomgauge.io/media/features/switch-rules.jpg).
+Competitor capabilities are documented offerings, not independently verified
+runtime or income results.
+
+### Concrete changes to our stack
+
+1. **Finish the shared financial reporting path.** The committed ledger now
+   preserves account scope, provider IDs, exact amounts and corrections;
+   authenticated projections are present on main. The working-tree Activity
+   and Overview integration consumes one report, but is still unfinished and
+   its latest focused run reports three issues. Do not count that integration
+   as released or fully verified. A provider-ID filter still needs a verified
+   local-machine mapping before its credits can calibrate this Mac's profits.
+2. **Make freshness adaptive through one scheduler.** The source currently
+   schedules earnings refreshes every 600 seconds: six scheduled cycles per
+   hour, excluding manual refreshes and requests within a cycle. Evaluate
+   30–60-second foreground/post-completion refreshes with coalescing, rate-limit
+   handling and backoff, then slow down when hidden or idle. These are proposed
+   values requiring measurement; a one-second animation is not fresher money.
+3. **Build one immutable day report.** Join existing histories by explicit
+   scope and time, carrying coverage and source timestamps. Render aligned
+   model, work, action and credit tracks from it. Credit time is not request
+   start time, and nearby switches do not prove missing rewards were caused by
+   switching. Preserve exact financial records; bound/downsample sensor data.
+4. **Improve the economics without adding another controller.** Our existing
+   policy already has gain, confirmation, hold, return and attempt-limit gates.
+   Audit its positive-incumbent prerequisite and raw-request/gross-rate filters:
+   they can exclude a better net alternative. First test those cases with
+   fixtures, then qualify any policy change. Add measured round-trip costs and
+   outcome review; keep simulations distinct from earned credits. Continue
+   routing actions through `ProviderControlStore` and respecting Autopilot.
+5. **Add bounded historical demand through the existing adapter.** The official
+   endpoint is public and cached, but at least an hour behind current time and
+   limited to publishable cohorts. It cannot replace live pressure, establish
+   zero demand from an empty response, or predict local income by itself.
+   [Official contract](https://github.com/Layr-Labs/d-inference/blob/master/docs/reference/api-contracts.md#model-demand-response).
+
+Our SwiftUI/AppKit, native Charts and SQLite modules fit these changes.
+BloomGauge's Swift/WKWebView, bundled Python and React stack supports shared
+desktop/phone rendering; it is not evidence that a rewrite would improve
+Bloomy. Compare CPU, memory, wakeups, launch latency and database growth under
+matched release-build workloads before making an efficiency claim.
+[Pinned architecture](https://github.com/cookder/bloomgauge/blob/724ce679e407eba0806cd03e94f303c4fb728468/docs/ARCHITECTURE.md).
+
+The UI direction should stay original and native: stable icon-first controls,
+one primary earnings graphic, compact readiness, comparable demand strips, and
+details revealed through selection. The first implementation priority is
+financial integration and machine attribution, followed by readiness/day
+replay, demand/switch economics, onboarding and Companion delivery. This brief
+is research only; it does not change runtime behavior or complete those items.
+
+## Earlier review and supporting analysis
+
 Initially reviewed October 6, 2026 at Bloomy `789b58e`. Refreshed October 7 at
 `f76a89af7f548459fe9a3d0df8c75fd2a40e9e40` on `main`; unfinished working-tree
 financial integration is explicitly excluded from completed-feature claims.
