@@ -1,5 +1,20 @@
 # Bloomy native polish and efficiency
 
+October 7 readiness checkpoint: Overview and Health now share one compact
+provider summary with five detailed evidence rows. Scheduled waiting, accepted
+work, manual stop, unconfirmed authorization, cold models and stale readings
+remain distinct; navigation reveals the relevant existing screen. Process
+identity is checked once per changed daemon observation, without another poller.
+The final serial Release run reports 1,768 passing tests with seven existing
+opt-in skips; 32 staging checks and the production build pass. Nine native states,
+compact/wide light/dark layouts, separate accessibility rows and all three
+navigation destinations were checked against 126 view/fixture and 94 telemetry
+source hashes. Models/Charts pass; motion remains 12/15 with the same three
+cover/reopening failures. No installed update or distribution is claimed.
+Historical local attribution, joined replay, demand history and broader native
+delivery remain open. See
+[provider readiness review](PROVIDER_READINESS_REVIEW_20261007.md).
+
 October 7 local-credit boundary: account earnings remain visible while power
 matching, model calibration and profit history require a separately verified
 local report. Unqualified production clients provide no local profit. Pending

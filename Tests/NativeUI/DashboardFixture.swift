@@ -36,6 +36,15 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+private enum FixtureReadinessMode: String, CaseIterable {
+    case scenario = "Scenario observation"
+    case idle = "Ready and idle", working = "Active inference"
+    case scheduled = "Scheduled waiting", draining = "Finishing accepted work"
+    case stopped = "Provider stopped", expired = "Expired authorization"
+    case cold = "Models on demand", unknown = "Unknown lifecycle phase"
+    case stale = "Expired daemon observation"
+}
+
 private enum FixtureLogTimeZone: String, CaseIterable, Identifiable {
     case system = "Mac local", utc = "UTC", kathmandu = "Kathmandu"
     var id: Self { self }
@@ -153,6 +162,34 @@ private enum FixtureData {
             tokenRate: scenario.hasCurrentRuntime ? .available(tokensPerSecond: 52.7, label: "Synthetic observed rate") : .unavailable(reason: "Synthetic inactive source"),
             diagnostics: scenario.hasCurrentRuntime ? [] : [AcquisitionDiagnostic(id: "fixture", source: "Synthetic review", message: "Synthetic source \(scenario.rawValue.lowercased())", occurredAt: now)],
             capturedAt: now, menuStatus: scenario.hasCurrentRuntime ? .online : scenario == .stale ? .stale : .offline)
+    }
+
+    static func readinessSnapshot(_ mode: FixtureReadinessMode, now: Date, events: [LogEvent]) -> TelemetrySnapshot {
+        let base = snapshot(.fresh, now: now, events: events)
+        let observed = mode == .stale ? now.addingTimeInterval(-15) : now
+        let time = observed.timeIntervalSince1970
+        let trust: TrustState? = mode == .scheduled || mode == .stopped ? nil : .init(
+            level: "verified", status: "online", reason: "Synthetic readiness only", receivedAt: time,
+            authorization: .init(path: "app_attest", expiresAt: mode == .expired ? time - 1 : time + 120,
+                sessionIDPresent: true, machineIDPresent: true))
+        let outcome: ProviderLifecycleOutcome = mode == .stopped ? .stopped : mode == .scheduled ? .drained : mode == .draining ? .draining : mode == .unknown ? .unknown : .serving
+        let state = DaemonState(schema: 1, version: "0.9.17", currentModel: modelIDs[0],
+            warmModels: mode == .cold || mode == .scheduled || mode == .stopped ? [] : [modelIDs[0]],
+            stats: .init(tokensGenerated: 126_400, requestsServed: 236, usageGaps: 0), trust: trust,
+            capacity: nil, slots: [], inferenceActive: mode == .working || mode == .draining,
+            startedAt: now.addingTimeInterval(-1800).timeIntervalSince1970, writtenAt: time, pid: 4242,
+            processIdentity: .init(pid: 4242, startTimeMicros: 1_800_000_000),
+            advertisedModels: Array(modelIDs.prefix(3)), coordinatorURL: "wss://coordinator.example:8443/ws/provider",
+            lifecycle: .init(outcome: outcome, remainingRequests: mode == .draining ? 2 : 0, coordinatorAcknowledged: true),
+            availability: mode == .scheduled ? .init(phase: .waitingForSchedule) : nil)
+        var status = StatusSnapshot()
+        status.version = "0.9.17"
+        status.coordinator = "https://coordinator.example:8443"
+        status.daemon = mode == .stopped ? "Stopped" : "Running"
+        return TelemetrySnapshot(state: .available(value: state, capturedAt: observed),
+            loadedModels: base.loadedModels, status: .available(value: status, capturedAt: now),
+            eventFeed: base.eventFeed, tokenRate: base.tokenRate, diagnostics: [], capturedAt: now,
+            menuStatus: mode == .stale ? .stale : mode == .stopped ? .offline : .online)
     }
 
     #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF || FIXTURE_SETTINGS_PREVIEW_PROOF
@@ -1227,6 +1264,7 @@ private final class FixtureModel: ObservableObject {
     @Published var ready = false
     @Published var issue: String?
     @Published var scenario: FixtureScenario = .fresh
+    @Published var readinessMode = FixtureReadinessMode.scenario
     @Published var cliUpdateRead: FixtureCLIUpdateRead = .current
     @Published var fanReadback: FixtureFanReadback = .held
     private var extrasClient: FixtureExtras
@@ -1317,14 +1355,17 @@ private final class FixtureModel: ObservableObject {
             ? FixtureActivityRead.microEarningsPower(now: seededAt, calendar: .current)
             : scenario == .matchedEnergy
                 ? EnergyRecordingSnapshot(reading: nil, intervals: savedEnergy.intervals, issue: nil) : savedEnergy
+        let initialSnapshot = FixtureData.snapshot(scenario, now: seededAt, events: events)
+        let inertProcessIdentity = initialSnapshot.state.value?.processIdentity
         let monitor = MonitorStore(service: TelemetryService(source: FixtureTelemetrySource(scenario: scenario, logFeed: logFeed)),
-            initial: FixtureData.snapshot(scenario, now: seededAt, events: events), providerExtras: extras,
+            initial: initialSnapshot, providerExtras: extras,
             initialEnergy: fixtureEnergy,
             earningsClient: earningsClient,
             networkCapacityClient: FixtureCapacity(scenario: scenario, fixedCapture: capacityCapturedAt), publicCatalogClient: FixtureCatalog(scenario: scenario),
             publicPricingClient: FixturePricing(scenario: scenario), networkSeriesClient: FixtureSeries(scenario: scenario),
             energyPreferences: defaults, energyRecorder: EnergyRecorder(file: directory.appendingPathComponent("energy.json"), readPower: { _ in nil }),
-            gpuUsage: SystemGPUUsageStore(read: { nil }), menuAttentionPreferences: defaults)
+            gpuUsage: SystemGPUUsageStore(read: { nil }), menuAttentionPreferences: defaults,
+            readinessProcessIdentityReader: { pid in inertProcessIdentity?.pid == pid ? inertProcessIdentity : nil })
         monitor.inactivityNudge = InactivityNudgeStore(keyStore: tokens, defaults: defaults,
             evidence: { _ in .unavailable }, canAct: { false }, send: { _, _ in nil })
         monitor.profitSwitch = ProfitSwitchStore(control: control, defaults: defaults, installedMemoryGB: 64, availableMemoryGB: { 24 })
@@ -1473,6 +1514,11 @@ private final class FixtureModel: ObservableObject {
             try? data.write(to: directory.appendingPathComponent("fixture-fan-proof.json"), options: .atomic)
         }
     }
+    func setReadinessMode(_ mode: FixtureReadinessMode) async {
+        guard ready, !isTerminating, !proofRunning, scenario == .fresh else { return }
+        readinessMode = mode
+        await publishTelemetry(scenario: scenario, monitor: monitor, logFeed: logFeed)
+    }
     func tick() async {
         #if FIXTURE_SETTINGS_PREVIEW_PROOF
         guard !settingsPreviewProofRunning else { return }
@@ -1502,7 +1548,11 @@ private final class FixtureModel: ObservableObject {
             let events = await logFeed.events()
             guard !Task.isCancelled, self.ready, !self.isTerminating,
                   !self.metricsReview, generation == self.loadGeneration else { return }
-            await monitor.accept(FixtureData.snapshot(scenario, now: Date(), events: events))
+            let now = Date()
+            let snapshot = scenario == .fresh && self.readinessMode != .scenario
+                ? FixtureData.readinessSnapshot(self.readinessMode, now: now, events: events)
+                : FixtureData.snapshot(scenario, now: now, events: events)
+            await monitor.accept(snapshot)
         }
         telemetryPublicationID = publicationID
         telemetryPublicationTask = task
@@ -2770,6 +2820,13 @@ private struct FixtureReviewView: View {
                             Task { await model.delayNextControlRead() }
                         }
                         .disabled(!model.ready)
+                        Menu("Synthetic readiness") {
+                            ForEach(FixtureReadinessMode.allCases, id: \.self) { mode in
+                                Button(mode.rawValue) { Task { await model.setReadinessMode(mode) } }
+                            }
+                        }
+                        .disabled(!model.ready || model.scenario != .fresh || model.proofRunning)
+                        .help("Changes inert daemon evidence only; no provider commands or credentials are read.")
                         Menu("Synthetic Autopilot") {
                             ForEach(FixtureAutopilotMode.allCases, id: \.self) { mode in
                                 Button(mode.rawValue) { Task { await model.setAutopilotMode(mode) } }

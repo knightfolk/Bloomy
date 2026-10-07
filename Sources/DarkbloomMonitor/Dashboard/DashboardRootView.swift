@@ -1,3 +1,4 @@
+import DarkbloomTelemetry
 import SwiftUI
 
 enum DashboardDestination: String, CaseIterable, Identifiable {
@@ -140,7 +141,7 @@ struct DashboardRootView: View {
                 DashboardOverviewView(store: store, controlStore: controlStore, openActivity: {
                     navigation.sidebarSelection = .destination(.activity)
                     navigation.revealSelectedSection()
-                })
+                }, openReadinessDestination: showReadinessDestination)
             } else if navigation.selected == .chat {
                 if let chatStore {
                     ChatView(store: chatStore, openPopOut: openChatWindow, draft: chatDraft,
@@ -190,7 +191,7 @@ struct DashboardRootView: View {
                     updateProtection: updateProtection
                 )
             } else {
-                HealthView(store: store)
+                HealthView(store: store, openReadinessDestination: showReadinessDestination)
             }
         }
         .toolbar {
@@ -212,6 +213,17 @@ struct DashboardRootView: View {
         .onChange(of: store.snapshot.status.value?.version) { _, _ in
             hostingStore?.refreshEnvironment()
         }
+    }
+
+    private func showReadinessDestination(_ destination: ProviderReadinessPresentation.Destination) {
+        let target: DashboardDestination
+        switch destination {
+        case .health: target = .health
+        case .hosting: target = .hosting
+        case .models: target = .models
+        }
+        navigation.sidebarSelection = .destination(target)
+        navigation.revealSelectedSection()
     }
 
     private func destinationRows(_ destinations: [DashboardDestination]) -> some View {

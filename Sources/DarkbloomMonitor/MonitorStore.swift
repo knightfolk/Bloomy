@@ -54,6 +54,23 @@ final class MonitorStore: ObservableObject {
     private var networkPollingPolicy = NetworkPollingPolicy()
 
     @Published private(set) var snapshot: TelemetrySnapshot
+    private let readinessProcessIdentityReader: @Sendable (Int32) -> ProcessIdentity?
+    private var readinessIdentitySource: SourceAvailability<DaemonState>?
+    private var readinessProcessIdentity: ProcessIdentity?
+
+    /// One kernel identity lookup per changed daemon observation, shared by the
+    /// visible summaries. Clock ticks and financial publications don't reread it.
+    func providerReadiness(at date: Date) -> ProviderReadinessPresentation {
+        if readinessIdentitySource != snapshot.state {
+            readinessIdentitySource = snapshot.state
+            if case .available(let state, _) = snapshot.state {
+                readinessProcessIdentity = readinessProcessIdentityReader(state.pid)
+            } else {
+                readinessProcessIdentity = nil
+            }
+        }
+        return .make(snapshot: snapshot, now: date, liveProcessIdentity: readinessProcessIdentity)
+    }
     /// App-owned watcher; telemetry observations drive its idle window.
     var inactivityNudge: InactivityNudgeStore?
     /// App-owned opt-in watcher. It receives only accepted telemetry and
@@ -183,13 +200,15 @@ final class MonitorStore: ObservableObject {
         energyPreferences: UserDefaults = .standard,
         energyRecorder: EnergyRecorder? = nil,
         gpuUsage: SystemGPUUsageStore? = nil,
-        menuAttentionPreferences: UserDefaults = .standard
+        menuAttentionPreferences: UserDefaults = .standard,
+        readinessProcessIdentityReader: @escaping @Sendable (Int32) -> ProcessIdentity? = { ProcessIdentity.read(pid: $0) }
     ) {
         self.service = service
         self.providerExtras = providerExtras
         self.gpuUsage = gpuUsage ?? SystemGPUUsageStore()
         self.energyPreferences = energyPreferences
         self.menuAttentionPreferences = menuAttentionPreferences
+        self.readinessProcessIdentityReader = readinessProcessIdentityReader
         self.energyRecorder = energyRecorder ?? EnergyRecorder(
             file: MonitorApplicationIdentity
                 .applicationSupportDirectory()

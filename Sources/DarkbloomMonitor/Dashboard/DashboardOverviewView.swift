@@ -5,15 +5,17 @@ struct DashboardOverviewView: View {
     @ObservedObject var store: MonitorStore
     let controlStore: ProviderControlStore?
     var openActivity: (() -> Void)? = nil
+    var openReadinessDestination: ((ProviderReadinessPresentation.Destination) -> Void)? = nil
     @AppStorage("overview.hardwareExpanded") private var hardwareExpanded = false
 
     var body: some View {
         TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 1), isVisible: store.dashboardVisible)) { _ in
-            overviewContent
+            // Telemetry can arrive between scheduled expiry redraws.
+            overviewContent(at: Date())
         }
     }
 
-    private var overviewContent: some View {
+    private func overviewContent(at now: Date) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
@@ -23,11 +25,10 @@ struct DashboardOverviewView: View {
                         Text(Host.current().localizedName ?? "This Mac").foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Label(store.snapshot.menuStatus.accessibilityLabel, systemImage: "circle.fill")
-                        .font(.callout)
-                        .foregroundStyle(store.snapshot.menuStatus == .online ? Color.green : Color.secondary)
                 }
                 .accessibilityElement(children: .contain)
+                ProviderReadinessSummaryView(presentation: store.providerReadiness(at: now),
+                    openDestination: openReadinessDestination)
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) { summaryMetrics }.frame(minWidth: 700)
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {

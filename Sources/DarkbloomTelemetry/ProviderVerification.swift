@@ -53,6 +53,23 @@ public struct ProviderVerification: Equatable, Sendable {
         now: Date,
         liveProcessIdentity: ProcessIdentity? = nil
     ) -> Self {
+        evaluateObservedIdentity(
+            state: state,
+            expectedCoordinator: expectedCoordinator,
+            now: now,
+            liveProcessIdentity: liveProcessIdentity ?? ProcessIdentity.read(pid: state.pid)
+        )
+    }
+
+    /// Pure evaluation of an explicitly supplied observation. A nil identity
+    /// stays missing and never triggers a kernel read. Use this entry point for
+    /// deterministic presentations and fixtures.
+    public static func evaluateObservedIdentity(
+        state: DaemonState,
+        expectedCoordinator: String?,
+        now: Date,
+        liveProcessIdentity: ProcessIdentity?
+    ) -> Self {
         let nowSeconds = now.timeIntervalSince1970
         let trust = state.trust
         let snapshotFresh = isFresh(state.writtenAt, now: nowSeconds)
@@ -62,7 +79,7 @@ public struct ProviderVerification: Equatable, Sendable {
             && (trust?.receivedAt ?? -.infinity) >= state.startedAt
         let online = trust?.status.lowercased() == "online"
 
-        let liveIdentity = liveProcessIdentity ?? ProcessIdentity.read(pid: state.pid)
+        let liveIdentity = liveProcessIdentity
         let processMatches = liveIdentity == state.processIdentity
             && liveIdentity?.pid == state.pid
         let coordinatorMatches = matches(

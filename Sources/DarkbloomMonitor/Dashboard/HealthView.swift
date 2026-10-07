@@ -3,6 +3,7 @@ import SwiftUI
 
 struct HealthView: View {
     @ObservedObject var store: MonitorStore
+    var openReadinessDestination: ((ProviderReadinessPresentation.Destination) -> Void)? = nil
     @State private var showsLogs = false
     @State private var showsProvider = false
     @State private var showsDaemon = false
@@ -21,10 +22,12 @@ struct HealthView: View {
                 LogsView(feed: store.snapshot.eventFeed)
             } else {
                 TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 5), isVisible: store.dashboardVisible)) { _ in
+                    // A scheduled entry can predate newly published telemetry.
                     let now = Date()
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
-                            overview
+                            ProviderReadinessSummaryView(presentation: store.providerReadiness(at: now),
+                                showsEvidence: true, openDestination: openReadinessDestination)
                             issues(at: now)
                             sourceFreshness
                             DisclosureGroup(isExpanded: $showsProvider) {
@@ -56,7 +59,11 @@ struct HealthView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.top, 10)
                             } label: {
-                                sectionLabel("Thermal details", symbol: "thermometer.medium")
+                                HStack {
+                                    sectionLabel("Thermal details", symbol: "thermometer.medium")
+                                    Spacer()
+                                    Text(store.thermalState.displayName).font(.callout).foregroundStyle(.secondary)
+                                }
                             }
                             AdvancedSection(snapshot: store.snapshot, isExpanded: $expanded)
                         }
@@ -67,27 +74,6 @@ struct HealthView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private var overview: some View {
-        HStack(alignment: .top, spacing: 12) {
-            overviewCard("Monitor", value: statusTitle, symbol: statusSymbol, color: statusColor)
-            overviewCard("Mac thermal", value: store.thermalState.displayName,
-                         symbol: "thermometer.medium", color: .secondary)
-        }
-    }
-
-    private func overviewCard(_ title: String, value: String, symbol: String, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Label(title, systemImage: symbol)
-                .font(.subheadline.weight(.medium)).foregroundStyle(color)
-            Text(value).font(.title3.weight(.semibold))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title): \(value)")
     }
 
     @ViewBuilder
@@ -213,32 +199,7 @@ struct HealthView: View {
         return false
     }
 
-    private var statusTitle: String {
-        switch store.snapshot.menuStatus {
-        case .online: "Online"
-        case .stale: "Stale"
-        case .offline: "Offline"
-        case .unavailable: "Unavailable"
-        }
-    }
 
-    private var statusSymbol: String {
-        switch store.snapshot.menuStatus {
-        case .online: "checkmark.circle.fill"
-        case .stale: "clock.fill"
-        case .offline: "xmark.circle.fill"
-        case .unavailable: "questionmark.circle.fill"
-        }
-    }
-
-    private var statusColor: Color {
-        switch store.snapshot.menuStatus {
-        case .online: .green
-        case .stale: .orange
-        case .offline: .red
-        case .unavailable: .secondary
-        }
-    }
 }
 
 /// Keep source status scannable without discarding its diagnostic evidence.
