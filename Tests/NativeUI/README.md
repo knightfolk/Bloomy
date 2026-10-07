@@ -229,17 +229,30 @@ python3 Tests/NativeUI/build-dashboard-fixture.py --configuration release \
 Choose **Settings preview proof** in the review console. It opens the unchanged
 `DashboardWindowController` and dashboard root with an isolated, never-started
 synthetic store and private preferences. The console keeps its own visibility
-owner. Seven bounded cases observe baseline motion, fresh publications, idle,
-page departure/return, minimize/restore, retained close/reopen and rapid reopen.
-Each successful case includes a publication-free compositor hold over 1.6
-seconds. No animation, display, layout or visibility notification is forced.
+owner. Nine bounded cases observe baseline motion, fresh publications, idle,
+independent temperature/fan changes, failed fan reads and recovery, page
+departure/return, minimize/restore, retained close/reopen and rapid reopen.
+An inert counted extras client supplies measured fan RPM and temperatures;
+no sensors, provider commands, fan mutations or background polling run. The
+temperature ramp covers 54, 70 and 85 °C with 25, 50 and 100 percent fan speed.
+The failure case first observes its own red baseline, then requires the retained
+payload/date, neutral stale color and fresh green recovery. Native colors must
+match the view's own effective appearance, including material appearances;
+the reports retain expected and actual RGBA components. Geometry, native
+identity and the single clock must remain stable across input changes.
+Each successful motion observation includes a publication-free compositor hold
+over 1.6 seconds. No animation, display, layout or visibility notification is forced.
 Terminal/progress reports use a unique `settings-preview/<UUID>` directory in
 the fixture session. Success also requires stopped departed clocks and closure
 of the owned production window. Quit cancels and joins the finite proof.
 The option retains the console after last-window close and rejects other motion
 diagnostics or a hidden banner. Omission preserves the ordinary fixture policy;
 the original **Native proof** gate is separate. See
-`docs/MENU_BAR_SETTINGS_LIFECYCLE_REVIEW_20261007.md` for evidence and limits.
+`docs/MENU_BAR_SETTINGS_LIFECYCLE_REVIEW_20261007.md` for the earlier seven-case
+evidence and limits, and `docs/MENU_BAR_SETTINGS_FAN_TRANSITIONS_REVIEW_20261007.md`
+for the color defect and final nine-case evidence. The fan-transition extension
+does not prove physical cooling-ring fill, actual sensor behavior or macOS
+Reduce Motion delivery.
 
 For the separate production status-item host diagnostic, build a fresh output
 with `--configuration release --production-status-item-proof`, then choose

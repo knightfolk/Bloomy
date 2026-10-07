@@ -414,7 +414,11 @@ struct MenuBarActivityArc: NSViewRepresentable {
             self.reduceMotion = reduceMotion
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            arc.strokeColor = tint.cgColor
+            // SwiftUI updates can arrive under another drawing appearance.
+            // Resolve dynamic AppKit colors in this view, including vibrancy.
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                arc.strokeColor = tint.cgColor
+            }
             arc.isHidden = !active
             CATransaction.commit()
             synchronizeAnimation()

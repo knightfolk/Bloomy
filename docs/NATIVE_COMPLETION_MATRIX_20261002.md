@@ -1,5 +1,15 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 fan-color follow-up: native appearance tracing confirms a fixed
+color-conversion defect; production now resolves the tint in its own view.
+Sixteen contrary-context regression combinations and the repaired 1,650-test
+Release run pass, with seven existing opt-in skips. Nine actual Settings cases
+verify color thresholds, independently failed fan reads/recovery and stable
+clock/geometry; cancelled Quit and all owned process exits are verified. The
+ordinary gate retains cover/normal/rapid reopening failures (12/15), so no
+release or broader matrix completion is claimed. See
+[fan-transition review](MENU_BAR_SETTINGS_FAN_TRANSITIONS_REVIEW_20261007.md).
+
 October 7 delay-only follow-up: delay and observed arms repeat 14/15 versus
 immediate 12/15 in both orders. Ninety motion cases are terminal, Models/Charts
 pass, 32 staging checks pass and all owned processes exit. Short settling is

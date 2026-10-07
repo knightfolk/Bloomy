@@ -1,5 +1,17 @@
 # Bloomy native polish and efficiency
 
+October 7 fan-color follow-up: the actual Settings preview exposed ambient
+appearance leaking into fixed native colors. The production label now resolves
+color in its own view appearance, with no animation/timing change. A regression
+fails all sixteen pre-fix appearance/tint combinations; the repaired full Release
+suite passes with 1,650 reported tests and seven existing opt-in skips. Nine native
+Settings cases and cancelled cleanup pass, including exact color boundaries,
+stale fan evidence and recovery; 32 staging checks pass. The fresh ordinary gate
+still reports the same three cover/reopening failures (12/15), Models/Charts
+pass and all owned processes exit. See
+`MENU_BAR_SETTINGS_FAN_TRANSITIONS_REVIEW_20261007.md`. Actual system Reduce
+Motion and appearance-only transitions remain open; the broader goal is active.
+
 October 7 delay-only follow-up: one 50 ms sleep passes both unchanged reopening
 checks in both run orders (14/15), as does compositor observation; immediate
 controls repeat 12/15. All ninety cases are terminal; cover remains failed,

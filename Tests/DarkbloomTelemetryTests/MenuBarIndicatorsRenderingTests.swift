@@ -94,6 +94,35 @@ struct MenuBarIndicatorsRenderingTests {
         #expect(!arc.isHidden)
     }
 
+    @Test("activity colors resolve in the native view appearance, not an unrelated drawing context")
+    func activityColorUsesViewAppearance() throws {
+        let view = MenuBarActivityArc.ActivityArcView(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
+        defer { view.stopObserving() }
+        let arc = try #require(view.layer?.sublayers?.first as? CAShapeLayer)
+        for name in [NSAppearance.Name.aqua, .darkAqua, .vibrantLight, .vibrantDark] {
+            let local = try #require(NSAppearance(named: name))
+            let other = try #require(NSAppearance(named: name == .aqua || name == .vibrantLight ? .darkAqua : .aqua))
+            view.appearance = local
+            for tint in [NSColor.systemGreen, .systemYellow, .systemRed, .secondaryLabelColor] {
+                other.performAsCurrentDrawingAppearance {
+                    view.configure(active: true, tint: tint)
+                }
+                let actual = try components(arc.strokeColor)
+                var resolved: CGColor?
+                local.performAsCurrentDrawingAppearance { resolved = tint.cgColor }
+                let expected = try components(resolved)
+                #expect(zip(actual, expected).allSatisfy { abs($0 - $1) < 0.005 })
+                #expect(!arc.isHidden)
+                #expect(arc.animationKeys() == nil)
+            }
+        }
+    }
+
+    private func components(_ color: CGColor?) throws -> [CGFloat] {
+        let rgb = try #require(color.flatMap { NSColor(cgColor: $0)?.usingColorSpace(.deviceRGB) })
+        return [rgb.redComponent, rgb.greenComponent, rgb.blueComponent, rgb.alphaComponent]
+    }
+
     private func fixture(active: Bool = false, gpu: Double, fan: Double, temperature: Double,
                          freshness: MenuBarIndicators.Freshness = .current) -> MenuBarIndicators {
         .init(modelIsActive: active, gpu: .init(value: gpu, freshness: freshness),

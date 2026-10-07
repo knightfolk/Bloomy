@@ -1699,15 +1699,18 @@ private final class FixtureModel: ObservableObject {
             // A separate never-started store gives the actual production
             // controller sole ownership of its dashboard visibility. The
             // review console keeps its own store and visibility observer.
+            let testedExtrasClient = SettingsProofExtras()
+            let testedExtras = ProviderExtrasStore(client: testedExtrasClient)
+            await testedExtrasClient.set(temperature: 54, fanPercent: 25)
+            await testedExtras.refresh()
             let testedStore = MonitorStore(
                 service: TelemetryService(source: FixtureTelemetrySource(scenario: .fresh, logFeed: FixtureLogFeed(events: []))),
-                initial: FixtureData.statusItemSnapshot(active: true), providerExtras: nil,
+                initial: FixtureData.statusItemSnapshot(active: true), providerExtras: testedExtras,
                 earningsClient: FixtureEarnings(scenario: .fresh), energyPreferences: proofDefaults,
                 energyRecorder: EnergyRecorder(file: output.appendingPathComponent("inert-energy.json"), readPower: { _ in nil }),
                 gpuUsage: SystemGPUUsageStore(read: { nil }), menuAttentionPreferences: proofDefaults)
-            // Use the actual production window controller and unwrapped root,
-            // not the review console's imitation presentation policy. The
-            // console remains open for controls and terminal evidence.
+            // Actual production controller and unwrapped root. The console
+            // remains open for controls and terminal evidence.
             let controller = DashboardWindowController(store: testedStore, controlStore: nil,
                 frameAutosaveName: nil, defaults: proofDefaults)
             defer { controller.close(); presentDashboard?(nil, nil) }
@@ -1719,7 +1722,8 @@ private final class FixtureModel: ObservableObject {
             var result = await SettingsPreviewProof.run(window: window, navigation: controller.navigation,
                 store: testedStore, publish: { active in
                     await testedStore.accept(FixtureData.statusItemSnapshot(active: active))
-                }, reopen: { controller.present() }, outputDirectory: output)
+                }, reopen: { controller.present() }, extrasClient: testedExtrasClient, outputDirectory: output)
+            await testedExtras.stop()
             controller.close()
             let closed = !window.isVisible && !testedStore.dashboardVisible
             result["productionControllerClosed"] = closed

@@ -9,7 +9,8 @@ import QuartzCore
 enum SettingsPreviewProof {
     static func run(window: NSWindow, navigation: DashboardNavigation, store: MonitorStore,
                     publish: @MainActor (Bool) async -> Void,
-                    reopen: @MainActor () -> Void, outputDirectory: URL) async -> [String: Any] {
+                    reopen: @MainActor () -> Void, extrasClient: SettingsProofExtras,
+                    outputDirectory: URL) async -> [String: Any] {
         let session = Session(window: window, navigation: navigation, store: store, output: outputDirectory)
         func fresh(_ active: Bool = true) async throws {
             try Task.checkCancellation()
@@ -52,6 +53,80 @@ enum SettingsPreviewProof {
             var evidence = try await session.motion(host, stage: "after_idle")
             evidence["idle"] = idle
             return evidence
+        }
+        await session.check("independent_fan_temperature_updates") {
+            try await fresh()
+            let host = try await session.eligible()
+            let geometry = host.geometry
+            var readings = [[String: Any]]()
+            for (temperature, percent, color) in [(54.0, 25.0, NSColor.systemGreen),
+                                                   (70.0, 50.0, NSColor.systemYellow),
+                                                   (85.0, 100.0, NSColor.systemRed)] {
+                try await fresh()
+                let beforeReads = await extrasClient.readCount
+                await extrasClient.set(temperature: temperature, fanPercent: percent)
+                await store.providerExtras?.refresh()
+                let afterReads = await extrasClient.readCount
+                try require(afterReads == beforeReads + 1, "unexpected_extras_read_count")
+                try session.requireReadings(temperature: temperature, fanPercent: percent, stale: false)
+                try await session.wait("fan_temperature_color_not_rendered") {
+                    try session.requireIdentity(host)
+                    try require(host.geometry == geometry, "fan_update_changed_geometry")
+                    return session.colorMatches(host, expected: color)
+                }
+                var evidence = try await session.motion(host, stage: "fan_\(temperature)")
+                evidence["temperature"] = temperature; evidence["fanPercent"] = percent
+                evidence["clientReads"] = afterReads
+                readings.append(evidence)
+            }
+            return ["readings": readings, "sameHost": true]
+        }
+        await session.check("failed_fan_read_and_recovery") {
+            try await fresh()
+            let host = try await session.eligible()
+            let geometry = host.geometry
+            // Establish this case independently of the preceding color ramp.
+            await extrasClient.set(temperature: 85, fanPercent: 100)
+            await store.providerExtras?.refresh()
+            try session.requireReadings(temperature: 85, fanPercent: 100, stale: false)
+            try await session.wait("fresh_fan_baseline_not_rendered") {
+                try session.requireIdentity(host)
+                try require(host.geometry == geometry, "fresh_fan_baseline_changed_geometry")
+                try session.requireClock(host.layer)
+                return session.colorMatches(host, expected: .systemRed)
+            }
+            let freshBaseline = host.json
+            guard case .available(let previous, let date) = store.providerExtras?.snapshot?.fanStatus else {
+                throw Failure(code: "fan_baseline_missing")
+            }
+            let beforeReads = await extrasClient.readCount
+            await extrasClient.failRead()
+            await store.providerExtras?.refresh()
+            try require(await extrasClient.readCount == beforeReads + 1, "unexpected_extras_read_count")
+            guard case .stale(let retained, let retainedDate, _) = store.providerExtras?.snapshot?.fanStatus else {
+                throw Failure(code: "failed_fan_read_not_stale")
+            }
+            try require(retained == previous && retainedDate == date, "failed_fan_read_lost_evidence")
+            try session.requireReadings(temperature: 85, fanPercent: 100, stale: true)
+            try await session.wait("stale_temperature_not_neutral") {
+                try session.requireIdentity(host)
+                try require(host.geometry == geometry, "stale_fan_changed_geometry")
+                return session.colorMatches(host, expected: .secondaryLabelColor)
+            }
+            let stale = try await session.motion(host, stage: "stale_fan_active_model")
+            try await fresh()
+            await extrasClient.set(temperature: 54, fanPercent: 75)
+            await store.providerExtras?.refresh()
+            try require(await extrasClient.readCount == beforeReads + 2, "unexpected_extras_read_count")
+            try session.requireReadings(temperature: 54, fanPercent: 75, stale: false)
+            try await session.wait("fan_recovery_color_not_rendered") {
+                try session.requireIdentity(host)
+                try require(host.geometry == geometry, "recovered_fan_changed_geometry")
+                return session.colorMatches(host, expected: .systemGreen)
+            }
+            let recovered = try await session.motion(host, stage: "recovered_fan")
+            return ["freshBaseline": freshBaseline, "stale": stale, "recovered": recovered,
+                    "retainedCaptureDate": date.timeIntervalSince1970]
         }
         await session.check("navigate_away_return") {
             try await fresh()
@@ -150,11 +225,25 @@ enum SettingsPreviewProof {
         var json: [String: Any] {
             let clock = layer.animation(forKey: "inferenceRotation") as? CABasicAnimation
             return ["viewIdentity": identity(view), "layerIdentity": identity(layer),
+                    "viewAppearance": view.effectiveAppearance.name.rawValue,
+                    "windowAppearance": view.window?.effectiveAppearance.name.rawValue ?? "nil",
+                    "expectedGreenComponents": colorComponents(.systemGreen),
+                    "expectedYellowComponents": colorComponents(.systemYellow),
+                    "expectedRedComponents": colorComponents(.systemRed),
+                    "expectedNeutralComponents": colorComponents(.secondaryLabelColor),
                     "windowIdentity": view.window.map(identity) ?? "nil", "geometry": geometry,
                     "viewVisibleRect": NSStringFromRect(view.visibleRect),
                     "hiddenAncestor": view.isHiddenOrHasHiddenAncestor, "layerHidden": layer.isHidden,
                     "animationKeys": layer.animationKeys() ?? [], "clockDuration": clock?.duration ?? -1,
+                    "strokeColorComponents": layer.strokeColor.flatMap { NSColor(cgColor: $0)?.usingColorSpace(.deviceRGB) }
+                        .map { [$0.redComponent, $0.greenComponent, $0.blueComponent, $0.alphaComponent] } ?? [],
                     "presentationAngle": layer.presentation().map { atan2($0.transform.m12, $0.transform.m11) } ?? 0]
+        }
+        func colorComponents(_ color: NSColor) -> [CGFloat] {
+            var resolved: CGColor?
+            view.effectiveAppearance.performAsCurrentDrawingAppearance { resolved = color.cgColor }
+            guard let resolved, let rgb = NSColor(cgColor: resolved)?.usingColorSpace(.deviceRGB) else { return [] }
+            return [rgb.redComponent, rgb.greenComponent, rgb.blueComponent, rgb.alphaComponent]
         }
     }
 
@@ -260,6 +349,23 @@ enum SettingsPreviewProof {
             try require(clock.keyPath == "transform.rotation.z" && abs(clock.duration - 1.4) < 0.000001
                         && clock.repeatCount == .infinity, "preview_clock_parameters")
         }
+        func requireReadings(temperature: Double, fanPercent: Double, stale: Bool) throws {
+            let values = MenuBarIndicators.make(snapshot: store.snapshot, utilization: nil, sampledAt: nil,
+                fanStatus: store.providerExtras?.snapshot?.fanStatus, now: Date())
+            try require(values.temperature.value == temperature && values.fanSpeed.value == fanPercent
+                        && values.modelIsActive && values.temperature.freshness == (stale ? .stale : .current)
+                        && values.fanSpeed.freshness == (stale ? .stale : .current), "unexpected_fan_evidence")
+        }
+        func colorMatches(_ host: Host, expected: NSColor) -> Bool {
+            guard let color = host.layer.strokeColor,
+                  let actual = NSColor(cgColor: color)?.usingColorSpace(.deviceRGB) else { return false }
+            var expectedColor: CGColor?
+            host.view.effectiveAppearance.performAsCurrentDrawingAppearance { expectedColor = expected.cgColor }
+            guard let expectedColor, let target = NSColor(cgColor: expectedColor)?.usingColorSpace(.deviceRGB) else { return false }
+            return zip([actual.redComponent, actual.greenComponent, actual.blueComponent, actual.alphaComponent],
+                       [target.redComponent, target.greenComponent, target.blueComponent, target.alphaComponent])
+                .allSatisfy { abs($0 - $1) < 0.005 }
+        }
         func angle(_ host: Host, geometry: [String], after: Double? = nil) async throws -> Double {
             var result: Double?
             try await wait(after == nil ? "presentation_missing" : "presentation_stalled") {
@@ -322,7 +428,7 @@ enum SettingsPreviewProof {
             ["schemaVersion": 1, "proof": "actual_dashboard_settings_preview", "synthetic": true,
              "pid": ProcessInfo.processInfo.processIdentifier, "diagnosticOnly": true,
              "replacesNormalNativeGate": false, "terminal": terminal, "currentCase": currentCase,
-             "passed": terminal == "completed" && !cancelled && results.count == 7
+             "passed": terminal == "completed" && !cancelled && results.count == 9
                 && results.allSatisfy { $0["passed"] as? Bool == true } && cleanupVerified && writeErrors.isEmpty,
              "results": results, "cleanupVerified": cleanupVerified, "retainedHosts": hosts.map(\.json),
              "angleSamples": angleSamples,
