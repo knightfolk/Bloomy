@@ -1,5 +1,14 @@
 # Bloomy native polish and efficiency
 
+October 7 immediate supported Settings reopening: two fresh optimized processes
+pass all eleven cases, six immediate navigation/reopen cycles and 34 compositor
+holds. Returned views are connected to the content layer before closing and
+retain identity/geometry afterward. Forty-two staging checks and exact 128-source
+artifact matching pass; all finite jobs and owned app exits are verified. No
+product delay or gate replacement is added. Investigate the manual-host contract;
+genuine supported-host occlusion, system Reduce Motion and broad qualification
+remain open. See [immediate Settings reopening review](MENU_BAR_SETTINGS_IMMEDIATE_REOPEN_REVIEW_20261007.md).
+
 October 7 manual root-layer comparison: identical staged helpers with ordinary
 and explicit root backing both complete at 12/15; Models/Charts pass. The changed
 root setting is observed, but reopening still lacks the content-layer ancestry.

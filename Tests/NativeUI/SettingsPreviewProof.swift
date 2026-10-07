@@ -188,6 +188,39 @@ enum SettingsPreviewProof {
             evidence["departed"] = departed
             return evidence
         }
+        await session.check("navigate_return_immediate_close_reopen") {
+            var cycles = [[String: Any]]()
+            for cycle in 0..<3 {
+                try await fresh()
+                let old = try await session.eligible()
+                navigation.sidebarSelection = .settings(.appearance)
+                try await session.wait("immediate_departure_not_dismantled") {
+                    session.nativeArcs().isEmpty && (old.layer.animationKeys() ?? []).isEmpty
+                }
+                showPreview()
+                let returned = try await session.eligible()
+                try require(returned.view !== old.view && returned.layer !== old.layer,
+                            "immediate_navigation_reused_dismantled_preview")
+                let geometry = returned.geometry
+                // Read the model attachment only. No presentation sampling,
+                // compositor hold or yield precedes this supported close/reopen.
+                let beforeClose = returned.attachment
+                window.performClose(nil)
+                reopen()
+                _ = try await session.eligible()
+                try session.requireIdentity(returned)
+                try require(returned.geometry == geometry, "immediate_reopening_changed_geometry")
+                try require((old.layer.animationKeys() ?? []).isEmpty,
+                            "immediate_departed_clock_restarted")
+                var evidence = try await session.motion(returned, stage: "immediate_navigation_reopen_\(cycle)")
+                evidence["beforeCloseAttachment"] = beforeClose
+                evidence["afterReopenAttachment"] = returned.attachment
+                evidence["cycle"] = cycle
+                cycles.append(evidence)
+            }
+            return ["cycles": cycles, "presentationObservedBeforeClose": false,
+                    "supportedNavigationAndWindowController": true]
+        }
         await session.check("minimize_restore") {
             try await fresh()
             let host = try await session.eligible()
@@ -260,6 +293,23 @@ enum SettingsPreviewProof {
     private struct Host {
         let view: MenuBarActivityArc.ActivityArcView
         let layer: CAShapeLayer
+        var attachment: [String: Any] {
+            let content = view.window?.contentView
+            var ancestors = [[String: Any]]()
+            var cursor = view.layer
+            while let current = cursor, ancestors.count < 32 {
+                ancestors.append(["identity": identity(current),
+                                  "isContentViewLayer": current === content?.layer,
+                                  "parentIdentity": current.superlayer.map(identity) ?? "nil"])
+                cursor = current.superlayer
+            }
+            return ["viewIdentity": identity(view), "layerIdentity": identity(layer),
+                    "windowIdentity": view.window.map(identity) ?? "nil",
+                    "contentViewWantsLayer": content?.wantsLayer ?? false,
+                    "contentViewLayerIdentity": content?.layer.map(identity) ?? "nil",
+                    "backingLayerParentIdentity": view.layer?.superlayer.map(identity) ?? "nil",
+                    "ancestors": ancestors, "ancestryTruncated": cursor != nil]
+        }
         var geometry: [String] {
             [NSStringFromRect(view.bounds), NSStringFromRect(layer.frame), NSStringFromRect(layer.bounds),
              layer.path.map { NSStringFromRect($0.boundingBoxOfPath) } ?? "nil",
@@ -280,7 +330,8 @@ enum SettingsPreviewProof {
                     "animationKeys": layer.animationKeys() ?? [], "clockDuration": clock?.duration ?? -1,
                     "strokeColorComponents": layer.strokeColor.flatMap { NSColor(cgColor: $0)?.usingColorSpace(.deviceRGB) }
                         .map { [$0.redComponent, $0.greenComponent, $0.blueComponent, $0.alphaComponent] } ?? [],
-                    "presentationAngle": layer.presentation().map { atan2($0.transform.m12, $0.transform.m11) } ?? 0]
+                    "presentationAngle": layer.presentation().map { atan2($0.transform.m12, $0.transform.m11) } ?? 0,
+                    "attachment": attachment]
         }
         func colorComponents(_ color: NSColor) -> [CGFloat] {
             var resolved: CGColor?
@@ -471,7 +522,7 @@ enum SettingsPreviewProof {
             ["schemaVersion": 1, "proof": "actual_dashboard_settings_preview", "synthetic": true,
              "pid": ProcessInfo.processInfo.processIdentifier, "diagnosticOnly": true,
              "replacesNormalNativeGate": false, "terminal": terminal, "currentCase": currentCase,
-             "passed": terminal == "completed" && !cancelled && results.count == 10
+             "passed": terminal == "completed" && !cancelled && results.count == 11
                 && results.allSatisfy { $0["passed"] as? Bool == true } && cleanupVerified && writeErrors.isEmpty,
              "results": results, "cleanupVerified": cleanupVerified, "retainedHosts": hosts.map(\.json),
              "angleSamples": angleSamples,

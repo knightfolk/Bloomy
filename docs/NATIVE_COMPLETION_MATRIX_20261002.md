@@ -1,5 +1,13 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 immediate Settings reopening: eleven cases pass in each of two fresh
+optimized processes, with six immediate navigation/reopen cycles, complete
+pre-close attachment, retained identity/geometry and 34 advancing motion holds.
+Forty-two staging checks and 128-source artifact matching pass. Owned apps exit;
+ordinary manual-host failures, genuine cover, system Reduce Motion and broad
+matrix qualification remain open. See
+[supported immediate reopening review](MENU_BAR_SETTINGS_IMMEDIATE_REOPEN_REVIEW_20261007.md).
+
 October 7 manual root-layer comparison: ordinary and explicitly backed roots
 both finish the unchanged fifteen cases at 12/15, with the same cover/reopening
 failures. Models/Charts pass; 39 staging checks, 36 focused Release tests and both
