@@ -165,6 +165,14 @@ public actor EarningsDatabase {
         sqlite3_busy_timeout(database, 2_000)
 
         do {
+            // SQLite inherits sidecar permissions from the main file. Tighten
+            // it before WAL creation, and repair sidecars from older runs.
+            for suffix in ["", "-wal", "-shm"] {
+                let path = url.path + suffix
+                if FileManager.default.fileExists(atPath: path) {
+                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+                }
+            }
             try Self.execute(database, sql: "PRAGMA journal_mode=WAL")
             try Self.execute(database, sql: "PRAGMA synchronous=NORMAL")
             try Self.execute(database, sql: """
@@ -207,8 +215,9 @@ public actor EarningsDatabase {
                     coverage_start REAL NOT NULL
                 )
                 """)
+            try Self.execute(database, sql: "BEGIN IMMEDIATE")
+            try CreditLedgerPersistence.createSchema(database)
             try Self.execute(database, sql: """
-                BEGIN IMMEDIATE;
                 INSERT INTO rewards_hourly (hour_start, amount_micro_usd, events)
                 SELECT hour_start, amount_micro_usd, jobs
                 FROM earnings_hourly
@@ -224,6 +233,7 @@ public actor EarningsDatabase {
                 ofItemAtPath: url.path
             )
         } catch {
+            try? Self.execute(database, sql: "ROLLBACK")
             connection = nil
             throw error
         }
@@ -233,9 +243,11 @@ public actor EarningsDatabase {
         _ response: AccountEarningsResponse,
         capturedAt: Date
     ) throws {
+        let response = try CreditLedgerPersistence.normalized(response, capturedAt: capturedAt)
         let database = try requireConnection()
         try Self.execute(database, sql: "BEGIN IMMEDIATE")
         do {
+            try CreditLedgerPersistence.ingest(response, capturedAt: capturedAt, database: database)
             try upsertHourlyEarnings(response, database: database)
             try upsertAccountSample(response, capturedAt: capturedAt, database: database)
             try upsertHistoryCoverage(response)
@@ -244,6 +256,17 @@ public actor EarningsDatabase {
             try? Self.execute(database, sql: "ROLLBACK")
             throw error
         }
+    }
+
+    /// Reads observed exact credits for an explicit account; this is not a
+    /// completeness guarantee. Time bounds are half-open and results are newest
+    /// first, with earning ID breaking ties. Legacy aggregates remain separate.
+    public func accountCreditRecords(
+        accountID: String, providerID: String? = nil,
+        from: Date? = nil, to: Date? = nil, limit: Int = 1_000
+    ) throws -> [AccountCreditRecord] {
+        try CreditLedgerPersistence.records(accountID: accountID, providerID: providerID,
+            from: from, to: to, limit: limit, database: requireConnection())
     }
 
     public func hourBucketCount() throws -> Int {
@@ -668,14 +691,17 @@ public actor EarningsDatabase {
         sqlite3_bind_double(statement, 1, since.timeIntervalSince1970)
 
         var values: [ModelEarnings] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            guard let modelCString = sqlite3_column_text(statement, 0) else { continue }
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            guard let modelCString = sqlite3_column_text(statement, 0) else { throw lastError() }
             values.append(ModelEarnings(
                 model: String(cString: modelCString),
                 microUSD: sqlite3_column_int64(statement, 1),
                 jobs: sqlite3_column_int64(statement, 2)
             ))
+            result = sqlite3_step(statement)
         }
+        guard result == SQLITE_DONE else { throw lastError() }
         return values
     }
 
@@ -758,6 +784,14 @@ public actor EarningsDatabase {
         var events: Int64 = 0
     }
 
+    private func checkedAdd(_ left: Int64, _ right: Int64) throws -> Int64 {
+        let (value, overflow) = left.addingReportingOverflow(right)
+        guard !overflow else {
+            throw EarningsDatabaseError.sqlite(message: "earnings integer total out of range")
+        }
+        return value
+    }
+
     private func upsertHourlyEarnings(
         _ response: AccountEarningsResponse,
         database: OpaquePointer
@@ -782,17 +816,17 @@ public actor EarningsDatabase {
             let hourStart = floor(earning.createdAt.timeIntervalSince1970 / 3_600) * 3_600
             if earning.model == "base_reward" {
                 var reward = rewardBuckets[hourStart, default: RewardBucketValue()]
-                reward.amountMicroUSD += earning.amountMicroUSD
-                reward.events += 1
+                reward.amountMicroUSD = try checkedAdd(reward.amountMicroUSD, earning.amountMicroUSD)
+                reward.events = try checkedAdd(reward.events, 1)
                 rewardBuckets[hourStart] = reward
                 continue
             }
             let key = BucketKey(hourStart: hourStart, model: earning.model)
             var value = buckets[key, default: BucketValue()]
-            value.amountMicroUSD += earning.amountMicroUSD
-            value.jobs += 1
-            value.promptTokens += Int64(earning.promptTokens)
-            value.completionTokens += Int64(earning.completionTokens)
+            value.amountMicroUSD = try checkedAdd(value.amountMicroUSD, earning.amountMicroUSD)
+            value.jobs = try checkedAdd(value.jobs, 1)
+            value.promptTokens = try checkedAdd(value.promptTokens, Int64(earning.promptTokens))
+            value.completionTokens = try checkedAdd(value.completionTokens, Int64(earning.completionTokens))
             buckets[key] = value
         }
 

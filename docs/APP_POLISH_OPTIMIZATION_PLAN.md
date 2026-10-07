@@ -1,5 +1,17 @@
 # Bloomy native polish and efficiency
 
+October 7 credit-capture follow-up: exact account-scoped records now retain late
+IDs and signed corrections with provider/model/token/time dimensions, alongside
+preserved legacy aggregates in one transaction. Credentials are excluded and
+SQLite main/sidecar files use private permissions, including reopen repair.
+All 1,665 reported Release tests pass with seven existing opt-in skips; 28 focused
+database tests, the final 13 ledger regressions, 32 staging checks and production
+build pass. Bounded review is complete. Current charts, balances and coverage
+still use the old unscoped aggregates; scoped presentation, reconciliation and
+retention remain open. The earlier native gate's three failures are unresolved,
+with no new UI rendering or release claim. See
+[credit ledger capture review](ACCOUNT_CREDIT_LEDGER_CAPTURE_REVIEW_20261007.md).
+
 October 7 Overview follow-up: an hourly native account-credit chart now sits
 above models, and hardware/cooling details use a persisted disclosure. Collapsed
 GPU warnings remain visible; the resource CPU sampler is unmounted on collapse.
