@@ -95,8 +95,12 @@ struct HealthView: View {
         let warning = HealthPresentation.daemonWarning(store.snapshot.state, at: now)
         let diagnostics = store.snapshot.diagnostics
         let failures = store.snapshot.state.value?.modelLoadFailures ?? []
+        let hasReportedIssues = warning != nil || !diagnostics.isEmpty || !failures.isEmpty
         VStack(alignment: .leading, spacing: 9) {
-            sectionLabel("Needs attention", symbol: "exclamationmark.triangle")
+            sectionLabel(
+                hasReportedIssues ? "Needs attention" : allSourcesAvailable ? "Reported health" : "Readings incomplete",
+                symbol: hasReportedIssues ? "exclamationmark.triangle" : allSourcesAvailable ? "waveform.path.ecg" : "clock")
+                .accessibilityAddTraits(.isHeader)
             if let warning {
                 Label(daemonAttentionTitle, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)

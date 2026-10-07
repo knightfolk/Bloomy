@@ -1,5 +1,14 @@
 # Bloomy native polish and efficiency
 
+October 7 Health summary follow-up: the heading now distinguishes reported
+health, incomplete readings and reported issues instead of always asking for
+attention. Exact-source optimized native checks cover fresh, partial, mixed,
+missing and recovery states across compact/wide light/dark observations; full
+diagnostics remain reachable and headings are exposed to accessibility. All
+1,649 reported Release tests pass with seven existing opt-in skips. See
+`HEALTH_SUMMARY_HEADING_REVIEW_20261007.md`; broader native and release gates
+remain open.
+
 October 7 Settings lifecycle follow-up: the actual production window controller
 and Settings root pass seven bounded synthetic cases, including navigation,
 minimize/restore and normal/rapid retained-window reopening. Cancelled Quit
@@ -53,7 +62,8 @@ native disclosures retain full selectable diagnostics and stale capture times.
 Final compact/wide, light/dark and named accessibility checks pass after
 rejecting an accessibility-value regression. All 1,649 reported Release tests
 pass. See `HEALTH_SOURCE_DISCLOSURE_REVIEW_20261006.md`; broader proof remains
-open, including the healthy-state attention heading's wording.
+open. October 7's summary-heading review resolves the misleading healthy-state
+wording without changing source or warning rules.
 
 October 6 research: the BloomGauge comparison distinguishes implemented,
 released and proposed capabilities. Recommended follow-ups are ledger

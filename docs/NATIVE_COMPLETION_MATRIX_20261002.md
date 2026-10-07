@@ -1,5 +1,13 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 Health summary follow-up: fresh, incomplete and reported-issue
+headings render correctly through synthetic recovery. Compact/wide light/dark
+observations retain named source states and complete expanded reasons; all
+three summaries are accessibility headings. The 1,649-test Release run passes
+with seven existing opt-in skips. See
+[Health summary review](HEALTH_SUMMARY_HEADING_REVIEW_20261007.md). This resolves
+the misleading heading, not the full Health or application matrix.
+
 October 6 callback comparison: actual observer registration operations and
 delivered close/visibility callbacks restore the clock before the retained
 manual-host failure. Fresh targets pass sustained motion. This diagnostic

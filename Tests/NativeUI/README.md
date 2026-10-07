@@ -34,6 +34,12 @@ and real provider state remain untouched. Final Native164 proof and updater
 callback regression limits are in
 `docs/HEALTH_LONG_REASONS_UPDATER_REVIEW_20261003.md`.
 
+**Health partial** keeps fresh daemon, CLI and event readings but omits loaded
+models, with no acquisition diagnostic. It exercises incomplete source coverage
+separately from reported warnings. Compare its summary heading with **Fresh**,
+**Health long mixed** and **Health long missing**; the full missing-read reason
+remains in the Loaded models disclosure.
+
 The independent `ConfirmationReferenceFixture.swift` and matching Info plist
 compare AppKit sheet/modal and minimal SwiftUI confirmations with no real
 actions. October 3 captures reproduce the blank-alert symptom outside Bloomy;

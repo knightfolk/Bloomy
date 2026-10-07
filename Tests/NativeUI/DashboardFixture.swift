@@ -18,6 +18,7 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case ambiguousStartup = "Ambiguous startup alias", startupLoadingOff = "Startup loading off"
     case emptyCatalog = "Empty model catalog", unavailableCatalog = "Unavailable model catalog"
     case healthLongMixed = "Health long mixed", healthLongMissing = "Health long missing"
+    case healthPartial = "Health partial"
     case largeActionHistory = "5,000 action records"
     case acceptedWork = "Accepted work confirmation"
     case matchedEnergy = "Matched electricity graphics"
@@ -143,8 +144,9 @@ private enum FixtureData {
         let stateAvailability: SourceAvailability<DaemonState> = scenario == .offline
             ? .available(value: state, capturedAt: date) : scenario.availability(state, at: date)
         return TelemetrySnapshot(state: stateAvailability,
-            loadedModels: scenario.availability(LoadedModelsState(schema: 1,
-                models: Array(modelIDs.prefix(2)), updatedAt: date.timeIntervalSince1970), at: date),
+            loadedModels: scenario == .healthPartial ? .unavailable(reason: "Synthetic loaded-model read did not complete")
+                : scenario.availability(LoadedModelsState(schema: 1,
+                    models: Array(modelIDs.prefix(2)), updatedAt: date.timeIntervalSince1970), at: date),
             status: scenario == .offline
                 ? .available(value: status, capturedAt: date) : scenario.availability(status, at: date),
             eventFeed: scenario.availability(EventFeed(events: events ?? logEvents(scenario, now: now), legacyReadAt: date, unifiedActivityAt: date), at: date),
@@ -418,7 +420,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
         if calendarSummaryMode == .accountFailure { throw FixtureError.offline }
         return switch scenario {
         case .microEarnings: .observed(microUSD: 1, observedSeconds: 10_800)
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .largeActionHistory, .acceptedWork, .matchedEnergy, .unmeasuredMetrics, .idleMetrics:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .healthPartial, .largeActionHistory, .acceptedWork, .matchedEnergy, .unmeasuredMetrics, .idleMetrics:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
