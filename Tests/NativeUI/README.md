@@ -229,9 +229,10 @@ python3 Tests/NativeUI/build-dashboard-fixture.py --configuration release \
 Choose **Settings preview proof** in the review console. It opens the unchanged
 `DashboardWindowController` and dashboard root with an isolated, never-started
 synthetic store and private preferences. The console keeps its own visibility
-owner. Nine bounded cases observe baseline motion, fresh publications, idle,
+owner. Ten bounded cases observe baseline motion, fresh publications, idle,
 independent temperature/fan changes, failed fan reads and recovery, page
-departure/return, minimize/restore, retained close/reopen and rapid reopen.
+departure/return, minimize/restore, retained close/reopen and rapid reopen,
+plus window appearance changes without another daemon publication or extras read.
 An inert counted extras client supplies measured fan RPM and temperatures;
 no sensors, provider commands, fan mutations or background polling run. The
 temperature ramp covers 54, 70 and 85 °C with 25, 50 and 100 percent fan speed.
@@ -240,6 +241,10 @@ payload/date, neutral stale color and fresh green recovery. Native colors must
 match the view's own effective appearance, including material appearances;
 the reports retain expected and actual RGBA components. Geometry, native
 identity and the single clock must remain stable across input changes.
+The appearance case requests Dark Aqua then Aqua, verifies actual effective
+appearance and resolved colors, and explicitly restores the original window
+appearance (including nil) with unchanged counters. A defer also restores it
+on failure or cancellation; global Mac settings are untouched.
 Each successful motion observation includes a publication-free compositor hold
 over 1.6 seconds. No animation, display, layout or visibility notification is forced.
 Terminal/progress reports use a unique `settings-preview/<UUID>` directory in
@@ -250,7 +255,9 @@ diagnostics or a hidden banner. Omission preserves the ordinary fixture policy;
 the original **Native proof** gate is separate. See
 `docs/MENU_BAR_SETTINGS_LIFECYCLE_REVIEW_20261007.md` for the earlier seven-case
 evidence and limits, and `docs/MENU_BAR_SETTINGS_FAN_TRANSITIONS_REVIEW_20261007.md`
-for the color defect and final nine-case evidence. The fan-transition extension
+for the color defect and earlier nine-case evidence. See
+`docs/MENU_BAR_APPEARANCE_CHANGE_REVIEW_20261007.md` for the ten-case extension.
+The fan-transition extension
 does not prove physical cooling-ring fill, actual sensor behavior or macOS
 Reduce Motion delivery.
 

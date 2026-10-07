@@ -123,6 +123,42 @@ struct MenuBarIndicatorsRenderingTests {
         return [rgb.redComponent, rgb.greenComponent, rgb.blueComponent, rgb.alphaComponent]
     }
 
+    @Test("mounted activity colors follow window appearance without another telemetry update")
+    func activityColorFollowsAppearance() async throws {
+        let view = MenuBarActivityArc.ActivityArcView(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
+        let window = NSWindow(contentRect: view.bounds, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer { view.stopObserving(); window.close() }
+        // Establish geometry during setup, before testing appearance-only
+        // transitions. The unshown window has not delivered its first layout.
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()
+        let arc = try #require(view.layer?.sublayers?.first as? CAShapeLayer)
+        #expect(arc.frame == view.bounds)
+        for tint in [NSColor.systemGreen, .systemYellow, .systemRed, .secondaryLabelColor] {
+            window.appearance = NSAppearance(named: .aqua)
+            view.configure(active: true, tint: tint)
+            let frame = arc.frame
+            for name in [NSAppearance.Name.darkAqua, .aqua] {
+                window.appearance = try #require(NSAppearance(named: name))
+                // Yield to AppKit's actual appearance delivery; do not force
+                // configure, display, layout or the appearance callback.
+                try await Task.sleep(for: .milliseconds(100))
+                #expect(view.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == name)
+                var expectedColor: CGColor?
+                view.effectiveAppearance.performAsCurrentDrawingAppearance { expectedColor = tint.cgColor }
+                let actual = try components(arc.strokeColor)
+                let expected = try components(expectedColor)
+                #expect(zip(actual, expected).allSatisfy { abs($0 - $1) < 0.005 })
+                #expect(view.window === window)
+                #expect(arc.frame == frame)
+                #expect(!arc.isHidden)
+                #expect(arc.animationKeys() == nil)
+            }
+        }
+    }
+
     private func fixture(active: Bool = false, gpu: Double, fan: Double, temperature: Double,
                          freshness: MenuBarIndicators.Freshness = .current) -> MenuBarIndicators {
         .init(modelIsActive: active, gpu: .init(value: gpu, freshness: freshness),

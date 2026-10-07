@@ -1,5 +1,17 @@
 # Bloomy native polish and efficiency
 
+October 7 appearance-only follow-up: the native activity arc now refreshes its
+cached dynamic tint through AppKit's effective-appearance callback, without a
+timer or animation/lifecycle change. All 1,651 reported Release tests pass with
+seven existing opt-in skips; 32 staging checks pass. Ten actual Settings cases
+pass, including Dark Aqua/Aqua changes with unchanged telemetry reads, stable
+geometry and one clock, plus verified original-appearance restoration. Fourteen
+compositor holds, cancelled cleanup and all owned process exits are verified.
+The ordinary gate remains 12/15 with the same three cover/reopening failures;
+Models/Charts pass. See `MENU_BAR_APPEARANCE_CHANGE_REVIEW_20261007.md`.
+Actual system Reduce Motion, genuine cover and broader native proof remain open;
+the overall goal stays active and no release is claimed.
+
 October 7 fan-color follow-up: the actual Settings preview exposed ambient
 appearance leaking into fixed native colors. The production label now resolves
 color in its own view appearance, with no animation/timing change. A regression

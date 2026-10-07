@@ -128,6 +128,49 @@ enum SettingsPreviewProof {
             return ["freshBaseline": freshBaseline, "stale": stale, "recovered": recovered,
                     "retainedCaptureDate": date.timeIntervalSince1970]
         }
+        await session.check("window_appearance_changes_without_reading") {
+            try await fresh()
+            let host = try await session.eligible()
+            let geometry = host.geometry
+            let originalAppearance = window.appearance
+            defer { window.appearance = originalAppearance }
+            let sourceWrittenAt = store.snapshot.state.value?.writtenAt
+            let extrasReads = await extrasClient.readCount
+            var transitions = [[String: Any]]()
+            for name in [NSAppearance.Name.darkAqua, .aqua] {
+                window.appearance = NSAppearance(named: name)
+                try await session.wait("appearance_color_not_rendered") {
+                    try session.requireIdentity(host)
+                    try require(host.geometry == geometry, "appearance_changed_geometry")
+                    try session.requireClock(host.layer)
+                    return host.view.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == name
+                        && session.colorMatches(host, expected: .systemGreen)
+                }
+                var evidence = try await session.motion(host, stage: "appearance_\(name.rawValue)")
+                try require(store.snapshot.state.value?.writtenAt == sourceWrittenAt,
+                            "appearance_published_daemon_input")
+                try require(await extrasClient.readCount == extrasReads,
+                            "appearance_refreshed_fan_input")
+                evidence["requestedAppearance"] = name.rawValue
+                evidence["unchangedDaemonPublication"] = true
+                evidence["extrasReads"] = extrasReads
+                transitions.append(evidence)
+            }
+            window.appearance = originalAppearance
+            try await session.wait("original_appearance_not_restored") {
+                try session.requireIdentity(host)
+                try require(host.geometry == geometry, "appearance_restore_changed_geometry")
+                try session.requireClock(host.layer)
+                return window.appearance === originalAppearance
+                    && session.colorMatches(host, expected: .systemGreen)
+            }
+            try require(store.snapshot.state.value?.writtenAt == sourceWrittenAt,
+                        "appearance_restore_published_daemon_input")
+            try require(await extrasClient.readCount == extrasReads,
+                        "appearance_restore_refreshed_fan_input")
+            return ["transitions": transitions, "originalWindowAppearance": originalAppearance?.name.rawValue ?? "nil",
+                    "restoresOriginalAppearance": true]
+        }
         await session.check("navigate_away_return") {
             try await fresh()
             let old = try await session.eligible()
@@ -428,7 +471,7 @@ enum SettingsPreviewProof {
             ["schemaVersion": 1, "proof": "actual_dashboard_settings_preview", "synthetic": true,
              "pid": ProcessInfo.processInfo.processIdentifier, "diagnosticOnly": true,
              "replacesNormalNativeGate": false, "terminal": terminal, "currentCase": currentCase,
-             "passed": terminal == "completed" && !cancelled && results.count == 9
+             "passed": terminal == "completed" && !cancelled && results.count == 10
                 && results.allSatisfy { $0["passed"] as? Bool == true } && cleanupVerified && writeErrors.isEmpty,
              "results": results, "cleanupVerified": cleanupVerified, "retainedHosts": hosts.map(\.json),
              "angleSamples": angleSamples,

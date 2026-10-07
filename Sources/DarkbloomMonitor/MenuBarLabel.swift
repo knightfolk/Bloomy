@@ -330,6 +330,7 @@ struct MenuBarActivityArc: NSViewRepresentable {
     final class ActivityArcView: NSView {
         private let arc = CAShapeLayer()
         private var active = false
+        private var tint: NSColor?
         private var reduceMotion = false
         private var dismantled = false
         private var closeReevaluationScheduled = false
@@ -409,16 +410,31 @@ struct MenuBarActivityArc: NSViewRepresentable {
             CATransaction.commit()
         }
 
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            guard tint != nil else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            resolveStrokeColor()
+            CATransaction.commit()
+        }
+
+        private func resolveStrokeColor() {
+            guard let tint else { return }
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                arc.strokeColor = tint.cgColor
+            }
+        }
+
         func configure(active: Bool, tint: NSColor, reduceMotion: Bool = false) {
             self.active = active
             self.reduceMotion = reduceMotion
+            self.tint = tint
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             // SwiftUI updates can arrive under another drawing appearance.
             // Resolve dynamic AppKit colors in this view, including vibrancy.
-            effectiveAppearance.performAsCurrentDrawingAppearance {
-                arc.strokeColor = tint.cgColor
-            }
+            resolveStrokeColor()
             arc.isHidden = !active
             CATransaction.commit()
             synchronizeAnimation()

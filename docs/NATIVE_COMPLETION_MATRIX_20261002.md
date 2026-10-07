@@ -1,5 +1,15 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 appearance-only follow-up: cached native colors now follow AppKit
+appearance changes without new telemetry. The mounted unit regression, all
+1,651 reported Release tests and 32 staging checks pass, with seven existing
+opt-in skips. Ten actual Settings cases pass with fourteen sustained compositor
+holds, unchanged input counters and explicit restoration of the original window
+appearance. Cancelled cleanup and owned process exits are verified. The ordinary
+gate remains 12/15 with the same three failures; Models/Charts pass. No release,
+system Reduce Motion delivery or broad matrix completion is claimed. See
+[appearance-change review](MENU_BAR_APPEARANCE_CHANGE_REVIEW_20261007.md).
+
 October 7 fan-color follow-up: native appearance tracing confirms a fixed
 color-conversion defect; production now resolves the tint in its own view.
 Sixteen contrary-context regression combinations and the repaired 1,650-test
