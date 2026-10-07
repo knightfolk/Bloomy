@@ -140,7 +140,7 @@ extension ActivityQuery {
     }
 }
 
-/// Every financial component comes from the same unfiltered atomic report.
+/// Every financial component comes from the same atomic report for its scope.
 /// Local token samples are supplementary and must pass the final session check.
 extension ActivityReadSnapshot {
     @MainActor
@@ -148,8 +148,15 @@ extension ActivityReadSnapshot {
                       powerIntervals: [EnergyInterval] = []) async throws -> Self? {
         guard let context = query.context, query.ledgerReady, let range = query.range else { return nil }
         guard query.sessionEpoch == store.financialSessionEpoch else { throw AccountEarningsClientError.sessionChanged }
-        guard let report = try await store.financialReport(context: context, in: range,
-            unit: query.unit, calendar: query.calendar) else { return nil }
+        let capturedReport: AccountCreditReport?
+        if query.metric == .estimatedProfit {
+            capturedReport = try await store.localProviderFinancialReport(context: context, in: range,
+                unit: query.unit, calendar: query.calendar)
+        } else {
+            capturedReport = try await store.financialReport(context: context, in: range,
+                unit: query.unit, calendar: query.calendar)
+        }
+        guard let report = capturedReport else { return nil }
         try Task.checkCancellation()
         let hourlyProfits: [ModelHourlyProfit]
         if query.metric == .estimatedProfit {

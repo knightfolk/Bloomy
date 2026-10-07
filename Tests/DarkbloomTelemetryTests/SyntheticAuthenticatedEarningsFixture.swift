@@ -6,6 +6,14 @@ import Foundation
 protocol SyntheticAuthenticatedEarningsFixture: AccountEarningsFetching {}
 
 extension SyntheticAuthenticatedEarningsFixture {
+    /// This explicit test-only protocol supplies known inert local ownership.
+    /// Ordinary authenticated clients never inherit this capability.
+    func localProviderFinancialReport(context: AccountEarningsContext,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> LocalProviderCreditReport? {
+        try await financialReport(context: context, providerID: nil, model: nil,
+            in: range, unit: unit, calendar: calendar).map { LocalProviderCreditReport(report: $0) }
+    }
+
     var syntheticFinancialContext: AccountEarningsContext {
         AccountEarningsContext(accountScope: "test-only-synthetic:\(String(reflecting: Self.self))",
             generation: UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)))

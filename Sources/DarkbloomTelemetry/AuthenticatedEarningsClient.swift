@@ -52,6 +52,12 @@ public protocol AccountEarningsFetching: Sendable {
     func validateFinancialContext(_ context: AccountEarningsContext) async throws
     func financialReport(context: AccountEarningsContext, providerID: String?, model: String?,
         in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> AccountCreditReport?
+    /// Must validate local-provider attribution across the complete requested
+    /// range, including reconnects, before returning and after suspended reads.
+    /// Attribution changes must publish a new financial-session revision so
+    /// consumers invalidate cached local reports and pending automation.
+    func localProviderFinancialReport(context: AccountEarningsContext,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> LocalProviderCreditReport?
     func modelWorkEarnings(in range: DateInterval, calendar: Calendar) async throws -> [ModelWorkEarnings]
     func fetch(now: Date) async throws -> EarningsPresentationValue
     func jobCompletionSummary(now: Date, calendar: Calendar) async throws -> JobCompletionSummary?
@@ -88,6 +94,10 @@ public extension AccountEarningsFetching {
     }
     func financialReport(context: AccountEarningsContext, providerID: String?, model: String?,
         in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> AccountCreditReport? { nil }
+    // The production API currently supplies account-wide credits, without a
+    // verified association to this Mac. Do not infer one from filtered rows.
+    func localProviderFinancialReport(context: AccountEarningsContext,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> LocalProviderCreditReport? { nil }
     func modelWorkEarnings(in range: DateInterval, calendar: Calendar) async throws -> [ModelWorkEarnings] { [] }
     func modelActivity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar, model: String?) async throws -> [ActivityBucket]? {
         guard model == nil else { return nil }

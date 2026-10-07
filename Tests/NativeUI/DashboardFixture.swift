@@ -303,6 +303,7 @@ private struct FixtureEarningsReadSnapshot: Codable, Sendable {
     var account = "Synthetic A"
     var generation = ""
     var ledgerReady = true
+    var localProviderAttributed = false
 }
 
 private enum FixtureCalendarSummaryMode: String, CaseIterable, Identifiable, Sendable {
@@ -329,6 +330,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
     private var gateWaiters: [CheckedContinuation<Void, Never>] = []
     private var stateChanged: (@Sendable (FixtureEarningsReadSnapshot) -> Void)?
     private var sessionMode = FixtureFinancialSession.a
+    private var syntheticLocalCredits = false
     private var session = AccountEarningsSessionState(
         context: AccountEarningsContext(accountScope: "review-only-account-A", generation: UUID()),
         ledgerReady: true, revision: UUID())
@@ -363,6 +365,21 @@ private actor FixtureEarnings: AccountEarningsFetching {
         session = .init(context: session.context, ledgerReady: ready, revision: UUID())
         for observer in sessionObservers.values { observer.yield(session) }
         publishReadState()
+    }
+
+    func setSyntheticLocalCredits(_ enabled: Bool) {
+        syntheticLocalCredits = enabled
+        session = .init(context: session.context, ledgerReady: session.ledgerReady, revision: UUID())
+        for observer in sessionObservers.values { observer.yield(session) }
+        publishReadState()
+    }
+
+    func localProviderFinancialReport(context: AccountEarningsContext,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> LocalProviderCreditReport? {
+        guard syntheticLocalCredits else { return nil }
+        // This control proves only inert local ownership, never a real machine.
+        return try await financialReport(context: context, providerID: nil, model: nil,
+            in: range, unit: unit, calendar: calendar).map { LocalProviderCreditReport(report: $0) }
     }
 
     /// One inert report captures all displayed financial projections. The gate
@@ -495,6 +512,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
         readState.account = sessionMode.rawValue
         readState.generation = session.context?.generation.uuidString ?? "revoked"
         readState.ledgerReady = session.ledgerReady
+        readState.localProviderAttributed = syntheticLocalCredits
         readState.heldReadID = activeGateID
         stateChanged?(readState)
     }
@@ -1219,6 +1237,7 @@ private final class FixtureModel: ObservableObject {
     @Published var activityRead = FixtureActivityRead.normal
     @Published var calendarSummaryMode = FixtureCalendarSummaryMode.normal
     @Published var financialSession = FixtureFinancialSession.a
+    @Published var syntheticLocalCredits = false
     @Published private(set) var earningsRenderingReview = false
     @Published private(set) var earningsReadState = FixtureEarningsReadSnapshot()
     private var earningsReadSession = UUID()
@@ -1345,6 +1364,12 @@ private final class FixtureModel: ObservableObject {
     func setLedgerReady(_ ready: Bool) async {
         guard self.ready, !isTerminating else { return }
         await earningsClient.setLedgerReady(ready)
+        _ = await monitor.synchronizeFinancialSession()
+    }
+    func setSyntheticLocalCredits(_ enabled: Bool) async {
+        guard ready, !isTerminating else { return }
+        await earningsClient.setSyntheticLocalCredits(enabled)
+        syntheticLocalCredits = enabled
         _ = await monitor.synchronizeFinancialSession()
     }
     func setNextEarningsRead(_ mode: FixtureEarningsReadMode) async {
@@ -1745,6 +1770,7 @@ private final class FixtureModel: ObservableObject {
         activityRead = .normal
         calendarSummaryMode = .normal
         financialSession = .a
+        syntheticLocalCredits = false
         await observeEarningsReads()
         fanReadback = .held
         chatVerificationTest = nil
@@ -2836,6 +2862,9 @@ private struct FixtureReviewView: View {
                             Text(model.earningsReadState.ledgerReady ? "Ledger ready" : "Ledger unavailable")
                             Button("Lose ledger readiness") { Task { await model.setLedgerReady(false) } }
                             Button("Restore same ledger") { Task { await model.setLedgerReady(true) } }
+                            Button(model.syntheticLocalCredits ? "Remove synthetic local attribution" : "Verify synthetic local credits") {
+                                Task { await model.setSyntheticLocalCredits(!model.syntheticLocalCredits) }
+                            }
                             Button("Save scoped report counts") { Task { await model.saveEarningsReadProof() } }
                         }
                         .disabled(!model.ready || model.proofRunning)

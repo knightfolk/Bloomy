@@ -1,5 +1,19 @@
 # Bloomy native polish and efficiency
 
+October 7 local-credit boundary: account earnings remain visible while power
+matching, model calibration and profit history require a separately verified
+local report. Unqualified production clients provide no local profit. Pending
+automatic proposals lose invalidated economics; already handed-off switches
+finish normally. Native compact/wide, held replacement, signed-profit and
+attribution-removal checks pass on the final 125-source-hash artifact. The serial
+Release run reports 1,750 passing tests with seven opt-in skips; 32 staging checks
+and the production build pass. Two default-execution runs retain an unchanged
+process-runner elapsed-time failure under concurrent load; no bound was relaxed.
+Models/Charts pass, and motion remains 12/15 with the same three failures.
+Real machine attribution, legacy disclosure, retention, joined replay and broader
+native/distribution gates remain open. See
+[local-credit attribution review](LOCAL_CREDIT_ATTRIBUTION_REVIEW_20261007.md).
+
 October 7 financial UI integration: MonitorStore now observes authenticated
 session changes, clears financial caches and visible recommendations, rejects
 obsolete success/errors, and drains old acquisitions before refreshing a new

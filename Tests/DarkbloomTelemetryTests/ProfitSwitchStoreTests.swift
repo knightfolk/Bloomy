@@ -82,6 +82,42 @@ struct ProfitSwitchStoreTests {
         #expect(fixture.store.lastAttempt == nil)
     }
 
+    @Test("financial invalidation rejects a held proposal even after fresh profit evidence returns")
+    func invalidationCannotRevivePendingSwitch() async throws {
+        let fixture = try makeFixture()
+        let hold = ProfitRefreshHold()
+        defer { fixture.defaults.removePersistentDomain(forName: fixture.suite) }
+        fixture.store.setEnabled(true)
+        await drive(fixture, through: 3_590)
+        await fixture.controller.holdNextRefresh(hold)
+        await observe(fixture, offset: 3_600)
+        do {
+            try await waitForRefreshHold(hold)
+            #expect(await fixture.controller.switches.isEmpty)
+            fixture.store.invalidateFinancialEvidence()
+            // Restore qualifying data before the original inventory read returns.
+            // Clearing copied values alone would allow that old proposal to run.
+            await observe(fixture, offset: 3_600)
+            await hold.release()
+            try await waitForEvaluationSettlement(fixture.store)
+            #expect(await fixture.controller.switches.isEmpty)
+            #expect(fixture.store.lastAttempt == nil)
+
+            // The model's existing tenure survives, while the sustained economic
+            // advantage must be established again over a full confirmation span.
+            await drive(fixture, from: 3_610, through: 4_190)
+            #expect(await fixture.controller.switches.isEmpty)
+            await drive(fixture, from: 4_200, through: 4_260)
+            await waitForSwitch(fixture.controller)
+            #expect(await fixture.controller.switches == ["candidate"])
+            await fixture.store.stop()
+        } catch {
+            await hold.release()
+            await fixture.store.stop()
+            throw error
+        }
+    }
+
     @Test("active serving work prevents a switch even after dwell and confirmation")
     func activeWorkStaysOnCurrentModel() async throws {
         let fixture = try makeFixture()
@@ -90,6 +126,36 @@ struct ProfitSwitchStoreTests {
         await drive(fixture, through: 3_700, active: true)
         #expect(await fixture.controller.switches.isEmpty)
         #expect(fixture.store.lastAttempt == nil)
+    }
+
+    @Test("financial invalidation lets an already accepted native switch finish without cancellation")
+    func invalidationPreservesAcceptedSwitchTransaction() async throws {
+        let fixture = try makeFixture()
+        let hold = ProfitRefreshHold()
+        defer { fixture.defaults.removePersistentDomain(forName: fixture.suite) }
+        fixture.store.setEnabled(true)
+        await drive(fixture, through: 3_590)
+        await fixture.controller.holdNextSwitch(hold)
+        await observe(fixture, offset: 3_600)
+        do {
+            try await waitForRefreshHold(hold)
+            #expect(await fixture.controller.switches == ["candidate"])
+            #expect(await fixture.controller.completedSwitches.isEmpty)
+            #expect(fixture.store.hasPendingEvaluation)
+            fixture.store.invalidateFinancialEvidence()
+            await hold.release()
+            try await waitForEvaluationSettlement(fixture.store)
+            #expect(await fixture.controller.switches == ["candidate"])
+            #expect(await fixture.controller.completedSwitches == ["candidate"])
+            #expect(await fixture.controller.switchCancellationStates == [false])
+            #expect(fixture.control.snapshot?.daemonState?.currentModel == "candidate")
+            #expect(fixture.control.errorMessage == nil)
+            await fixture.store.stop()
+        } catch {
+            await hold.release()
+            await fixture.store.stop()
+            throw error
+        }
     }
 
     @Test("sustained measured profit triggers one native switch after one hour idle")
@@ -279,6 +345,22 @@ struct ProfitSwitchStoreTests {
             try? await Task.sleep(for: .milliseconds(2))
         }
     }
+
+    private func waitForRefreshHold(_ hold: ProfitRefreshHold) async throws {
+        for _ in 0..<100 {
+            if await hold.entered { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw ProfitTestFailure.unexpectedOperation
+    }
+
+    private func waitForEvaluationSettlement(_ store: ProfitSwitchStore) async throws {
+        for _ in 0..<100 {
+            if !store.hasPendingEvaluation { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw ProfitTestFailure.unexpectedOperation
+    }
 }
 
 private struct ProfitFixture {
@@ -305,7 +387,11 @@ private actor ProfitTestController: ProviderControlling {
     private let switchFails: Bool
     private let autopilotPhase: String?
     private var currentModel = "current"
+    private var nextRefreshHold: ProfitRefreshHold?
+    private var nextSwitchHold: ProfitRefreshHold?
     private(set) var switches: [String] = []
+    private(set) var completedSwitches: [String] = []
+    private(set) var switchCancellationStates: [Bool] = []
 
     init(clock: ProfitTestClock, switchFails: Bool, autopilotPhase: String? = nil) {
         self.clock = clock
@@ -314,17 +400,28 @@ private actor ProfitTestController: ProviderControlling {
     }
 
     func refresh() async throws -> ProviderControlSnapshot {
-        profitControlSnapshot(at: clock.now(), model: currentModel, autopilotPhase: autopilotPhase)
+        let held = nextRefreshHold
+        nextRefreshHold = nil
+        if let held { await held.hold() }
+        return profitControlSnapshot(at: clock.now(), model: currentModel, autopilotPhase: autopilotPhase)
     }
+
+    func holdNextRefresh(_ hold: ProfitRefreshHold) { nextRefreshHold = hold }
+    func holdNextSwitch(_ hold: ProfitRefreshHold) { nextSwitchHold = hold }
 
     func performSingleModelSwitch(
         modelID: String,
         onPhase: ProviderMutationPhaseObserver?
     ) async throws -> ProviderMutationCompletion {
         switches.append(modelID)
+        let held = nextSwitchHold
+        nextSwitchHold = nil
+        if let held { await held.hold() }
+        switchCancellationStates.append(Task.isCancelled)
         if switchFails { throw ProfitTestFailure.switchFailed }
         currentModel = modelID
         await onPhase?(.reconciling)
+        completedSwitches.append(modelID)
         return .refreshed(profitControlSnapshot(at: clock.now(), model: currentModel))
     }
 
@@ -342,6 +439,26 @@ private actor ProfitTestController: ProviderControlling {
 }
 
 private enum ProfitTestFailure: Error { case switchFailed, unexpectedOperation }
+
+private actor ProfitRefreshHold {
+    private(set) var entered = false
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var deadline: Task<Void, Never>?
+    func hold() async {
+        entered = true
+        deadline = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            await self?.release()
+        }
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func release() {
+        deadline?.cancel()
+        deadline = nil
+        continuation?.resume()
+        continuation = nil
+    }
+}
 
 private actor ProfitTestWarmup: SelfRouteWarmupProbing {
     private(set) var calls: [String] = []

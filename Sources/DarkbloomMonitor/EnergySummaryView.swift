@@ -5,7 +5,7 @@ struct EnergySummaryView: View {
     let reading: EnergyReading?
     let earnings: EnergyEarnings?
     let now: Date
-    var waitingMessage: String = "Collecting matched earnings data"
+    var waitingMessage: String = LocalFinancialAttributionPresentation.powerWaitingMessage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -36,7 +36,7 @@ struct EnergySummaryView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .help("Whole-Mac DC adapter input, not wall power or Darkbloom-only consumption. Earnings after electricity includes only completed earnings intervals with uninterrupted energy readings. Excludes adapter losses, other expenses and unmeasured intervals. A complete matched hour is required before showing an estimate.")
+        .help("Whole-Mac DC adapter input, not wall power or Darkbloom-only consumption. Local earnings must be verified before matching them with this Mac's electricity. The estimate includes only completed local earning intervals with uninterrupted energy readings. Excludes adapter losses, other expenses and unmeasured intervals. A complete matched hour is required before showing an estimate.")
     }
 
     private func costBar(_ title: String, symbol: String, value: Double, maximum: Double, color: Color) -> some View {

@@ -54,7 +54,7 @@ struct DashboardOverviewView: View {
                         ProviderSelectionView(store: store, controlStore: controlStore)
                     }.font(.callout)
                 }
-                Text("Earnings reflect observed calendar coverage. Missing measurements are omitted; they are not zero.")
+                Text("Account credits may include other owned machines. Missing measurements are unknown, not zero.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(20)
@@ -69,7 +69,7 @@ struct DashboardOverviewView: View {
             let earnings = PopupEarningsMetrics.make(from: reading?.value, isRetained: reading?.isRetained == true)
             let retained = earnings?.lastReadAt != nil
             let help = earnings?.lastReadAt.map { "Last successful read \($0.formatted(date: .abbreviated, time: .standard)). This retained observation is not current." }
-                ?? "Recorded earnings with observed calendar coverage."
+                ?? "Recorded account earnings with observed calendar coverage. " + LocalFinancialAttributionPresentation.accountHelp
             DashboardMetric(id: "today", title: "Observed today",
                 value: earnings.map { money($0.totalUSD) } ?? "—",
                 unit: earnings == nil ? "Awaiting earnings" : retained ? "USD · last read" : "USD",

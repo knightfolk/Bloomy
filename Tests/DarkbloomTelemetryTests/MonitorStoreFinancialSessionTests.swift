@@ -657,6 +657,13 @@ private actor FinancialSessionFixture: AccountEarningsFetching {
         [.init(model: "synthetic-model", queryPeriod: range, sourceCapturedAt: date,
             workMicroUSD: amount(for: try current()), jobs: 1, recordedHours: 1, unknownHours: 0, uncertainBoundaryHours: 0)]
     }
+    /// Explicitly known synthetic ownership preserves local publication-race
+    /// coverage; production account-only clients have no such capability.
+    func localProviderFinancialReport(context: AccountEarningsContext,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> LocalProviderCreditReport? {
+        try await financialReport(context: context, providerID: nil, model: nil,
+            in: range, unit: unit, calendar: calendar).map { LocalProviderCreditReport(report: $0) }
+    }
     func financialReport(context: AccountEarningsContext, providerID: String?, model: String?,
         in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> AccountCreditReport? {
         reportCalls += 1

@@ -330,6 +330,7 @@ final class MonitorStore: ObservableObject {
         recommendationDecision = nil
         recommendationHistory = []
         recommendationHistoryAvailable = false
+        profitSwitch?.invalidateFinancialEvidence()
     }
 
     func attachRecommendationInventory(_ snapshot: @escaping @MainActor () -> ProviderControlSnapshot?) {
@@ -535,13 +536,34 @@ final class MonitorStore: ObservableObject {
     func financialReport(context expectedContext: AccountEarningsContext? = nil,
         in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar,
         model: String? = nil) async throws -> AccountCreditReport? {
+        try await readFinancialReport(context: expectedContext, in: range, unit: unit,
+            calendar: calendar, model: model, localProvider: false)
+    }
+
+    /// Account money cannot calibrate this Mac's power or serving economics.
+    /// The client must supply a separately verified local-provider report.
+    func localProviderFinancialReport(context expectedContext: AccountEarningsContext? = nil,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> AccountCreditReport? {
+        try await readFinancialReport(context: expectedContext, in: range, unit: unit,
+            calendar: calendar, model: nil, localProvider: true)
+    }
+
+    private func readFinancialReport(context expectedContext: AccountEarningsContext?,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar,
+        model: String?, localProvider: Bool) async throws -> AccountCreditReport? {
         let state = await synchronizeFinancialSession()
         guard expectedContext == nil || expectedContext == state.context else { throw AccountEarningsClientError.sessionChanged }
         guard let context = state.context, state.ledgerReady else { return nil }
         let epoch = financialSessionEpoch
         do {
-            let report = try await earningsClient.financialReport(context: context, providerID: nil, model: model,
-                in: range, unit: unit, calendar: calendar)
+            let report: AccountCreditReport?
+            if localProvider {
+                report = try await earningsClient.localProviderFinancialReport(context: context,
+                    in: range, unit: unit, calendar: calendar)?.report
+            } else {
+                report = try await earningsClient.financialReport(context: context, providerID: nil, model: model,
+                    in: range, unit: unit, calendar: calendar)
+            }
             try await validateFinancialContext(context)
             guard epoch == financialSessionEpoch else { throw AccountEarningsClientError.sessionChanged }
             guard report == nil || report?.accountScope == context.accountScope else { throw AccountEarningsClientError.sessionChanged }
@@ -574,7 +596,7 @@ final class MonitorStore: ObservableObject {
         let capturedAt = accountEarningsCapturedAt
         let intervals = energy?.intervals ?? []
         do {
-            guard let report = try await financialReport(context: context, in: range, unit: .hour, calendar: .current) else {
+            guard let report = try await localProviderFinancialReport(context: context, in: range, unit: .hour, calendar: .current) else {
                 if financialContext == context, activityRevision == revision,
                    accountEarningsCapturedAt == capturedAt {
                     modelServingProfitAverages = []
@@ -1308,7 +1330,7 @@ final class MonitorStore: ObservableObject {
             if energyActivityKey == key, let cached = energyActivityBuckets {
                 buckets = cached
             } else {
-                guard let report = try await financialReport(context: context, in: day, unit: .hour, calendar: calendar) else {
+                guard let report = try await localProviderFinancialReport(context: context, in: day, unit: .hour, calendar: calendar) else {
                     if financialContext == context, key.activityRevision == activityRevision,
                        key.accountCapturedAt == accountEarningsCapturedAt { energyEarnings = nil }
                     return

@@ -84,7 +84,8 @@ struct ActivityEarningsGraphic: View {
                 .font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit()
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .accessibilityIdentifier("activity.earnings.total")
-            Label("Local ledger", systemImage: "internaldrive").font(.caption2).foregroundStyle(.secondary)
+            Label("Account ledger", systemImage: "person.2").font(.caption2).foregroundStyle(.secondary)
+                .help(LocalFinancialAttributionPresentation.accountHelp)
         }
         .help("Sum of displayed recorded earnings, including signed corrections. Hidden rewards are excluded. Missing history remains unknown; this is not proof of complete account income or a payout.")
         .fixedSize(horizontal: true, vertical: false)

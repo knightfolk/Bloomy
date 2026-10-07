@@ -19,6 +19,9 @@ final class ProfitSwitchStore: ObservableObject {
     private let availableMemoryGB: () -> Double?
     private var policy: ProfitSwitchPolicy
     private var task: Task<Void, Never>?
+    private var switchHandedOff = false
+    /// Read-only lifetime evidence for bounded callback regression checks.
+    var hasPendingEvaluation: Bool { task != nil }
     private var generation = 0
     private var currentIdentity: ProcessIdentity?
     private var currentModel: String?
@@ -95,6 +98,18 @@ final class ProfitSwitchStore: ObservableObject {
         currentSince = nil
     }
 
+    /// An account or attribution boundary invalidates both copied economics
+    /// and proposals waiting on an inventory read. Fresh calibration must earn
+    /// a new sustained lead; model tenure and the attempt budget stay intact.
+    func invalidateFinancialEvidence() {
+        latestProfits = []
+        profitsCapturedAt = nil
+        generation += 1
+        if !switchHandedOff { task?.cancel() }
+        policy.reset()
+        if enabled { status = "Waiting for verified local profit evidence." }
+    }
+
     func observe(telemetry: TelemetrySnapshot, network: SourceAvailability<NetworkCapacitySnapshot>,
                  profits: [ModelServingProfitAverage], profitsCapturedAt: Date?) {
         latestTelemetry = telemetry
@@ -164,7 +179,7 @@ final class ProfitSwitchStore: ObservableObject {
         let ticket = generation
         task = Task { [weak self] in
             guard let self else { return }
-            defer { self.task = nil }
+            defer { self.switchHandedOff = false; self.task = nil }
             // Existing refresh preserves a user's draft. The same control gate
             // serializes this work with nudges, manual switches, and restarts.
             await self.control.refreshPreservingDraft()
@@ -198,6 +213,9 @@ final class ProfitSwitchStore: ObservableObject {
             self.status = "Switching to \(proposal.modelID) for an estimated profit advantage."
             // No automatic consumer inference: the inactivity watcher has its
             // own credential, rate limit, and independent evidence requirements.
+            // Once controls own this transaction, financial invalidation must
+            // not terminate its CLI child or interrupt its graceful drain.
+            self.switchHandedOff = true
             await self.control.switchToSingleModel(proposal.modelID, sendWarmup: false, trigger: .automatic)
             let ended = self.now()
             let elapsed = ended.timeIntervalSince(started)

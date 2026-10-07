@@ -770,7 +770,7 @@ struct MonitorPopover: View {
     private func financePanel(currentTime: Date) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Earnings", systemImage: "chart.line.uptrend.xyaxis")
+                Label("Account earnings", systemImage: "chart.line.uptrend.xyaxis")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 if let summary = jobSummary {
@@ -784,7 +784,7 @@ struct MonitorPopover: View {
                 Divider()
                 EnergySummaryView(reading: store.currentEnergyReading,
                                   earnings: store.currentEnergyEarnings, now: currentTime,
-                                  waitingMessage: store.energy?.issue ?? "Collecting matched earnings data")
+                                  waitingMessage: store.energy?.issue ?? LocalFinancialAttributionPresentation.powerWaitingMessage)
             }
         }
         .padding(12)

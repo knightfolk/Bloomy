@@ -36,7 +36,7 @@ struct PopupEarningsGraphic: View {
                 fraction: comparison.fraction(comparison.week), lastReadAt: week?.lastReadAt)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Observed earnings")
+        .accessibilityLabel("Observed account earnings")
     }
 
     private func amountTile(_ title: String, qualifier: String, value: Double?,
@@ -71,7 +71,7 @@ struct PopupEarningsGraphic: View {
         .accessibilityLabel("\(title), \(qualifier) earnings")
         .accessibilityValue(value.map { ActivityAmountPresentation.hourlyAmount($0) + retainedDescription(lastReadAt) } ?? "Unavailable")
         .help(value == nil ? "\(title) earnings are unavailable. Missing history is not zero."
-            : "Recorded \(title.lowercased()) earnings. Today and week bars use the same dollar scale, with partial observation coverage. They are not targets or payout guarantees." + retainedDescription(lastReadAt, separator: " "))
+            : "Recorded \(title.lowercased()) account earnings. Today and week bars use the same dollar scale, with partial observation coverage. They are not targets or payout guarantees. " + LocalFinancialAttributionPresentation.accountHelp + retainedDescription(lastReadAt, separator: " "))
     }
 
     private var rateTile: some View {
@@ -97,10 +97,10 @@ struct PopupEarningsGraphic: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background((metrics?.perHourUSD == nil ? Color.secondary : .orange).opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Earnings per observed hour")
+        .accessibilityLabel("Account earnings per observed hour")
         .accessibilityValue(metrics?.perHourUSD.map { ActivityAmountPresentation.hourlyAmount($0) + retainedDescription(metrics?.lastReadAt) } ?? "Unavailable")
         .help(metrics?.perHourUSD == nil ? "Earnings per observed hour are unavailable. Missing earnings or time coverage is not zero."
-            : "Recorded earnings divided by observed hours today. This is not a forecast or a guaranteed hourly rate." + retainedDescription(metrics?.lastReadAt, separator: " "))
+            : "Recorded account earnings divided by observed hours today. This is not a forecast or a guaranteed hourly rate. " + LocalFinancialAttributionPresentation.accountHelp + retainedDescription(metrics?.lastReadAt, separator: " "))
     }
 
     private func qualifierLabel(_ text: String, lastReadAt: Date?) -> some View {

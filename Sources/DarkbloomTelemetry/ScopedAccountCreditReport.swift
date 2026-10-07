@@ -1,6 +1,18 @@
 import Foundation
 import SQLite3
 
+/// Credits with a verified association to the local provider throughout the
+/// requested history. A caller-selected provider filter does not establish this
+/// association; neither does one current connection ID after a reconnect.
+/// Construction stays inside telemetry until a production resolver can prove
+/// account, coordinator and historical-provider ownership. Inert tests opt in
+/// explicitly through testable imports.
+public struct LocalProviderCreditReport: Sendable {
+    public let report: AccountCreditReport
+
+    init(report: AccountCreditReport) { self.report = report }
+}
+
 /// Counts refer to credit records, not proof of completed serving requests.
 public struct AccountCreditTotals: Equatable, Sendable {
     public let workMicroUSD: Int64

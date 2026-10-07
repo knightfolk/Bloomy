@@ -172,7 +172,9 @@ struct ActivityView: View {
                         .modifier(ScrollControlKeyboardReveal(documentSpace: "activity.earnings.document"))
                     }
                 } else if let message = visibleRead.message {
-                    ContentUnavailableView("History unavailable", systemImage: "chart.bar", description: Text(message))
+                    ContentUnavailableView(chartMetric == .estimatedProfit ? "Local profit unavailable" : "History unavailable",
+                        systemImage: chartMetric == .estimatedProfit ? "desktopcomputer" : "chart.bar", description: Text(message))
+                        .frame(maxWidth: .infinity, minHeight: 200)
                 } else {
                     ProgressView("Reading local history…")
                 }
@@ -195,7 +197,10 @@ struct ActivityView: View {
 
     private var activityHeader: some View {
         HStack(spacing: 8) {
-            Label("Earnings history", systemImage: "chart.bar").font(.headline)
+            Label(renderedMetric == .estimatedProfit ? "Local profit history" : "Account credit history",
+                systemImage: renderedMetric == .estimatedProfit ? "desktopcomputer" : "chart.bar").font(.headline)
+                .help(renderedMetric == .estimatedProfit ? LocalFinancialAttributionPresentation.localHelp
+                    : LocalFinancialAttributionPresentation.accountHelp)
             Spacer(minLength: 8)
             periodPicker
             refreshButton
@@ -734,7 +739,11 @@ struct ActivityView: View {
             guard let snapshot = try await ActivityReadSnapshot.fetch(query: query, store: store,
                 powerIntervals: powerIntervals) else {
                 try Task.checkCancellation()
-                read.fail("Local earnings storage is unavailable.", for: ticket)
+                if query.metric == .estimatedProfit {
+                    read.unavailable(LocalFinancialAttributionPresentation.unavailableMessage, for: ticket)
+                } else {
+                    read.fail("Account credit storage is unavailable.", for: ticket)
+                }
                 return
             }
             try Task.checkCancellation()
