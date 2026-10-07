@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 from MenuBarMotionComparison import stage_comparison
 from MenuBarWindowTrace import stage_trace_report, stage_window_trace
+from StatusItemHostStaging import stage_status_item_access
 
 ROOT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -31,9 +32,13 @@ parser.add_argument("--motion-target-lifetime", choices=["reused", "fresh", "res
                     help="Opt-in diagnostic overlay; compare reused targets, fresh targets or one reset before detach.")
 parser.add_argument("--motion-window-trace", action="store_true",
                     help="Bounded staged native callback trace; requires a target-lifetime comparison.")
+parser.add_argument("--production-status-item-proof", action="store_true",
+                    help="Separate inert real-status-item diagnostic; does not replace the normal native gate.")
 args = parser.parse_args()
 if args.motion_window_trace and not args.motion_target_lifetime:
     parser.error("Window trace requires an explicit diagnostic target-lifetime comparison.")
+if args.production_status_item_proof and (args.motion_target_lifetime or args.motion_window_trace or args.hide_review_banner):
+    parser.error("Real status-item proof requires its visible review controls and no motion comparison overlays.")
 output = args.output.resolve()
 if output.exists():
     parser.error("Output already exists; preserve it for provenance and pass --output with a fresh task-owned path.")
@@ -90,6 +95,7 @@ substitutions = {
 hashes = {}
 sources = []
 window_trace = None
+status_item_access = None
 for source in sorted((ROOT / "Sources/DarkbloomMonitor").rglob("*.swift")):
     if source.name == "DarkbloomMonitorApp.swift":
         continue  # Production app entry point owns all live start-up wiring.
@@ -109,6 +115,14 @@ for source in sorted((ROOT / "Sources/DarkbloomMonitor").rglob("*.swift")):
         window_trace = {"original_sha256": hashes[str(source.relative_to(ROOT))],
                         "staged_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
                         "capacity_per_view": 512, "diagnostic_only": True}
+    if source.name == "StatusItemController.swift" and args.production_status_item_proof:
+        try:
+            text = stage_status_item_access(text)
+        except ValueError as error:
+            parser.error(str(error))
+        status_item_access = {"original_sha256": hashes[str(source.relative_to(ROOT))],
+                              "staged_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                              "diagnostic_only": True, "replaces_normal_native_gate": False}
     destination = stage / source.relative_to(ROOT / "Sources/DarkbloomMonitor")
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(text)
@@ -165,6 +179,7 @@ command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6
            *(["-D", "FIXTURE_FRESH_MOTION_TARGETS"] if args.motion_target_lifetime == "fresh" else []),
            *(["-D", "FIXTURE_RESET_BEFORE_DETACH"] if args.motion_target_lifetime == "reset-before-detach" else []),
            *(["-D", "FIXTURE_MOTION_WINDOW_TRACE"] if args.motion_window_trace else []),
+           *(["-D", "FIXTURE_PRODUCTION_STATUS_ITEM_PROOF"] if args.production_status_item_proof else []),
            "-I", str(products), "-F", str(products),
            str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle", "-lsqlite3",
            "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks", "-o", str(binary)]
@@ -178,6 +193,7 @@ manifest = {
     "source_sha256": hashes,
     "motion_target_comparison": motion_comparison,
     "motion_window_trace": window_trace,
+    "production_status_item_proof": status_item_access,
     "dependency_substitutions": {name: {"before": pair[0], "after": pair[1]}
                                  for name, pair in substitutions.items()},
     "telemetry_library_sha256": hashlib.sha256(staged_telemetry.read_bytes()).hexdigest(),

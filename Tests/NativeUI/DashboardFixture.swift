@@ -152,6 +152,30 @@ private enum FixtureData {
             diagnostics: scenario.hasCurrentRuntime ? [] : [AcquisitionDiagnostic(id: "fixture", source: "Synthetic review", message: "Synthetic source \(scenario.rawValue.lowercased())", occurredAt: now)],
             capturedAt: now, menuStatus: scenario.hasCurrentRuntime ? .online : scenario == .stale ? .stale : .offline)
     }
+
+    #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF
+    static func statusItemSnapshot(active: Bool) -> TelemetrySnapshot {
+        let now = Date()
+        let base = snapshot(.fresh, now: now)
+        let model = modelIDs[0]
+        let state = DaemonState(schema: 1, version: "0.9.17", currentModel: model,
+            warmModels: [model], stats: ProviderStats(tokensGenerated: 126_400, requestsServed: 236, usageGaps: 0),
+            trust: TrustState(level: "verified", status: "online", reason: "Synthetic status-item proof",
+                receivedAt: now.timeIntervalSince1970), capacity: nil, slots: [], inferenceActive: active,
+            startedAt: now.addingTimeInterval(-10_800).timeIntervalSince1970,
+            writtenAt: now.timeIntervalSince1970, pid: 4242,
+            processIdentity: ProcessIdentity(pid: 4242, startTimeMicros: 1_800_000_000),
+            advertisedModels: [model], lifecycle: ProviderLifecycleState(outcome: .serving,
+                remainingRequests: active ? 1 : 0, coordinatorAcknowledged: true))
+        return TelemetrySnapshot(state: .available(value: state, capturedAt: now),
+            loadedModels: .available(value: LoadedModelsState(schema: 1, models: [model],
+                updatedAt: now.timeIntervalSince1970), capturedAt: now),
+            status: base.status, eventFeed: base.eventFeed,
+            tokenRate: active ? .available(tokensPerSecond: 52.7, label: "Synthetic active rate")
+                : .unavailable(reason: "Synthetic idle input"),
+            diagnostics: [], capturedAt: now, menuStatus: .online)
+    }
+    #endif
 }
 
 /// Event payloads are seeded once for one prepared session. Source capture
@@ -1070,6 +1094,9 @@ private final class FixtureModel: ObservableObject {
     @Published var logTimeZone: FixtureLogTimeZone = .system
     @Published var popupHeightBudget: FixturePopupHeightBudget = .screen
     @Published private(set) var nativeProofStatus = "Native proof"
+    #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF
+    @Published private(set) var statusItemProofStatus = "Status-item proof"
+    #endif
     private var nativeProofTask: Task<Void, Never>?
     @Published private(set) var cacheProofStatus = "Cache visibility proof"
     private var cacheProofTask: Task<Void, Never>?
@@ -1586,6 +1613,42 @@ private final class FixtureModel: ObservableObject {
             self.nativeProofTask = nil
         }
     }
+
+    #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF
+    func runStatusItemHostProof() {
+        guard !proofRunning, ready, !isTerminating else { return }
+        statusItemProofStatus = "Status-item proof running…"
+        nativeProofTask = Task { @MainActor in
+            let suite = "dev.darkbloom.status-item-proof.\(UUID().uuidString)"
+            let proofDefaults = UserDefaults(suiteName: suite)!
+            defer { proofDefaults.removePersistentDomain(forName: suite) }
+            let output = self.directory.appendingPathComponent("status-item-host", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+                let logFeed = FixtureLogFeed(events: [])
+                let store = MonitorStore(
+                    service: TelemetryService(source: FixtureTelemetrySource(scenario: .fresh, logFeed: logFeed)),
+                    initial: FixtureData.statusItemSnapshot(active: true), providerExtras: nil,
+                    earningsClient: FixtureEarnings(scenario: .fresh), energyPreferences: proofDefaults,
+                    energyRecorder: EnergyRecorder(file: output.appendingPathComponent("inert-energy.json"), readPower: { _ in nil }),
+                    gpuUsage: SystemGPUUsageStore(read: { nil }), menuAttentionPreferences: proofDefaults)
+                // This dedicated store is never started and never receives the
+                // dashboard's five-second publications or live dependencies.
+                let result = await StatusItemHostProof.run(store: store,
+                    snapshot: { FixtureData.statusItemSnapshot(active: $0) },
+                    defaults: proofDefaults, outputDirectory: output)
+                let data = try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
+                try data.write(to: output.appendingPathComponent("status-item-host-result.json"), options: .atomic)
+                statusItemProofStatus = result["passed"] as? Bool == true ? "Status-item proof passed" : "Status-item proof failed"
+            } catch {
+                statusItemProofStatus = "Status-item proof write failed"
+                FileHandle.standardError.write(Data("Fixture status-item diagnostic failed: \(error.localizedDescription)\n".utf8))
+            }
+            nativeProofTask = nil
+        }
+    }
+    #endif
 
     func runCacheVisibilityProof() {
         guard !proofRunning, loadTask == nil, ready, !isTerminating,
@@ -2560,6 +2623,11 @@ private struct FixtureReviewView: View {
                     Button(model.nativeProofStatus) { model.runNativeProof() }
                         .disabled(!model.ready || model.proofRunning)
                         .help("Run finite synthetic native checks; results: \(model.directory.path)")
+                    #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF
+                    Button(model.statusItemProofStatus) { model.runStatusItemHostProof() }
+                        .disabled(!model.ready || model.proofRunning)
+                        .help("Separate real-status-item diagnostic; results: \(model.directory.path)/status-item-host")
+                    #endif
                 }
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .background(Color.orange.opacity(0.08))
@@ -2627,8 +2695,10 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
         model.presentDashboard = { [weak self] section, settingsPage in
             self?.presentDashboard(section: section, settingsPage: settingsPage)
         }
+        #if !FIXTURE_PRODUCTION_STATUS_ITEM_PROOF
         statusItem = FixtureStatusItemController(model: model)
         model.presentMenuBarPopup = { [weak self] in self?.statusItem?.showPopup() }
+        #endif
         presentDashboard()
     }
 

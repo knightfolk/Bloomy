@@ -1,5 +1,15 @@
 # Bloomy native polish and efficiency
 
+October 7 actual-host follow-up: the optimized production StatusItemController
+passes all five bounded synthetic lifecycle cases, including actual popover
+open/close and supported invalidation/recreation. A second invocation verifies
+cancelled Quit, stopped clocks and owned process exit. Fifteen staging checks
+pass; the ordinary fifteen-case gate remains unchanged and unresolved. These
+are AppKit visibility/presentation observations, not an independent WindowServer
+cover result. See `MENU_BAR_STATUS_ITEM_HOST_REVIEW_20261007.md`. The real
+Settings preview through supported navigation/reopening is next; no production
+animation change or release readiness is claimed.
+
 October 6 callback follow-up: window observers and actual close/visibility
 callbacks restore an eligible rotation, which later disappears in the retained
 manual host. Fresh targets sustain motion. The matched traced pair reproduces

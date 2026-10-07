@@ -161,6 +161,30 @@ Run **Native proof** and retain each terminal motion, Models, Charts and aggrega
 report. Staging guards can be checked without launching an app:
 `python3 -m unittest discover -s Tests/NativeUI -p test_motion_comparison_staging.py`.
 
+For the separate production status-item host diagnostic, build a fresh output
+with `--configuration release --production-status-item-proof`, then choose
+**Status-item proof** in the fixture banner. The ordinary fixture status item
+is omitted in this mode. A dedicated never-started synthetic store supplies the
+actual `StatusItemController`, its `NSStatusItem`, production hosting view and
+popover; optional control/hosting/chat dependencies and provider extras are nil.
+The staged source adds only a guarded read-only accessor to its own button.
+No provider commands, inference, hardware sampling or production preferences
+are used by this diagnostic.
+
+Five finite cases check baseline motion, ten separate fresh publications,
+active/idle/active, production popover open/close, and supported controller
+invalidation/recreation. Each active check observes compositor angles on both
+sides of a 1.7-second hold, without forced display, layout or transaction flush.
+The report qualifies source freshness, actual visibility, native identities,
+geometry, clocks, cancellation and owned cleanup. A joined, bounded cleanup
+verification checks all retained clocks even after cancellation; creation and
+invalidation counts alone cannot establish success. Every invocation retains its
+own UUID directory under the fixture session's `status-item-host/`; read its
+`status-item-host-result.json` and incremental `status-item-host-progress.json`.
+This diagnostic does not replace the fifteen-case motion gate or resolve its
+genuine-occlusion requirement. Do not close or reorder AppKit's status-bar window.
+The mode rejects lifetime/trace overlays and hidden fixture review controls.
+
 The fixture uses `NSHostingController` inside an AppKit `NSWindow` with the same
 titled/closable/miniaturizable/resizable style and full-screen-primary policy as
 production `DashboardWindowController`. Its synthetic banner sits above the
