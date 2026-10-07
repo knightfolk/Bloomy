@@ -1,5 +1,21 @@
 # Bloomy native polish and efficiency
 
+October 7 financial UI integration: MonitorStore now observes authenticated
+session changes, clears financial caches and visible recommendations, rejects
+obsolete success/errors, and drains old acquisitions before refreshing a new
+account. Activity and Overview use one atomic report and mask old charts by
+session epoch, including buffered readiness loss/restoration. Signed partial
+amounts stay visible without inventing an hourly pace; credit records are
+labeled as credits. The full Release run reports 1,742 passing tests with seven
+existing opt-in skips; staging and production builds pass. Native synthetic
+proof covers A/B/A, revocation, unready/restored ledgers, failed replacement
+reads, held cancellation and compact/wide credit graphics. The final column
+layout passes 63 focused tests, exact-source comparison of 124 files and the
+production build; the ordinary native gate remains 12/15 with the same three
+motion failures and passing Models/Charts. Machine attribution,
+legacy disclosure, retention, day replay and earlier motion/distribution gates
+remain open. See [financial UI review](FINANCIAL_SESSION_UI_REVIEW_20261007.md).
+
 October 7 scoped-presentation follow-up: production financial query getters and
 MonitorStore's activity wrappers now delegate to authenticated atomic reports.
 Exact model counts/tokens, signed corrections and actual earning-hour averages

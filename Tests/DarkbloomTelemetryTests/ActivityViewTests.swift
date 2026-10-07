@@ -8,6 +8,73 @@ import Testing
 @Suite("Activity rendering", .serialized)
 @MainActor
 struct ActivityViewTests {
+    @Test("a complete chart uses one unfiltered report for buckets, models, contributions and averages",
+          arguments: [ActivityChartMetric.earnings, .estimatedProfit])
+    func oneAtomicReport(metric: ActivityChartMetric) async throws {
+        let client = ActivityAtomicReadClient()
+        let store = MonitorStore(service: TelemetryService(source: ActivityUnusedSource()),
+            initial: .unavailable(now: Date()), earningsClient: client)
+        let session = await store.synchronizeFinancialSession()
+        let context = try #require(session.context)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSince1970: 7_200)
+        let query = ActivityQuery(period: .today, selectedDate: now, endDate: now, now: now,
+            calendar: calendar, model: "synthetic-model-A", revision: 0, refreshID: 0,
+            metric: metric, context: context, ledgerReady: true, sessionEpoch: store.financialSessionEpoch)
+        let result = try await ActivityReadSnapshot.fetch(query: query, store: store)
+        let snapshot = try #require(result)
+        #expect(snapshot.query.context == context)
+        #expect(snapshot.models == ["synthetic-model-A", "synthetic-model-B"])
+        #expect(snapshot.buckets.first?.totals?.workMicroUSD == 11)
+        #expect(snapshot.modelWorkByBucket.values.first?["synthetic-model-A"] == 11)
+        #expect(snapshot.modelWorkByBucket.values.first?["synthetic-model-B"] == 22)
+        #expect(snapshot.modelHourlyAverages.first?.workMicroUSD == 99)
+        let requests = await client.requests()
+        #expect(requests.count == 1)
+        #expect(requests.first?.context == context)
+        #expect(requests.first?.model == nil)
+        #expect(requests.first?.unit == .hour)
+        #expect(await client.legacyReads() == 0)
+        // Store validates the report and the snapshot validates again after
+        // supplementary token history, immediately before publication.
+        #expect(await client.validationCount() >= 2)
+    }
+
+    @Test("daily profit uses distinct hourly attribution from exactly one captured report")
+    func dailyProfitUsesOneAtomicReport() async throws {
+        let client = ActivityAtomicReadClient()
+        let store = MonitorStore(service: TelemetryService(source: ActivityUnusedSource()),
+            initial: .unavailable(now: Date()), earningsClient: client)
+        let session = await store.synchronizeFinancialSession()
+        let context = try #require(session.context)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSince1970: 7_200)
+        let query = ActivityQuery(period: .dateRange, selectedDate: now, endDate: now, now: now,
+            calendar: calendar, model: nil, revision: 0, refreshID: 0,
+            metric: .estimatedProfit, context: context, sessionEpoch: store.financialSessionEpoch)
+        let power = (0..<240).map { index in
+            EnergyInterval(start: Date(timeIntervalSince1970: Double(index * 30)),
+                end: Date(timeIntervalSince1970: Double((index + 1) * 30)),
+                kWh: 0.1 / 240, usdPerKWh: 0.2, source: "inert-fixture", estimated: true)
+        }
+        let result = try await ActivityReadSnapshot.fetch(query: query, store: store, powerIntervals: power)
+        let snapshot = try #require(result)
+        let requests = await client.requests()
+        #expect(requests.count == 1)
+        #expect(requests.map(\.unit) == [.day])
+        #expect(requests.allSatisfy { $0.context == context && $0.model == nil })
+        #expect(snapshot.buckets.first?.totals?.workMicroUSD == 33)
+        #expect(snapshot.modelHourlyAverages.first?.workMicroUSD == 99)
+        let modelProfit = snapshot.modelHourlyProfits.filter { $0.model == "synthetic-model-A" }
+        #expect(modelProfit.map(\.interval.start) == [Date(timeIntervalSince1970: 0), Date(timeIntervalSince1970: 3_600)])
+        #expect(modelProfit.map(\.grossUSD) == [0.000005, 0.000006])
+        #expect(modelProfit.allSatisfy { $0.profitUSD < 0 })
+        #expect(snapshot.modelHourlyProfitAverages.first { $0.model == "synthetic-model-A" }?.coveredHours == 2)
+        #expect(await client.legacyReads() == 0)
+    }
+
     @Test("hidden Earnings skips revision reads, cancels pending work and rereads on restoration")
     func hiddenReadLifecycle() async throws {
         let client = ActivityHeldReadClient()
@@ -297,5 +364,59 @@ private actor ActivityHeldReadClient: SyntheticAuthenticatedEarningsFixture {
     func activity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ActivityBucket]? {
         buckets += 1
         return []
+    }
+}
+
+private actor ActivityAtomicReadClient: SyntheticAuthenticatedEarningsFixture {
+    struct Request: Sendable {
+        let context: AccountEarningsContext
+        let model: String?
+        let unit: ActivityCalendarUnit
+    }
+    private var reads: [Request] = []
+    private var legacyReadCount = 0
+    private var validations = 0
+    func requests() -> [Request] { reads }
+    func legacyReads() -> Int { legacyReadCount }
+    func validationCount() -> Int { validations }
+    func fetch(now: Date) async throws -> EarningsPresentationValue { .unavailable(reason: "Inert fixture") }
+    func validateFinancialContext(_ context: AccountEarningsContext) async throws {
+        validations += 1
+        guard context == syntheticFinancialContext else { throw AccountEarningsClientError.sessionChanged }
+    }
+    func financialReport(context: AccountEarningsContext, providerID: String?, model: String?,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> AccountCreditReport? {
+        reads.append(Request(context: context, model: model, unit: unit))
+        let intervals = try ActivityCalendar.intervals(in: range, unit: unit, calendar: calendar)
+        let interval = try #require(intervals.first)
+        let totals = ActivityTotals(workMicroUSD: 33, rewardMicroUSD: 5, jobs: 3,
+            promptTokens: 10, completionTokens: 20)
+        let modelBuckets = [("synthetic-model-A", Int64(11)), ("synthetic-model-B", Int64(22))].map { model, work in
+            ModelAccountCreditBucket(interval: interval, model: model, totals: .init(workMicroUSD: work,
+                rewardMicroUSD: 0, workCreditCount: 1, rewardCreditCount: 0, promptTokens: 5, completionTokens: 10))
+        }
+        let hourIntervals = try ActivityCalendar.intervals(in: range, unit: .hour, calendar: calendar)
+        let hourlyActivity: [ModelActivityBucket] = [
+            .init(interval: hourIntervals[0], model: "synthetic-model-A", workMicroUSD: 5),
+            .init(interval: hourIntervals[0], model: "synthetic-model-B", workMicroUSD: 22),
+            .init(interval: hourIntervals[1], model: "synthetic-model-A", workMicroUSD: 6),
+        ]
+        return SyntheticAccountCreditReport.make(context: context, model: model, range: range,
+            buckets: [.init(interval: interval, totals: totals, coverage: .recorded)],
+            models: ["synthetic-model-A", "synthetic-model-B"],
+            modelActivity: modelBuckets.map { .init(interval: $0.interval, model: $0.model, workMicroUSD: $0.totals.workMicroUSD) },
+            modelBuckets: modelBuckets,
+            hourlyEarningsAverages: [.init(model: "synthetic-model-A", workMicroUSD: 99, earningHours: 3)],
+            modelHourlyActivity: hourlyActivity)
+    }
+    func activity(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ActivityBucket]? {
+        legacyReadCount += 1; return []
+    }
+    func activityModels(in range: DateInterval) async throws -> [String] { legacyReadCount += 1; return [] }
+    func activityByModel(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> [ModelActivityBucket]? {
+        legacyReadCount += 1; return []
+    }
+    func modelHourlyEarningsAverages(in range: DateInterval) async throws -> [ModelHourlyEarningsAverage]? {
+        legacyReadCount += 1; return []
     }
 }

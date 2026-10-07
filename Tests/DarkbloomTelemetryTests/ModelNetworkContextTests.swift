@@ -16,6 +16,11 @@ struct ModelNetworkContextTests {
         #expect(label?.contains("partial") == true)
         #expect(label?.contains("1 recorded") == true)
         #expect(label?.contains("1 unknown") == true)
+        let correction = ModelWorkEarnings(model: "model", queryPeriod: value.queryPeriod,
+            sourceCapturedAt: now, workMicroUSD: -125_000, jobs: 2, recordedHours: 1, unknownHours: 1, uncertainBoundaryHours: 1)
+        let corrected = ModelNetworkContext.workLabel(modelID: "model", values: [correction], now: now, calendar: calendar)
+        #expect(corrected?.contains("-0.125") == true)
+        #expect(corrected?.contains("Account work credits") == true)
         #expect(ModelNetworkContext.workLabel(modelID: "Model", values: [value], now: now, calendar: calendar) == nil)
         #expect(ModelNetworkContext.workLabel(modelID: "model", values: [value, value], now: now, calendar: calendar) == nil)
         #expect(ModelNetworkContext.workLabel(modelID: "model", values: [value], now: Date(timeIntervalSince1970: 86400), calendar: calendar) == nil)

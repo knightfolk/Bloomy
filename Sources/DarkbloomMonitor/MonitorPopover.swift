@@ -247,17 +247,15 @@ struct PopupModelSourceInput: Equatable {
 
 struct PopupEarningsMetrics: Equatable {
     let totalUSD: Double
-    let perHourUSD: Double
+    let perHourUSD: Double?
     let lastReadAt: Date?
 
     static func make(from summary: ObservedEarningsWindow?, isRetained: Bool = false) -> Self? {
-        guard let summary,
-              summary.microUSD >= 0,
-              let perHour = EarningsHourlyRate.derive(
-                  microUSD: summary.microUSD,
-                  observedSeconds: summary.observedSeconds
-              )
-        else { return nil }
+        guard let summary, summary.observedSeconds.isFinite,
+              summary.observedSeconds >= 0,
+              summary.observedSeconds > 0 || !summary.coversDayToDate else { return nil }
+        let perHour = EarningsHourlyRate.derive(microUSD: summary.microUSD,
+            observedSeconds: summary.observedSeconds)
         return Self(
             totalUSD: Double(summary.microUSD) / 1_000_000,
             perHourUSD: perHour,
@@ -276,7 +274,7 @@ struct PopupWeekEarningsMetric: Equatable {
     }
 
     static func make(from summary: CalendarWeekEarningsSummary?, isRetained: Bool = false) -> Self? {
-        guard let summary, summary.microUSD >= 0 else { return nil }
+        guard let summary else { return nil }
         return Self(
             title: summary.isComplete && !isRetained ? "This week" : "Observed this week",
             totalUSD: Double(summary.microUSD) / 1_000_000,
@@ -776,9 +774,9 @@ struct MonitorPopover: View {
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 if let summary = jobSummary {
-                    Label("\(summary.completedToday) jobs", systemImage: "checkmark.circle")
+                    Label("\(summary.completedToday) credits", systemImage: "checkmark.circle")
                         .font(.caption).foregroundStyle(.secondary)
-                        .help("Completed jobs today. \(averageJobsPerDay.map { String(format: "%.1f jobs per day on average", $0) } ?? "Daily average unavailable")")
+                        .help("Observed work credits today. \(averageJobsPerDay.map { String(format: "%.1f credits per day on average", $0) } ?? "Daily average unavailable"). Credits do not independently establish completed requests.")
                 }
             }
             compactEarnings
@@ -809,7 +807,7 @@ struct MonitorPopover: View {
     @ViewBuilder private var compactJobs: some View {
         if let summary = jobSummary {
             HStack {
-                Text("\(summary.completedToday) jobs today")
+                Text("\(summary.completedToday) work credits today")
                 Spacer()
                 if let averageJobsPerDay {
                     Text("\(averageJobsPerDay, specifier: "%.1f") / day avg")
@@ -960,15 +958,17 @@ struct MonitorPopover: View {
                             )
                         }
 
-                        InfographicMetricCard(
-                            title: "Average",
-                            unit: "per hour",
-                            accessibilityValue: "\(metrics.perHourUSD) dollars per observed hour today"
-                        ) {
-                            Text(
-                                metrics.perHourUSD,
-                                format: .currency(code: "USD").precision(.fractionLength(2))
-                            )
+                        if let perHour = metrics.perHourUSD {
+                            InfographicMetricCard(
+                                title: "Average",
+                                unit: "per hour",
+                                accessibilityValue: "\(perHour) dollars per observed hour today"
+                            ) {
+                                Text(
+                                    perHour,
+                                    format: .currency(code: "USD").precision(.fractionLength(2))
+                                )
+                            }
                         }
                     }
                 }

@@ -77,13 +77,13 @@ struct PopupEarningsGraphic: View {
     private var rateTile: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 5) {
-                Image(systemName: "clock").foregroundStyle(metrics == nil ? Color.secondary : .orange).font(.system(size: 18))
+                Image(systemName: "clock").foregroundStyle(metrics?.perHourUSD == nil ? Color.secondary : .orange).font(.system(size: 18))
                 Text("Per hour").font(.caption.weight(.medium))
                 Spacer(minLength: 0)
             }
             amount(metrics?.perHourUSD)
             HStack(spacing: 3) {
-                if metrics == nil {
+                if metrics?.perHourUSD == nil {
                     Image(systemName: "questionmark")
                 } else {
                     Image(systemName: "dollarsign.circle")
@@ -91,15 +91,15 @@ struct PopupEarningsGraphic: View {
                     Image(systemName: "clock")
                 }
             }.font(.caption2).foregroundStyle(.secondary).frame(height: 14).accessibilityHidden(true)
-            qualifierLabel(metrics == nil ? "unavailable" : metrics?.lastReadAt == nil ? "observed hours" : "last read", lastReadAt: metrics?.lastReadAt)
+            qualifierLabel(metrics?.perHourUSD == nil ? "unavailable" : metrics?.lastReadAt == nil ? "observed hours" : "last read", lastReadAt: metrics?.lastReadAt)
         }
         .padding(6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background((metrics == nil ? Color.secondary : .orange).opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
+        .background((metrics?.perHourUSD == nil ? Color.secondary : .orange).opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Earnings per observed hour")
-        .accessibilityValue(metrics.map { ActivityAmountPresentation.hourlyAmount($0.perHourUSD) + retainedDescription($0.lastReadAt) } ?? "Unavailable")
-        .help(metrics == nil ? "Earnings per observed hour are unavailable. Missing earnings or time coverage is not zero."
+        .accessibilityValue(metrics?.perHourUSD.map { ActivityAmountPresentation.hourlyAmount($0) + retainedDescription(metrics?.lastReadAt) } ?? "Unavailable")
+        .help(metrics?.perHourUSD == nil ? "Earnings per observed hour are unavailable. Missing earnings or time coverage is not zero."
             : "Recorded earnings divided by observed hours today. This is not a forecast or a guaranteed hourly rate." + retainedDescription(metrics?.lastReadAt, separator: " "))
     }
 

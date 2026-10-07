@@ -290,7 +290,7 @@ private enum FixtureEarningsReadMode: String, CaseIterable, Identifiable, Codabl
     var id: Self { self }
 }
 
-/// Counts the first-query gate, not completion of the entire production report.
+/// Counts the single synthetic report gate; never real account requests.
 private struct FixtureEarningsReadSnapshot: Codable, Sendable {
     var revision: UInt64 = 0
     var nextMode = FixtureEarningsReadMode.normal
@@ -300,12 +300,21 @@ private struct FixtureEarningsReadSnapshot: Codable, Sendable {
     var cancelled: UInt64 = 0
     var empty: UInt64 = 0
     var heldReadID: UInt64?
+    var account = "Synthetic A"
+    var generation = ""
+    var ledgerReady = true
 }
 
 private enum FixtureCalendarSummaryMode: String, CaseIterable, Identifiable, Sendable {
     case normal = "Normal", accountFailure = "Account failure", dayFailure = "Day failure"
     case weekFailure = "Week failure", empty = "No summaries", zero = "Recorded zero", expired = "Expired read"
     var id: String { rawValue }
+}
+
+private enum FixtureFinancialSession: String, CaseIterable, Identifiable, Sendable {
+    case a = "Synthetic A", b = "Synthetic B", newA = "Synthetic A (new generation)"
+    case revoked = "Revoked", unready = "Unready ledger"
+    var id: Self { self }
 }
 
 private actor FixtureEarnings: AccountEarningsFetching {
@@ -319,7 +328,131 @@ private actor FixtureEarnings: AccountEarningsFetching {
     private var activeGateID: UInt64?
     private var gateWaiters: [CheckedContinuation<Void, Never>] = []
     private var stateChanged: (@Sendable (FixtureEarningsReadSnapshot) -> Void)?
+    private var sessionMode = FixtureFinancialSession.a
+    private var session = AccountEarningsSessionState(
+        context: AccountEarningsContext(accountScope: "review-only-account-A", generation: UUID()),
+        ledgerReady: true, revision: UUID())
+    private var sessionObservers: [UUID: AsyncStream<AccountEarningsSessionState>.Continuation] = [:]
     init(scenario: FixtureScenario) { self.scenario = scenario }
+    func financialSessionState() -> AccountEarningsSessionState { session }
+    func financialSessionChanges() -> AsyncStream<AccountEarningsSessionState> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<AccountEarningsSessionState>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        sessionObservers[id] = continuation
+        continuation.yield(session)
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeSessionObserver(id) }
+        }
+        return stream
+    }
+    private func removeSessionObserver(_ id: UUID) { sessionObservers.removeValue(forKey: id) }
+    func validateFinancialContext(_ context: AccountEarningsContext) async throws {
+        guard context == session.context, session.ledgerReady else { throw AccountEarningsClientError.sessionChanged }
+    }
+    func setFinancialSession(_ mode: FixtureFinancialSession) {
+        sessionMode = mode
+        let context = mode == .revoked ? nil : AccountEarningsContext(
+            accountScope: mode == .b ? "review-only-account-B" : "review-only-account-A", generation: UUID())
+        session = AccountEarningsSessionState(context: context,
+            ledgerReady: mode != .revoked && mode != .unready, revision: UUID())
+        for observer in sessionObservers.values { observer.yield(session) }
+        publishReadState()
+    }
+    func setLedgerReady(_ ready: Bool) {
+        guard session.context != nil else { return }
+        session = .init(context: session.context, ledgerReady: ready, revision: UUID())
+        for observer in sessionObservers.values { observer.yield(session) }
+        publishReadState()
+    }
+
+    /// One inert report captures all displayed financial projections. The gate
+    /// belongs here, so one chart query cannot consume several held reads.
+    func financialReport(context: AccountEarningsContext, providerID: String?, model selectedModel: String?,
+        in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar) async throws -> AccountCreditReport? {
+        try await validateFinancialContext(context)
+        try await beginActivityQuery()
+        try await validateFinancialContext(context)
+        guard let hourBuckets = try await activity(in: range, unit: .hour, calendar: calendar) else { return nil }
+        let models = try await activityModels(in: range)
+        let sourceHours = try await activityByModel(in: range, unit: .hour, calendar: calendar)
+        let sourceBuckets: [ActivityBucket]
+        if unit == .hour || hourBuckets.isEmpty { sourceBuckets = hourBuckets }
+        else {
+            sourceBuckets = try ActivityCalendar.intervals(in: range, unit: unit, calendar: calendar).map { interval in
+                let hours = hourBuckets.filter { $0.interval.start >= interval.start && $0.interval.end <= interval.end }
+                let recorded = hours.compactMap(\.totals)
+                let totals: ActivityTotals? = recorded.isEmpty ? nil : .init(
+                    workMicroUSD: recorded.reduce(0) { $0 + $1.workMicroUSD },
+                    rewardMicroUSD: recorded.reduce(0) { $0 + $1.rewardMicroUSD },
+                    jobs: recorded.reduce(0) { $0 + $1.jobs },
+                    promptTokens: recorded.reduce(0) { $0 + $1.promptTokens },
+                    completionTokens: recorded.reduce(0) { $0 + $1.completionTokens })
+                return ActivityBucket(interval: interval, totals: totals,
+                    coverage: totals != nil ? .recorded : hours.contains { $0.coverage == .boundaryUncertain }
+                        ? .boundaryUncertain : .unavailable)
+            }
+        }
+        let multiplier: Int64 = context.accountScope == "review-only-account-B" ? 3 : 1
+        func splitWork(_ buckets: [ActivityBucket]) -> [ModelActivityBucket] {
+            buckets.flatMap { bucket in
+                guard let totals = bucket.totals, !models.isEmpty else { return [ModelActivityBucket]() }
+                let share = totals.workMicroUSD / Int64(models.count)
+                let remainder = totals.workMicroUSD % Int64(models.count)
+                return models.enumerated().map { index, name in
+                    .init(interval: bucket.interval, model: name,
+                        workMicroUSD: share + (index == 0 ? remainder : 0))
+                }
+            }
+        }
+        let hourlyContributions = (sourceHours ?? splitWork(hourBuckets)).map {
+            ModelActivityBucket(interval: $0.interval, model: $0.model, workMicroUSD: $0.workMicroUSD * multiplier)
+        }
+        let contributions: [ModelActivityBucket]
+        if unit == .hour { contributions = hourlyContributions }
+        else {
+            contributions = sourceBuckets.flatMap { bucket in
+                let rows = hourlyContributions.filter {
+                    $0.interval.start >= bucket.interval.start && $0.interval.end <= bucket.interval.end
+                }
+                return Dictionary(grouping: rows, by: \.model).sorted { $0.key < $1.key }.map { name, values in
+                    ModelActivityBucket(interval: bucket.interval, model: name,
+                        workMicroUSD: values.reduce(0) { $0 + $1.workMicroUSD })
+                }
+            }
+        }
+        let modelBuckets = contributions.map {
+            ModelAccountCreditBucket(interval: $0.interval, model: $0.model,
+                totals: .init(workMicroUSD: $0.workMicroUSD, rewardMicroUSD: 0,
+                    workCreditCount: $0.workMicroUSD == 0 ? 0 : 1, rewardCreditCount: 0, promptTokens: 4, completionTokens: 10))
+        }
+        let buckets = sourceBuckets.map { bucket in
+            AccountCreditBucket(interval: bucket.interval, totals: bucket.totals.map {
+                .init(workMicroUSD: $0.workMicroUSD * multiplier, rewardMicroUSD: $0.rewardMicroUSD * multiplier,
+                    workCreditCount: $0.jobs, rewardCreditCount: $0.rewardMicroUSD == 0 ? 0 : 1,
+                    promptTokens: $0.promptTokens, completionTokens: $0.completionTokens)
+            }, coverage: bucket.coverage)
+        }
+        let recorded = buckets.compactMap(\.totals)
+        let totals: AccountCreditTotals? = recorded.isEmpty ? nil : .init(
+            workMicroUSD: recorded.reduce(0) { $0 + $1.workMicroUSD },
+            rewardMicroUSD: recorded.reduce(0) { $0 + $1.rewardMicroUSD },
+            workCreditCount: recorded.reduce(0) { $0 + $1.workCreditCount },
+            rewardCreditCount: recorded.reduce(0) { $0 + $1.rewardCreditCount },
+            promptTokens: recorded.reduce(0) { $0 + $1.promptTokens },
+            completionTokens: recorded.reduce(0) { $0 + $1.completionTokens })
+        let averages = Dictionary(grouping: hourlyContributions, by: \.model).map { name, values in
+            ModelHourlyEarningsAverage(model: name, workMicroUSD: values.reduce(0) { $0 + $1.workMicroUSD },
+                earningHours: values.count)
+        }.sorted { $0.model < $1.model }
+        try await validateFinancialContext(context)
+        return AccountCreditReport(accountScope: context.accountScope, providerID: providerID, model: selectedModel,
+            range: range, observation: nil, reconciliation: .unavailable, lifetimeBalanceChange: nil,
+            totals: totals, buckets: buckets, models: models, modelActivity: contributions,
+            modelHourlyActivity: hourlyContributions, modelBuckets: modelBuckets, hourlyEarningsAverages: averages,
+            modelTotals: averages.map { .init(model: $0.model, microUSD: $0.workMicroUSD, jobs: Int64($0.earningHours)) },
+            queryCalendar: calendar)
+    }
+
     func setCalendarSummaryMode(_ mode: FixtureCalendarSummaryMode) -> Bool {
         guard activeGateID == nil else { return false }
         calendarSummaryMode = mode
@@ -359,6 +492,9 @@ private actor FixtureEarnings: AccountEarningsFetching {
     func readSnapshot() -> FixtureEarningsReadSnapshot { readState }
     private func publishReadState() {
         readState.revision &+= 1
+        readState.account = sessionMode.rawValue
+        readState.generation = session.context?.generation.uuidString ?? "revoked"
+        readState.ledgerReady = session.ledgerReady
         readState.heldReadID = activeGateID
         stateChanged?(readState)
     }
@@ -486,7 +622,6 @@ private actor FixtureEarnings: AccountEarningsFetching {
         }
     }
     func activityModels(in range: DateInterval) async throws -> [String] {
-        try await beginActivityQuery()
         return scenario.hasCurrentRuntime && queryActivityRead != .empty && queryActivityRead != .unknown
             ? Array(FixtureData.modelIDs.prefix(limitedModels ? 1 : queryActivityRead == .signed ? 2 : 3)) : []
     }
@@ -1083,6 +1218,7 @@ private final class FixtureModel: ObservableObject {
     @Published var limitedActivityModels = false
     @Published var activityRead = FixtureActivityRead.normal
     @Published var calendarSummaryMode = FixtureCalendarSummaryMode.normal
+    @Published var financialSession = FixtureFinancialSession.a
     @Published private(set) var earningsRenderingReview = false
     @Published private(set) var earningsReadState = FixtureEarningsReadSnapshot()
     private var earningsReadSession = UUID()
@@ -1199,6 +1335,17 @@ private final class FixtureModel: ObservableObject {
         guard ready, !isTerminating else { return }
         guard await earningsClient.setActivityRead(value) else { return }
         activityRead = value
+    }
+    func setFinancialSession(_ mode: FixtureFinancialSession) async {
+        guard ready, !isTerminating else { return }
+        await earningsClient.setFinancialSession(mode)
+        financialSession = mode
+        _ = await monitor.synchronizeFinancialSession()
+    }
+    func setLedgerReady(_ ready: Bool) async {
+        guard self.ready, !isTerminating else { return }
+        await earningsClient.setLedgerReady(ready)
+        _ = await monitor.synchronizeFinancialSession()
     }
     func setNextEarningsRead(_ mode: FixtureEarningsReadMode) async {
         guard ready, !isTerminating, metricsReview else { return }
@@ -1597,6 +1744,7 @@ private final class FixtureModel: ObservableObject {
         limitedActivityModels = false
         activityRead = .normal
         calendarSummaryMode = .normal
+        financialSession = .a
         await observeEarningsReads()
         fanReadback = .held
         chatVerificationTest = nil
@@ -2678,7 +2826,20 @@ private struct FixtureReviewView: View {
                             Text("\(model.earningsReadState.failed) failed · \(model.earningsReadState.cancelled) cancelled · \(model.earningsReadState.empty) empty")
                             Button("Save Earnings read counts") { Task { await model.saveEarningsReadProof() } }
                         }
-                        .help("Inert first-query gate. Choose a next read, then use Earnings Refresh or change scope.")
+                        .help("Inert report gate. Choose a next read, then use Earnings Refresh or change scope.")
+                        Menu("Account: \(model.financialSession.rawValue)") {
+                            ForEach(FixtureFinancialSession.allCases) { session in
+                                Button(session.rawValue) { Task { await model.setFinancialSession(session) } }
+                            }
+                            Divider()
+                            Text("B credits are three times A; every selection creates a new generation.")
+                            Text(model.earningsReadState.ledgerReady ? "Ledger ready" : "Ledger unavailable")
+                            Button("Lose ledger readiness") { Task { await model.setLedgerReady(false) } }
+                            Button("Restore same ledger") { Task { await model.setLedgerReady(true) } }
+                            Button("Save scoped report counts") { Task { await model.saveEarningsReadProof() } }
+                        }
+                        .disabled(!model.ready || model.proofRunning)
+                        .help("Synthetic account, revocation and unready-ledger review. No real identity, provider or credentials are read.")
                         Menu("Calendar summaries: \(model.calendarSummaryMode.rawValue)") {
                             ForEach(FixtureCalendarSummaryMode.allCases) { mode in
                                 Button(mode.rawValue) { Task { await model.setCalendarSummaryMode(mode) } }

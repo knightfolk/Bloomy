@@ -90,8 +90,8 @@ public enum EarningsPresentationValue: Equatable, Sendable {
               start == calendar.startOfDay(for: now), captured >= start,
               now.timeIntervalSince(captured).isFinite,
               (0...600).contains(now.timeIntervalSince(captured)),
-              value.observedSeconds.isFinite, value.observedSeconds > 0,
-              value.microUSD >= 0 else {
+              value.observedSeconds.isFinite, value.observedSeconds >= 0,
+              value.observedSeconds > 0 || !value.coversDayToDate else {
             return .unavailable(reason: "Today's earnings unavailable or expired")
         }
         return .day(microUSD: value.microUSD, complete: value.coversDayToDate)

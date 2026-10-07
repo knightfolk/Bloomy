@@ -14,23 +14,35 @@ struct OverviewEarningsView: View {
         TimelineView(VisibilityTimelineSchedule(base: .everyMinute, isVisible: store.dashboardVisible)) { context in
             let query = store.dashboardVisible ? ActivityQuery(
                 period: .today, selectedDate: context.date, endDate: context.date, now: context.date,
-                calendar: .current, model: nil, revision: store.activityRevision, refreshID: refreshID
+                calendar: .current, model: nil, revision: store.activityRevision, refreshID: refreshID,
+                context: store.financialContext, ledgerReady: store.financialLedgerReady, sessionEpoch: store.financialSessionEpoch
             ) : nil
-            OverviewEarningsCard(read: read, refresh: { refreshID += 1 }, openActivity: openActivity)
+            OverviewEarningsCard(read: read.presentation(context: store.financialContext,
+                ledgerReady: store.financialLedgerReady, sessionEpoch: store.financialSessionEpoch), refresh: { refreshID += 1 }, openActivity: openActivity)
                 .task(id: query) {
                     guard let query, !Task.isCancelled else { return }
                     let ticket = read.begin(query)
                     do {
-                        guard let range = query.range,
-                              let buckets = try await store.activity(in: range, unit: .hour, calendar: query.calendar) else {
+                        let session = await store.synchronizeFinancialSession()
+                        try Task.checkCancellation()
+                        guard let capturedContext = query.context, capturedContext == session.context,
+                              query.ledgerReady, session.ledgerReady else {
+                            read.unavailable(ActivityReadState.unavailableMessage(context: session.context,
+                                ledgerReady: session.ledgerReady), for: ticket)
+                            return
+                        }
+                        guard let snapshot = try await ActivityReadSnapshot.fetch(query: query, store: store) else {
                             try Task.checkCancellation()
                             read.fail("Local earnings history is unavailable.", for: ticket)
                             return
                         }
                         try Task.checkCancellation()
-                        read.finish(ActivityReadSnapshot(query: query, buckets: buckets), for: ticket)
+                        read.finish(snapshot, for: ticket)
                     } catch is CancellationError {
                         read.cancel(ticket)
+                    } catch AccountEarningsClientError.sessionChanged {
+                        read.unavailable("The account changed. Reading its local credit history…", for: ticket)
+                        _ = await store.synchronizeFinancialSession()
                     } catch {
                         if Task.isCancelled { read.cancel(ticket) }
                         else { read.fail("Could not read local earnings history.", for: ticket) }

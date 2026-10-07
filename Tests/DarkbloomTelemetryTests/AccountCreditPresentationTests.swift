@@ -128,11 +128,42 @@ struct AccountCreditPresentationTests {
             in: period, unit: .day, calendar: calendar)
         #expect(hours.buckets.count == 48 && days.buckets.count == 2)
         #expect(days.hourlyEarningsAverages == hours.hourlyEarningsAverages)
+        #expect(days.modelHourlyActivity == hours.modelHourlyActivity)
+        #expect(days.modelHourlyActivity == hours.modelActivity)
+        let gemmaHours = days.modelHourlyActivity.filter { $0.model == "gemma" }
+        #expect(gemmaHours.map(\.workMicroUSD) == [150_000, 250_000, -100_000])
+        #expect(gemmaHours.map(\.interval.start) == [dayStart, dayStart.addingTimeInterval(3_600), dayStart.addingTimeInterval(90_000)])
+        #expect(gemmaHours.allSatisfy { $0.interval.duration == 3_600 })
+        #expect(!days.modelHourlyActivity.contains { $0.model == "base_reward" })
         let gemma = try #require(days.hourlyEarningsAverages.first { $0.model == "gemma" })
         #expect(gemma.workMicroUSD == 300_000 && gemma.earningHours == 3)
         #expect(abs(gemma.averageWorkUSDPerEarningHour - 0.1) < 0.000_001)
         #expect(days.recentModelEarnings() == hours.recentModelEarnings())
         #expect(!days.hourlyEarningsAverages.contains { $0.model == "base_reward" })
+    }
+
+    @Test("daily atomic hourly attribution clips partial endpoints and preserves signed amounts")
+    func dailyHourlyAttributionClipsEndpoints() async throws {
+        let database = try EarningsDatabase(url: url())
+        let dayStart = calendar.startOfDay(for: start)
+        let period = DateInterval(start: dayStart.addingTimeInterval(900),
+            end: dayStart.addingTimeInterval(8_100))
+        let rows = [
+            credit(1, amount: 100, model: "gemma", at: dayStart.addingTimeInterval(1_000)),
+            credit(2, amount: 200, model: "gemma", at: dayStart.addingTimeInterval(4_000)),
+            credit(3, amount: -50, model: "gemma", at: dayStart.addingTimeInterval(7_300)),
+        ]
+        try await database.ingest(page(rows, total: 250), capturedAt: period.end)
+        let hours = try await database.accountCreditReport(accountID: "presentation-account",
+            in: period, unit: .hour, calendar: calendar)
+        let days = try await database.accountCreditReport(accountID: "presentation-account",
+            in: period, unit: .day, calendar: calendar)
+        #expect(days.modelHourlyActivity == hours.modelHourlyActivity)
+        #expect(days.modelHourlyActivity == hours.modelActivity)
+        #expect(days.modelHourlyActivity.map(\.workMicroUSD) == [100, 200, -50])
+        #expect(days.modelHourlyActivity.map(\.interval.duration) == [2_700, 3_600, 900])
+        #expect(days.modelHourlyActivity.first?.interval.start == period.start)
+        #expect(days.modelHourlyActivity.last?.interval.end == period.end)
     }
 
     @Test("repeated local DST hours remain distinct earning hours in daily and hourly reports")
@@ -160,6 +191,12 @@ struct AccountCreditPresentationTests {
         #expect(repeated.map { $0.totals?.workMicroUSD } == [150_000, 300_000])
         #expect(repeated.map { $0.totals?.jobs } == [2, 1])
         #expect(days.hourlyEarningsAverages == hours.hourlyEarningsAverages)
+        #expect(days.modelHourlyActivity == hours.modelHourlyActivity)
+        #expect(days.modelHourlyActivity == hours.modelActivity)
+        let hourlyAttribution = days.modelHourlyActivity.filter { local.component(.hour, from: $0.interval.start) == 1 }
+        #expect(hourlyAttribution.map(\.interval.start) == repeated.map(\.interval.start))
+        #expect(hourlyAttribution.map(\.workMicroUSD) == [150_000, 300_000])
+        #expect(hourlyAttribution.allSatisfy { $0.interval.duration == 3_600 })
         #expect(days.hourlyEarningsAverages == [
             ModelHourlyEarningsAverage(model: "gemma", workMicroUSD: 450_000, earningHours: 2),
         ])

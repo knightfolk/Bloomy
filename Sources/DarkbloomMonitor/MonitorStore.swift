@@ -18,6 +18,7 @@ final class MonitorStore: ObservableObject {
     private var energyEarningsDay: Date?
     private struct EnergyActivityKey: Equatable {
         let day: DateInterval
+        let context: AccountEarningsContext
         let accountCapturedAt: Date?
         let activityRevision: UInt64
     }
@@ -89,6 +90,21 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var networkSeries: SourceAvailability<NetworkSeriesSnapshot> = .unavailable(reason: "Open the dashboard to load network history")
     @Published private(set) var networkSeriesRefreshing = false
     @Published private(set) var activityRevision: UInt64 = 0
+    @Published private(set) var financialContext: AccountEarningsContext?
+    @Published private(set) var financialLedgerReady = false
+    private var financialSessionTask: Task<Void, Never>?
+    private var financialSessionObservationID: UUID?
+    private var earningsRefreshID: UUID?
+    private var latestFinancialRefreshID: UUID?
+    private var publishedFinancialRefreshID: UUID?
+    private var financialStopping = false
+    private var financialSessionReadID: UInt64 = 0
+    private var latestFinancialSessionRead: Task<AccountEarningsSessionState, Never>?
+    @Published private(set) var financialSessionEpoch: UInt64 = 0
+    private var earningsRefreshContext: AccountEarningsContext?
+    /// Non-published acquisition diagnostic; observing it adds no UI updates.
+    private(set) var earningsRefreshWaiterCount = 0
+    private var latestFinancialSessionState: AccountEarningsSessionState = .unavailable
 
     private let service: TelemetryService
     private let earningsClient: any AccountEarningsFetching
@@ -134,7 +150,7 @@ final class MonitorStore: ObservableObject {
     private var earningsPollingTask: Task<Void, Never>?
     private var networkCapacityPollingTask: Task<Void, Never>?
     private var accountEarningsCapturedAt: Date?
-    private var earningsRefreshTask: Task<AccountRefreshState, Never>?
+    private var earningsRefreshTask: Task<AccountRefreshState?, Never>?
     private var shutdownTask: Task<Void, Never>?
     private var thermalObserver: NSObjectProtocol?
     private var networkCapacityRefreshGeneration = 0
@@ -208,6 +224,112 @@ final class MonitorStore: ObservableObject {
         modelTokenRateAverages = []
         modelEarnings = []
         networkCapacity = .unavailable(reason: "Waiting for network model demand")
+        observeFinancialSession()
+    }
+
+    deinit {
+        financialSessionTask?.cancel()
+        latestFinancialSessionRead?.cancel()
+    }
+
+    private func observeFinancialSession() {
+        guard financialSessionTask == nil, shutdownTask == nil, !financialStopping else { return }
+        let client = earningsClient
+        let observationID = UUID()
+        financialSessionObservationID = observationID
+        financialSessionTask = Task { [weak self] in
+            let changes = await client.financialSessionChanges()
+            for await _ in changes {
+                guard !Task.isCancelled else { return }
+                // An older buffered event must not undo a newer API-boundary
+                // snapshot. Resolve current state before the actor publication.
+                guard let request = self?.beginFinancialSessionRead() else { return }
+                let state = await request.task.value
+                guard !Task.isCancelled, let self,
+                      self.financialSessionObservationID == observationID,
+                      self.shutdownTask == nil, !self.financialStopping else { return }
+                _ = await self.resolveFinancialSessionRead(id: request.id, state: state)
+            }
+        }
+    }
+
+    @discardableResult
+    func synchronizeFinancialSession() async -> AccountEarningsSessionState {
+        observeFinancialSession()
+        let request = beginFinancialSessionRead()
+        let state = await request.task.value
+        return await resolveFinancialSessionRead(id: request.id, state: state)
+    }
+
+    private func beginFinancialSessionRead() -> (id: UInt64, task: Task<AccountEarningsSessionState, Never>) {
+        financialSessionReadID &+= 1
+        let client = earningsClient
+        let task = Task { await client.financialSessionState() }
+        latestFinancialSessionRead = task
+        return (financialSessionReadID, task)
+    }
+
+    private func resolveFinancialSessionRead(id: UInt64, state: AccountEarningsSessionState) async -> AccountEarningsSessionState {
+        var resolvedID = id
+        var resolved = state
+        // Superseded callers must await the newer snapshot, not return the
+        // previous cached account while its authoritative read is still pending.
+        while resolvedID != financialSessionReadID {
+            guard !Task.isCancelled, !financialStopping, let latestFinancialSessionRead else { return .unavailable }
+            resolvedID = financialSessionReadID
+            resolved = await latestFinancialSessionRead.value
+        }
+        guard !Task.isCancelled, shutdownTask == nil, !financialStopping else { return .unavailable }
+        applyFinancialSession(resolved)
+        return latestFinancialSessionState
+    }
+
+    func validateFinancialContext(_ context: AccountEarningsContext) async throws {
+        do {
+            try await earningsClient.validateFinancialContext(context)
+            let state = await synchronizeFinancialSession()
+            guard state.context == context, state.ledgerReady else { throw AccountEarningsClientError.sessionChanged }
+        } catch {
+            _ = await synchronizeFinancialSession()
+            throw error
+        }
+    }
+
+    private func applyFinancialSession(_ state: AccountEarningsSessionState) {
+        let revisionChanged = latestFinancialSessionState.revision != state.revision
+        latestFinancialSessionState = state
+        guard financialContext != state.context || financialLedgerReady != state.ledgerReady || revisionChanged else { return }
+        // Session revisions change at identity/readiness boundaries, not on
+        // ordinary ingestion. A buffered loss/restoration must also invalidate.
+        if financialContext != state.context || (financialLedgerReady && (!state.ledgerReady || revisionChanged)) {
+            clearFinancialPresentation()
+        }
+        financialContext = state.context
+        financialLedgerReady = state.ledgerReady
+        financialSessionEpoch &+= 1
+        activityRevision &+= 1
+    }
+
+    private func clearFinancialPresentation() {
+        let reason = "Waiting for this account's earnings"
+        earnings = .unavailable(reason: reason)
+        todayEarningsReading = .unavailable(reason: reason)
+        weekEarningsReading = .unavailable(reason: reason)
+        jobSummary = .unavailable(reason: "Work credit history is unavailable")
+        accountEarningsCapturedAt = nil
+        earningsPerHourUSD = nil
+        publishedFinancialRefreshID = nil
+        modelEarnings = []
+        modelWorkEarnings = []
+        modelServingProfitAverages = []
+        modelServingProfitCapturedAt = nil
+        energyActivityKey = nil
+        energyActivityBuckets = nil
+        energyEarnings = nil
+        energyEarningsDay = nil
+        recommendationDecision = nil
+        recommendationHistory = []
+        recommendationHistoryAvailable = false
     }
 
     func attachRecommendationInventory(_ snapshot: @escaping @MainActor () -> ProviderControlSnapshot?) {
@@ -215,10 +337,14 @@ final class MonitorStore: ObservableObject {
     }
 
     func refreshRecommendation() async {
+        let state = await synchronizeFinancialSession()
+        guard !Task.isCancelled, !financialStopping else { return }
+        let context = state.context
+        let epoch = financialSessionEpoch
+        let revision = activityRevision
         let input = RecommendationEvidenceAssembler.make(
             at: now(), network: networkCapacity, telemetry: snapshot,
-            control: recommendationControlSnapshot?(), observedWork: modelWorkEarnings
-        )
+            control: recommendationControlSnapshot?(), observedWork: modelWorkEarnings)
         guard let recommendationJournal else {
             recommendationDecision = RecommendationEvaluator.evaluate(input)
             recommendationHistory = []
@@ -227,15 +353,31 @@ final class MonitorStore: ObservableObject {
         }
         do {
             let decision = try await recommendationJournal.record(input)
-            let history = try await recommendationJournal.recent(limit: 12).map(\.storedDecision)
+            guard await recommendationPublicationValid(context: context, epoch: epoch, revision: revision) else { return }
             recommendationDecision = decision
-            recommendationHistory = history
+            // Existing journal rows have no account/session attribution. Keep
+            // them for replay, but show only decisions accepted in this session.
+            var history = recommendationHistory.filter { $0.id != decision.id }
+            history.append(decision)
+            recommendationHistory = Array(history.suffix(12))
             recommendationHistoryAvailable = true
         } catch {
+            guard await recommendationPublicationValid(context: context, epoch: epoch, revision: revision) else { return }
             recommendationDecision = RecommendationEvaluator.evaluate(input)
             recommendationHistory = []
             recommendationHistoryAvailable = false
         }
+    }
+
+    private func recommendationPublicationValid(context: AccountEarningsContext?, epoch: UInt64,
+                                               revision: UInt64) async -> Bool {
+        if let context, (try? await earningsClient.validateFinancialContext(context)) == nil {
+            _ = await synchronizeFinancialSession()
+            return false
+        }
+        let state = await synchronizeFinancialSession()
+        return !Task.isCancelled && !financialStopping && state.context == context
+            && financialContext == context && financialSessionEpoch == epoch && activityRevision == revision
     }
 
     func start() {
@@ -393,23 +535,28 @@ final class MonitorStore: ObservableObject {
     func financialReport(context expectedContext: AccountEarningsContext? = nil,
         in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar,
         model: String? = nil) async throws -> AccountCreditReport? {
-        let state = await earningsClient.financialSessionState()
+        let state = await synchronizeFinancialSession()
         guard expectedContext == nil || expectedContext == state.context else { throw AccountEarningsClientError.sessionChanged }
         guard let context = state.context, state.ledgerReady else { return nil }
+        let epoch = financialSessionEpoch
         do {
             let report = try await earningsClient.financialReport(context: context, providerID: nil, model: model,
                 in: range, unit: unit, calendar: calendar)
-            try await earningsClient.validateFinancialContext(context)
+            try await validateFinancialContext(context)
+            guard epoch == financialSessionEpoch else { throw AccountEarningsClientError.sessionChanged }
             guard report == nil || report?.accountScope == context.accountScope else { throw AccountEarningsClientError.sessionChanged }
             return report
         } catch {
-            try await earningsClient.validateFinancialContext(context)
+            try await validateFinancialContext(context)
+            guard epoch == financialSessionEpoch else { throw AccountEarningsClientError.sessionChanged }
             throw error
         }
     }
 
     func refreshModelServingProfitability() async {
-        guard energyPreferences.bool(forKey: "electricity.enabled"),
+        let state = await synchronizeFinancialSession()
+        guard let context = state.context, state.ledgerReady,
+              energyPreferences.bool(forKey: "electricity.enabled"),
               ElectricityCost.rate(energyPreferences.string(forKey: "electricity.usdPerKWh") ?? "") != nil,
               let first = energy?.intervals.first?.start,
               let last = energy?.intervals.last?.end,
@@ -419,26 +566,38 @@ final class MonitorStore: ObservableObject {
             observeProfitSwitch()
             return
         }
-
         let end = min(last, now())
         let start = max(first, end.addingTimeInterval(-7 * 86_400))
+        guard end > start else { return }
         let range = DateInterval(start: start, end: end)
-        guard let activity = try? await earningsClient.activityByModel(
-            in: range,
-            unit: .hour,
-            calendar: .current
-        ) else {
-            modelServingProfitAverages = []
-            modelServingProfitCapturedAt = nil
+        let revision = activityRevision
+        let capturedAt = accountEarningsCapturedAt
+        let intervals = energy?.intervals ?? []
+        do {
+            guard let report = try await financialReport(context: context, in: range, unit: .hour, calendar: .current) else {
+                if financialContext == context, activityRevision == revision,
+                   accountEarningsCapturedAt == capturedAt {
+                    modelServingProfitAverages = []
+                    modelServingProfitCapturedAt = nil
+                    observeProfitSwitch()
+                }
+                return
+            }
+            try await validateFinancialContext(context)
+            guard activityRevision == revision, accountEarningsCapturedAt == capturedAt,
+                  energy?.intervals == intervals else { return }
+            modelServingProfitAverages = ModelProfitability.servingAverages(
+                activity: report.modelActivity, energy: intervals)
+            modelServingProfitCapturedAt = capturedAt
             observeProfitSwitch()
-            return
+        } catch {
+            if financialContext == context, activityRevision == revision,
+               accountEarningsCapturedAt == capturedAt, energy?.intervals == intervals {
+                modelServingProfitAverages = []
+                modelServingProfitCapturedAt = nil
+                observeProfitSwitch()
+            }
         }
-        modelServingProfitAverages = ModelProfitability.servingAverages(
-            activity: activity,
-            energy: energy?.intervals ?? []
-        )
-        modelServingProfitCapturedAt = accountEarningsCapturedAt
-        observeProfitSwitch()
     }
 
     func modelHourlyEarningsAverages(in range: DateInterval) async throws -> [ModelHourlyEarningsAverage]? {
@@ -462,26 +621,34 @@ final class MonitorStore: ObservableObject {
     }
 
     func refreshEarnings() async {
-        if let earningsRefreshTask {
-            let refresh = await earningsRefreshTask.value
-            accountEarningsCapturedAt = refresh.accountCapturedAt
-            earnings = refresh.earnings
-            todayEarningsReading = refresh.todayEarnings
-            weekEarningsReading = refresh.weekEarnings
-            modelEarnings = refresh.modelEarnings
-            modelWorkEarnings = refresh.modelWorkEarnings
-            earningsPerHourUSD = refresh.freshlyReadToday.flatMap {
-                EarningsHourlyRate.derive(
-                    microUSD: $0.microUSD,
-                    observedSeconds: $0.observedSeconds
-                )
+        guard !Task.isCancelled, shutdownTask == nil, !financialStopping else { return }
+        var initial = await synchronizeFinancialSession()
+        guard !Task.isCancelled, shutdownTask == nil else { return }
+        while let task = earningsRefreshTask {
+            let joinedID = earningsRefreshID
+            let joinedContext = earningsRefreshContext
+            earningsRefreshWaiterCount += 1
+            let refresh = await task.value
+            earningsRefreshWaiterCount -= 1
+            if let refresh { await publishFinancialRefresh(refresh) }
+            guard !Task.isCancelled, shutdownTask == nil, !financialStopping,
+                  joinedContext != initial.context else { return }
+            // Drain an obsolete acquisition before starting the explicitly
+            // requested current account; preserve same-session coalescing.
+            if earningsRefreshID == joinedID {
+                earningsRefreshTask = nil
+                earningsRefreshID = nil
+                earningsRefreshContext = nil
             }
-            jobSummary = refresh.jobSummary
-            await refreshModelServingProfitability()
-            return
+            let latest = await synchronizeFinancialSession()
+            guard latest.context == initial.context else { return }
+            initial = latest
         }
 
         let client = earningsClient
+        let previousContext = initial.context
+        let previousSessionEpoch = financialSessionEpoch
+        let previousLedgerReady = initial.ledgerReady
         let previousEarnings = earnings
         let previousJobSummary = jobSummary
         let previousModelEarnings = modelEarnings
@@ -489,101 +656,158 @@ final class MonitorStore: ObservableObject {
         let previousWeek = weekEarningsReading
         let refreshedAt = now()
         let calendar = Calendar.current
-        let task = Task<AccountRefreshState, Never> {
+        let refreshID = UUID()
+        let task = Task<AccountRefreshState?, Never> {
+            var context = previousContext
             let refreshedEarnings: EarningsPresentationValue
             do {
-                let value = try await client.fetch(now: refreshedAt)
-                switch value {
-                case .available, .observed, .day:
-                    refreshedEarnings = value
-                case .stale(let microUSD, let reason):
-                    refreshedEarnings = .stale(microUSD: microUSD, reason: reason)
+                let result = try await client.fetchWithContext(now: refreshedAt)
+                context = result.context
+                try await client.validateFinancialContext(result.context)
+                switch result.value {
+                case .available, .observed, .day, .stale:
+                    refreshedEarnings = result.value
                 case .unavailable(let reason):
                     refreshedEarnings = Self.staleOrUnavailable(
-                        previous: previousEarnings,
-                        reason: reason
-                    )
+                        previous: result.context == previousContext ? previousEarnings : .unavailable(reason: reason),
+                        reason: reason)
                 }
             } catch {
-                refreshedEarnings = Self.staleOrUnavailable(
-                    previous: previousEarnings,
-                    reason: error.localizedDescription
-                )
+                guard let previousContext,
+                      (try? await client.validateFinancialContext(previousContext)) != nil else { return nil }
+                // A failed first acquisition must not manufacture a partially
+                // refreshed dashboard from later independent getters. Retention
+                // requires an already accepted snapshot from this same session.
+                if case .unavailable = previousEarnings { return nil }
+                refreshedEarnings = Self.staleOrUnavailable(previous: previousEarnings, reason: error.localizedDescription)
             }
-
+            guard let context else { return nil }
+            // Every later getter must still belong to the fetch's context,
+            // including failures. Only same-context previous values may remain.
+            let sameContext = context == previousContext
             let refreshedJobSummary: SourceAvailability<JobCompletionSummary>
             do {
-                if let summary = try await client.jobCompletionSummary(
-                    now: refreshedAt,
-                    calendar: calendar
-                ) {
-                    refreshedJobSummary = .available(value: summary, capturedAt: refreshedAt)
+                if let value = try await Self.readFinancial(context, client: client, read: {
+                    try await client.jobCompletionSummary(now: refreshedAt, calendar: calendar)
+                }) {
+                    refreshedJobSummary = .available(value: value, capturedAt: refreshedAt)
                 } else {
-                    refreshedJobSummary = Self.staleOrUnavailable(
-                        previous: previousJobSummary,
-                        reason: "Local completed-job history is unavailable"
-                    )
+                    refreshedJobSummary = .unavailable(reason: "Work credit history is unavailable")
                 }
             } catch {
+                guard (try? await client.validateFinancialContext(context)) != nil else { return nil }
                 refreshedJobSummary = Self.staleOrUnavailable(
-                    previous: previousJobSummary,
-                    reason: error.localizedDescription
-                )
+                    previous: sameContext ? previousJobSummary : .unavailable(reason: "Work credit history is unavailable"),
+                    reason: error.localizedDescription)
+            }
+            let refreshedModelEarnings: [ModelEarnings]
+            do {
+                refreshedModelEarnings = try await Self.readFinancial(context, client: client, read: {
+                    try await client.modelEarnings(since: refreshedAt.addingTimeInterval(-7 * 86_400))
+                })
+            } catch {
+                guard (try? await client.validateFinancialContext(context)) != nil else { return nil }
+                refreshedModelEarnings = sameContext ? previousModelEarnings : []
             }
             let refreshedTodayEarnings: SourceAvailability<ObservedEarningsWindow>
             let refreshedWeekEarnings: SourceAvailability<CalendarWeekEarningsSummary>
-            let refreshedModelEarnings = (try? await client.modelEarnings(
-                since: refreshedAt.addingTimeInterval(-7 * 86_400)
-            )) ?? previousModelEarnings
             var refreshedModelWork: [ModelWorkEarnings] = []
             switch refreshedEarnings {
             case .available, .observed, .day:
-                refreshedModelWork = (try? await client.modelWorkEarnings(
-                    in: DateInterval(start: calendar.startOfDay(for: refreshedAt), end: refreshedAt),
-                    calendar: calendar)) ?? []
                 do {
-                    if let value = try await client.todayEarningsSummary(now: refreshedAt, calendar: calendar) {
+                    refreshedModelWork = try await Self.readFinancial(context, client: client, read: {
+                        try await client.modelWorkEarnings(
+                            in: DateInterval(start: calendar.startOfDay(for: refreshedAt), end: refreshedAt), calendar: calendar)
+                    })
+                } catch {
+                    guard (try? await client.validateFinancialContext(context)) != nil else { return nil }
+                }
+                do {
+                    if let value = try await Self.readFinancial(context, client: client, read: {
+                        try await client.todayEarningsSummary(now: refreshedAt, calendar: calendar)
+                    }) {
                         refreshedTodayEarnings = .available(value: value, capturedAt: refreshedAt)
                     } else {
                         refreshedTodayEarnings = .unavailable(reason: "Today's observed earnings are unavailable")
                     }
                 } catch {
-                    refreshedTodayEarnings = Self.staleOrUnavailable(previous: previousToday,
+                    guard (try? await client.validateFinancialContext(context)) != nil else { return nil }
+                    refreshedTodayEarnings = Self.staleOrUnavailable(
+                        previous: sameContext ? previousToday : .unavailable(reason: "Today's observed earnings are unavailable"),
                         reason: "Today's earnings refresh failed")
                 }
                 do {
-                    if let value = try await client.weekEarningsSummary(now: refreshedAt, calendar: calendar) {
+                    if let value = try await Self.readFinancial(context, client: client, read: {
+                        try await client.weekEarningsSummary(now: refreshedAt, calendar: calendar)
+                    }) {
                         refreshedWeekEarnings = .available(value: value, capturedAt: refreshedAt)
                     } else {
                         refreshedWeekEarnings = .unavailable(reason: "This week's observed earnings are unavailable")
                     }
                 } catch {
-                    refreshedWeekEarnings = Self.staleOrUnavailable(previous: previousWeek,
+                    guard (try? await client.validateFinancialContext(context)) != nil else { return nil }
+                    refreshedWeekEarnings = Self.staleOrUnavailable(
+                        previous: sameContext ? previousWeek : .unavailable(reason: "This week's observed earnings are unavailable"),
                         reason: "This week's earnings refresh failed")
                 }
             case .stale, .unavailable:
-                refreshedTodayEarnings = Self.staleOrUnavailable(previous: previousToday,
+                refreshedTodayEarnings = Self.staleOrUnavailable(
+                    previous: sameContext ? previousToday : .unavailable(reason: "Today's observed earnings are unavailable"),
                     reason: "Account earnings could not be refreshed")
-                refreshedWeekEarnings = Self.staleOrUnavailable(previous: previousWeek,
+                refreshedWeekEarnings = Self.staleOrUnavailable(
+                    previous: sameContext ? previousWeek : .unavailable(reason: "This week's observed earnings are unavailable"),
                     reason: "Account earnings could not be refreshed")
             }
+            guard (try? await client.validateFinancialContext(context)) != nil else { return nil }
             let accountCapturedAt: Date?
             switch refreshedEarnings {
             case .available, .observed, .day: accountCapturedAt = refreshedAt
             case .stale, .unavailable: accountCapturedAt = nil
             }
-            return AccountRefreshState(
-                accountCapturedAt: accountCapturedAt,
-                earnings: refreshedEarnings,
-                jobSummary: refreshedJobSummary,
-                todayEarnings: refreshedTodayEarnings,
-                weekEarnings: refreshedWeekEarnings,
-                modelEarnings: refreshedModelEarnings,
-                modelWorkEarnings: refreshedModelWork
-            )
+            return AccountRefreshState(context: context, requestID: refreshID,
+                initialSessionEpoch: previousSessionEpoch, initialLedgerReady: previousLedgerReady, accountCapturedAt: accountCapturedAt,
+                earnings: refreshedEarnings, jobSummary: refreshedJobSummary,
+                todayEarnings: refreshedTodayEarnings, weekEarnings: refreshedWeekEarnings,
+                modelEarnings: refreshedModelEarnings, modelWorkEarnings: refreshedModelWork)
         }
+        earningsRefreshID = refreshID
+        earningsRefreshContext = previousContext
+        latestFinancialRefreshID = refreshID
         earningsRefreshTask = task
         let refresh = await task.value
+        if earningsRefreshID == refreshID {
+            earningsRefreshTask = nil
+            earningsRefreshID = nil
+            earningsRefreshContext = nil
+        }
+        if let refresh { await publishFinancialRefresh(refresh) }
+        else { _ = await synchronizeFinancialSession() }
+    }
+
+    private static func readFinancial<T: Sendable>(_ context: AccountEarningsContext,
+        client: any AccountEarningsFetching, read: () async throws -> T) async throws -> T {
+        try await client.validateFinancialContext(context)
+        do {
+            let value = try await read()
+            try await client.validateFinancialContext(context)
+            return value
+        } catch {
+            try await client.validateFinancialContext(context)
+            throw error
+        }
+    }
+
+    private func publishFinancialRefresh(_ refresh: AccountRefreshState) async {
+        guard !Task.isCancelled, shutdownTask == nil else { return }
+        do { try await earningsClient.validateFinancialContext(refresh.context) }
+        catch { _ = await synchronizeFinancialSession(); return }
+        let state = await synchronizeFinancialSession()
+        guard !Task.isCancelled, shutdownTask == nil, !financialStopping,
+              state.context == refresh.context, state.ledgerReady, financialContext == refresh.context,
+              (!refresh.initialLedgerReady || refresh.initialSessionEpoch == financialSessionEpoch),
+              latestFinancialRefreshID == refresh.requestID,
+              publishedFinancialRefreshID != refresh.requestID else { return }
+        publishedFinancialRefreshID = refresh.requestID
         accountEarningsCapturedAt = refresh.accountCapturedAt
         earnings = refresh.earnings
         todayEarningsReading = refresh.todayEarnings
@@ -591,17 +815,11 @@ final class MonitorStore: ObservableObject {
         modelEarnings = refresh.modelEarnings
         modelWorkEarnings = refresh.modelWorkEarnings
         earningsPerHourUSD = refresh.freshlyReadToday.flatMap {
-            EarningsHourlyRate.derive(
-                microUSD: $0.microUSD,
-                observedSeconds: $0.observedSeconds
-            )
+            $0.coversDayToDate ? EarningsHourlyRate.derive(microUSD: $0.microUSD, observedSeconds: $0.observedSeconds) : nil
         }
         jobSummary = refresh.jobSummary
-        earningsRefreshTask = nil
-        await refreshModelServingProfitability()
-        // Invalidate local history queries even if the displayed account total
-        // is unchanged: ingestion may have filled older buckets or rewards.
         activityRevision &+= 1
+        await refreshModelServingProfitability()
     }
 
     func setDashboardVisible(_ visible: Bool) {
@@ -865,6 +1083,14 @@ final class MonitorStore: ObservableObject {
     }
 
     func stop() async {
+        financialStopping = true
+        financialSessionObservationID = nil
+        financialSessionTask?.cancel()
+        await financialSessionTask?.value
+        financialSessionTask = nil
+        latestFinancialSessionRead?.cancel()
+        _ = await latestFinancialSessionRead?.value
+        latestFinancialSessionRead = nil
         slowdownPolicy.reset()
         servingSlowdownWarning = nil
         await hostGPUProtection?.stop()
@@ -1066,36 +1292,44 @@ final class MonitorStore: ObservableObject {
     }
 
     func updateEnergyEarnings(using result: EnergyRecordingSnapshot, enabled: Bool, at date: Date) async {
+        let state = await synchronizeFinancialSession()
         let calendar = Calendar.current
-        guard enabled, result.issue == nil, !result.intervals.isEmpty,
+        guard let context = state.context, state.ledgerReady, enabled,
+              result.issue == nil, !result.intervals.isEmpty,
               let day = calendar.dateInterval(of: .day, for: date) else {
-            if energyEarnings != nil { energyEarnings = nil }
+            energyEarnings = nil
+            energyEarningsDay = nil
             return
         }
-        let key = EnergyActivityKey(day: day, accountCapturedAt: accountEarningsCapturedAt,
+        let key = EnergyActivityKey(day: day, context: context, accountCapturedAt: accountEarningsCapturedAt,
                                     activityRevision: activityRevision)
         do {
             let buckets: [ActivityBucket]
             if energyActivityKey == key, let cached = energyActivityBuckets {
                 buckets = cached
             } else {
-                guard let fetched = try await earningsClient.activity(in: day, unit: .hour, calendar: calendar) else {
-                    if energyEarnings != nil { energyEarnings = nil }
+                guard let report = try await financialReport(context: context, in: day, unit: .hour, calendar: calendar) else {
+                    if financialContext == context, key.activityRevision == activityRevision,
+                       key.accountCapturedAt == accountEarningsCapturedAt { energyEarnings = nil }
                     return
                 }
-                guard !Task.isCancelled else { return }
-                energyActivityKey = key
-                energyActivityBuckets = fetched
-                buckets = fetched
+                buckets = report.activityBuckets()
             }
+            try await validateFinancialContext(context)
+            // A refresh during the suspended read invalidates this cache entry,
+            // even when the account has not changed. Retry on the next sample.
+            guard key.accountCapturedAt == accountEarningsCapturedAt,
+                  key.activityRevision == activityRevision else { return }
+            energyActivityKey = key
+            energyActivityBuckets = buckets
             let value = EnergyEarnings.matching(buckets: buckets,
                 energy: EnergyHistory.overlapping(result.intervals, with: day), day: day, now: date)
             if energyEarnings != value { energyEarnings = value }
             energyEarningsDay = day.start
         } catch {
-            // Failed activity reads do not become cache hits; retry with the
-            // next fresh energy reading instead of displaying stale profit.
-            if energyEarnings != nil { energyEarnings = nil }
+            // An obsolete failure cannot clear a newer account's result.
+            if financialContext == context, key.activityRevision == activityRevision,
+               key.accountCapturedAt == accountEarningsCapturedAt { energyEarnings = nil }
         }
     }
 
@@ -1288,6 +1522,10 @@ final class MonitorStore: ObservableObject {
 }
 
 private struct AccountRefreshState: Sendable {
+    let context: AccountEarningsContext
+    let requestID: UUID
+    let initialSessionEpoch: UInt64
+    let initialLedgerReady: Bool
     let accountCapturedAt: Date?
     let earnings: EarningsPresentationValue
     let jobSummary: SourceAvailability<JobCompletionSummary>

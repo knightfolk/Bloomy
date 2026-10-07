@@ -96,6 +96,7 @@ struct MonitorStoreEarningsTests {
         #expect(menu.accessibilityLabel.contains("partial-day coverage"))
         #expect(!menu.accessibilityLabel.contains("24 hours"))
         #expect(store.currentTodayEarnings?.microUSD == 1_230_000)
+        #expect(store.earningsPerHourUSD == nil)
     }
 
     @Test("each completed earnings acquisition invalidates Activity even when totals are unchanged")
@@ -105,11 +106,12 @@ struct MonitorStoreEarningsTests {
             initial: .unavailable(now: Date()),
             earningsClient: StubEarningsClient(result: .success(.available(microUSD: 321_000)))
         )
-        #expect(store.activityRevision == 0)
+        _ = await store.synchronizeFinancialSession()
+        let revision = store.activityRevision
         await store.refreshEarnings()
-        #expect(store.activityRevision == 1)
+        #expect(store.activityRevision == revision + 1)
         await store.refreshEarnings()
-        #expect(store.activityRevision == 2)
+        #expect(store.activityRevision == revision + 2)
     }
 
     @Test("earnings collection interval is short enough for capped account history")
@@ -126,7 +128,8 @@ struct MonitorStoreEarningsTests {
                 result: .success(.available(microUSD: 321_000)),
                 todayEarningsResult: .success(ObservedEarningsWindow(
                     microUSD: 321_000,
-                    observedSeconds: 86_400
+                    observedSeconds: 86_400,
+                    coversDayToDate: true
                 )),
                 weekEarningsResult: .success(CalendarWeekEarningsSummary(
                     microUSD: 2_321_000,
@@ -280,7 +283,7 @@ private actor SequencedEarningsClient: SyntheticAuthenticatedEarningsFixture {
         now: Date,
         calendar: Calendar
     ) -> ObservedEarningsWindow? {
-        ObservedEarningsWindow(microUSD: 2_400_000, observedSeconds: 86_400)
+        ObservedEarningsWindow(microUSD: 2_400_000, observedSeconds: 86_400, coversDayToDate: true)
     }
 }
 

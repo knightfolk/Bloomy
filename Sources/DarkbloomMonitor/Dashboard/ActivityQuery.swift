@@ -9,6 +9,9 @@ enum ActivityPeriod: String, CaseIterable, Identifiable {
 /// Captures the complete request before suspension. A new date, timezone,
 /// model, or ledger revision invalidates the old task without string collisions.
 struct ActivityQuery: Hashable {
+    let context: AccountEarningsContext?
+    let ledgerReady: Bool
+    let sessionEpoch: UInt64
     let range: DateInterval?
     let unit: ActivityCalendarUnit
     let calendar: Calendar
@@ -20,7 +23,11 @@ struct ActivityQuery: Hashable {
 
     init(period: ActivityPeriod, selectedDate: Date, endDate: Date, now: Date,
          calendar: Calendar, model: String?, revision: UInt64, refreshID: Int,
-         metric: ActivityChartMetric = .earnings, energyRevision: Date? = nil) {
+         metric: ActivityChartMetric = .earnings, energyRevision: Date? = nil,
+         context: AccountEarningsContext? = nil, ledgerReady: Bool = true, sessionEpoch: UInt64 = 0) {
+        self.context = context
+        self.ledgerReady = ledgerReady
+        self.sessionEpoch = sessionEpoch
         self.calendar = calendar
         self.model = model
         self.revision = revision

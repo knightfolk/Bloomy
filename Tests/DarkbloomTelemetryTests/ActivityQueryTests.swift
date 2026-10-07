@@ -1,9 +1,28 @@
 import Foundation
 import Testing
 @testable import DarkbloomMonitor
+@testable import DarkbloomTelemetry
 
 @Suite("Activity query identity")
 struct ActivityQueryTests {
+    @Test("account identity, authentication generation and ledger readiness invalidate chart tasks")
+    func financialContextIdentity() {
+        let a = AccountEarningsContext(accountScope: "synthetic-A", generation: UUID())
+        let b = AccountEarningsContext(accountScope: "synthetic-B", generation: UUID())
+        let newA = AccountEarningsContext(accountScope: a.accountScope, generation: UUID())
+        let now = Date(timeIntervalSince1970: 86_400)
+        func query(_ context: AccountEarningsContext?, ready: Bool = true) -> ActivityQuery {
+            ActivityQuery(period: .today, selectedDate: now, endDate: now, now: now,
+                calendar: .current, model: nil, revision: 0, refreshID: 0,
+                context: context, ledgerReady: ready)
+        }
+        #expect(query(a) != query(b))
+        #expect(query(a) != query(newA))
+        #expect(query(a) != query(nil))
+        #expect(query(a) != query(a, ready: false))
+        #expect(Set([query(a), query(b), query(newA), query(nil), query(a, ready: false)]).count == 5)
+    }
+
     @Test("This Week follows the configured calendar week boundary")
     func weekBoundary() throws {
         var calendar = Calendar(identifier: .gregorian)

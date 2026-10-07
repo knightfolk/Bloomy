@@ -76,17 +76,17 @@ struct DashboardOverviewView: View {
                 symbol: "dollarsign.circle", accessibilityUnit: retained ? "US dollars, last read" : "US dollars")
                 .help(help)
             DashboardMetric(id: "hourly", title: "Per observed hour",
-                value: earnings.map { money($0.perHourUSD) } ?? "—",
-                unit: earnings == nil ? "Awaiting coverage" : retained ? "USD / h · last read" : "USD / hour",
+                value: earnings?.perHourUSD.map(money) ?? "—",
+                unit: earnings?.perHourUSD == nil ? "Awaiting coverage" : retained ? "USD / h · last read" : "USD / hour",
                 symbol: "clock", accessibilityUnit: retained ? "US dollars per observed hour, last read" : "US dollars per observed hour")
                 .help(help)
             DashboardMetric(id: "speed", title: "Average speed today",
                 value: store.currentDayAverageTokenRate.map(number) ?? "—",
                 unit: store.currentDayAverageTokenRate == nil ? "Awaiting samples" : "tok/s",
                 symbol: "speedometer", accessibilityUnit: "tokens per second")
-            DashboardMetric(id: "jobs", title: "Completed today",
+            DashboardMetric(id: "jobs", title: "Work credits today",
                 value: store.currentJobSummary.map { $0.completedToday.formatted() } ?? "—",
-                unit: store.currentJobSummary == nil ? "Awaiting job history" : "jobs",
+                unit: store.currentJobSummary == nil ? "Awaiting credits" : "credits",
                 symbol: "checkmark.circle")
         }
     }

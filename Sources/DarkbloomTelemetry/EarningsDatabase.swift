@@ -55,7 +55,7 @@ public struct CalendarWeekEarningsSummary: Equatable, Sendable {
     }
 
     public func isCurrent(at now: Date, calendar: Calendar) -> Bool {
-        guard now.timeIntervalSince1970.isFinite, microUSD >= 0,
+        guard now.timeIntervalSince1970.isFinite,
               let weekStart, let capturedAt, capturedAt >= weekStart,
               weekStart == calendar.dateInterval(of: .weekOfYear, for: now)?.start else { return false }
         let age = now.timeIntervalSince(capturedAt)

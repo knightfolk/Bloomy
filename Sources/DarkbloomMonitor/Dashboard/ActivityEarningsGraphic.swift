@@ -46,7 +46,7 @@ struct ActivityEarningsGraphic: View {
 
     private var composition: EarningsComposition { EarningsComposition(values: values) }
     private var recorded: Int { buckets.filter { $0.totals != nil }.count }
-    private var jobs: Decimal { buckets.compactMap(\.totals).reduce(Decimal(0)) { $0 + Decimal($1.jobs) } }
+    private var workCredits: Decimal { buckets.compactMap(\.totals).reduce(Decimal(0)) { $0 + Decimal($1.jobs) } }
 
     var body: some View {
         let composition = composition
@@ -159,7 +159,8 @@ struct ActivityEarningsGraphic: View {
 
     private var observations: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Label(jobs.formatted(.number) + " jobs", systemImage: "checkmark.circle").font(.headline)
+            Label(workCredits.formatted(.number) + " credits", systemImage: "checkmark.circle").font(.headline)
+                .help("Observed work credit records, not a count of completed serving requests.")
             HStack(spacing: 6) {
                 Image(systemName: "clock")
                 Text("\(recorded)/\(buckets.count) intervals").monospacedDigit()

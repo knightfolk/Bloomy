@@ -65,6 +65,7 @@ public struct AccountCreditReport: Equatable, Sendable {
     public let buckets: [AccountCreditBucket]
     public let models: [String]
     public let modelActivity: [ModelActivityBucket]
+    public var modelHourlyActivity: [ModelActivityBucket] = []
     public var modelBuckets: [ModelAccountCreditBucket] = []
     public var hourlyEarningsAverages: [ModelHourlyEarningsAverage] = []
     public var modelTotals: [ModelEarnings] = []
@@ -206,6 +207,8 @@ enum ScopedCreditReadPersistence {
         var modelBucketTotals: [Int: [String: Accumulator]] = [:]
         var modelTotals: [String: Accumulator] = [:]
         var earningHours: [String: Set<Date>] = [:]
+        var hourlyContributions: [Date: [String: Int64]] = [:]
+        var hourIntervals: [Date: DateInterval] = [:]
         var intervalIndex = 0
         var earningHour: DateInterval?
         var count = 0
@@ -240,6 +243,10 @@ enum ScopedCreditReadPersistence {
                     throw ActivityCalendarError.invalidInterval
                 }
                 earningHours[model, default: []].insert(hour.start)
+                let clipped = DateInterval(start: max(range.start, hour.start), end: min(range.end, hour.end))
+                hourIntervals[hour.start] = clipped
+                hourlyContributions[hour.start, default: [:]][model] = try add(
+                    hourlyContributions[hour.start]?[model] ?? 0, amount)
             }
             step = sqlite3_step(rows)
         }
@@ -272,7 +279,11 @@ enum ScopedCreditReadPersistence {
             lifetimeBalanceChange: try balanceChange(scope: scope, range: range, database: database),
             totals: known ? totals.value : nil,
             buckets: buckets, models: sortedModels, modelActivity: modelActivity,
-            modelBuckets: modelBuckets,
+            modelHourlyActivity: hourlyContributions.keys.sorted().flatMap { start in
+                hourlyContributions[start]!.sorted { $0.key < $1.key }.map {
+                    ModelActivityBucket(interval: hourIntervals[start]!, model: $0.key, workMicroUSD: $0.value)
+                }
+            }, modelBuckets: modelBuckets,
             hourlyEarningsAverages: sortedModels.map {
                 ModelHourlyEarningsAverage(model: $0, workMicroUSD: modelTotals[$0]!.work,
                     earningHours: earningHours[$0]?.count ?? 0)

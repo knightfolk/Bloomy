@@ -16,11 +16,34 @@ struct ActivityReadStateTests {
     private func query(model: String? = nil, metric: ActivityChartMetric = .earnings,
                        revision: UInt64 = 0, refresh: Int = 0,
                        now: Date? = nil, period: ActivityPeriod = .today,
-                       calendar: Calendar? = nil, energy: Date? = nil) -> ActivityQuery {
+                       calendar: Calendar? = nil, energy: Date? = nil,
+                       context: AccountEarningsContext? = nil, ledgerReady: Bool = true,
+                       sessionEpoch: UInt64 = 0) -> ActivityQuery {
         ActivityQuery(period: period, selectedDate: self.now, endDate: self.now,
                       now: now ?? self.now, calendar: calendar ?? self.calendar,
                       model: model, revision: revision, refreshID: refresh,
-                      metric: metric, energyRevision: energy)
+                      metric: metric, energyRevision: energy, context: context, ledgerReady: ledgerReady, sessionEpoch: sessionEpoch)
+    }
+
+    @Test("restored readiness cannot reveal a completed snapshot from before the loss")
+    func readinessEpochMasksRetainedSnapshotBeforeTaskRuns() {
+        let context = AccountEarningsContext(accountScope: "synthetic-account", generation: UUID())
+        var read = ActivityReadState()
+        let original = query(context: context, sessionEpoch: 1)
+        let ticket = read.begin(original)
+        read.finish(report(original), for: ticket)
+        #expect(read.presentation(context: context, ledgerReady: true, sessionEpoch: 1).completed != nil)
+        #expect(read.presentation(context: context, ledgerReady: false, sessionEpoch: 2).completed == nil)
+        // No begin(false): the underlying state must remain masked after recovery.
+        #expect(read.presentation(context: context, ledgerReady: true, sessionEpoch: 3).completed == nil)
+        let recovered = query(context: context, sessionEpoch: 3)
+        #expect(original != recovered && !original.hasSameScope(as: recovered))
+        let fresh = read.begin(recovered)
+        #expect(read.completed == nil)
+        read.finish(report(original), for: ticket)
+        #expect(read.completed == nil)
+        read.finish(report(recovered), for: fresh)
+        #expect(read.presentation(context: context, ledgerReady: true, sessionEpoch: 3).completed != nil)
     }
 
     private func report(_ query: ActivityQuery) -> ActivityReadSnapshot {
@@ -174,6 +197,74 @@ struct ActivityReadStateTests {
         var otherCalendar = calendar
         otherCalendar.timeZone = TimeZone(secondsFromGMT: -7 * 3_600)!
         #expect(!first.hasSameScope(as: query(calendar: otherCalendar)))
+    }
+
+    @Test("account switches discard all completed components and reject A/B/A callbacks")
+    func accountSwitchRetention() {
+        let a = AccountEarningsContext(accountScope: "synthetic-A", generation: UUID())
+        let b = AccountEarningsContext(accountScope: "synthetic-B", generation: UUID())
+        let newA = AccountEarningsContext(accountScope: "synthetic-A", generation: UUID())
+        var read = ActivityReadState()
+        let first = query(context: a)
+        read.finish(report(first), for: read.begin(first))
+        let oldRefresh = read.begin(query(refresh: 1, context: a))
+        let bTicket = read.begin(query(context: b))
+        #expect(read.completed == nil)
+        read.fail("B unavailable", for: bTicket)
+        #expect(read.completed == nil)
+        #expect(!read.status.contains("last completed"))
+        let aTicket = read.begin(query(context: newA))
+        read.finish(report(query(refresh: 1, context: a)), for: oldRefresh)
+        read.fail("Late A error", for: oldRefresh)
+        #expect(read.completed == nil)
+        #expect(read.pending == aTicket)
+        read.finish(report(query(context: newA)), for: aTicket)
+        #expect(read.completed?.query.context == newA)
+    }
+
+    @Test("rendering masks old accounts and revocation before replacement tasks run")
+    func immediatePresentation() {
+        let a = AccountEarningsContext(accountScope: "synthetic-A", generation: UUID())
+        let b = AccountEarningsContext(accountScope: "synthetic-B", generation: UUID())
+        var read = ActivityReadState()
+        let first = query(context: a)
+        read.finish(report(first), for: read.begin(first))
+        #expect(read.presentation(context: a, ledgerReady: true).completed?.buckets.count == 1)
+        #expect(read.presentation(context: b, ledgerReady: true).completed == nil)
+        for (context, ready) in [(a as AccountEarningsContext?, false), (nil, false), (nil, true)] {
+            let visible = read.presentation(context: context, ledgerReady: ready)
+            #expect(visible.completed == nil)
+            #expect(visible.pending == nil)
+            #expect(visible.message != nil)
+            #expect(!visible.status.contains("Reading"))
+        }
+        // Render masking does not wait for task cancellation and is a pure read.
+        #expect(read.completed?.query.context == a)
+    }
+
+    @Test("same-session transient failures retain data but unready and revoked sessions clear it")
+    func sessionAvailability() {
+        let a = AccountEarningsContext(accountScope: "synthetic-A", generation: UUID())
+        var read = ActivityReadState()
+        let first = query(context: a)
+        read.finish(report(first), for: read.begin(first))
+        let retry = read.begin(query(refresh: 1, context: a))
+        read.fail("Transient read failure", for: retry)
+        #expect(read.completed?.query == first)
+        #expect(read.presentation(context: a, ledgerReady: true).message == "Transient read failure")
+        #expect(read.presentation(context: a, ledgerReady: true).status.contains("last completed"))
+        let unready = read.begin(query(context: a, ledgerReady: false))
+        #expect(read.completed == nil)
+        read.unavailable("Ledger not ready", for: unready)
+        #expect(read.status == "Ledger not ready")
+        read.finish(report(first), for: read.begin(first))
+        let revoke = read.begin(query(context: nil, ledgerReady: false))
+        #expect(read.completed == nil)
+        read.unavailable("Connect an account", for: revoke)
+        #expect(read.pending == nil)
+        #expect(read.status == "Connect an account")
+        #expect(!first.hasSameScope(as: query(context: a, ledgerReady: false)))
+        #expect(!first.hasSameScope(as: query(context: nil)))
     }
 
     @Test("captured scope states resolved dates rather than a rolling Today label")

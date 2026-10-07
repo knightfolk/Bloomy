@@ -102,7 +102,8 @@ struct RetainedCalendarEarningsTests {
         let now = Date()
         for duration in [Double.nan, .infinity, -1, 0] {
             let value = ObservedEarningsWindow(microUSD: 5, observedSeconds: duration,
-                calendarDayStart: Calendar.current.startOfDay(for: now), capturedAt: now)
+                calendarDayStart: Calendar.current.startOfDay(for: now), capturedAt: now,
+                coversDayToDate: duration == 0)
             #expect(CalendarEarningsPresentation.day(.stale(value: value, capturedAt: now, reason: "failed"),
                 now: now, calendar: .current) == nil)
         }
@@ -110,16 +111,72 @@ struct RetainedCalendarEarningsTests {
         #expect(CalendarEarningsPresentation.day(.available(value: undated, capturedAt: now), now: now, calendar: .current) == nil)
         #expect(CalendarEarningsPresentation.week(.unavailable(reason: "missing"), now: now, calendar: .current) == nil)
     }
+
+    @Test("signed day and week corrections remain current and retain their signed amounts after failure")
+    func signedCorrectionsStayDisplayable() async throws {
+        let now = Calendar.current.startOfDay(for: Date()).addingTimeInterval(3_600)
+        let client = CalendarHistoryClient(at: now)
+        await client.setMode(.signed)
+        let store = MonitorStore(service: TelemetryService(source: CalendarHistoryEmptySource()),
+            initial: .unavailable(now: now), earningsClient: client, now: { now })
+        await store.refreshEarnings()
+        let day = try #require(store.currentTodayEarnings)
+        let week = try #require(store.currentWeekEarnings)
+        #expect(day.microUSD == -1_230_000 && week.microUSD == -7_000_000)
+        #expect(EarningsPresentationValue.calendarDay(day, now: now, calendar: .current)
+            == .day(microUSD: -1_230_000, complete: true))
+        #expect(week.isCurrent(at: now, calendar: .current))
+        #expect(PopupEarningsMetrics.make(from: day)?.totalUSD == -1.23)
+        #expect(PopupWeekEarningsMetric.make(from: week)?.totalUSD == -7)
+        #expect(store.menuPresentation(mode: .earnings).metricText != nil)
+        #expect(store.earningsPerHourUSD == nil)
+
+        await client.setMode(.accountFailure)
+        await store.refreshEarnings()
+        #expect(store.displayedTodayEarnings?.isRetained == true && store.displayedTodayEarnings?.value == day)
+        #expect(store.displayedWeekEarnings?.isRetained == true && store.displayedWeekEarnings?.value == week)
+        #expect(store.currentTodayEarnings == nil && store.currentWeekEarnings == nil)
+        #expect(PopupEarningsMetrics.make(from: store.displayedTodayEarnings?.value, isRetained: true)?.totalUSD == -1.23)
+        #expect(PopupWeekEarningsMetric.make(from: store.displayedWeekEarnings?.value, isRetained: true)?.totalUSD == -7)
+        await store.stop()
+    }
+
+    @Test("a positive partial subtotal with unknown duration stays visible without an hourly rate")
+    func partialZeroDurationPreservesAmount() async throws {
+        let now = Calendar.current.startOfDay(for: Date()).addingTimeInterval(3_600)
+        let client = CalendarHistoryClient(at: now)
+        await client.setMode(.partial)
+        let store = MonitorStore(service: TelemetryService(source: CalendarHistoryEmptySource()),
+            initial: .unavailable(now: now), earningsClient: client, now: { now })
+        await store.refreshEarnings()
+        let day = try #require(store.currentTodayEarnings)
+        #expect(day.microUSD == 1_230_000 && day.observedSeconds == 0 && !day.coversDayToDate)
+        #expect(store.displayedTodayEarnings?.isRetained == false)
+        #expect(EarningsPresentationValue.calendarDay(day, now: now, calendar: .current)
+            == .day(microUSD: 1_230_000, complete: false))
+        let popup = try #require(PopupEarningsMetrics.make(from: day))
+        #expect(popup.totalUSD == 1.23 && popup.perHourUSD == nil && popup.lastReadAt == nil)
+        #expect(store.menuPresentation(mode: .earnings).metricText == "$1.23/d*")
+        #expect(store.earningsPerHourUSD == nil)
+
+        await client.setMode(.accountFailure)
+        await store.refreshEarnings()
+        #expect(store.displayedTodayEarnings?.isRetained == true && store.displayedTodayEarnings?.value == day)
+        #expect(store.currentTodayEarnings == nil && store.earningsPerHourUSD == nil)
+        let retained = try #require(PopupEarningsMetrics.make(from: store.displayedTodayEarnings?.value, isRetained: true))
+        #expect(retained.totalUSD == 1.23 && retained.perHourUSD == nil && retained.lastReadAt == now)
+        await store.stop()
+    }
 }
 
 private actor CalendarHistoryClient: SyntheticAuthenticatedEarningsFixture {
-    enum Mode { case normal, accountFailure, dayFailure, weekFailure, empty, zero }
+    enum Mode { case normal, accountFailure, dayFailure, weekFailure, empty, zero, signed, partial }
     private var mode = Mode.normal
     let day: ObservedEarningsWindow
     let week: CalendarWeekEarningsSummary
     init(at date: Date) {
         day = ObservedEarningsWindow(microUSD: 1_230_000, observedSeconds: 3_600,
-            calendarDayStart: Calendar.current.startOfDay(for: date), capturedAt: date)
+            calendarDayStart: Calendar.current.startOfDay(for: date), capturedAt: date, coversDayToDate: true)
         week = CalendarWeekEarningsSummary(microUSD: 7_000_000, isComplete: false,
             weekStart: Calendar.current.dateInterval(of: .weekOfYear, for: date)?.start, capturedAt: date)
     }
@@ -131,12 +188,24 @@ private actor CalendarHistoryClient: SyntheticAuthenticatedEarningsFixture {
     func todayEarningsSummary(now: Date, calendar: Calendar) async throws -> ObservedEarningsWindow? {
         if mode == .dayFailure { throw CalendarHistoryFailure.unavailable }
         if mode == .empty { return nil }
+        if mode == .partial {
+            return ObservedEarningsWindow(microUSD: day.microUSD, observedSeconds: 0,
+                calendarDayStart: day.calendarDayStart, capturedAt: day.capturedAt, coversDayToDate: false)
+        }
+        if mode == .signed {
+            return ObservedEarningsWindow(microUSD: -day.microUSD, observedSeconds: day.observedSeconds,
+                calendarDayStart: day.calendarDayStart, capturedAt: day.capturedAt, coversDayToDate: day.coversDayToDate)
+        }
         return mode == .zero ? ObservedEarningsWindow(microUSD: 0, observedSeconds: 3_600,
-            calendarDayStart: day.calendarDayStart, capturedAt: day.capturedAt) : day
+            calendarDayStart: day.calendarDayStart, capturedAt: day.capturedAt, coversDayToDate: day.coversDayToDate) : day
     }
     func weekEarningsSummary(now: Date, calendar: Calendar) async throws -> CalendarWeekEarningsSummary? {
         if mode == .weekFailure { throw CalendarHistoryFailure.unavailable }
         if mode == .empty { return nil }
+        if mode == .signed {
+            return CalendarWeekEarningsSummary(microUSD: -week.microUSD, isComplete: week.isComplete,
+                weekStart: week.weekStart, capturedAt: week.capturedAt)
+        }
         return mode == .zero ? CalendarWeekEarningsSummary(microUSD: 0, isComplete: false,
             weekStart: week.weekStart, capturedAt: week.capturedAt) : week
     }

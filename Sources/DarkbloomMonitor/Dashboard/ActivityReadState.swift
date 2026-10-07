@@ -38,16 +38,21 @@ struct ActivityReadState {
     private(set) var completed: ActivityReadSnapshot?
     private(set) var pending: ActivityReadTicket?
     private(set) var message: String?
+    private var requestedContext: AccountEarningsContext?
+    private var requestedEpoch: UInt64?
 
     mutating func begin(_ query: ActivityQuery) -> ActivityReadTicket {
+        if completed?.query.context != query.context || completed?.query.sessionEpoch != query.sessionEpoch || !query.ledgerReady { completed = nil }
         let ticket = ActivityReadTicket(id: UUID(), query: query)
         pending = ticket
+        requestedContext = query.context
+        requestedEpoch = query.sessionEpoch
         message = nil
         return ticket
     }
 
     mutating func finish(_ snapshot: ActivityReadSnapshot, for ticket: ActivityReadTicket) {
-        guard pending == ticket, snapshot.query == ticket.query else { return }
+        guard pending == ticket, snapshot.query == ticket.query, ticket.query.ledgerReady else { return }
         completed = snapshot
         pending = nil
         message = nil
@@ -55,6 +60,7 @@ struct ActivityReadState {
 
     mutating func fail(_ reason: String, for ticket: ActivityReadTicket) {
         guard pending == ticket else { return }
+        if completed?.query.context != ticket.query.context || !ticket.query.ledgerReady { completed = nil }
         message = reason
         pending = nil
     }
@@ -62,6 +68,33 @@ struct ActivityReadState {
     mutating func cancel(_ ticket: ActivityReadTicket) {
         guard pending == ticket else { return }
         pending = nil
+    }
+
+    /// Also used while rendering: account changes suppress retained data before
+    /// SwiftUI has cancelled the old task or scheduled the replacement.
+    func presentation(context: AccountEarningsContext?, ledgerReady: Bool, sessionEpoch: UInt64 = 0) -> Self {
+        var visible = self
+        if context == nil || !ledgerReady {
+            visible.completed = nil
+            visible.pending = nil
+            visible.message = Self.unavailableMessage(context: context, ledgerReady: ledgerReady)
+        } else {
+            if visible.completed?.query.context != context || visible.completed?.query.sessionEpoch != sessionEpoch { visible.completed = nil }
+            if visible.requestedContext != context || visible.requestedEpoch != sessionEpoch { visible.pending = nil; visible.message = nil }
+        }
+        return visible
+    }
+
+    static func unavailableMessage(context: AccountEarningsContext?, ledgerReady: Bool) -> String {
+        context == nil ? "Connect an account to read its local credit history."
+            : "Local credit history is unavailable until this account's ledger is ready."
+    }
+
+    mutating func unavailable(_ reason: String, for ticket: ActivityReadTicket) {
+        guard pending == ticket else { return }
+        completed = nil
+        pending = nil
+        message = reason
     }
 
     var status: String {
@@ -90,7 +123,7 @@ extension ActivityQuery {
     }
 
     func hasSameScope(as other: Self) -> Bool {
-        range == other.range && unit == other.unit && calendar == other.calendar && model == other.model && metric == other.metric
+        context == other.context && ledgerReady == other.ledgerReady && sessionEpoch == other.sessionEpoch && range == other.range && unit == other.unit && calendar == other.calendar && model == other.model && metric == other.metric
     }
 
     var scopeSummary: String {
@@ -104,5 +137,43 @@ extension ActivityQuery {
                 : "\(range.start.formatted(format))–\(last.formatted(format))"
         } else { period = "Invalid date range" }
         return "Showing \(period) · \(model.map(ModelDisplayName.short) ?? "All models") · \(metric.rawValue)"
+    }
+}
+
+/// Every financial component comes from the same unfiltered atomic report.
+/// Local token samples are supplementary and must pass the final session check.
+extension ActivityReadSnapshot {
+    @MainActor
+    static func fetch(query: ActivityQuery, store: MonitorStore,
+                      powerIntervals: [EnergyInterval] = []) async throws -> Self? {
+        guard let context = query.context, query.ledgerReady, let range = query.range else { return nil }
+        guard query.sessionEpoch == store.financialSessionEpoch else { throw AccountEarningsClientError.sessionChanged }
+        guard let report = try await store.financialReport(context: context, in: range,
+            unit: query.unit, calendar: query.calendar) else { return nil }
+        try Task.checkCancellation()
+        let hourlyProfits: [ModelHourlyProfit]
+        if query.metric == .estimatedProfit {
+            // Daily and hourly attribution belong to the same ledger transaction.
+            // Older inert hourly fixtures can still supply their primary series.
+            let hourlyActivity = report.modelHourlyActivity.isEmpty && query.unit == .hour
+                ? report.modelActivity : report.modelHourlyActivity
+            hourlyProfits = ModelProfitability.hourlyProfits(activity: hourlyActivity, energy: powerIntervals)
+        } else { hourlyProfits = [] }
+        let perModel = Dictionary(grouping: report.modelActivity, by: \.interval.start).mapValues { values in
+            Dictionary(uniqueKeysWithValues: values.map { ($0.model, $0.workMicroUSD) })
+        }
+        let rates: [ModelRateBucket]
+        if let model = query.model {
+            rates = (try? await store.activityTokenRates(in: range, unit: query.unit,
+                calendar: query.calendar, model: model)) ?? []
+        } else { rates = [] }
+        try Task.checkCancellation()
+        try await store.validateFinancialContext(context)
+        guard query.sessionEpoch == store.financialSessionEpoch else { throw AccountEarningsClientError.sessionChanged }
+        try Task.checkCancellation()
+        return Self(query: query, buckets: report.activityBuckets(model: query.model), models: report.models,
+            modelWorkByBucket: perModel, modelHourlyAverages: report.hourlyEarningsAverages,
+            modelHourlyProfits: hourlyProfits, modelHourlyProfitAverages: ModelProfitability.averages(hourlyProfits),
+            tokenRates: Dictionary(uniqueKeysWithValues: rates.map { ($0.id, $0) }))
     }
 }

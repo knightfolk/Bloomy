@@ -29,6 +29,9 @@ extension SyntheticAuthenticatedEarningsFixture {
         try await validateFinancialContext(context)
         let buckets = try await activity(in: range, unit: unit, calendar: calendar) ?? []
         let modelActivity = try await activityByModel(in: range, unit: unit, calendar: calendar) ?? []
+        let hourlyActivity: [ModelActivityBucket]
+        if unit == .hour { hourlyActivity = modelActivity }
+        else { hourlyActivity = try await activityByModel(in: range, unit: .hour, calendar: calendar) ?? [] }
         let fixtureModels = try await activityModels(in: range)
         let models = Array(Set(fixtureModels + modelActivity.map(\.model))).sorted()
         var modelBuckets: [ModelAccountCreditBucket] = []
@@ -50,7 +53,7 @@ extension SyntheticAuthenticatedEarningsFixture {
         try await validateFinancialContext(context)
         return SyntheticAccountCreditReport.make(context: context, providerID: providerID, model: model,
             range: range, buckets: buckets, models: models, modelActivity: modelActivity,
-            modelBuckets: modelBuckets, hourlyEarningsAverages: averages)
+            modelBuckets: modelBuckets, hourlyEarningsAverages: averages, modelHourlyActivity: hourlyActivity)
     }
 }
 
@@ -64,7 +67,8 @@ enum SyntheticAccountCreditReport {
     static func make(context: AccountEarningsContext, providerID: String? = nil, model: String? = nil,
         range: DateInterval, buckets: [ActivityBucket] = [], models: [String] = [],
         modelActivity: [ModelActivityBucket] = [], modelBuckets: [ModelAccountCreditBucket] = [],
-        hourlyEarningsAverages: [ModelHourlyEarningsAverage] = []) -> AccountCreditReport {
+        hourlyEarningsAverages: [ModelHourlyEarningsAverage] = [],
+        modelHourlyActivity: [ModelActivityBucket] = []) -> AccountCreditReport {
         let creditBuckets = buckets.map {
             AccountCreditBucket(interval: $0.interval, totals: $0.totals.map(totals), coverage: $0.coverage)
         }
@@ -79,6 +83,6 @@ enum SyntheticAccountCreditReport {
         return AccountCreditReport(accountScope: context.accountScope, providerID: providerID, model: model,
             range: range, observation: nil, reconciliation: .unavailable, lifetimeBalanceChange: nil,
             totals: sum, buckets: creditBuckets, models: models, modelActivity: modelActivity,
-            modelBuckets: modelBuckets, hourlyEarningsAverages: hourlyEarningsAverages)
+            modelHourlyActivity: modelHourlyActivity, modelBuckets: modelBuckets, hourlyEarningsAverages: hourlyEarningsAverages)
     }
 }

@@ -36,11 +36,13 @@ runtime or income results.
 
 1. **Finish the shared financial reporting path.** The committed ledger now
    preserves account scope, provider IDs, exact amounts and corrections;
-   authenticated projections are present on main. The working-tree Activity
-   and Overview integration consumes one report, but is still unfinished and
-   its latest focused run reports three issues. Do not count that integration
-   as released or fully verified. A provider-ID filter still needs a verified
-   local-machine mapping before its credits can calibrate this Mac's profits.
+   authenticated projections are present on main. The subsequent Activity and
+   Overview integration consumes one report and rejects obsolete account and
+   readiness epochs; its full Release run and bounded native account-switch
+   proof pass. This is a source checkpoint, not a distributed release. See the
+   [financial UI review](FINANCIAL_SESSION_UI_REVIEW_20261007.md) for exact scope.
+   A provider-ID filter still needs a verified local-machine mapping before its
+   credits can calibrate this Mac's profits.
 2. **Make freshness adaptive through one scheduler.** The source currently
    schedules earnings refreshes every 600 seconds: six scheduled cycles per
    hour, excluding manual refreshes and requests within a cycle. Evaluate

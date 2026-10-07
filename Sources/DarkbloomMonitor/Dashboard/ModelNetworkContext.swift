@@ -7,12 +7,12 @@ enum ModelNetworkContext {
         let matches = values.filter { $0.model == modelID }
         guard matches.count == 1, let value = matches.first,
               value.queryPeriod.start == calendar.startOfDay(for: now), value.queryPeriod.end <= now,
-              let amount = value.workMicroUSD, amount >= 0, let jobs = value.jobs, jobs >= 0,
+              let amount = value.workMicroUSD, let jobs = value.jobs, jobs >= 0,
               value.recordedHours > 0, let captured = value.sourceCapturedAt else { return nil }
         let age = now.timeIntervalSince(captured)
         guard age.isFinite, age >= 0 else { return nil }
         let money = (Decimal(amount) / 1_000_000).formatted(.number.precision(.fractionLength(2...6)))
-        return "Observed work today: $\(money) · \(jobs) jobs · partial · \(value.recordedHours) recorded / \(value.unknownHours) unknown / \(value.uncertainBoundaryHours) boundary hours · \(age <= 600 ? "current" : "stale") · \(ageLabel(captured, now: now))"
+        return "Account work credits today: $\(money) · \(jobs) credits · partial · \(value.recordedHours) recorded / \(value.unknownHours) unknown / \(value.uncertainBoundaryHours) boundary hours · \(age <= 600 ? "current" : "stale") · \(ageLabel(captured, now: now))"
     }
 
     static func performanceLabel(modelID: String, averages: [ModelTokenRateAverage], now: Date) -> String? {
