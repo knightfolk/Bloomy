@@ -1,6 +1,6 @@
 # BloomGauge comparison: current assessment
 
-Checked October 7, 2026 against Bloomy main `fc6b2f0`, with concurrent local-credit-attribution edits observed but not treated as verified or shipped. This assessment supersedes the earlier comparison's current-state claims about missing exact credit capture and missing Overview charts.
+Rechecked October 7, 2026 against Bloomy main `9a65f17`. The financial-attribution guard is committed; concurrent readiness presentation work is unfinished and is not counted as shipped. This assessment supersedes the earlier comparison's current-state claims about missing exact credit capture and missing Overview charts.
 
 Bloomy has the stronger foundation for a native Mac control app. BloomGauge has a clearer earning narrative and advertises more complete setup and remote access. Neither source inspection nor screenshots establishes which app earns more, uses less power or behaves more reliably in production.
 
@@ -8,7 +8,25 @@ Bloomy has the stronger foundation for a native Mac control app. BloomGauge has 
 
 Reviewed the current [website](https://bloomgauge.io/), [features](https://bloomgauge.io/features), [guide](https://bloomgauge.io/guide), [changelog](https://bloomgauge.io/changelog), [privacy notice](https://bloomgauge.io/privacy) and public source. A fresh GitHub API request confirmed public main at `724ce679e407eba0806cd03e94f303c4fb728468`; the architecture hash matches the retained research copy. Five retained vendor screenshots were visually inspected: dashboard, demand, switch rules, day replay and readiness. A fresh image request returned HTTP 403, so their bytes were not revalidated against today's website. The in-app browser was unavailable. No competitor binary, live interactions or comparative performance benchmark was tested.
 
-The homepage lists 1.36.73 beta 54; the changelog's latest entry lists 1.36.72 beta 53. Public-core behavior is separate from current downloadable-app claims. Their September 29 [comparison](https://bloomgauge.io/help/darkbloom-apps-for-mac) describes our former Darkbloom Control and is not a current inventory of Bloomy.
+The refreshed homepage lists **1.36.74 beta 55**; the changelog's latest entry still lists 1.36.72 beta 53, and the guide links beta 52. The public README explicitly says its core is from 1.36.63 and that newer setup/Guardian source is not public. Public-core behavior is separate from current downloadable-app claims. Their September 29 [comparison](https://bloomgauge.io/help/darkbloom-apps-for-mac) describes our former Darkbloom Control and is not a current inventory of Bloomy.
+
+## Decision after the deeper review
+
+Keep the native stack. Bloomy's useful advantage is direct Mac control: a compact menu-bar surface, host GPU protection, cooling controls, cached-model management and deletion, and local/network Chat. BloomGauge's stronger published journey is getting started, understanding earnings and checking another Mac. There is no comparative runtime evidence that either product earns more or consumes fewer resources.
+
+The inspected screens suggest three original native improvements, in this order:
+
+1. A compact **readiness summary** with detailed evidence in Health and one relevant navigation action. Separate ready-but-quiet, accepted work, scheduled waiting, stale evidence and failure. Do not make unpaid minutes alone a restart trigger.
+2. An **Activity day replay** joining model residence, observed work, loading, nudges and credit arrivals. Highlight visits that ended without observed organic work. Keep credits' recorded model/provider scope; their arrival after a switch does not identify when that work was served.
+3. **Comparable demand graphics** on model cards: one ruler, a current marker, historical context and a small chart. Pay-colored zones need attributable financial evidence; a demand ratio alone is not profitability.
+
+The largest correctness prerequisite is historical local-machine attribution. On `9a65f17`, production `AuthenticatedEarningsClient` does not supply a verified local-provider report. The new boundary therefore withholds local profit and automatic profit switching when that evidence is absent. This is a useful guard, but it does not finish the resolver. Account credit charts remain useful on their own.
+
+The largest experience gap is complete resumable onboarding. Companion access is also a delivery gap: the Settings UI says Coming soon, and the standalone helper deliberately has no listener or provider authority. Existing transport and pairing code should not be advertised as delivered phone/fleet access.
+
+For efficiency, prioritize one immutable report per screen, shared/coalesced refreshes, bounded SQLite samples and batched queries. Bloomy's scheduled earnings interval is 600 seconds; the public competitor collector documents 20 seconds. Evaluate adaptive foreground/post-work refreshes with cache/rate-limit handling, rather than adding card-level polling. Profile CPU, memory, wakeups and query latency under matched Release conditions before claiming savings.
+
+Fresh GitHub metadata still reports public main `724ce679e407eba0806cd03e94f303c4fb728468`; its architecture bytes match the retained research copy (SHA-256 `bfeeb61267e766d29a815836e124bf67e986a954a17d17f7ff2ecbce81a2ec53`). Four retained screenshots were re-inspected for hierarchy; these remain published captures, not live interaction proof. This research performed no provider commands or production app changes.
 
 ## Product comparison
 
@@ -43,7 +61,7 @@ The dashboard's earning-rate gauge is visually strong, but a simple native trend
 
 ## What to improve first
 
-1. **Finish the financial attribution prerequisite.** Exact account/provider/model credit capture and session-safe charts now exist. The next critical boundary is proving which historical provider identities belong to this Mac; retention and legacy-history disclosure also remain open. A current connection ID, matching model name or single provider on the account is insufficient. Concurrent code introduces an explicit local-report capability; it is not a completed production resolver. Keep account credits available, but do not use them as local profit or match them to this Mac's electricity without proof. Whole-Mac GPU and power measurements must retain their scope.
+1. **Finish the financial attribution prerequisite.** Exact account/provider/model credit capture and session-safe charts now exist. The next critical boundary is proving which historical provider identities belong to this Mac; retention and legacy-history disclosure also remain open. A current connection ID, matching model name or single provider on the account is insufficient. The committed local-report capability withholds unsupported local economics; it is not a completed production resolver. Keep account credits available, but do not use them as local profit or match them to this Mac's electricity without proof. Whole-Mac GPU and power measurements must retain their scope.
 
 2. **Create one readiness explanation.** A pure evaluator should combine connected, authorized, accepting work, model ready, work observed and credits received, each with observation time and uncertainty. Overview gets a compact strip; Health gets evidence and one useful action. Distinguish quiet demand, accepted long-running work, stale readings and a failed provider. This should reuse existing controls rather than introduce another restart loop.
 
@@ -93,4 +111,4 @@ The published screens offer useful hierarchy, particularly day replay and demand
 
 A bounded native source review confirmed the three leading UI opportunities and corrected the timing description to distinguish configurable defaults from fixed gain gates. It also noted that `ProfitSwitchStore` uses `max(1, warmProviders)` for heuristic pressure while `NetworkCapacity.demandPerWarmProvider` returns unavailable for a zero denominator. A shared demand read model should preserve the latter semantics rather than display that heuristic as a measured ratio.
 
-This update is documentation only. Existing implementation work and production state were preserved. Concurrent local-attribution work is not committed or qualified for delivery by this report. This assessment does not establish competitor performance, final native visual qualification or release readiness.
+This update is documentation only. Existing implementation work and production state were preserved. The financial boundary is committed; concurrent readiness work is not qualified for delivery by this report. This assessment does not establish competitor performance, final native visual qualification or release readiness.
