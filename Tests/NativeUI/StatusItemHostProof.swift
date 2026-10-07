@@ -6,10 +6,23 @@ import QuartzCore
 /// Opt-in diagnostic of the actual production status-item host. This requires
 /// an already-running fixture application and a never-started, inert store.
 /// It does not replace the normal native motion or human visual acceptance gate.
+/// Controlled whole-Mac input only; this fake never touches IOKit or sensors.
+@MainActor
+final class StatusItemProofGPUReader {
+    var input: Double?
+    private(set) var readCount = 0
+    func read() -> Double? { readCount += 1; return input }
+}
+
 @MainActor
 enum StatusItemHostProof {
     static func run(
         store: MonitorStore,
+        dynamicStore: MonitorStore,
+        extras: ProviderExtrasStore,
+        extrasClient: SettingsProofExtras,
+        gpuUsage: SystemGPUUsageStore,
+        gpuReader: StatusItemProofGPUReader,
         snapshot: @MainActor (Bool) -> TelemetrySnapshot,
         defaults: UserDefaults,
         outputDirectory: URL
@@ -113,6 +126,171 @@ enum StatusItemHostProof {
                     "oldControllerReleased": oldController == nil, "oldHost": oldHost.diagnostics(),
                     "newControllerIdentity": session.controller.map(identity) ?? "nil", "newHost": after]
         }
+        await finish(session)
+        // The original five cases deliberately retain providerExtras:nil:
+        // production popoverWillShow would otherwise start fan observation.
+        let inputs = Session(store: dynamicStore, defaults: defaults,
+            outputDirectory: outputDirectory.appendingPathComponent("dynamic-inputs", isDirectory: true),
+            expectedCases: 2, ownedExtras: extras, ownedGPU: gpuUsage)
+        defer { inputs.cleanup() }
+        inputs.cancelled = session.cancelled
+        inputs.write()
+        await inputs.check("independent_synthetic_whole_mac_gpu_readings") {
+            try require(dynamicStore !== store, "dynamic_store_not_separate", "Dynamic inputs require a separate never-started store")
+            try await requireReadCounts(gpuReader, extrasClient: extrasClient, gpu: 0, extras: 0)
+            try await accept(inputs, snapshot: snapshot, active: true)
+            inputs.createController()
+            let host = try await eligibleHost(inputs)
+            inputs.baseline = host
+            var steps = [[String: Any]]()
+            var lastGoodDate: Date?
+            for (index, input) in [nil, 12.0, 87.0, nil, 42.0].enumerated() {
+                try await accept(inputs, snapshot: snapshot, active: true)
+                let daemon = dynamicStore.snapshot
+                let sourceBefore = inputs.sourceDiagnostics()
+                let gpuReadsBefore = gpuReader.readCount
+                let extrasReadsBefore = await extrasClient.readCount
+                let fan = extras.snapshot
+                gpuReader.input = input
+                gpuUsage.refresh()
+                try require(gpuReader.readCount == index + 1, "gpu_read_count_mismatch", "Every explicit GPU refresh must perform exactly one fake read")
+                let expectedFreshness: MenuBarIndicators.Freshness = input == nil ? (lastGoodDate == nil ? .unavailable : .stale) : .current
+                let expectedValue = input ?? (lastGoodDate == nil ? nil : 87)
+                if input != nil { lastGoodDate = gpuUsage.lastGoodSampledAt }
+                let values = try requireGPU(inputs, value: expectedValue, freshness: expectedFreshness, sampledAt: lastGoodDate)
+                try require(values.temperature == .unavailable && values.fanSpeed == .unavailable,
+                            "gpu_changed_thermal_inputs", "GPU reads must not invent temperature or fan readings")
+                let stage = ["unavailable", "current_12", "current_87", "failed_retained_87", "recovered_42"][index]
+                let rendered = try await renderedLabel(inputs, host: host, detail: values.accessibilityDetail)
+                var evidence = try await motion(inputs, host: host, stage: "gpu_" + stage)
+                _ = try requireGPU(inputs, value: expectedValue, freshness: expectedFreshness, sampledAt: lastGoodDate)
+                try require(dynamicStore.snapshot == daemon && extras.snapshot == fan,
+                            "gpu_read_changed_other_sources", "Independent GPU reads changed daemon or extras evidence")
+                try await requireReadCounts(gpuReader, extrasClient: extrasClient, gpu: index + 1, extras: 0)
+                evidence["sourceBeforeIndependentPublication"] = sourceBefore
+                evidence["readCountsBeforeIndependentPublication"] = ["gpu": gpuReadsBefore, "extras": extrasReadsBefore]
+                evidence["input"] = input.map { $0 as Any } ?? NSNull()
+                evidence["reading"] = measurement(values.gpu)
+                evidence["explicitGPUReadCount"] = gpuReader.readCount
+                evidence["nativeAccessibilityLabels"] = rendered
+                evidence["otherSourcesUnchanged"] = true
+                steps.append(evidence)
+            }
+            return ["steps": steps, "wholeMacSyntheticMeasurements": true,
+                    "processAttribution": false, "graphicalGPUFillQualified": false,
+                    "expectedGPUReads": 5, "actualGPUReads": gpuReader.readCount,
+                    "expectedExtrasReads": 0, "actualExtrasReads": await extrasClient.readCount]
+        }
+        await inputs.check("independent_synthetic_temperature_fan_readings") {
+            try await accept(inputs, snapshot: snapshot, active: true)
+            let host = try await eligibleHost(inputs)
+            try inputs.requireBaseline(host)
+            // A fixed failed GPU sample retains 42% throughout the independent
+            // thermal ramp, avoiding a time-driven current-to-stale transition.
+            try await requireReadCounts(gpuReader, extrasClient: extrasClient, gpu: 5, extras: 0)
+            gpuReader.input = nil
+            gpuUsage.refresh()
+            let gpuDate = gpuUsage.lastGoodSampledAt
+            _ = try requireGPU(inputs, value: 42, freshness: .stale, sampledAt: gpuDate)
+            var retainedFan: ProviderFanStatus?
+            var retainedDate: Date?
+            var steps = [[String: Any]]()
+            let ramp: [(temperature: Double?, fan: Double?, tint: MenuBarGPURing.Tint)] = [
+                (54, 25, .green), (70, 50, .yellow), (90, 80, .red),
+                (nil, nil, .neutral), (54, 25, .green)
+            ]
+            for (index, input) in ramp.enumerated() {
+                try await accept(inputs, snapshot: snapshot, active: true)
+                let daemon = dynamicStore.snapshot
+                let sourceBefore = inputs.sourceDiagnostics()
+                let gpuReadsBefore = gpuReader.readCount
+                let extrasReadsBefore = await extrasClient.readCount
+                if let temperature = input.temperature, let fan = input.fan {
+                    await extrasClient.set(temperature: temperature, fanPercent: fan)
+                } else { await extrasClient.failRead() }
+                await extras.refreshFan()
+                try Task.checkCancellation()
+                try require(await extrasClient.readCount == index + 1, "extras_read_count_mismatch", "Each explicit thermal refresh must perform exactly one fake read")
+                let expectedFreshness: MenuBarIndicators.Freshness = input.temperature == nil ? .stale : .current
+                guard let fanSource = extras.snapshot?.fanStatus else { throw Failure("fan_evidence_missing", "The explicit extras read published no fan source") }
+                if input.temperature != nil {
+                    guard case .available(let status, let date) = fanSource else { throw Failure("fan_source_not_current", "A successful fake read must publish available fan evidence") }
+                    retainedFan = status; retainedDate = date
+                } else {
+                    guard case .stale(let status, let date, _) = fanSource else { throw Failure("failed_fan_read_not_stale", "A failed read must retain stale fan evidence") }
+                    try require(status == retainedFan && date == retainedDate, "stale_fan_evidence_changed", "Failure must retain exactly the last successful status and capture time")
+                }
+                let values = indicators(inputs)
+                try require(values.temperature.value == (input.temperature ?? 90) && values.fanSpeed.value == (input.fan ?? 80)
+                            && values.temperature.freshness == expectedFreshness && values.fanSpeed.freshness == expectedFreshness
+                            && values.temperatureTint == input.tint,
+                            "thermal_measurement_mismatch", "Explicit temperature/RPM measurements or stale thermal tint differ from the expected ramp")
+                _ = try requireGPU(inputs, value: 42, freshness: .stale, sampledAt: gpuDate)
+                let stage = ["green_54_25", "yellow_70_50", "red_90_80", "failed_retained_90_80_neutral", "recovered_54_25"][index]
+                let rendered = try await renderedLabel(inputs, host: host, detail: values.accessibilityDetail)
+                let color = try await requireStroke(inputs, host: host, tint: input.tint)
+                var evidence = try await motion(inputs, host: host, stage: "thermal_" + stage)
+                _ = try await requireStroke(inputs, host: host, tint: input.tint)
+                let heldValues = indicators(inputs)
+                try require(heldValues.temperature == values.temperature && heldValues.fanSpeed == values.fanSpeed,
+                            "thermal_evidence_changed_during_hold", "Thermal evidence changed during the compositor-only hold")
+                try require(dynamicStore.snapshot == daemon, "thermal_read_changed_daemon", "Independent extras reads changed daemon evidence")
+                _ = try requireGPU(inputs, value: 42, freshness: .stale, sampledAt: gpuDate)
+                try await requireReadCounts(gpuReader, extrasClient: extrasClient, gpu: 6, extras: index + 1)
+                evidence["sourceBeforeIndependentPublication"] = sourceBefore
+                evidence["readCountsBeforeIndependentPublication"] = ["gpu": gpuReadsBefore, "extras": extrasReadsBefore]
+                evidence["temperature"] = measurement(values.temperature)
+                evidence["fanSpeed"] = measurement(values.fanSpeed)
+                evidence["gpu"] = measurement(values.gpu)
+                evidence["actualArcStrokeColor"] = color
+                evidence["nativeAccessibilityLabels"] = rendered
+                evidence["explicitExtrasReadCount"] = await extrasClient.readCount
+                evidence["otherSourcesUnchanged"] = true
+                steps.append(evidence)
+            }
+            return ["steps": steps, "syntheticTemperatureAndRPM": true,
+                    "expectedGPUReads": 6, "actualGPUReads": gpuReader.readCount,
+                    "expectedExtrasReads": 5, "actualExtrasReads": await extrasClient.readCount,
+                    "graphicalGPUFillQualified": false]
+        }
+        await finish(inputs)
+        let finalExtrasReads = await extrasClient.readCount
+        let finalReadCountsValid = gpuReader.readCount == 6 && finalExtrasReads == 5
+            && extras.visibleFanSubscriberCount == 0
+        let original = session.report(), dynamic = inputs.report()
+        var aggregate = original
+        aggregate["schemaVersion"] = 2
+        aggregate["expectedCaseCount"] = 7
+        aggregate["results"] = session.results + inputs.results
+        aggregate["observations"] = session.observations + inputs.observations
+        aggregate["terminal"] = session.cancelled || inputs.cancelled ? "cancelled" : "completed"
+        aggregate["passed"] = original["passed"] as? Bool == true && dynamic["passed"] as? Bool == true
+            && session.results.count + inputs.results.count == 7 && finalReadCountsValid
+        aggregate["explicitReadCounts"] = ["expectedGPU": 6, "actualGPU": gpuReader.readCount,
+            "expectedExtras": 5, "actualExtras": finalExtrasReads,
+            "visibleFanSubscribersAtEnd": extras.visibleFanSubscriberCount,
+            "countsAndNoSubscribersVerified": finalReadCountsValid]
+        aggregate["graphicalGPUFillQualified"] = false
+        aggregate["phases"] = ["originalNilExtrasHost": original, "independentInputHost": dynamic]
+        aggregate["finalSource"] = inputs.sourceDiagnostics()
+        aggregate["ownedCleanup"] = ["controllersCreated": session.created + inputs.created,
+            "controllersInvalidated": session.invalidated + inputs.invalidated,
+            "allOwnedStatusItemsInvalidated": session.created == session.invalidated && inputs.created == inputs.invalidated,
+            "allOwnedClocksVerifiedStopped": session.allOwnedClocksVerifiedStopped && inputs.allOwnedClocksVerifiedStopped,
+            "cleanupVerificationComplete": session.cleanupVerificationComplete && inputs.cleanupVerificationComplete,
+            "remainingOwnedController": session.controller != nil || inputs.controller != nil,
+            "events": session.cleanupEvidence + inputs.cleanupEvidence]
+        do {
+            let data = try JSONSerialization.data(withJSONObject: aggregate, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: session.outputURL, options: .atomic)
+        } catch {
+            aggregate["passed"] = false
+            aggregate["aggregateReportWriteError"] = error.localizedDescription
+        }
+        return aggregate
+    }
+
+    private static func finish(_ session: Session) async {
         if Task.isCancelled { session.cancelled = true }
         session.cleanup()
         // Teardown must be verified even when the proof was cancelled. This
@@ -122,7 +300,109 @@ enum StatusItemHostProof {
         await cleanupVerification.value
         session.terminal = session.cancelled ? "cancelled" : "completed"
         session.write()
-        return session.report()
+    }
+
+    private static func requireReadCounts(_ reader: StatusItemProofGPUReader,
+        extrasClient: SettingsProofExtras, gpu: Int, extras: Int) async throws {
+        let actualExtras = await extrasClient.readCount
+        try require(reader.readCount == gpu && actualExtras == extras,
+                    "unexpected_background_read", "Explicit read counts differ: GPU \(reader.readCount)/\(gpu), extras \(actualExtras)/\(extras)")
+    }
+
+    private static func indicators(_ session: Session) -> MenuBarIndicators {
+        let now = Date()
+        let gpu = session.store.gpuUsage.reading(at: now)
+        return .make(snapshot: session.store.snapshot, utilization: gpu.percentage,
+            sampledAt: session.store.gpuUsage.lastGoodSampledAt, utilizationIsCurrent: !gpu.isStale,
+            fanStatus: session.store.providerExtras?.snapshot?.fanStatus, now: now)
+    }
+
+    private static func requireGPU(_ session: Session, value: Double?,
+        freshness: MenuBarIndicators.Freshness, sampledAt: Date?) throws -> MenuBarIndicators {
+        try session.requireOwnedInputs()
+        let store = session.store.gpuUsage
+        let expected: SystemGPUUsageStore.Reading
+        if let value, let sampledAt {
+            expected = freshness == .current ? .current(percentage: value, sampledAt: sampledAt)
+                : .stale(percentage: value, sampledAt: sampledAt)
+        } else { expected = .unavailable }
+        try require(store.reading() == expected && store.lastGoodPercentage == value
+                    && store.lastGoodSampledAt == sampledAt
+                    && store.percentage == (freshness == .current ? value : nil)
+                    && store.sampledAt == (freshness == .current ? sampledAt : nil),
+                    "gpu_store_reading_mismatch", "GPU current/stale/unavailable fields or retained capture time differ from explicit input")
+        let values = indicators(session)
+        try require(values.gpu.value == value && values.gpu.freshness == freshness
+                    && values.gpu.sampledAt == sampledAt && abs(values.gpu.progress - (value ?? 0) / 100) < 0.000001,
+                    "gpu_indicator_reading_mismatch", "Whole-Mac GPU indicator reading/freshness/progress differs from explicit measurement")
+        return values
+    }
+
+    private static func measurement(_ reading: MenuBarIndicators.Reading) -> [String: Any] {
+        ["value": reading.value.map { $0 as Any } ?? NSNull(), "freshness": String(describing: reading.freshness),
+         "sampledAt": reading.sampledAt.map { $0.timeIntervalSince1970 as Any } ?? NSNull(),
+         "semanticProgress": reading.progress]
+    }
+
+    /// Read SwiftUI's actual combined label through native accessibility.
+    /// This verifies exposed values, not pixels of the GPU utilization fill.
+    private static func renderedLabel(_ session: Session, host: Host, detail: String) async throws -> [String] {
+        var labels = [String]()
+        try await wait(session, code: "rendered_input_label_missing", message: "The actual status-button accessibility label did not expose the expected independent readings") {
+            try requireSameHost(session, host: host)
+            labels = nativeLabels(in: host.button)
+            return labels.contains { $0.contains(detail) }
+        }
+        return labels
+    }
+
+    private static func nativeLabels(in root: NSView) -> [String] {
+        var labels = [String](), seen = Set<ObjectIdentifier>()
+        func attribute(_ name: String, of object: NSObject) -> Any? {
+            guard object.responds(to: NSSelectorFromString(name)) else { return nil }
+            return object.value(forKey: name)
+        }
+        func visit(_ object: NSObject) {
+            guard seen.insert(ObjectIdentifier(object)).inserted, seen.count < 2_000 else { return }
+            if let label = attribute("accessibilityLabel", of: object) as? String,
+               label.contains("Model inference"), label.contains("Whole-Mac GPU use") { labels.append(label) }
+            for child in attribute("accessibilityChildren", of: object) as? [Any] ?? [] {
+                if let child = child as? NSObject { visit(child) }
+            }
+            if let view = object as? NSView {
+                if let descendant = NSAccessibility.unignoredDescendant(of: view) as? NSObject { visit(descendant) }
+                for child in view.subviews { visit(child) }
+            }
+        }
+        visit(root)
+        return labels
+    }
+
+    private static func requireStroke(_ session: Session, host: Host,
+        tint: MenuBarGPURing.Tint) async throws -> [String: Any] {
+        let color: NSColor = switch tint {
+        case .green: .systemGreen
+        case .yellow: .systemYellow
+        case .red: .systemRed
+        case .neutral: .secondaryLabelColor
+        }
+        var expected = [CGFloat](), actual = [CGFloat]()
+        func components(_ color: NSColor) -> [CGFloat]? {
+            guard let rgb = color.usingColorSpace(.sRGB) else { return nil }
+            return [rgb.redComponent, rgb.greenComponent, rgb.blueComponent, rgb.alphaComponent]
+        }
+        try await wait(session, code: "actual_thermal_arc_color_mismatch", message: "The actual native activity arc stroke did not match the expected thermal tint in its effective appearance") {
+            try requireSameHost(session, host: host)
+            host.view.effectiveAppearance.performAsCurrentDrawingAppearance {
+                expected = components(color) ?? []
+                actual = host.layer.strokeColor.flatMap(NSColor.init(cgColor:)).flatMap(components) ?? []
+            }
+            return expected.count == 4 && actual.count == 4
+                && zip(expected, actual).allSatisfy { abs($0 - $1) < 0.000001 }
+        }
+        return ["expectedTint": String(describing: tint), "expectedSRGBA": expected, "actualSRGBA": actual,
+                "effectiveAppearance": host.view.effectiveAppearance.name.rawValue,
+                "readActualNativeStroke": true]
     }
 
     private static func accept(_ session: Session, snapshot: @MainActor (Bool) -> TelemetrySnapshot, active: Bool) async throws {
@@ -312,6 +592,9 @@ enum StatusItemHostProof {
         let store: MonitorStore
         let defaults: UserDefaults
         let outputURL: URL
+        let expectedCases: Int
+        let ownedExtras: ProviderExtrasStore?
+        let ownedGPU: SystemGPUUsageStore?
         var controller: StatusItemController?
         var baseline: Host?
         var expectedActive = true
@@ -328,8 +611,10 @@ enum StatusItemHostProof {
         var cleanupVerificationComplete = false
         var writeErrors = [String]()
 
-        init(store: MonitorStore, defaults: UserDefaults, outputDirectory: URL) {
+        init(store: MonitorStore, defaults: UserDefaults, outputDirectory: URL,
+             expectedCases: Int = 5, ownedExtras: ProviderExtrasStore? = nil, ownedGPU: SystemGPUUsageStore? = nil) {
             self.store = store; self.defaults = defaults
+            self.expectedCases = expectedCases; self.ownedExtras = ownedExtras; self.ownedGPU = ownedGPU
             outputURL = outputDirectory.appendingPathComponent("status-item-host-progress.json")
         }
 
@@ -373,8 +658,17 @@ enum StatusItemHostProof {
                 && cleanupEvidence.allSatisfy { $0["clockVerifiedStopped"] as? Bool == true }
         }
 
+        func requireOwnedInputs() throws {
+            try require(store.providerExtras === ownedExtras, "extras_store_identity_mismatch", "Only the explicitly owned synthetic extras store, or the original nil extras, is permitted")
+            if let ownedGPU {
+                try require(store.gpuUsage === ownedGPU, "gpu_store_identity_mismatch", "Only the explicitly owned synthetic GPU store is permitted")
+            }
+            try require((ownedExtras?.visibleFanSubscriberCount ?? 0) == 0,
+                        "fan_poller_started", "Dynamic input proof must never subscribe to visible fan polling")
+        }
+
         func requireSource() throws {
-            try require(store.providerExtras == nil, "store_not_inert", "This proof requires providerExtras:nil")
+            try requireOwnedInputs()
             guard store.snapshot.menuStatus == .online, case .available(let state, _) = store.snapshot.state else {
                 throw Failure("source_not_current", "The synthetic source must be online and available")
             }
@@ -440,7 +734,7 @@ enum StatusItemHostProof {
             let started = CACurrentMediaTime()
             var result: [String: Any] = ["case": name]
             do {
-                try require(store.providerExtras == nil, "store_not_inert", "This proof requires providerExtras:nil")
+                try requireOwnedInputs()
                 try require(NSApplication.shared.isRunning, "app_loop_not_running", "This diagnostic requires the fixture's normal NSApplication loop")
                 try require(!NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
                             "system_reduce_motion", "System Reduce Motion prevents rotation proof; the preference is preserved")
@@ -471,7 +765,8 @@ enum StatusItemHostProof {
         func report() -> [String: Any] {
             ["schemaVersion": 1, "proof": "production_status_item_host", "pid": ProcessInfo.processInfo.processIdentifier,
              "diagnosticOnly": true, "replacesNormalNativeGate": false, "terminal": terminal,
-             "passed": !cancelled && terminal == "completed" && results.count == 5
+             "expectedCaseCount": expectedCases, "testedStoreIdentity": identity(store),
+             "passed": !cancelled && terminal == "completed" && results.count == expectedCases
                 && results.allSatisfy { $0["passed"] as? Bool == true } && writeErrors.isEmpty
                 && controller == nil && created == invalidated && allOwnedClocksVerifiedStopped,
              "currentCase": currentCase ?? "none", "results": results, "observations": observations,

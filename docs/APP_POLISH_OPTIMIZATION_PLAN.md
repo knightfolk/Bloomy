@@ -1,5 +1,18 @@
 # Bloomy native polish and efficiency
 
+October 7 status-item input follow-up: the actual production menu-bar host
+passes seven bounded cases in two fresh processes, including independent GPU
+and temperature/fan readings, failed-read retention and recovery. Native
+accessibility values, actual thermal arc colors, retained geometry/identity and
+38 sustained compositor holds pass with exactly six GPU/five extras reads per
+run and zero fan subscribers. A third process cancelled during cooling verifies
+joined teardown without falsely marking its incomplete run passed. Thirty-two
+staging checks, fourteen focused Release tests and exact 126-source artifact
+matching pass; no product animation change or full package rerun is claimed.
+Ordinary motion remains 12/15; system Reduce Motion, genuine cover, graphical
+GPU fill and broader native/performance qualification remain open. See
+[status-item independent-input review](MENU_BAR_STATUS_ITEM_INPUTS_REVIEW_20261007.md).
+
 October 7 readiness checkpoint: Overview and Health now share one compact
 provider summary with five detailed evidence rows. Scheduled waiting, accepted
 work, manual stop, unconfirmed authorization, cold models and stale readings

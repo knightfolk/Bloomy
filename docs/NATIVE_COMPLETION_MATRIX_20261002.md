@@ -1,5 +1,21 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 status-item inputs: two fresh optimized production-host runs pass
+seven cases and 38 sustained holds. Independent fake GPU/cooling reads preserve
+native identity and geometry; native AX values, actual thermal color,
+failed-reading retention and recovery pass with exact read counts and zero
+fan subscribers. Cancelled Quit during the third run joins teardown and leaves
+the aggregate incomplete. Ordinary motion, actual system Reduce Motion,
+graphical GPU fill and broad native/performance gates remain open. See
+[status-item input review](MENU_BAR_STATUS_ITEM_INPUTS_REVIEW_20261007.md).
+
+October 7 readiness: Overview and Health share one summary, with five separately
+accessible evidence rows and existing destination navigation. Nine native states
+and compact/wide light/dark layouts pass; the serial Release checkpoint reports
+1,768 passing tests with seven opt-in skips and a successful production build.
+The ordinary motion gate remains 12/15; no full matrix or release qualification
+is claimed. See [readiness review](PROVIDER_READINESS_REVIEW_20261007.md).
+
 October 7 Overview follow-up: an hourly native account-credit chart now sits
 above models, and hardware/cooling details use a persisted disclosure. Collapsed
 GPU warnings remain visible; the resource CPU sampler is unmounted on collapse.

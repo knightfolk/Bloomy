@@ -1881,17 +1881,53 @@ private final class FixtureModel: ObservableObject {
             do {
                 try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
                 let logFeed = FixtureLogFeed(events: [])
+                let gpuReader = StatusItemProofGPUReader()
+                let dynamicGPU = SystemGPUUsageStore(read: { gpuReader.read() })
+                let extrasClient = SettingsProofExtras()
+                let dynamicExtras = ProviderExtrasStore(client: extrasClient)
                 let store = MonitorStore(
                     service: TelemetryService(source: FixtureTelemetrySource(scenario: .fresh, logFeed: logFeed)),
                     initial: FixtureData.statusItemSnapshot(active: true), providerExtras: nil,
                     earningsClient: FixtureEarnings(scenario: .fresh), energyPreferences: proofDefaults,
                     energyRecorder: EnergyRecorder(file: output.appendingPathComponent("inert-energy.json"), readPower: { _ in nil }),
                     gpuUsage: SystemGPUUsageStore(read: { nil }), menuAttentionPreferences: proofDefaults)
-                // This dedicated store is never started and never receives the
+                let dynamicStore = MonitorStore(
+                    service: TelemetryService(source: FixtureTelemetrySource(scenario: .fresh, logFeed: logFeed)),
+                    initial: FixtureData.statusItemSnapshot(active: true), providerExtras: dynamicExtras,
+                    earningsClient: FixtureEarnings(scenario: .fresh), energyPreferences: proofDefaults,
+                    energyRecorder: EnergyRecorder(file: output.appendingPathComponent("inert-dynamic-energy.json"), readPower: { _ in nil }),
+                    gpuUsage: dynamicGPU, menuAttentionPreferences: proofDefaults)
+                // Both dedicated stores are never started and never receive the
                 // dashboard's five-second publications or live dependencies.
-                let result = await StatusItemHostProof.run(store: store,
+                var result = await StatusItemHostProof.run(store: store,
+                    dynamicStore: dynamicStore, extras: dynamicExtras, extrasClient: extrasClient,
+                    gpuUsage: dynamicGPU, gpuReader: gpuReader,
                     snapshot: { FixtureData.statusItemSnapshot(active: $0) },
                     defaults: proofDefaults, outputDirectory: output)
+                let gpuReadsBeforeCleanup = gpuReader.readCount
+                let extrasReadsBeforeCleanup = await extrasClient.readCount
+                // Join teardown even when the originating proof was cancelled.
+                // No store was started; stop also clears retained fixture data.
+                let cleanup = Task { @MainActor in
+                    await dynamicExtras.stop()
+                    dynamicGPU.stop()
+                    await store.stop()
+                    await dynamicStore.stop()
+                }
+                await cleanup.value
+                let extrasReadsAfterCleanup = await extrasClient.readCount
+                let readsUnchanged = gpuReader.readCount == gpuReadsBeforeCleanup
+                    && extrasReadsAfterCleanup == extrasReadsBeforeCleanup
+                let cleanupPassed = dynamicExtras.visibleFanSubscriberCount == 0
+                    && dynamicGPU.percentage == nil && dynamicGPU.lastGoodPercentage == nil
+                    && dynamicGPU.sampledAt == nil && dynamicGPU.lastGoodSampledAt == nil && readsUnchanged
+                result["inertStoreCleanup"] = ["joinedEvenIfCancelled": true,
+                    "bothMonitorStoresStopped": true, "extrasStopped": true, "gpuStopped": true,
+                    "visibleFanSubscribers": dynamicExtras.visibleFanSubscriberCount,
+                    "gpuReadsBeforeCleanup": gpuReadsBeforeCleanup, "extrasReadsBeforeCleanup": extrasReadsBeforeCleanup,
+                    "actualGPUReads": gpuReader.readCount, "actualExtrasReads": extrasReadsAfterCleanup,
+                    "readsUnchangedDuringCleanup": readsUnchanged, "expectedGPUReads": 6, "expectedExtrasReads": 5, "passed": cleanupPassed]
+                result["passed"] = result["passed"] as? Bool == true && cleanupPassed
                 let data = try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
                 try data.write(to: output.appendingPathComponent("status-item-host-result.json"), options: .atomic)
                 statusItemProofStatus = result["passed"] as? Bool == true ? "Status-item proof passed" : "Status-item proof failed"
