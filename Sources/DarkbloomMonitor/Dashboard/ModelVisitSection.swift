@@ -5,13 +5,17 @@ struct ModelVisitSection: View {
     let visits: [ModelVisit]
     let withoutWorkVisits: [ModelVisit]
     let summary: ModelVisitSummary
+    let range: DateInterval?
     @State private var withoutWorkOnly = false
     @State private var visibleLimit = 8
+    @State private var showsDetails = false
 
-    init(visits: [ModelVisit], withoutWorkVisits: [ModelVisit]? = nil, summary: ModelVisitSummary? = nil) {
+    init(visits: [ModelVisit], withoutWorkVisits: [ModelVisit]? = nil, summary: ModelVisitSummary? = nil,
+         range: DateInterval? = nil) {
         self.visits = visits
         self.withoutWorkVisits = withoutWorkVisits ?? visits.filter { $0.outcome == .noObservedWork }
         self.summary = summary ?? ModelVisitSummary(visits: visits)
+        self.range = range ?? ModelVisitTimelineData.inferredRange(visits: visits)
     }
     private var displayed: [ModelVisit] {
         Array((withoutWorkOnly ? withoutWorkVisits : visits).suffix(visibleLimit).reversed())
@@ -43,17 +47,26 @@ struct ModelVisitSection: View {
                 Text(withoutWorkOnly ? "No completed visits without observed work in this history." : "Model visits appear as fresh loaded-model observations arrive.")
                     .font(.callout).foregroundStyle(.secondary)
             }
-            ForEach(displayed) { visit in
-                ModelVisitRow(visit: visit)
+            if let range, !displayed.isEmpty {
+                ModelVisitTimeline(data: ModelVisitTimelineData(
+                    visits: withoutWorkOnly ? withoutWorkVisits : visits, range: range), withoutWorkOnly: withoutWorkOnly)
             }
-            if (withoutWorkOnly ? withoutWorkVisits.count : visits.count) > visibleLimit {
-                Button("Show more visits") { visibleLimit += 12 }
-                    .controlSize(.small)
-                    .modifier(MetricsKeyboardReveal(target: .moreVisits))
+            if !displayed.isEmpty {
+                DisclosureGroup(isExpanded: $showsDetails) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(displayed) { visit in ModelVisitRow(visit: visit) }
+                        if (withoutWorkOnly ? withoutWorkVisits.count : visits.count) > visibleLimit {
+                            Button("Show more visits") { visibleLimit += 12 }
+                                .controlSize(.small)
+                                .modifier(MetricsKeyboardReveal(target: .moreVisits))
+                        }
+                        Text("Observed time; gaps and shared residency stay uncertain. Short requests between readings may be missed.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }.padding(.top, 6)
+                } label: { Label("Visit details", systemImage: "list.bullet").font(.callout) }
+                .accessibilityIdentifier("activity.metrics.visits.details")
             }
-            Text("Observed time; gaps and shared residency stay uncertain. Short requests between readings may be missed.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
             if summary.visitCount > 500 {
                 Text("Counts use all visits; each filter lists its latest 500.")
                     .font(.caption2).foregroundStyle(.secondary)
@@ -71,7 +84,10 @@ struct ModelVisitSection: View {
                 .init(title: "Without work", value: true),
             ])
         .equatable().frame(width: 225)
-        .onChange(of: withoutWorkOnly) { _, _ in visibleLimit = 8 }
+        .onChange(of: withoutWorkOnly) { _, value in
+            visibleLimit = 8
+            if value { showsDetails = true }
+        }
         .modifier(MetricsKeyboardReveal(target: .visitFilter))
     }
 

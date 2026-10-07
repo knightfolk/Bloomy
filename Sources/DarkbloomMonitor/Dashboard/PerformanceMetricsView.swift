@@ -253,7 +253,8 @@ struct PerformanceMetricsContent: View {
                         }
                     } else {
                         summaryGrid
-                        ModelVisitSection(visits: presentation.visits, withoutWorkVisits: presentation.withoutWorkVisits, summary: presentation.visitSummary)
+                        ModelVisitSection(visits: presentation.visits, withoutWorkVisits: presentation.withoutWorkVisits,
+                            summary: presentation.visitSummary, range: range)
                         speedChart
                         modelTimeline
                     }
@@ -443,30 +444,31 @@ struct PerformanceMetricsContent: View {
     }
 
     private var modelTimeline: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Provider model history", systemImage: "arrow.triangle.swap").font(.headline)
-                Spacer(minLength: 0)
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 8) {
                 if presentation.transitionCount > 8 {
                     Text("Latest 8 of \(presentation.transitionCount)").font(.caption).foregroundStyle(.secondary)
                 }
-            }
-            ForEach(Array(transitions.suffix(8).reversed())) { transition in
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(transition.date, format: .dateTime.month(.abbreviated).day().hour().minute())
-                        .font(.caption).foregroundStyle(.secondary).monospacedDigit().frame(width: 110, alignment: .leading)
-                    Text(transition.model.map(ModelDisplayName.short) ?? "Unknown model")
-                        .font(.callout).lineLimit(1).truncationMode(.middle)
-                        .help(transition.model ?? "No current model measurement")
-                    Spacer(minLength: 0)
-                    if let phase = transition.autopilotPhase {
-                        Text(phase == "waiting_inventory" ? "Refresh model inventory" : phase)
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                ForEach(Array(transitions.suffix(8).reversed())) { transition in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(transition.date, format: .dateTime.month(.abbreviated).day().hour().minute())
+                            .font(.caption).foregroundStyle(.secondary).monospacedDigit().frame(width: 110, alignment: .leading)
+                        Text(transition.model.map(ModelDisplayName.short) ?? "Unknown model")
+                            .font(.callout).lineLimit(1).truncationMode(.middle)
+                            .help(transition.model ?? "No current model measurement")
+                        Spacer(minLength: 0)
+                        if let phase = transition.autopilotPhase {
+                            Text(phase == "waiting_inventory" ? "Refresh model inventory" : phase)
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
                     }
                 }
+                Text("Provider reports may name the most recently used model. Loaded-model visits are tracked above.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            Text("Provider reports may name the most recently used model. Loaded-model visits are tracked above.")
-                .font(.caption).foregroundStyle(.secondary)
+            .padding(.top, 6)
+        } label: {
+            Label("Provider model reports", systemImage: "arrow.triangle.swap").font(.callout)
         }
     }
 

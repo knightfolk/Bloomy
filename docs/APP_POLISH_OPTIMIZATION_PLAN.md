@@ -1,5 +1,16 @@
 # Bloomy native polish and efficiency
 
+October 7 model visits: Activity Metrics now uses an observed-residence timeline
+with distinct status shapes, uncertain boundaries and collapsed details/provider
+reports. Native wide light/dark and compact checks confirm aligned rows, separate
+visit accessibility items, no-work scope and pagination. The final serial Release
+run reports 1,774 tests with seven opt-in skips; 32 staging checks and production
+build pass. All 127 source hashes match the optimized final fixture; owned apps
+exit normally. Models/Charts pass; ordinary motion remains 12/15 with the same
+cover/reopening failures. Joined day replay, historical local attribution, broad
+native/accessibility/performance and distribution remain open. See
+[model visit timeline review](MODEL_VISIT_TIMELINE_REVIEW_20261007.md).
+
 October 7 status-item input follow-up: the actual production menu-bar host
 passes seven bounded cases in two fresh processes, including independent GPU
 and temperature/fan readings, failed-read retention and recovery. Native
