@@ -6,16 +6,18 @@ struct ModelVisitSection: View {
     let withoutWorkVisits: [ModelVisit]
     let summary: ModelVisitSummary
     let range: DateInterval?
+    let activity: PerformanceActivityHistory?
     @State private var withoutWorkOnly = false
     @State private var visibleLimit = 8
     @State private var showsDetails = false
 
     init(visits: [ModelVisit], withoutWorkVisits: [ModelVisit]? = nil, summary: ModelVisitSummary? = nil,
-         range: DateInterval? = nil) {
+         range: DateInterval? = nil, activity: PerformanceActivityHistory? = nil) {
         self.visits = visits
         self.withoutWorkVisits = withoutWorkVisits ?? visits.filter { $0.outcome == .noObservedWork }
         self.summary = summary ?? ModelVisitSummary(visits: visits)
         self.range = range ?? ModelVisitTimelineData.inferredRange(visits: visits)
+        self.activity = activity
     }
     private var displayed: [ModelVisit] {
         Array((withoutWorkOnly ? withoutWorkVisits : visits).suffix(visibleLimit).reversed())
@@ -47,9 +49,10 @@ struct ModelVisitSection: View {
                 Text(withoutWorkOnly ? "No completed visits without observed work in this history." : "Model visits appear as fresh loaded-model observations arrive.")
                     .font(.callout).foregroundStyle(.secondary)
             }
-            if let range, !displayed.isEmpty {
+            if let range, !displayed.isEmpty || activity != nil {
                 ModelVisitTimeline(data: ModelVisitTimelineData(
-                    visits: withoutWorkOnly ? withoutWorkVisits : visits, range: range), withoutWorkOnly: withoutWorkOnly)
+                    visits: withoutWorkOnly ? withoutWorkVisits : visits, range: range), withoutWorkOnly: withoutWorkOnly,
+                    activity: activity)
             }
             if !displayed.isEmpty {
                 DisclosureGroup(isExpanded: $showsDetails) {

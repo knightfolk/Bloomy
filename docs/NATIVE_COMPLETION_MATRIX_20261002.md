@@ -1,5 +1,16 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 provider activity: Metrics now aligns an explicitly all-model provider
+activity row with residence. Active, between-reading work, idle and uncertain
+segments preserve gaps, resets and scope; clipped counter brackets stay uncertain.
+The frozen source passes 25 focused and 1,781 reported serial Release tests, with
+seven opt-in skips; 32 staging checks and production build pass. Native compact/
+wide appearances, grayscale, separate accessibility rows, model/no-work filters
+and empty-visit layout are checked on the 127-source-hash artifact. Models/Charts
+pass; motion remains 12/15 with the same three failures. No provider action or
+release occurred; joined financial/action replay and broader qualification stay
+open. See [provider activity review](PROVIDER_ACTIVITY_TIMELINE_REVIEW_20261007.md).
+
 October 7 model visits: Activity Metrics now uses an observed-residence timeline
 with distinct status shapes, uncertain boundaries and collapsed details/provider
 reports. Native wide light/dark and compact checks confirm aligned rows, separate

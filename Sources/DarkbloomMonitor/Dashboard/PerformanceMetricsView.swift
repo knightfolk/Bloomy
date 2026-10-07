@@ -254,7 +254,7 @@ struct PerformanceMetricsContent: View {
                     } else {
                         summaryGrid
                         ModelVisitSection(visits: presentation.visits, withoutWorkVisits: presentation.withoutWorkVisits,
-                            summary: presentation.visitSummary, range: range)
+                            summary: presentation.visitSummary, range: range, activity: presentation.activity)
                         speedChart
                         modelTimeline
                     }
@@ -735,6 +735,7 @@ struct PerformanceMetricsSnapshot: Sendable {
     let visits: [ModelVisit]
     let withoutWorkVisits: [ModelVisit]
     let visitSummary: ModelVisitSummary
+    let activity: PerformanceActivityHistory
 
     static let empty = PerformanceMetricsSnapshot(samples: [], range: DateInterval(start: .distantPast, end: .distantFuture), model: nil)
 
@@ -775,6 +776,7 @@ struct PerformanceMetricsSnapshot: Sendable {
         transitionCount = changes.count
         transitions = Array(changes.suffix(100))
         visitSummary = ModelVisitSummary(visits: analyzedVisits)
+        activity = PerformanceActivityHistory(samples: samples, period: range)
         visits = Array(analyzedVisits.suffix(500))
         withoutWorkVisits = Array(analyzedVisits.filter { $0.outcome == .noObservedWork }.suffix(500))
     }

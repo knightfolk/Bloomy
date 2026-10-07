@@ -187,7 +187,7 @@ public struct PerformanceSummary: Equatable, Sendable {
         generatedTokens = tokens
     }
 
-    private static func validPair(_ first: PerformanceSample, _ second: PerformanceSample) -> Bool {
+    static func validPair(_ first: PerformanceSample, _ second: PerformanceSample) -> Bool {
         guard first.quality == .current, second.quality == .current,
               let session = first.providerSession, session == second.providerSession,
               let firstCapture = first.sourceCapturedAt, let secondCapture = second.sourceCapturedAt,

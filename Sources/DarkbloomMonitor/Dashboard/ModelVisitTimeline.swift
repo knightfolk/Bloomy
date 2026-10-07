@@ -88,13 +88,27 @@ enum ModelVisitEvidenceStyle: String, CaseIterable, Identifiable {
 struct ModelVisitTimeline: View {
     let data: ModelVisitTimelineData
     var withoutWorkOnly = false
+    var activity: PerformanceActivityHistory? = nil
+    private var rowOffset: Int { activity == nil ? 0 : 1 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Chart {
+                if let activity {
+                    ForEach(activity.segments) { segment in
+                        RectangleMark(xStart: .value("First activity reading", segment.start),
+                                      xEnd: .value("Last activity reading", segment.end),
+                                      y: .value("Model row", 0), height: .fixed(12))
+                            .foregroundStyle(segment.evidence.color.opacity(0.3))
+                        PointMark(x: .value("Activity evidence", segment.start.addingTimeInterval(segment.end.timeIntervalSince(segment.start) / 2)),
+                                  y: .value("Model row", 0))
+                            .symbol(segment.evidence.shape).symbolSize(18)
+                            .foregroundStyle(segment.evidence.color)
+                    }
+                }
                 ForEach(data.entries) { entry in
                     let style = ModelVisitEvidenceStyle(entry.visit)
-                    let row = data.modelPositions[entry.visit.model] ?? 0
+                    let row = (data.modelPositions[entry.visit.model] ?? 0) + rowOffset
                     if entry.isPoint {
                         PointMark(x: .value("Observed time", entry.start),
                                   y: .value("Model row", row))
@@ -129,12 +143,14 @@ struct ModelVisitTimeline: View {
                 }
             }
             .chartXScale(domain: data.range.start...data.range.end)
-            .chartYScale(domain: -0.5...(Double(max(1, data.models.count)) - 0.5))
+            .chartYScale(domain: -0.5...(Double(max(1, data.models.count + rowOffset)) - 0.5))
             .chartYAxis {
-                AxisMarks(position: .leading, values: Array(data.models.indices)) { value in
+                AxisMarks(position: .leading, values: Array(0..<max(1, data.models.count + rowOffset))) { value in
                     AxisValueLabel(centered: false) {
-                        if let index = value.as(Int.self), data.models.indices.contains(index) {
-                            let model = data.models[index]
+                        if let row = value.as(Int.self), rowOffset == 1 && row == 0 {
+                            Text("Provider · all").font(.caption).help("Provider-wide activity, independent of the model and visit filters")
+                        } else if let row = value.as(Int.self), data.models.indices.contains(row - rowOffset) {
+                            let model = data.models[row - rowOffset]
                             Text(ModelDisplayName.short(model)).font(.caption)
                                 .lineLimit(1).truncationMode(.middle)
                                 .help(model)
@@ -144,11 +160,19 @@ struct ModelVisitTimeline: View {
             }
             .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
             .chartLegend(.hidden)
-            .frame(height: CGFloat(max(1, data.models.count)) * 32 + 32)
+            .frame(height: CGFloat(max(1, data.models.count + rowOffset)) * 32 + 32)
             // Charts can aggregate coincident point observations into a series
             // summary. Expose each retained visit explicitly, including points.
             .accessibilityRepresentation {
                 VStack {
+                    if let activity {
+                        ForEach(activity.segments) { segment in
+                            Text(activityLabel(segment))
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel(activityLabel(segment))
+                                .accessibilityIdentifier("activity.metrics.activity.\(segment.id.uuidString)")
+                        }
+                    }
                     ForEach(data.entries) { entry in
                         accessibilityLabel(entry)
                             .accessibilityElement(children: .ignore)
@@ -172,8 +196,23 @@ struct ModelVisitTimeline: View {
             Text("\(withoutWorkOnly ? "Without-work visits only" : "Observed residence") · blank time has no displayed visit · crosses mark uncertain boundaries")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let activity {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 125), alignment: .leading)], alignment: .leading, spacing: 6) {
+                    ForEach(PerformanceActivityHistory.Evidence.allCases, id: \.self) { evidence in
+                        Label { Text(evidence.title).foregroundStyle(.secondary) } icon: {
+                            Image(systemName: evidence.symbol).foregroundStyle(evidence.color).frame(width: 14)
+                        }.font(.caption)
+                    }
+                }
+                Text("Provider row covers all models · activity between readings is approximate\(activity.totalSegmentCount > activity.segments.count ? " · latest \(activity.segments.count) of \(activity.totalSegmentCount) segments" : "")")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
         }
         .help("Bands show observation times, not exact loading or inference times. Symbols describe evidence from the entire visit. Blank time can be unobserved, filtered out, or outside retained visit history. A last-loaded visit may already have ended. Short work between readings can be missed.")
+    }
+
+    private func activityLabel(_ segment: PerformanceActivityHistory.Segment) -> String {
+        "All-model provider activity, \(segment.start.formatted(date: .abbreviated, time: .standard)) to \(segment.end.formatted(date: .abbreviated, time: .standard)); \(segment.evidence.title). Based on adjacent readings, not exact request duration or payment."
     }
 
     private func accessibilityLabel(_ entry: ModelVisitTimelineData.Entry) -> Text {
@@ -183,5 +222,40 @@ struct ModelVisitTimeline: View {
         let start = visit.isStartTruncated || entry.start != visit.observedStart ? "; first boundary uncertain or clipped" : ""
         let end = visit.isEndTruncated || entry.end != visit.observedEnd ? "; last boundary uncertain or clipped" : ""
         return Text("\(visit.model), \(entry.start.formatted(date: .abbreviated, time: .standard)) to \(entry.end.formatted(date: .abbreviated, time: .standard)); \(evidence)\(work)\(start)\(end). Observed residence, not continuous inference.")
+    }
+}
+
+private extension PerformanceActivityHistory.Evidence {
+    var title: String {
+        switch self {
+        case .active: "Active readings"
+        case .betweenReadings: "Work between readings"
+        case .idle: "Idle readings"
+        case .uncertain: "Activity uncertain"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .active: "circle.fill"
+        case .betweenReadings: "diamond.fill"
+        case .idle: "square.fill"
+        case .uncertain: "triangle.fill"
+        }
+    }
+    var shape: BasicChartSymbolShape {
+        switch self {
+        case .active: .circle
+        case .betweenReadings: .diamond
+        case .idle: .square
+        case .uncertain: .triangle
+        }
+    }
+    var color: Color {
+        switch self {
+        case .active: .teal
+        case .betweenReadings: .purple
+        case .idle: .secondary
+        case .uncertain: .orange
+        }
     }
 }
