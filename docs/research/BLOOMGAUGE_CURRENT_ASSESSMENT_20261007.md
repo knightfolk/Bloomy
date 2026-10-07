@@ -1,5 +1,40 @@
 # BloomGauge comparison: current assessment
 
+## Latest checkout refresh
+
+Rechecked October 7 against Bloomy `118fa9b`, with the existing timeline-inspector working tree preserved. The earlier `9a65f17` baseline below remains useful for the detailed research, but its readiness and timeline status is superseded here. This pass reread the live homepage, features, guide, switch-rules tutorial, privacy notice and public architecture. Three retained vendor captures were visually re-inspected: demand, day replay and dashboard. These captures were not freshly downloaded, and no competitor binary or live interaction was tested.
+
+Bloomy's committed source now includes a shared readiness presentation in Overview and Health, observed model-residence bands, and provider activity intervals aligned to the same time scale. The uncommitted inspector adds time selection; a reviewer identified a mixed-input selection issue, so it is not counted as a finished feature. The complete earning-day replay is still missing: credit arrivals, actions, loading and model residence do not yet form one report.
+
+| Product question | BloomGauge's published experience | Current Bloomy position | Useful next improvement |
+| --- | --- | --- | --- |
+| What happened today? | A day replay combines earnings, model stays and gaps. | Account credit charts plus observed residence/activity graphics exist. | One selectable day report joining visits, nudges, loading, work evidence and credits without inventing serving times. |
+| Which model is worth considering? | Shared demand ruler, typical marker and history; estimates have evidence-dependent zones. | Current demand and guarded profit-switch policy exist; persistent per-model demand context remains missing. | Small native demand ruler and sparkline on cards, with units, freshness and coverage. |
+| Why am I getting no work? | A readiness diagnosis and one next action; bounded recovery is advertised. | A shared readiness strip now exists; Health carries supporting evidence. | Qualify all readiness states and connect them to relevant history, rather than treating silence as failure. |
+| Can I get started without Terminal? | Guided official-provider install, sign-in, download and startup. | Narrow guides exist; complete resumable onboarding remains unfinished. | One resumable setup flow with explicit steps and progress. |
+| Can I check another Mac or my phone? | Private Tailscale dashboard and a multi-Mac view are advertised. | Companion protocols/transport are substantial foundations; Settings still says Coming soon. | Finish packaged helper and real-device delivery before describing this as available. |
+| Can I protect my own Mac's responsiveness? | Hardware readings and temperature-aware model checks are documented. | Fan controls, host-GPU protection, model deletion and Chat provide broader local control. | Keep the compact native controls coherent and clearly label whole-Mac measurements. |
+
+### Recommended order
+
+1. Finish historical local-provider attribution. The correction-aware account ledger exists, but the production financial client still does not return a verified local-provider report. A current provider ID or account-wide total cannot justify historical earnings for this Mac. Keep confirmed account credits useful while withholding unsupported local profit estimates.
+2. Complete the joined Activity day report. The residence and activity charts are useful building blocks. Distinguish a visit ending without observed work from proven zero work; distinguish credit arrival from request execution. Let the user inspect the evidence and see why Bloomy acted.
+3. Add bounded per-model demand history and compact card graphics. Preserve requests-per-warm-provider units and observation intervals. Begin with current demand versus observed history; add pay-colored zones only when attributable evidence supports them.
+4. Explain existing switch decisions. Show the estimated advantage, load allowance, current hold/return limits and what evidence is missing. Bloomy's defaults already include ten-minute confirmation, sixty-minute residence and a three-hour return cooldown; a second model controller would complicate ownership. Live Darkbloom Autopilot must retain selection authority.
+5. Finish complete onboarding, then deliver Companion access. These are real experience gaps relative to the vendor's published offering, even though parts of the underlying code exist.
+
+### Stack recommendation
+
+Retain SwiftUI/AppKit, native Charts and the existing Swift telemetry/SQLite modules. BloomGauge documents a Swift/WKWebView shell, bundled Python collector and React/Vite dashboard. Sharing that web UI with phones is a practical benefit; it also requires maintaining process, HTTP and web/native bridge boundaries. This review establishes neither stack's comparative CPU, memory, battery use or reliability.
+
+Improve Bloomy's shared data flow instead: one immutable screen report, coordinated refreshes, batched database reads, bounded raw history and longer-lived rollups. Adapt earnings refresh to visibility and recent work without introducing timers on every model card. Keep manual commands, Autopilot, nudges, profit switching and host-GPU protection under coordinated ownership. Measure matched Release builds, visible and hidden, before claiming resource savings.
+
+The vendor dashboard's strongest visual lesson is hierarchy: a clear earning summary, a trend and an explanation. For Bloomy, retain the dense icon-first popup and use the resizable dashboard for detailed history. A common model scale, stable card geometry and useful selection will add more clarity than more rings or credit animations.
+
+Sources: [features](https://bloomgauge.io/features), [guide](https://bloomgauge.io/guide), [switch rules](https://bloomgauge.io/help/bloomgauge-switch-rules), [architecture](https://github.com/cookder/bloomgauge/blob/main/docs/ARCHITECTURE.md), [privacy](https://bloomgauge.io/privacy). Bloomy findings were refreshed against `Package.swift`, `ProviderReadinessSummaryView.swift`, `ModelVisitTimeline.swift`, `PerformanceActivityHistory.swift`, `ProfitSwitchPolicy.swift`, `AuthenticatedEarningsClient.swift` and the Companion availability UI. These are source capabilities, not claims that the current installed release includes or qualifies every feature.
+
+---
+
 Rechecked October 7, 2026 against Bloomy main `9a65f17`. The financial-attribution guard is committed; concurrent readiness presentation work is unfinished and is not counted as shipped. This assessment supersedes the earlier comparison's current-state claims about missing exact credit capture and missing Overview charts.
 
 Bloomy has the stronger foundation for a native Mac control app. BloomGauge has a clearer earning narrative and advertises more complete setup and remote access. Neither source inspection nor screenshots establishes which app earns more, uses less power or behaves more reliably in production.
