@@ -30,6 +30,7 @@ public enum AccountEarningsClientError: Error, LocalizedError, Equatable, Sendab
     case unauthorized
     case httpStatus(Int)
     case invalidResponse
+    case sessionChanged
 
     public var errorDescription: String? {
         switch self {
@@ -39,6 +40,7 @@ public enum AccountEarningsClientError: Error, LocalizedError, Equatable, Sendab
         case .unauthorized: "Darkbloom login expired — run darkbloom login"
         case .httpStatus(let status): "Darkbloom earnings request returned HTTP \(status)"
         case .invalidResponse: "Darkbloom earnings response was invalid"
+        case .sessionChanged: "Darkbloom account changed — refresh earnings"
         }
     }
 }
@@ -113,10 +115,11 @@ public struct AuthenticatedEarningsClient: AccountEarningsFetching, Sendable {
     }
 
     private let tokenURL: URL
-    private let session: URLSession
+    private let requestData: @Sendable (URLRequest) async throws -> (Data, URLResponse)
     private let historyLimit: Int
     private let database: EarningsDatabase?
     private let observeAccount: (@Sendable (AccountEarningsResponse, Date) async -> Void)?
+    private let accountSession: AuthenticatedAccountSession
 
     public init(
         homeDirectory: URL,
@@ -125,8 +128,18 @@ public struct AuthenticatedEarningsClient: AccountEarningsFetching, Sendable {
         database: EarningsDatabase? = nil,
         observeAccount: (@Sendable (AccountEarningsResponse, Date) async -> Void)? = nil
     ) {
+        self.init(homeDirectory: homeDirectory, historyLimit: historyLimit,
+            database: database, observeAccount: observeAccount,
+            requestData: { try await session.data(for: $0) })
+    }
+
+    // Synthetic transport seam; the public initializer always uses URLSession.
+    init(homeDirectory: URL, historyLimit: Int = 1_000, database: EarningsDatabase? = nil,
+         observeAccount: (@Sendable (AccountEarningsResponse, Date) async -> Void)? = nil,
+         requestData: @escaping @Sendable (URLRequest) async throws -> (Data, URLResponse)) {
         tokenURL = homeDirectory.appendingPathComponent(".darkbloom/auth_token")
-        self.session = session
+        accountSession = AuthenticatedAccountSession(tokenURL: tokenURL)
+        self.requestData = requestData
         self.historyLimit = historyLimit
         self.database = database
         self.observeAccount = observeAccount
@@ -148,37 +161,86 @@ public struct AuthenticatedEarningsClient: AccountEarningsFetching, Sendable {
     }
 
     public func fetch(now: Date) async throws -> EarningsPresentationValue {
-        let token = try String(contentsOf: tokenURL, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let request = try AccountEarningsRequest.make(token: token, limit: historyLimit)
-        let (data, response) = try await session.data(for: request.urlRequest)
-        try validate(response)
+        try await fetchWithContext(now: now).value
+    }
+
+    public func financialSessionState() async -> AccountEarningsSessionState {
+        await accountSession.snapshot()
+    }
+
+    public func financialSessionChanges() async -> AsyncStream<AccountEarningsSessionState> {
+        await accountSession.changes()
+    }
+
+    public func financialReport(context: AccountEarningsContext, providerID: String? = nil,
+        model: String? = nil, in range: DateInterval, unit: ActivityCalendarUnit,
+        calendar: Calendar) async throws -> AccountCreditReport? {
+        try await financialReport(context: context, providerID: providerID, model: model,
+            in: range, unit: unit, calendar: calendar, onReadProgress: nil)
+    }
+
+    func financialReport(context: AccountEarningsContext, providerID: String? = nil,
+        model: String? = nil, in range: DateInterval, unit: ActivityCalendarUnit,
+        calendar: Calendar, onReadProgress: (@Sendable () -> Void)?) async throws -> AccountCreditReport? {
+        let accountID = try await accountSession.identity(for: context)
+        do {
+            let report = try await database?.accountCreditReport(accountID: accountID,
+                providerID: providerID, model: model, in: range, unit: unit, calendar: calendar,
+                onReadProgress: onReadProgress)
+            _ = try await accountSession.identity(for: context)
+            return report
+        } catch {
+            _ = try await accountSession.identity(for: context)
+            throw error
+        }
+    }
+
+    public func fetchWithContext(now: Date) async throws -> AccountEarningsFetchResult {
+        let ticket = try await accountSession.beginRequest()
+        let request = try AccountEarningsRequest.make(token: ticket.token, limit: historyLimit)
+        let (data, response) = try await read(request.urlRequest, ticket: ticket)
+        try await accountSession.require(ticket)
+        do { try validate(response) }
+        catch AccountEarningsClientError.unauthorized {
+            try await accountSession.reject(ticket)
+            throw AccountEarningsClientError.unauthorized
+        }
         let account = try AccountEarningsParser.parse(data)
+        let context = try await accountSession.authenticate(accountID: account.accountID, request: ticket)
+        // Identity changes before ingestion: a failed B page must never leave A
+        // as the current authenticated account.
+        if let database {
+            do { try await database.ingest(account, capturedAt: now) }
+            catch {
+                try await accountSession.require(ticket)
+                throw error
+            }
+            try await accountSession.didIngest(context: context, request: ticket)
+        }
         await observeAccount?(account, now)
-        try await database?.ingest(account, capturedAt: now)
+        try await accountSession.require(ticket)
 
         let recentHistory = AccountEarningsParser.rolling24Hours(account, now: now)
         if case .available = recentHistory {
-            return recentHistory
+            return AccountEarningsFetchResult(context: context, value: recentHistory)
         }
 
         let leaderboardRequest = AccountLeaderboardRequest.make()
-        let (leaderboardData, leaderboardResponse) = try await session.data(for: leaderboardRequest)
-        try validate(leaderboardResponse)
+        let (leaderboardData, leaderboardResponse) = try await read(leaderboardRequest, ticket: ticket)
+        try await accountSession.require(ticket)
+        // This public request is not evidence that the authenticated login expired.
+        try validate(leaderboardResponse, authenticated: false)
         let leaderboard = try AccountLeaderboardParser.rolling24Hours(
             leaderboardData,
             accountID: account.accountID
         )
         if case .available = leaderboard {
-            return leaderboard
+            return AccountEarningsFetchResult(context: context, value: leaderboard)
         }
-        if let observed = try await database?.observedEarningsWindow(endingAt: now) {
-            return .observed(
-                microUSD: observed.microUSD,
-                observedSeconds: observed.observedSeconds
-            )
-        }
-        return leaderboard
+        // A lifetime balance delta may reflect corrections and is not an income
+        // rate. Do not fall back to old global balance observations as earnings.
+        try await accountSession.require(ticket)
+        return AccountEarningsFetchResult(context: context, value: leaderboard)
     }
 
     public func jobCompletionSummary(
@@ -206,15 +268,33 @@ public struct AuthenticatedEarningsClient: AccountEarningsFetching, Sendable {
         try await database?.earningsByModel(since: since) ?? []
     }
 
-    private func validate(_ response: URLResponse) throws {
+    private func validate(_ response: URLResponse, authenticated: Bool = true) throws {
         guard let http = response as? HTTPURLResponse else {
             throw AccountEarningsClientError.invalidResponse
         }
-        if http.statusCode == 401 || http.statusCode == 403 {
+        if authenticated && (http.statusCode == 401 || http.statusCode == 403) {
             throw AccountEarningsClientError.unauthorized
         }
         guard (200..<300).contains(http.statusCode) else {
             throw AccountEarningsClientError.httpStatus(http.statusCode)
         }
     }
+
+    private func read(_ request: URLRequest, ticket: AuthenticatedAccountSession.Request) async throws -> (Data, URLResponse) {
+        do {
+            let value = try await requestData(request)
+            try await accountSession.require(ticket)
+            return value
+        } catch {
+            // A transport failure from an old request cannot justify retaining
+            // data after the credentials changed during that suspension.
+            try await accountSession.require(ticket)
+            throw error
+        }
+    }
+}
+
+public struct AccountEarningsFetchResult: Equatable, Sendable {
+    public let context: AccountEarningsContext
+    public let value: EarningsPresentationValue
 }

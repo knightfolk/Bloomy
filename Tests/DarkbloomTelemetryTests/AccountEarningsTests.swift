@@ -99,8 +99,8 @@ struct AccountEarningsTests {
             "https://api.darkbloom.dev/v1/leaderboard?metric=earnings&window=24h&limit=200")
     }
 
-    @Test("authenticated client falls back to the locally observed earnings window")
-    func fallsBackToObservedWindow() async throws {
+    @Test("authenticated client never substitutes a lifetime balance change for earned credits")
+    func doesNotSubstituteBalanceDelta() async throws {
         let now = Date(timeIntervalSince1970: 2_000_000)
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("DarkbloomObservedEarningsTests-\(UUID().uuidString)", isDirectory: true)
@@ -129,7 +129,7 @@ struct AccountEarningsTests {
 
         let value = try await client.fetch(now: now)
 
-        #expect(value == .observed(microUSD: 1_100_000, observedSeconds: 43_200))
+        #expect(value == .unavailable(reason: "Account is outside the public 24-hour leaderboard window"))
     }
 
     private var responseData: Data {

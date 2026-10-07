@@ -1,5 +1,18 @@
 # Bloomy native polish and efficiency
 
+October 7 authenticated-session follow-up: the earnings client now exposes
+opaque account contexts with unique session generations and guarded exact
+report reads. Filesystem events invalidate replaced/deleted credentials without
+network polling; superseded success, transport and authentication responses
+cannot publish or revoke a newer session. Failed B ingestion cannot retain A's
+identity, and lifetime balance changes no longer substitute for earned income.
+All 1,698 reported Release tests pass with seven existing opt-in skips; 40 focused
+tests, 32 staging checks and the production build pass. A diagnosed synthetic
+FIFO watcher hang and reject-ordering race are repaired, with final read-only
+review complete. Protocol/MonitorStore/chart publication and clearing still need
+integration and native proof. Earlier motion gates remain open; no UI or release
+claim is made. See [authenticated session review](AUTHENTICATED_FINANCIAL_SESSION_REVIEW_20261007.md).
+
 October 7 scoped-report follow-up: exact credit reads now return atomic
 account/provider/model reports with separate signed work/rewards, exact-time
 buckets, balance endpoints and account-wide reconciliation. Missing intervals

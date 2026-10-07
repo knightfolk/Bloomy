@@ -39,3 +39,21 @@ rollups and disk retention are not complete.
 - [x] Run focused and full Release tests, production build and relevant staging checks; collect bounded read-only review for the data prerequisite. Repeat relevant checks for subsequent authentication/UI changes.
 - [ ] Verify native financial presentation before claiming chart integration. Existing motion gates remain independently required for release.
 - [ ] Commit/push coherent verified milestones and keep the full integration goal open until native proof passes.
+
+## Authenticated session milestone
+
+Files: create `AuthenticatedAccountSession.swift` and session regressions;
+modify `AuthenticatedEarningsClient.swift`. Keep existing chart integration
+separate until MonitorStore publication and retained-view clearing are verified.
+
+- [x] Own private credential fingerprint/account identity in a shared actor; expose only opaque account scope and a unique session generation.
+- [x] Recheck local credentials around suspended network/database work. Reject superseded fetches and prevent an old unauthorized response revoking a newer session.
+- [x] Establish new account identity before ingestion, keeping read readiness false on ingestion failure. Public leaderboard failure must not revoke authenticated identity.
+- [x] Expose context-bound exact reports with pre/post-read checks; remove the global balance-delta earnings fallback rather than label a potentially corrected balance change as earned income.
+- [x] Observe token replacement/deletion and directory recreation using owned filesystem events, bounded credential reads and no extra network polling.
+- [x] Prove A→B→A, held response/read, replacement/revocation, failed ingestion and public fallback boundaries with synthetic files/network.
+- [x] Run focused/full Release checks and production build, bounded review and prepare a coherent verified checkpoint. Commit/push identity and remote verification are reported at handoff.
+
+See [authenticated session review](../../AUTHENTICATED_FINANCIAL_SESSION_REVIEW_20261007.md).
+The client APIs are verified; the protocol, MonitorStore publication and retained
+view/cache clearing in the integration checklist remain unfinished.
