@@ -2,9 +2,9 @@
 
 ## Latest checkout refresh
 
-Rechecked October 7 against Bloomy `118fa9b`, with the existing timeline-inspector working tree preserved. The earlier `9a65f17` baseline below remains useful for the detailed research, but its readiness and timeline status is superseded here. This pass reread the live homepage, features, guide, switch-rules tutorial, privacy notice and public architecture. Three retained vendor captures were visually re-inspected: demand, day replay and dashboard. These captures were not freshly downloaded, and no competitor binary or live interaction was tested.
+Rechecked October 7 against Bloomy `4589971`. The earlier `9a65f17` baseline below remains useful for the detailed research, but its readiness and timeline status is superseded here. This pass reread the live homepage, features, guide and privacy notice, and fetched the current public architecture and README directly from GitHub. Three retained vendor captures were visually re-inspected: demand, day replay and dashboard. These captures were not freshly downloaded, and no competitor binary or live interaction was tested. Unrelated native motion fixture work was preserved.
 
-Bloomy's committed source now includes a shared readiness presentation in Overview and Health, observed model-residence bands, and provider activity intervals aligned to the same time scale. The uncommitted inspector adds time selection; a reviewer identified a mixed-input selection issue, so it is not counted as a finished feature. The complete earning-day replay is still missing: credit arrivals, actions, loading and model residence do not yet form one report.
+Bloomy's committed source now includes a shared readiness presentation in Overview and Health, observed model-residence bands, and provider activity intervals aligned to the same time scale. The timeline inspector is committed with native click, drag and accessibility selection verification; its earlier mixed-input issue was corrected. This improves inspection but does not complete the earning-day replay: credit arrivals, actions, loading and model residence do not yet form one report.
 
 | Product question | BloomGauge's published experience | Current Bloomy position | Useful next improvement |
 | --- | --- | --- | --- |
@@ -32,6 +32,20 @@ Improve Bloomy's shared data flow instead: one immutable screen report, coordina
 The vendor dashboard's strongest visual lesson is hierarchy: a clear earning summary, a trend and an explanation. For Bloomy, retain the dense icon-first popup and use the resizable dashboard for detailed history. A common model scale, stable card geometry and useful selection will add more clarity than more rings or credit animations.
 
 Sources: [features](https://bloomgauge.io/features), [guide](https://bloomgauge.io/guide), [switch rules](https://bloomgauge.io/help/bloomgauge-switch-rules), [architecture](https://github.com/cookder/bloomgauge/blob/main/docs/ARCHITECTURE.md), [privacy](https://bloomgauge.io/privacy). Bloomy findings were refreshed against `Package.swift`, `ProviderReadinessSummaryView.swift`, `ModelVisitTimeline.swift`, `PerformanceActivityHistory.swift`, `ProfitSwitchPolicy.swift`, `AuthenticatedEarningsClient.swift` and the Companion availability UI. These are source capabilities, not claims that the current installed release includes or qualifies every feature.
+
+### Concrete engineering follow-through
+
+Use the existing native timeline as the spine of Activity. A selected day should show confirmed credits, observed model residence, provider work evidence and actions on the same time axis. Keep loading duration measured separately from residence; retain unknown gaps and delayed credit arrival. The inspector should answer Kevin's original question: did a model leave before any organic work was observed, and what evidence covers that visit?
+
+Create a shared demand report for model cards and Opportunity. Persist validated per-model samples in bounded SQLite history; derive current value, typical range, coverage and freshness together. Use a common scale and one small sparkline. A zero warm-provider denominator is unavailable, not zero demand. Avoid a timer or database query owned by each card.
+
+Expose the existing command ownership in one place: manual choice, Darkbloom Autopilot, or Bloomy's eligible automation. Keep `ProviderControlStore`'s operation gate for changes. Explain a hold with evidence, estimated advantage, loading allowance and next eligible decision. A new earnings chart should not introduce another model controller.
+
+Improve financial refresh without making the whole app poll faster. `MonitorStore.earningsPollingInterval` is currently 600 seconds. Consider a shared, rate-limited refresh after observed work and while earnings are visible, then back off when hidden or quiet. Measure API calls, wakeups, query latency and process-tree memory before changing defaults.
+
+The Mac stack remains SwiftUI/AppKit, Charts and Swift telemetry/SQLite. A future phone interface can consume authenticated snapshots from the existing Companion foundation without replacing the Mac UI with a webview. Companion is still a delivery task: its Settings availability reads Coming soon.
+
+Fresh public main remained `724ce679e407eba0806cd03e94f303c4fb728468`; the architecture SHA-256 remained `bfeeb61267e766d29a815836e124bf67e986a954a17d17f7ff2ecbce81a2ec53`. The freshly fetched README says the public core is 1.36.63 and newer setup/Guardian implementation is not public. The homepage advertises 1.36.74 beta 55. Treat current vendor behavior and public implementation as different evidence. No app was installed, provider command run, credential accessed or comparative performance measurement taken for this refresh.
 
 ---
 
