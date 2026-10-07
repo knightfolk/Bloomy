@@ -1,5 +1,16 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 timeline inspection: native click/drag, exact point Inspect, Clear,
+filter replacement and range clearing pass on the final 128-source-hash fixture.
+Compact/wide light/dark layouts and separate visit/provider accessibility labels
+are inspected. The exact-time mixed-input regression passes; 1,785 reported serial
+Release tests, 32 staging checks and production build pass, with seven opt-in
+skips. Models/Charts pass; motion retains the same three failures (12/15). All
+finite work and owned app exits are verified. VoiceOver/audio traversal, larger
+text, maximum-history responsiveness, joined replay and full matrix/distribution
+qualification remain open. See
+[timeline inspection review](TIMELINE_INSPECTION_REVIEW_20261007.md).
+
 October 7 provider activity: Metrics now aligns an explicitly all-model provider
 activity row with residence. Active, between-reading work, idle and uncertain
 segments preserve gaps, resets and scope; clipped counter brackets stay uncertain.

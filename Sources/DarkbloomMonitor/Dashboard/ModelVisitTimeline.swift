@@ -90,10 +90,21 @@ struct ModelVisitTimeline: View {
     var withoutWorkOnly = false
     var activity: PerformanceActivityHistory? = nil
     private var rowOffset: Int { activity == nil ? 0 : 1 }
+    @State private var rawSelectedDate: Date?
+    @State private var inspectedDate: Date?
+    private var selection: ModelVisitTimelineSelection? {
+        ModelVisitTimelineSelection(date: inspectedDate, data: data, activity: activity)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Chart {
+                if let selection {
+                    RuleMark(x: .value("Inspected moment", selection.date))
+                        .foregroundStyle(Color.primary.opacity(0.4))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                        .accessibilityHidden(true)
+                }
                 if let activity {
                     ForEach(activity.segments) { segment in
                         RectangleMark(xStart: .value("First activity reading", segment.start),
@@ -160,6 +171,20 @@ struct ModelVisitTimeline: View {
             }
             .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
             .chartLegend(.hidden)
+            .chartXSelection(value: $rawSelectedDate)
+            .chartGesture { proxy in
+                DragGesture(minimumDistance: 0)
+                    .onChanged { proxy.selectXValue(at: $0.location.x) }
+            }
+            .onChange(of: rawSelectedDate) { _, date in
+                if let date { inspectedDate = date }
+            }
+            .onChange(of: data.range) { _, _ in
+                if selection == nil {
+                    inspectedDate = nil
+                    rawSelectedDate = nil
+                }
+            }
             .frame(height: CGFloat(max(1, data.models.count + rowOffset)) * 32 + 32)
             // Charts can aggregate coincident point observations into a series
             // summary. Expose each retained visit explicitly, including points.
@@ -167,16 +192,22 @@ struct ModelVisitTimeline: View {
                 VStack {
                     if let activity {
                         ForEach(activity.segments) { segment in
-                            Text(activityLabel(segment))
-                                .accessibilityElement(children: .ignore)
+                            Button {
+                                rawSelectedDate = segment.start
+                                inspectedDate = segment.start
+                            } label: { Text(activityLabel(segment)) }
                                 .accessibilityLabel(activityLabel(segment))
+                                .accessibilityHint("Inspect this activity interval")
                                 .accessibilityIdentifier("activity.metrics.activity.\(segment.id.uuidString)")
                         }
                     }
                     ForEach(data.entries) { entry in
-                        accessibilityLabel(entry)
-                            .accessibilityElement(children: .ignore)
+                        Button {
+                            rawSelectedDate = entry.start
+                            inspectedDate = entry.start
+                        } label: { accessibilityLabel(entry) }
                             .accessibilityLabel(accessibilityLabel(entry))
+                            .accessibilityHint("Inspect this visit observation")
                             .accessibilityIdentifier("activity.metrics.visit.\(entry.id.uuidString)")
                     }
                 }
@@ -184,6 +215,8 @@ struct ModelVisitTimeline: View {
                 .accessibilityIdentifier("activity.metrics.visits.timeline")
                 .accessibilityLabel("Observed model residence. \(withoutWorkOnly ? "Only visits without observed work are displayed." : "Retained visits for the selected models are displayed.") Visit evidence does not mean continuous inference. Blank time has no displayed visit; it may be unobserved, filtered out, or outside retained history.")
             }
+
+            selectionInspector
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 125), alignment: .leading)], alignment: .leading, spacing: 6) {
                 ForEach(ModelVisitEvidenceStyle.allCases) { style in
@@ -209,6 +242,72 @@ struct ModelVisitTimeline: View {
             }
         }
         .help("Bands show observation times, not exact loading or inference times. Symbols describe evidence from the entire visit. Blank time can be unobserved, filtered out, or outside retained visit history. A last-loaded visit may already have ended. Short work between readings can be missed.")
+    }
+
+    private var selectionInspector: some View {
+        ScrollView(.vertical) {
+        VStack(alignment: .leading, spacing: 5) {
+            if let selection {
+                HStack(alignment: .firstTextBaseline) {
+                    Label(selection.date.formatted(date: .abbreviated, time: .standard), systemImage: "scope")
+                        .font(.caption.weight(.medium)).monospacedDigit()
+                        .accessibilityIdentifier("activity.metrics.inspectedTime")
+                    Spacer(minLength: 8)
+                    Button {
+                        inspectedDate = nil
+                        rawSelectedDate = nil
+                    } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                        .accessibilityLabel("Clear inspected time")
+                        .accessibilityIdentifier("activity.metrics.inspection.clear")
+                        .help("Clear the selected moment")
+                }
+                if selection.visits.isEmpty {
+                    Label("No displayed visit at this time", systemImage: "minus.circle")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(selection.visits) { entry in
+                        let style = ModelVisitEvidenceStyle(entry.visit)
+                        Label {
+                            Text("\(ModelDisplayName.short(entry.visit.model)) · visit: \(style.title)")
+                                .help(entry.visit.model)
+                        } icon: { Image(systemName: style.symbol).foregroundStyle(style.color) }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(accessibilityLabel(entry))
+                        .accessibilityIdentifier("activity.metrics.inspection.visit.\(entry.id.uuidString)")
+                    }
+                }
+                if let segment = selection.activity {
+                    Label {
+                        Text("Provider interval · all: \(segment.evidence.title)")
+                    } icon: { Image(systemName: segment.evidence.symbol).foregroundStyle(segment.evidence.color) }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(activityLabel(segment))
+                    .accessibilityIdentifier("activity.metrics.inspection.activity")
+                    Text("\(segment.start.formatted(date: .abbreviated, time: .standard)) – \(segment.end.formatted(date: .abbreviated, time: .standard))")
+                        .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                } else if activity != nil {
+                    Label("No displayed provider activity at this time", systemImage: "minus.circle")
+                        .foregroundStyle(.secondary)
+                }
+                Text("Visit evidence describes the full visit; activity is approximate between readings.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else {
+                Label("Click or drag a time to inspect", systemImage: "scope")
+                    .foregroundStyle(.secondary)
+                Text("Visit evidence and all-model activity stay separate.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(height: 128)
+        .padding(10)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("activity.metrics.inspection")
     }
 
     private func activityLabel(_ segment: PerformanceActivityHistory.Segment) -> String {

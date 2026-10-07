@@ -1,5 +1,16 @@
 # Bloomy native polish and efficiency
 
+October 7 timeline inspection: Metrics supports native click/drag and exact
+accessibility Inspect actions, a stable scrollable panel, Clear and current-filter
+evidence. Mixed chart/accessibility selection, exact points, gaps and period
+changes are checked in the final 128-source-hash artifact, including compact/wide
+light/dark layouts. Four new boundary tests and 1,785 reported serial Release
+tests pass with seven opt-in skips; 32 staging checks and production build pass.
+All finite jobs and owned review processes are joined. Models/Charts pass; motion
+remains 12/15 with the same three failures. No provider action, push or release
+occurred. Joined action/credit replay, attribution and broader qualification remain
+open. See [timeline inspection review](TIMELINE_INSPECTION_REVIEW_20261007.md).
+
 October 7 provider activity: Metrics now aligns an explicitly all-model provider
 activity row with residence. Active, between-reading work, idle and uncertain
 segments preserve gaps, resets and scope; clipped counter brackets stay uncertain.
