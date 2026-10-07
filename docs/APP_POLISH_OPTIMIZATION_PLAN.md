@@ -1,5 +1,14 @@
 # Bloomy native polish and efficiency
 
+October 7 delay-only follow-up: one 50 ms sleep passes both unchanged reopening
+checks in both run orders (14/15), as does compositor observation; immediate
+controls repeat 12/15. All ninety cases are terminal; cover remains failed,
+Models/Charts pass and all twelve owned processes exit. Thirty-two staging
+checks pass. Polling is not required for the improvement in this manual host;
+no production sleep or repair is justified. Extend supported-host dynamic
+extras/Reduce Motion proof and investigate genuine cover separately. See
+`MENU_BAR_DELAY_CONTROL_REVIEW_20261007.md`; the ordinary/broader gates remain open.
+
 October 7 detach-cadence follow-up: immediate controls fail both reopening
 cases (12/15) in both run orders; advancing-compositor treatment passes both
 unchanged reopening bodies and sustained holds (14/15). Cover remains failed;

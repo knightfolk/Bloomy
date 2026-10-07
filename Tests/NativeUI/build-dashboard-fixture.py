@@ -42,7 +42,7 @@ parser.add_argument("--detach-history-proof", action="store_true",
                     help="Separate counterbalanced native detach versus continuously attached diagnostic.")
 parser.add_argument("--motion-render-history", choices=["display-flush", "compositor-only"],
                     help="Matched staged comparison of the four early angle observations only.")
-parser.add_argument("--motion-detach-cadence", choices=["immediate", "compositor-observed"],
+parser.add_argument("--motion-detach-cadence", choices=["immediate", "compositor-observed", "delay-only"],
                     help="Matched staged detach-to-close cadence comparison; original reopen bodies unchanged.")
 args = parser.parse_args()
 if args.motion_detach_cadence and (args.motion_render_history or args.detach_history_proof or args.settings_preview_proof or args.production_status_item_proof or args.motion_target_lifetime or args.motion_window_trace or args.hide_review_banner):
@@ -224,6 +224,7 @@ command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6
            *(["-D", "FIXTURE_DETACH_HISTORY_PROOF"] if args.detach_history_proof else []),
            *(["-D", "FIXTURE_COMPOSITOR_ONLY_HISTORY"] if args.motion_render_history == "compositor-only" else []),
            *(["-D", "FIXTURE_OBSERVED_DETACH_CADENCE"] if args.motion_detach_cadence == "compositor-observed" else []),
+           *(["-D", "FIXTURE_DELAY_ONLY_DETACH_CADENCE"] if args.motion_detach_cadence == "delay-only" else []),
            "-I", str(products), "-F", str(products),
            str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle", "-lsqlite3",
            "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks", "-o", str(binary)]

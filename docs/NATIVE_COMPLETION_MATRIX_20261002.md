@@ -1,5 +1,13 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 delay-only follow-up: delay and observed arms repeat 14/15 versus
+immediate 12/15 in both orders. Ninety motion cases are terminal, Models/Charts
+pass, 32 staging checks pass and all owned processes exit. Short settling is
+sufficient in the retained manual host without presentation polling during
+treatment; no product repair is inferred. Genuine cover and original gate stay
+open. Supported-host dynamic extras/Reduce Motion proof is next. See
+[delay control review](MENU_BAR_DELAY_CONTROL_REVIEW_20261007.md).
+
 October 7 detach-cadence follow-up: immediate 12/15 versus observed 14/15 repeats
 in both orders. Observed normal/rapid reopen holds pass with unchanged assertions;
 cover still fails and no original gate is replaced. Models/Charts, 30 staging

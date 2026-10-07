@@ -12,10 +12,15 @@ TREATMENT = '''            fixture.container.addSubview(view)
             let cadenceBefore: [String: Any] = ["window": diagnostics(window),
                 "native": nativeDiagnostics(view: view, arc: arc, window: window)]
             var cadenceAngles = [Double]()
-            #if FIXTURE_OBSERVED_DETACH_CADENCE
+            #if FIXTURE_OBSERVED_DETACH_CADENCE || FIXTURE_DELAY_ONLY_DETACH_CADENCE
             do {
+                #if FIXTURE_OBSERVED_DETACH_CADENCE
                 cadenceAngles = try await observeDetachedCompositor(view: view, arc: arc,
                     window: window, container: fixture.container)
+                #else
+                try await waitDetachedCadence(view: view, arc: arc,
+                    window: window, container: fixture.container)
+                #endif
             } catch {
                 throw MotionProofFailure("\\(error.localizedDescription); detachCadenceBefore=\\(cadenceBefore); "
                     + "detachCadenceSeconds=\\(CACurrentMediaTime() - cadenceStarted); "
@@ -70,10 +75,41 @@ OBSERVER = '''    /// Diagnostic only: observe advancing presentation motion bef
     }
 
 '''
+DELAY = '''    /// Diagnostic only: one settling interval with no presentation reads.
+    private static func waitDetachedCadence(view: MenuBarActivityArc.ActivityArcView,
+                                            arc: CAShapeLayer, window: NSWindow,
+                                            container: NSView) async throws {
+        let backing = view.layer
+        func geometry() -> [String] {
+            [NSStringFromRect(view.frame), NSStringFromRect(view.bounds), NSStringFromRect(arc.frame),
+             arc.path.map { NSStringFromRect($0.boundingBoxOfPath) } ?? "nil",
+             String(Double(arc.lineWidth)), String(Double(arc.strokeStart)), String(Double(arc.strokeEnd))]
+        }
+        let initialGeometry = geometry()
+        try await Task.sleep(for: .milliseconds(50))
+        try Task.checkCancellation()
+        try require(window.contentView === container && view.superview === container
+                    && view.window === window && view.layer === backing && arc.superlayer === backing
+                    && backing?.sublayers?.first === arc && geometry() == initialGeometry,
+                    "Detach delay lost native identity or geometry")
+        try require(window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
+                    && !view.isHiddenOrHasHiddenAncestor && view.visibleRect.intersects(view.bounds)
+                    && !arc.isHidden && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+                    "Detach delay lost native eligibility")
+        let clock = arc.animation(forKey: "inferenceRotation") as? CABasicAnimation
+        try require(arc.animationKeys() == ["inferenceRotation"] && clock?.keyPath == "transform.rotation.z"
+                    && clock?.duration == 1.4 && clock?.repeatCount == .infinity,
+                    "Detach delay lost the single production clock")
+    }
+
+'''
 METADATA = '''        payload["diagnosticComparisonOnly"] = true
         payload["replacesNormalNativeGate"] = false
         #if FIXTURE_OBSERVED_DETACH_CADENCE
         payload["detachCadence"] = "compositor-observed"
+        #elseif FIXTURE_DELAY_ONLY_DETACH_CADENCE
+        payload["detachCadence"] = "delay-only"
+        payload["detachCadenceRequestedDelayMilliseconds"] = 50
         #else
         payload["detachCadence"] = "immediate"
         #endif
@@ -92,6 +128,6 @@ def stage_detach_cadence(source: str) -> str:
     end = source.index('        await report.check("same_window_close_and_reopen")')
     if ANCHOR not in source[start:end]:
         raise ValueError('Detach cadence anchor moved outside the detach case')
-    staged = source.replace(ANCHOR, TREATMENT).replace(OBSERVER_ANCHOR, OBSERVER + OBSERVER_ANCHOR)
+    staged = source.replace(ANCHOR, TREATMENT).replace(OBSERVER_ANCHOR, OBSERVER + DELAY + OBSERVER_ANCHOR)
     staged = staged.replace(PAYLOAD, PAYLOAD.replace('let payload', 'var payload'))
     return staged.replace(SERIALIZE, METADATA + SERIALIZE)

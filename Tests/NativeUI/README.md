@@ -73,17 +73,22 @@ Conflicting motion modes and hidden controls reject before staging.
 
 ## Detach-to-close cadence comparison
 
-Build two fresh Release outputs with `--motion-detach-cadence immediate` and
-`--motion-detach-cadence compositor-observed`, then choose **Native proof** in
-each. Both stage identical source; a compiler definition selects whether the
+Build fresh Release outputs with `--motion-detach-cadence immediate`,
+`--motion-detach-cadence compositor-observed` and
+`--motion-detach-cadence delay-only`, then choose **Native proof** in
+each. All stage identical source; compiler definitions select whether the
 detach case observes two advancing, eligible presentation angles before
-returning. The immediate arm keeps the original key-only wait. Both record
-the same synchronous before/after snapshots and elapsed time. No redraw,
+returning. The immediate arm keeps the original key-only wait. All record
+the same synchronous before/after snapshots and elapsed time. The delay-only
+arm waits once for 50 ms, then validates retained identity/geometry, eligibility
+and the exact clock without additional presentation reads during treatment.
+Shared snapshots read native presentation state in every arm. No redraw,
 transaction flush, configuration, lifecycle recovery or extra hold is added.
 Both original reopening case bodies and their sustained-motion checks remain
 unchanged. Counterbalance order with fresh processes and retain all fifteen
-terminal cases. If only the observed arm passes, settling time and observation
-remain coupled; a delay-only control would be needed. Neither arm replaces the
+terminal cases. A passing delay arm establishes that a short elapsed/run-loop
+settling interval is sufficient in this host. A single sleep does not match the
+observed arm's repeated polling/yields exactly. None of these arms replaces the
 ordinary gate or proves a production defect. Other diagnostics/hidden controls
 are rejected before staging.
 
