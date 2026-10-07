@@ -1,5 +1,14 @@
 # Bloomy native polish and efficiency
 
+October 7 manual root-layer comparison: identical staged helpers with ordinary
+and explicit root backing both complete at 12/15; Models/Charts pass. The changed
+root setting is observed, but reopening still lacks the content-layer ancestry.
+Thirty-nine staging checks, 36 focused Release tests and both optimized builds
+pass; all finite work and owned exits are verified. This rules out root backing
+alone, not a production defect. Next: immediate Settings navigation and reopening
+before a compositor hold. Ordinary motion, genuine cover and broad qualification
+remain open. See [root-layer comparison](MENU_BAR_ROOT_LAYER_REVIEW_20261007.md).
+
 October 7 timeline inspection: Metrics supports native click/drag and exact
 accessibility Inspect actions, a stable scrollable panel, Clear and current-filter
 evidence. Mixed chart/accessibility selection, exact points, gaps and period

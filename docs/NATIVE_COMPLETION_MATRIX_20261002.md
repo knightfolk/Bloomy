@@ -1,5 +1,12 @@
 # Native polish completion matrix — October 2, 2026
 
+October 7 manual root-layer comparison: ordinary and explicitly backed roots
+both finish the unchanged fifteen cases at 12/15, with the same cover/reopening
+failures. Models/Charts pass; 39 staging checks, 36 focused Release tests and both
+optimized builds pass. All owned processes exit. No product repair or gate
+replacement is claimed; next evidence uses immediate supported Settings
+navigation/reopening. See [root-layer review](MENU_BAR_ROOT_LAYER_REVIEW_20261007.md).
+
 October 7 timeline inspection: native click/drag, exact point Inspect, Clear,
 filter replacement and range clearing pass on the final 128-source-hash fixture.
 Compact/wide light/dark layouts and separate visit/provider accessibility labels

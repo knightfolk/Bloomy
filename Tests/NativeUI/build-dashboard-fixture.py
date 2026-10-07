@@ -17,6 +17,7 @@ from pathlib import Path
 from MenuBarMotionComparison import stage_comparison
 from MenuBarRenderHistory import stage_render_history
 from MenuBarDetachCadence import stage_detach_cadence
+from MenuBarRootLayer import stage_root_layer
 from MenuBarWindowTrace import stage_trace_report, stage_window_trace
 from StatusItemHostStaging import stage_status_item_access
 
@@ -44,7 +45,11 @@ parser.add_argument("--motion-render-history", choices=["display-flush", "compos
                     help="Matched staged comparison of the four early angle observations only.")
 parser.add_argument("--motion-detach-cadence", choices=["immediate", "compositor-observed", "delay-only"],
                     help="Matched staged detach-to-close cadence comparison; original reopen bodies unchanged.")
+parser.add_argument("--motion-root-layer", choices=["ordinary", "explicit"],
+                    help="Single-factor manual root layer-backing diagnostic; does not replace the native gate.")
 args = parser.parse_args()
+if args.motion_root_layer and (args.motion_detach_cadence or args.motion_render_history or args.detach_history_proof or args.settings_preview_proof or args.production_status_item_proof or args.motion_target_lifetime or args.motion_window_trace or args.hide_review_banner):
+    parser.error("Root-layer comparison requires visible controls and no other motion diagnostics.")
 if args.motion_detach_cadence and (args.motion_render_history or args.detach_history_proof or args.settings_preview_proof or args.production_status_item_proof or args.motion_target_lifetime or args.motion_window_trace or args.hide_review_banner):
     parser.error("Detach cadence comparison requires visible controls and no other motion diagnostics.")
 if args.motion_render_history and (args.detach_history_proof or args.settings_preview_proof or args.production_status_item_proof or args.motion_target_lifetime or args.motion_window_trace or args.hide_review_banner):
@@ -167,6 +172,7 @@ staged_fixture.write_bytes(fixture_bytes)
 motion_comparison = None
 render_history = None
 detach_cadence = None
+root_layer = None
 for helper in sorted((ROOT / "Tests/NativeUI").glob("*Proof.swift")):
     helper_bytes = helper.read_bytes()
     hashes[str(helper.relative_to(ROOT))] = hashlib.sha256(helper_bytes).hexdigest()
@@ -204,6 +210,16 @@ for helper in sorted((ROOT / "Tests/NativeUI").glob("*Proof.swift")):
                           "original_sha256": hashes[str(helper.relative_to(ROOT))],
                           "staged_sha256": hashlib.sha256(staged_bytes).hexdigest(),
                           "diagnostic_only": True, "replaces_normal_native_gate": False}
+    elif helper.name == "MenuBarMotionProof.swift" and args.motion_root_layer:
+        try:
+            staged_bytes = stage_root_layer(helper_bytes.decode("utf-8")).encode("utf-8")
+        except ValueError as error:
+            parser.error(str(error))
+        staged_helper.write_bytes(staged_bytes)
+        root_layer = {"mode": args.motion_root_layer,
+                      "original_sha256": hashes[str(helper.relative_to(ROOT))],
+                      "staged_sha256": hashlib.sha256(staged_bytes).hexdigest(),
+                      "diagnostic_only": True, "replaces_normal_native_gate": False}
     else:
         staged_helper.write_bytes(helper_bytes)
     sources.append(staged_helper)
@@ -225,6 +241,7 @@ command = ["swiftc", "-target", f"{arch}-apple-macosx14.0", "-swift-version", "6
            *(["-D", "FIXTURE_COMPOSITOR_ONLY_HISTORY"] if args.motion_render_history == "compositor-only" else []),
            *(["-D", "FIXTURE_OBSERVED_DETACH_CADENCE"] if args.motion_detach_cadence == "compositor-observed" else []),
            *(["-D", "FIXTURE_DELAY_ONLY_DETACH_CADENCE"] if args.motion_detach_cadence == "delay-only" else []),
+           *(["-D", "FIXTURE_EXPLICIT_MOTION_ROOT_LAYER"] if args.motion_root_layer == "explicit" else []),
            "-I", str(products), "-F", str(products),
            str(staged_fixture), *map(str, sources), str(staged_telemetry), "-framework", "Sparkle", "-lsqlite3",
            "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks", "-o", str(binary)]
@@ -239,6 +256,7 @@ manifest = {
     "motion_target_comparison": motion_comparison,
     "motion_render_history": render_history,
     "motion_detach_cadence": detach_cadence,
+    "motion_root_layer": root_layer,
     "motion_window_trace": window_trace,
     "production_status_item_proof": status_item_access,
     "settings_preview_proof": {"enabled": args.settings_preview_proof,
