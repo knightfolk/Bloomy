@@ -8,6 +8,39 @@ import Testing
 @Suite("Model card rendering", .serialized)
 @MainActor
 struct ModelCardSummaryRenderingTests {
+    @Test("mixed history and catalog card faces keep equal heights", arguments: [300.0, 344.0, 460.0])
+    func mixedHistoryHeight(width: Double) {
+        let id = "gemma-4-26b-qat-4bit"
+        let capacity = NetworkModelCapacity(id: id, ready: true, canAccept: true,
+            routableProviders: 8, warmProviders: 5, runningProviders: 1, coldProviders: 2,
+            activeRequests: 11, queuedRequests: 1, queueLimit: 8, aggregateTokensPerSecond: 125,
+            estimatedTimeToFirstTokenMS: 240, tokenBudgetRemaining: 750, tokenBudgetTotal: 1_000)
+        let rate = ModelTokenRateAverage(model: id, tokensPerSecond: 24.7, sampleCount: 116, queryPeriod: nil)
+        func earnings(net: Double?) -> ModelServingProfitAverage {
+            .init(model: id, grossUSDPerActiveHour: 1.20, incrementalElectricityUSDPerActiveHour: net == nil ? nil : 0.21,
+                profitUSDPerActiveHour: net, activeHours: 2.5, coveredEarningHours: 3,
+                activePowerSamples: 900, idlePowerSamples: net == nil ? 0 : 500)
+        }
+        let states: [(Bool, ModelTokenRateAverage?, ModelServingProfitAverage?)] = [
+            (true, nil, nil), (true, rate, nil), (true, nil, earnings(net: nil)),
+            (true, rate, earnings(net: 0.99)), (false, nil, nil)
+        ]
+        let heights = states.map { downloaded, rate, serving in
+            let item = ModelInventoryItem(catalogID: id, localID: downloaded ? id : nil,
+                displayName: "Gemma 4 26B", modelType: "llm", capabilities: [], sizeGB: 18.2,
+                minimumRAMGB: 32, isDownloaded: downloaded, isEnabled: downloaded,
+                isPreloaded: false, liveState: .unloaded, issue: nil)
+            let view = ModelCardSummary(item: item, installedMemoryGB: 64, rate: rate,
+                capacity: capacity, serving: serving, grade: nil,
+                forecast: .calculate(runPercent: 0, serving: serving, tokenRate: rate),
+                runPercent: 0, setRunPercent: { _ in }, demandScale: .init(models: [capacity]),
+                residencyPresentation: .known(.unloaded))
+            return NSHostingView(rootView: view.frame(width: width)).fittingSize.height
+        }
+        #expect(heights.allSatisfy { $0.isFinite && $0 > 100 && $0 < 300 })
+        #expect((heights.max() ?? 0) - (heights.min() ?? 0) < 1)
+    }
+
     @Test("grid uses one two or three readable bounded columns")
     func columnCounts() {
         // Each breakpoint includes the gaps between cards and lands exactly

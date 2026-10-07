@@ -26,6 +26,7 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case unmeasuredMetrics = "Unmeasured metrics", idleMetrics = "Recorded idle metrics"
     case timelineActions = "Timeline actions"
     case demandRulerStates = "Demand ruler states"
+    case mixedModelCards = "Mixed model history"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
@@ -343,6 +344,35 @@ private enum FixtureActivityRead: String, CaseIterable, Identifiable, Sendable {
         }
         return EnergyRecordingSnapshot(reading: nil, intervals: intervals, issue: nil)
     }
+
+    static func mixedModelPower(now: Date, calendar: Calendar) -> EnergyRecordingSnapshot {
+        let end = calendar.dateInterval(of: .hour, for: now)!.start
+        let intervals = (0..<1_800).map { index in
+            let active = index < 1_440
+            let start = end.addingTimeInterval(Double(index - 1_800) * 10)
+            return EnergyInterval(start: start, end: start.addingTimeInterval(10),
+                kWh: Double(active ? 75 : 25) * 10 / 3_600_000, usdPerKWh: 1,
+                source: "Synthetic mixed model power", estimated: true,
+                activeModelID: active ? FixtureData.modelIDs[index < 720 ? 0 : 1] : nil,
+                inferenceActive: active)
+        }
+        return EnergyRecordingSnapshot(reading: nil, intervals: intervals, issue: nil)
+    }
+}
+
+/// A qualified current-day synthetic speed for one model; other models retain
+/// their genuine missing-history presentation. No database or provider is used.
+private actor FixtureModelRates: ModelTokenRateRecording {
+    func record(model: String, tokensPerSecond: Double, capturedAt: Date,
+        processIdentity: ProcessIdentity, writtenAt: TimeInterval) {}
+    func recordIfNew(model: String, tokensPerSecond: Double, capturedAt: Date,
+        processIdentity: ProcessIdentity, writtenAt: TimeInterval) -> Bool { false }
+    func averages(from start: Date, through end: Date) -> [ModelTokenRateAverage] {
+        [.init(model: FixtureData.modelIDs[0], tokensPerSecond: 52.7, sampleCount: 116,
+            queryPeriod: DateInterval(start: start, end: end))]
+    }
+    func history(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar,
+        model: String) -> [ModelRateBucket]? { nil }
 }
 
 private enum FixtureEarningsReadMode: String, CaseIterable, Identifiable, Codable, Sendable {
@@ -634,7 +664,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
         if calendarSummaryMode == .accountFailure { throw FixtureError.offline }
         return switch scenario {
         case .microEarnings: .observed(microUSD: 1, observedSeconds: 10_800)
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .healthPartial, .largeActionHistory, .acceptedWork, .matchedEnergy, .unmeasuredMetrics, .idleMetrics, .timelineActions, .demandRulerStates:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .healthPartial, .largeActionHistory, .acceptedWork, .matchedEnergy, .unmeasuredMetrics, .idleMetrics, .timelineActions, .demandRulerStates, .mixedModelCards:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -1364,7 +1394,7 @@ private final class FixtureModel: ObservableObject {
         capacityCapturedAt: Date? = nil) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore, FixtureExtras, FixtureController, FixtureEarnings, FixtureLogFeed) {
         let tokens = FixtureTokens()
         let autopilot = FixtureAutopilot()
-        defaults.set(scenario == .matchedEnergy || scenario == .microEarnings, forKey: "electricity.enabled")
+        defaults.set(scenario == .matchedEnergy || scenario == .microEarnings || scenario == .mixedModelCards, forKey: "electricity.enabled")
         defaults.set("1", forKey: "electricity.usdPerKWh")
         let controller = FixtureController(scenario: scenario, autopilot: autopilot)
         let control = ProviderControlStore(controller: controller, homeDirectory: directory, hostingOptions: { .default })
@@ -1375,7 +1405,9 @@ private final class FixtureModel: ObservableObject {
         let events = FixtureData.logEvents(scenario, now: seededAt)
         let logFeed = FixtureLogFeed(events: events)
         let savedEnergy = FixtureActivityRead.savedPower(now: seededAt, calendar: .current)
-        let fixtureEnergy = scenario == .microEarnings
+        let fixtureEnergy = scenario == .mixedModelCards
+            ? FixtureActivityRead.mixedModelPower(now: seededAt, calendar: .current)
+            : scenario == .microEarnings
             ? FixtureActivityRead.microEarningsPower(now: seededAt, calendar: .current)
             : scenario == .matchedEnergy
                 ? EnergyRecordingSnapshot(reading: nil, intervals: savedEnergy.intervals, issue: nil) : savedEnergy
@@ -1385,6 +1417,7 @@ private final class FixtureModel: ObservableObject {
             initial: initialSnapshot, providerExtras: extras,
             initialEnergy: fixtureEnergy,
             earningsClient: earningsClient,
+            tokenRateRecorder: scenario == .mixedModelCards ? FixtureModelRates() : nil,
             networkCapacityClient: FixtureCapacity(scenario: scenario, fixedCapture: capacityCapturedAt), publicCatalogClient: FixtureCatalog(scenario: scenario),
             publicPricingClient: FixturePricing(scenario: scenario), networkSeriesClient: FixtureSeries(scenario: scenario),
             energyPreferences: defaults, energyRecorder: EnergyRecorder(file: directory.appendingPathComponent("energy.json"), readPower: { _ in nil }),
@@ -1815,9 +1848,16 @@ private final class FixtureModel: ObservableObject {
             }
             preparedMonitor.actionHistory = history; preparedControl.actionHistory = history
             await preparedControl.refresh(); await preparedMonitor.providerExtras?.refresh()
+            if requestedScenario == .mixedModelCards {
+                await stores.6.setSyntheticLocalCredits(true)
+                await preparedMonitor.accept(preparedMonitor.snapshot)
+            }
             await preparedMonitor.refreshEarnings(); await preparedMonitor.refreshPublicCatalog(); await preparedMonitor.refreshPublicPricing()
             if requestedScenario == .matchedEnergy, let energy = preparedMonitor.energy {
                 await preparedMonitor.updateEnergyEarnings(using: energy, enabled: true, at: Date())
+            }
+            if requestedScenario == .mixedModelCards {
+                await preparedMonitor.refreshModelServingProfitability()
             }
             if requestedScenario != .offline { await preparedMonitor.refreshNetworkCapacity(); await preparedMonitor.refreshNetworkSeries() }
             if requestedScenario == .stale {
@@ -1846,7 +1886,7 @@ private final class FixtureModel: ObservableObject {
         activityRead = .normal
         calendarSummaryMode = .normal
         financialSession = .a
-        syntheticLocalCredits = false
+        syntheticLocalCredits = requestedScenario == .mixedModelCards
         await observeEarningsReads()
         fanReadback = .held
         chatVerificationTest = nil

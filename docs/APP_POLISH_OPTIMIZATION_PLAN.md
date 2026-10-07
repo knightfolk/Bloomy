@@ -1,5 +1,16 @@
 # Bloomy native polish and efficiency
 
+October 7 mixed model-card history: a private synthetic scenario now qualifies
+earnings-only, speed-plus-earnings and learning cards together. Actual card faces
+have equal heights at 300/344/460 points; native wide light/dark and compact
+dark/light/grayscale inspection preserves readable metrics, controls, Available
+collapse/reopen and Manage evidence. Six focused tests, 47 staging checks and the
+corrected optimized fixture build pass with 132 matching source hashes. No
+production view change was justified. Provider state and concurrent work remain
+untouched. The bounded demand-history integration design is recorded; persistent
+history and broad qualification remain open. See
+[mixed card review](MIXED_MODEL_CARD_REVIEW_20261007.md).
+
 October 7 shared model demand ruler: Models and Opportunity compare network
 requests per loaded provider on one snapshot-wide scale that search/draft
 selection cannot stretch. Current, stale, missing and zero-denominator states
