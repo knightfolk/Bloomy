@@ -13,7 +13,8 @@ import sys
 import statistics
 import time
 from pathlib import Path
-from metrics_read_phase import MetricsReadPhase
+from metrics_read_phase import MetricsReadPhase, bracket_metrics_endpoint
+from metrics_dataset import dataset_fingerprint
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--pid', type=int)
@@ -25,7 +26,10 @@ parser.add_argument('--visibility-proof', type=Path,
 parser.add_argument('--visibility-mode', choices=['visible', 'minimized', 'hidden'])
 parser.add_argument('--metrics-read-proof', type=Path,
                     help='Inert fixture Metrics read proof; qualify refresh or quiet work')
-parser.add_argument('--metrics-read-mode', choices=['refresh', 'quiet'])
+parser.add_argument('--metrics-read-mode', choices=['refresh', 'rolling-refresh', 'quiet'],
+                    help='Rolling refresh requires unchanged synthetic data and complete window/reuse evidence')
+parser.add_argument('--metrics-dataset', type=Path,
+                    help='Privately owned paused fixture database; content is hashed outside the CPU window')
 parser.add_argument('--self-check', action='store_true', help='Check Mach time conversion against getrusage using one second of owned CPU work')
 args = parser.parse_args()
 if not 1 <= args.seconds <= 60:
@@ -38,6 +42,8 @@ if bool(args.metrics_read_proof) != bool(args.metrics_read_mode):
     parser.error('Use --metrics-read-proof and --metrics-read-mode together')
 if args.self_check and args.metrics_read_proof:
     parser.error('Calibration cannot qualify another process Metrics read phase')
+if (args.metrics_read_mode == 'rolling-refresh') != bool(args.metrics_dataset):
+    parser.error('Use --metrics-dataset only with --metrics-read-mode rolling-refresh')
 
 class Usage(ctypes.Structure):
     _fields_ = [('uuid', ctypes.c_uint8 * 16)] + [(name, ctypes.c_uint64) for name in (
@@ -116,19 +122,26 @@ if args.self_check:
     sys.exit(0 if result['passed'] else 1)
 
 samples = []
-metrics_phase = (MetricsReadPhase(json.loads(args.metrics_read_proof.read_text()), args.metrics_read_mode)
-                 if args.metrics_read_proof else None)
-start = time.monotonic()
+dataset_before = dataset_fingerprint(args.metrics_dataset) if args.metrics_dataset else None
 initial_visibility = visibility()
-first = read()
+
+def metrics_proof():
+    return json.loads(args.metrics_read_proof.read_text()) if args.metrics_read_proof else None
+
+# Both sides of each CPU counter must agree about read state. Otherwise a read
+# could be absorbed into the opening baseline or counted past the closing CPU
+# endpoint. A boundary race rejects this finite observation instead.
+first, start, initial_metrics = bracket_metrics_endpoint(read, metrics_proof, time.monotonic)
+metrics_phase = (MetricsReadPhase(initial_metrics, args.metrics_read_mode)
+                 if args.metrics_read_proof else None)
 samples.append({'elapsed_seconds': 0, **first, **({'visibility': initial_visibility} if initial_visibility else {})})
 while time.monotonic() - start < args.seconds:
     time.sleep(min(1, max(0, args.seconds - (time.monotonic() - start))))
-    elapsed = time.monotonic() - start
-    current = read()
     current_visibility = visibility()
+    current, sampled_at, current_metrics = bracket_metrics_endpoint(read, metrics_proof, time.monotonic)
+    elapsed = sampled_at - start
     if metrics_phase:
-        metrics_phase.observe(json.loads(args.metrics_read_proof.read_text()))
+        metrics_phase.observe(current_metrics)
     if initial_visibility and current_visibility != initial_visibility:
         raise RuntimeError('Visibility events changed during the window; reject this observation')
     if current['proc_start_abstime'] != first['proc_start_abstime'] or current['proc_exit_abstime']:
@@ -136,6 +149,8 @@ while time.monotonic() - start < args.seconds:
     samples.append({'elapsed_seconds': elapsed, **current,
                     **({'visibility': current_visibility} if current_visibility else {})})
 last = samples[-1]
+if initial_visibility and visibility() != initial_visibility:
+    raise RuntimeError('Visibility changed at the closing boundary; reject this observation')
 wall = last['elapsed_seconds']
 cpu = cpu_seconds(first, last)
 result = {'mach_timebase_numer': timebase.numer, 'mach_timebase_denom': timebase.denom,
@@ -149,6 +164,11 @@ result = {'mach_timebase_numer': timebase.numer, 'mach_timebase_denom': timebase
           'samples': samples}
 if metrics_phase:
     result['metrics_read_phase'] = metrics_phase.finish()
+if dataset_before:
+    dataset_after = dataset_fingerprint(args.metrics_dataset)
+    if dataset_after != dataset_before:
+        raise RuntimeError('Metrics dataset changed; reject the rolling observation')
+    result['metrics_dataset'] = dataset_before
 if args.visibility_mode:
     result['visibility_mode'] = args.visibility_mode
     result['visibility_evidence'] = initial_visibility

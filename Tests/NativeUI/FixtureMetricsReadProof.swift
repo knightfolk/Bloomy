@@ -10,6 +10,8 @@ enum FixtureMetricsReadMode: String, CaseIterable, Identifiable, Codable, Sendab
 struct FixtureMetricsReadTiming: Codable, Sendable {
     let readID: UInt64
     let intervalSeconds: Double
+    let queryStartUnix: Double
+    let queryEndUnix: Double
     let rows: Int
     let reusedRows: Int
     let milliseconds: Double
@@ -102,6 +104,8 @@ actor FixtureMetricsReads {
             readSnapshot = next
             let duration = began.duration(to: .now).components
             recentReads.append(.init(readID: readID, intervalSeconds: interval.duration,
+                queryStartUnix: interval.start.timeIntervalSince1970,
+                queryEndUnix: interval.end.timeIntervalSince1970,
                 rows: rows.count, reusedRows: next?.reusedSampleCount ?? 0,
                 milliseconds: Double(duration.seconds) * 1_000 + Double(duration.attoseconds) / 1e15))
             if recentReads.count > 12 { recentReads.removeFirst(recentReads.count - 12) }

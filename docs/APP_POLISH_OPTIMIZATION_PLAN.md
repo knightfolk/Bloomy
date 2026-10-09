@@ -1,5 +1,17 @@
 # Bloomy native polish and efficiency
 
+October 9 current Metrics review: all five hour scopes, model/without-work
+filters, compact light/dark and wide dark layouts have fresh native evidence
+against a 100,000-record journal. A separate rolling-refresh qualifier validates
+forward windows, full row reuse, complete read evidence and frozen dataset
+content, with CPU endpoints bracketed against read-state changes. The corrected
+45-second visible window includes two refreshes at 1.904% of one core; the
+30-second minimized window includes no reads at 0.004%, with the raw snapshot
+released. These are bounded synthetic observations, not production savings or
+energy proof. Thirty-seven Python regressions, 49 staging checks and the
+optimized fixture build/signature pass. Broad native, production and delivery
+gates remain open. See [current Metrics review](METRICS_CURRENT_NATIVE_REVIEW_20261009.md).
+
 October 9 popup Chat and status efficiency: More now opens the retained Chat
 window directly, preserving its conversation and update guards. Native light/dark
 handoff, unsent draft retention on repeated opening and expired Autopilot Refresh

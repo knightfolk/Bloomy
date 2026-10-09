@@ -947,3 +947,23 @@ Refresh exercises retained local-read failure without an endpoint. Hardware &
 cooling must collapse without hiding GPU notices; its expansion preference uses
 the fixture's private defaults. Bind each new artifact explicitly and pass that
 app to reusable CUA helpers; avoid retaining closures bound to a closed artifact.
+
+## Finite rolling Metrics profiles
+
+Current Metrics scopes are 1/2/8/12/24 hours. Pausing synthetic observations
+does not freeze the rolling query bounds: old observations can age out during
+the ordinary 30-second refresh. Use the profiler's explicit `rolling-refresh`
+mode only with a privately owned paused fixture and `--metrics-dataset` pointing
+to its performance SQLite file. It requires forward bounds, complete read
+evidence and full reuse, plus identical full-content dataset hashes outside
+the CPU interval. Stay within retention limits and verify native pause and
+ownership separately. Endpoint equality is not continuous writer surveillance.
+
+Keep period, model filter, window size and visibility fixed during each finite
+window. Pass the exact banner directory's read/visibility proof paths and
+verify the app/PID pairing. Do not override display visibility for this proof.
+Minimized profiles use `quiet`; fixed-membership profiles retain `refresh`.
+CPU endpoints reject changing read proofs rather than accepting partial work;
+rolling reports preserve the baseline and every validated completion. Keep
+rejected and superseded outputs, and use a fresh output path for each attempt.
+See `docs/METRICS_CURRENT_NATIVE_REVIEW_20261009.md` for a corrected native run.
