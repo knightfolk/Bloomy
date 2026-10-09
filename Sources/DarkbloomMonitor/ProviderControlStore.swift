@@ -13,6 +13,10 @@ enum ProviderOperation: Equatable {
     case lifecycle(ProviderLifecycleAction)
 }
 
+enum ProviderSettingsMutationBlocker: Equatable {
+    case confirmation, modelChanges, operation
+}
+
 enum SwitchWarmupStatus: Equatable {
     case checking(modelID: String)
     case result(modelID: String, SelfRouteWarmupResult, at: Date)
@@ -146,6 +150,14 @@ final class ProviderControlStore: ObservableObject {
     var canEditProviderSettings: Bool {
         (operation == .idle || operation == .refreshing)
             && pendingConfirmation == nil && draft?.hasChanges != true
+    }
+
+    /// Mirrors the write gate, which also excludes a read still in progress.
+    var settingsMutationBlocker: ProviderSettingsMutationBlocker? {
+        if pendingConfirmation != nil { return .confirmation }
+        if draft?.hasChanges == true { return .modelChanges }
+        if operation != .idle { return .operation }
+        return nil
     }
 
     /// Own the same operation gate used by model switches and lifecycle work
@@ -1269,7 +1281,7 @@ final class ProviderControlStore: ObservableObject {
             : label == "idle memory policy" ? .idleSettings
             : label.hasPrefix("beta ") ? .betaSettings
             : label == "automatic provider updates" ? .providerUpdates : .saveSettings
-        guard pendingConfirmation == nil, draft?.hasChanges != true,
+        guard settingsMutationBlocker == nil,
               let generation = begin(.saving, historyAction: historyAction) else { return false }
         var succeeded = false
         let task = Task { @MainActor [weak self] in

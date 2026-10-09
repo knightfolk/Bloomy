@@ -1206,3 +1206,14 @@ On October 2 Kevin authorized resetting only Darkbloom's removable-drive permiss
   Memory readings are mixed, so no memory reduction is claimed. See
   `METRICS_READ_REUSE_REVIEW_20261004.md`; allocation profiling, production
   collectors/traffic, spoken accessibility, motion and delivery remain open.
+
+October 9 popup Hosting write-gate checkpoint: Hosting disables Apply for staged
+model edits, pending provider confirmation or active shared work and explains
+the correct recovery. Review model changes returns directly to the retained
+popup Models draft. Applying progress spans graceful restart/reconciliation;
+duplicate dispatch and post-dialog model edits are rejected. Native compact
+light/dark popup recovery, 1,877 app plus 49 companion tests, 64 optimized focused
+tests, 49 staging checks, Release application compilation and 143 fixture input
+hashes pass. Dashboard recovery has static/build evidence only. No real provider
+action, installed replacement, push or release; broader qualification remains
+open. See [popup Hosting review](POPUP_HOSTING_APPLY_REVIEW_20261009.md).

@@ -167,7 +167,11 @@ struct DashboardRootView: View {
                 }
             } else if navigation.selected == .hosting {
                 if let hostingStore {
-                    HostingSettingsView(store: hostingStore, draft: hostingDraft, updateProtection: updateProtection)
+                    HostingSettingsView(store: hostingStore, draft: hostingDraft, updateProtection: updateProtection,
+                        openModels: {
+                            navigation.sidebarSelection = .destination(.models)
+                            navigation.revealSelectedSection()
+                        })
                 } else {
                     ContentUnavailableView(
                         "Hosting unavailable",

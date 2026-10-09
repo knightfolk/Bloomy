@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import DarkbloomTelemetry
 import Foundation
 
@@ -121,9 +122,11 @@ final class HostingSettingsStore: ObservableObject {
     @Published private(set) var copiedStandaloneCommand: String?
     @Published private(set) var localTokenStatusMessage: String?
     @Published private(set) var localTokenNeedsRestart = false
+    @Published private(set) var isApplying = false
 
     private let defaults: UserDefaults
     private var controlStore: ProviderControlStore?
+    private var controlObservation: AnyCancellable?
     private let endpointClient: any LocalEndpointFetching
     private let tokenFile: any LocalEndpointTokenManaging
     private let cliVersionProvider: () -> String?
@@ -161,12 +164,36 @@ final class HostingSettingsStore: ObservableObject {
         self.copyCommand = copyCommand
         self.now = now
         options = Self.loadOptions(from: defaults)
+        observeProviderControls()
     }
 
     /// Completes two-phase wiring: the control store's hosting-option source
     /// is this store, so it is constructed afterwards.
     func attachControlStore(_ controlStore: ProviderControlStore) {
         self.controlStore = controlStore
+        observeProviderControls()
+        objectWillChange.send()
+    }
+
+    private func observeProviderControls() {
+        controlObservation = controlStore?.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+    }
+
+    var applyNeedsModelReview: Bool {
+        !isApplying && controlStore?.settingsMutationBlocker == .modelChanges
+    }
+
+    var applyUnavailableReason: String? {
+        if isApplying { return "Applying hosting changes. Accepted requests drain before restart." }
+        guard let controlStore else { return "Hosting controls are unavailable in this session." }
+        switch controlStore.settingsMutationBlocker {
+        case .modelChanges: return "Save or discard model changes in Models before applying hosting."
+        case .confirmation: return "Resolve the pending provider confirmation before applying hosting."
+        case .operation: return "Wait for the current provider action to finish before applying hosting."
+        case nil: return nil
+        }
     }
 
     /// Loads persisted preferences, falling back to the safe default: no
@@ -251,6 +278,10 @@ final class HostingSettingsStore: ObservableObject {
            options.bindScope == .specificInterface,
            !lanAddresses.contains(options.bindAddress) {
             errorMessage = "That address is not active on this Mac. Choose a current LAN or tailnet address, or use loopback."
+            return
+        }
+        if let reason = applyUnavailableReason {
+            errorMessage = reason
             return
         }
         if options.requiresExposureConfirmation {
@@ -457,16 +488,24 @@ final class HostingSettingsStore: ObservableObject {
     }
 
     private func apply(_ options: HostingOptions) async {
+        if let reason = applyUnavailableReason {
+            errorMessage = reason
+            return
+        }
         guard let controlStore else {
             errorMessage = "Hosting controls are unavailable."
             return
         }
+        isApplying = true
+        defer { isApplying = false }
         let tokenRevision = localTokenRevision
         let succeeded = await controlStore.applyHosting(options)
         if !succeeded {
-            errorMessage = "Hosting settings could not be applied. Refresh before trying again."
+            errorMessage = controlStore.errorMessage
+                ?? "Hosting settings could not be applied. Refresh before trying again."
             return
         }
+        errorMessage = nil
         invalidateEndpointDetails()
         if localTokenNeedsRestart, tokenRevision == localTokenRevision {
             localTokenNeedsRestart = false

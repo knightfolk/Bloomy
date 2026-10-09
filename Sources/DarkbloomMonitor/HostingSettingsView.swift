@@ -14,6 +14,7 @@ struct HostingSettingsView: View {
     @StateObject private var draft: HostingSettingsDraftState
     private let updateProtection: AppUpdateEditorProtection?
     private let presentation: Presentation
+    private let openModels: (() -> Void)?
     @State private var tokenEditorOwner = UUID()
     @State private var confirmationOwner = UUID()
     @State private var dismissalCoordinator = HostingExposureDismissalCoordinator()
@@ -26,12 +27,14 @@ struct HostingSettingsView: View {
         store: HostingSettingsStore,
         draft: HostingSettingsDraftState? = nil,
         updateProtection: AppUpdateEditorProtection? = nil,
-        presentation: Presentation = .dashboard
+        presentation: Presentation = .dashboard,
+        openModels: (() -> Void)? = nil
     ) {
         self.store = store
         _draft = StateObject(wrappedValue: draft ?? HostingSettingsDraftState(options: store.options))
         self.updateProtection = updateProtection
         self.presentation = presentation
+        self.openModels = openModels
     }
 
     private var isPortValid: Bool {
@@ -724,24 +727,37 @@ struct HostingSettingsView: View {
                     }
                 }
             } else {
-                HStack(alignment: .center, spacing: 14) {
-                    Button(applyTitle) {
-                        Task { await store.requestApply(confirmationOwner: confirmationOwner) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(!store.cliSupportsHosting || !isPortValid)
-                    .accessibilityIdentifier("hosting.apply")
-                    .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .center, spacing: 14) {
+                        Button(store.isApplying ? "Applying…" : applyTitle) {
+                            Task { await store.requestApply(confirmationOwner: confirmationOwner) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(!store.cliSupportsHosting || !isPortValid || store.applyUnavailableReason != nil)
+                        .accessibilityIdentifier("hosting.apply")
+                        .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Uses the official darkbloom start command.")
-                            .font(.callout.weight(.medium))
-                        Text("Accepted requests drain before the provider restarts. Local and fleet requests share model slots.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Uses the official darkbloom start command.")
+                                .font(.callout.weight(.medium))
+                            Text("Accepted requests drain before the provider restarts. Local and fleet requests share model slots.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    Spacer(minLength: 0)
+                    if let reason = store.applyUnavailableReason {
+                        Label(reason, systemImage: store.isApplying ? "hourglass" : "info.circle")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("hosting.apply.blocker")
+                        if store.applyNeedsModelReview, let openModels {
+                            Button("Review model changes", systemImage: "square.stack.3d.up", action: openModels)
+                                .buttonStyle(.bordered)
+                                .accessibilityIdentifier("hosting.reviewModels")
+                        }
+                    }
                 }
             }
 

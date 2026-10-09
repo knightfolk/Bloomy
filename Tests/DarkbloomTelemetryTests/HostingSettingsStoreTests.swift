@@ -14,6 +14,81 @@ struct HostingSettingsStoreTests {
         return defaults
     }
 
+    @Test("model edits block hosting with the correct recovery and survive refresh")
+    func modelEditsBlockHosting() async throws {
+        let controller = HostingSpyController()
+        let control = ProviderControlStore(controller: controller)
+        let (store, _) = try makeStore(defaults: makeDefaults(), controller: controller)
+        store.attachControlStore(control)
+        await control.refresh()
+        control.setEnabled(false, modelID: "model-a")
+        store.setMode(.unified)
+        store.setBindAddress("192.168.1.20")
+        await store.requestApply()
+        #expect(store.pendingExposureRequest == nil)
+        #expect(store.errorMessage == "Save or discard model changes in Models before applying hosting.")
+        #expect(await controller.hostingExecutions.isEmpty)
+        await control.refreshPreservingDraft()
+        #expect(control.draft?.hasChanges == true)
+        await store.requestApply()
+        #expect(store.errorMessage == "Save or discard model changes in Models before applying hosting.")
+        control.setEnabled(true, modelID: "model-a")
+        await store.requestApply()
+        let confirmation = try #require(store.pendingExposureRequest)
+        // Changes made after the exposure dialog must be checked again.
+        control.setEnabled(false, modelID: "model-a")
+        await store.confirmExposure(confirmation)
+        #expect(store.errorMessage == "Save or discard model changes in Models before applying hosting.")
+        #expect(await controller.hostingExecutions.isEmpty)
+        #expect(store.options.bindAddress == "192.168.1.20")
+        control.setEnabled(true, modelID: "model-a")
+        await store.requestApply()
+        await store.confirmPendingExposureConfirmation()
+        #expect(await controller.hostingExecutions.count == 1)
+        #expect(store.errorMessage == nil)
+    }
+
+    @Test("hosting progress blocks a duplicate restart and clears after completion")
+    func applyingBlocksDuplicateRestart() async throws {
+        let controller = HostingSpyController(delaysHostingCompletion: true)
+        let (store, _) = try makeStore(defaults: makeDefaults(), controller: controller)
+        let apply = Task { await store.requestApply() }
+        await controller.waitForHostingRestart()
+        #expect(store.isApplying)
+        #expect(store.applyUnavailableReason?.contains("Accepted requests drain") == true)
+        await store.requestApply()
+        #expect(await controller.hostingExecutions.count == 1)
+        await controller.completeHostingRestart()
+        await apply.value
+        #expect(!store.isApplying)
+        #expect(store.applyUnavailableReason == nil)
+        #expect(store.errorMessage == nil)
+    }
+
+    @Test("shared provider changes notify hosting and replacing the store detaches its observer")
+    func sharedControlObservation() async throws {
+        let controller = HostingSpyController()
+        let old = ProviderControlStore(controller: controller)
+        let next = ProviderControlStore(controller: controller)
+        let (store, _) = try makeStore(defaults: makeDefaults(), controller: controller)
+        await old.refresh()
+        await next.refresh()
+        store.attachControlStore(old)
+        var notifications = 0
+        let observation = store.objectWillChange.sink { notifications += 1 }
+        old.setEnabled(false, modelID: "model-a")
+        #expect(notifications > 0)
+        #expect(store.applyNeedsModelReview)
+        store.attachControlStore(next)
+        notifications = 0
+        old.setEnabled(true, modelID: "model-a")
+        #expect(notifications == 0)
+        next.setEnabled(false, modelID: "model-a")
+        #expect(notifications > 0)
+        #expect(store.applyNeedsModelReview)
+        withExtendedLifetime(observation) {}
+    }
+
     private func makeStore(
         defaults: UserDefaults,
         cliVersion: String? = "0.9.7",
@@ -620,7 +695,7 @@ struct HostingSettingsStoreTests {
         #expect(await controller.hostingExecutions.isEmpty)
     }
 
-    @Test("dismissing a newer dialog during an older restart clears the newer request")
+    @Test("a second editor cannot open another exposure dialog during a restart")
     func newerExposureDismissesDuringOlderRestart() async throws {
         let controller = HostingSpyController(delaysHostingCompletion: true)
         let (store, _) = try makeStore(defaults: makeDefaults(), controller: controller)
@@ -634,11 +709,8 @@ struct HostingSettingsStoreTests {
         let applying = Task { await store.confirmExposure(older) }
         await controller.waitForHostingRestart()
         await store.requestApply(confirmationOwner: owner)
-        let newer = try #require(store.exposureConfirmation(for: owner))
-        let dismissal = coordinator.scheduleCancellation(
-            newer, isPending: { store.exposureConfirmation(for: owner) == newer },
-            cancel: { store.cancelExposure(newer) })
-        await dismissal.value
+        #expect(store.exposureConfirmation(for: owner) == nil)
+        #expect(store.errorMessage?.contains("Accepted requests drain") == true)
         #expect(store.pendingExposureRequest == nil)
         await controller.completeHostingRestart()
         await applying.value

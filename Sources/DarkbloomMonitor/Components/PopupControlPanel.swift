@@ -209,7 +209,8 @@ struct PopupControlPanel: View {
         case .hosting:
             if let hostingStore {
                 HostingSettingsView(store: hostingStore, draft: hostingDraft,
-                    updateProtection: updateProtection, presentation: .popup)
+                    updateProtection: updateProtection, presentation: .popup,
+                    openModels: { openPanel(.models) })
             } else { unavailable("Hosting controls are not available in this session.") }
         case .settings(let page):
             if page == .provider {
