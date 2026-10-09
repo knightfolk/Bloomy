@@ -109,7 +109,7 @@ struct ModelManagerPresentationTests {
 
         #expect(ModelCardSummary.whatIfEstimateText(
             ModelRunForecast.calculate(runPercent: 50, serving: calibrated, tokenRate: rate)
-        ) == "Est. net $11.88/day if it served 12 h/day · what-if, not actual")
+        ) == "Est. net $11.8800/day if it served 12 h/day · what-if, not actual")
 
         let grossOnly = ModelServingProfitAverage(
             model: "model-id",
@@ -123,7 +123,7 @@ struct ModelManagerPresentationTests {
         )
         #expect(ModelCardSummary.whatIfEstimateText(
             ModelRunForecast.calculate(runPercent: 50, serving: grossOnly, tokenRate: nil)
-        ) == "Est. gross $14.40/day · net needs a power baseline · what-if")
+        ) == "Est. gross $14.4000/day · net needs a power baseline · what-if")
 
         let tokensOnly = ModelCardSummary.whatIfEstimateText(
             ModelRunForecast.calculate(runPercent: 25, serving: nil, tokenRate: rate)

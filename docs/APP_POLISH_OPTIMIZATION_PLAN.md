@@ -1,5 +1,17 @@
 # Bloomy native polish and efficiency
 
+October 9 model earnings precision: Models, its detail/what-if panels and popup
+summaries now share Overview/Activity's amount formatting. Small nonzero amounts
+and losses remain visible; nonfinite values stay unknown. Native optimized
+mixed-history Models (light/dark), the detail panel and dark popup show full
+precision against all 142 frozen product source inputs. No forecast math or
+account attribution changed. The 71 focused checks, 1,850 reported app Release
+tests, 49 companion tests and 49 native staging checks pass; failed expectation
+logs are retained in the linked review. No installed replacement,
+provider mutation, push or release occurred. Broader native, accessibility,
+resource and distribution gates remain open. See
+[earnings precision review](MODEL_EARNINGS_PRECISION_REVIEW_20261009.md).
+
 October 9 dense Overview models: Overview now shares the popup's 52-point rows,
 canonical-ID help, history attribution and freshness-aware network-demand ruler.
 Rate history qualifies once per render, with one first-match serving index.
@@ -9,8 +21,9 @@ Models and popup controls are inspected in an optimized synthetic fixture;
 45 focused tests and 49 staging checks pass. The negative Logs redraw experiment
 does not justify a new cache. Whole-app resource savings remain unmeasured.
 The final full regression result is recorded in the linked review. Pre-existing
-Models two-decimal hourly formatting is the concrete next follow-up, alongside
-the open native and distribution gates. No installed replacement, provider
+Models two-decimal hourly formatting was the concrete next follow-up, resolved
+by the precision checkpoint above. Native and distribution gates remain open.
+No installed replacement, provider
 mutation, push or release occurred. See
 [dense Overview review](OVERVIEW_DENSE_MODEL_ROWS_REVIEW_20261009.md).
 

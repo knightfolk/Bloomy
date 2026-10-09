@@ -758,7 +758,7 @@ struct MonitorPopover: View {
         if let average = store.modelServingProfitAverages.first(where: { $0.model == id }) {
             let value = average.profitUSDPerActiveHour ?? average.grossUSDPerActiveHour
             metrics.append(ModelCardMetric(id: "earnings", symbol: "dollarsign.circle",
-                value: value.formatted(.currency(code: "USD").precision(.fractionLength(2...4))),
+                value: ActivityAmountPresentation.hourlyAmount(value),
                 caption: average.profitUSDPerActiveHour == nil ? "derived gross / active h" : "est. net / active h"))
         }
         if metrics.isEmpty {

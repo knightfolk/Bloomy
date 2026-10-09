@@ -2144,9 +2144,8 @@ struct ModelCardSummary: View {
             .formatted(.number.precision(.fractionLength(0...1)))
     }
 
-    static func money(_ value: Double) -> String {
-        let cleaned = value.isFinite ? value : 0
-        return (cleaned < 0 ? "−$" : "$") + abs(cleaned).formatted(.number.precision(.fractionLength(2)))
+    static func money(_ value: Double, locale: Locale = .current) -> String {
+        ActivityAmountPresentation.hourlyAmount(value, locale: locale)
     }
 }
 
