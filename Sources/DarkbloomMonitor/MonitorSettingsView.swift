@@ -12,6 +12,8 @@ struct MonitorSettingsView: View {
     /// dashboard window's lifecycle. Nil preserves existing scene behavior.
     private let visibilityOverride: Bool?
     private let updateProtection: AppUpdateEditorProtection?
+    /// Embedded popup panels already provide a title and Done control.
+    private let showsTitle: Bool
     @AppStorage(ApplicationAppearance.defaultsKey) private var appearanceModeRaw =
         AppAppearanceMode.system.rawValue
     @StateObject private var draft: ProviderSettingsDraftState
@@ -29,7 +31,8 @@ struct MonitorSettingsView: View {
         selection: SettingsPage? = nil,
         isVisible: Bool? = nil,
         draft: ProviderSettingsDraftState? = nil,
-        updateProtection: AppUpdateEditorProtection? = nil
+        updateProtection: AppUpdateEditorProtection? = nil,
+        showsTitle: Bool = true
     ) {
         self.extrasStore = extrasStore
         self.controlStore = controlStore
@@ -37,6 +40,7 @@ struct MonitorSettingsView: View {
         self.selection = selection
         self.visibilityOverride = isVisible
         self.updateProtection = updateProtection
+        self.showsTitle = showsTitle
         _draft = StateObject(wrappedValue: draft ?? ProviderSettingsDraftState())
     }
 
@@ -110,14 +114,16 @@ struct MonitorSettingsView: View {
 
     private func settingsForm(_ page: SettingsPage, isVisible: Bool) -> some View {
         Form {
-            Section {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(page.rawValue, systemImage: page.symbol)
-                        .font(.largeTitle.bold())
-                    Text(pageDescription(page))
-                        .foregroundStyle(.secondary)
+            if showsTitle {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(page.rawValue, systemImage: page.symbol)
+                            .font(.largeTitle.bold())
+                        Text(pageDescription(page))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 8)
                 }
-                .padding(.vertical, 8)
             }
             switch page {
             case .appearance, .menuBar, .electricity:

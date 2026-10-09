@@ -256,7 +256,7 @@ struct PopupControlPanel: View {
     private func settings(_ page: SettingsPage) -> some View {
         MonitorSettingsView(extrasStore: store.providerExtras, controlStore: controlStore,
             monitorStore: store, selection: page, isVisible: isVisible, draft: settingsDraft,
-            updateProtection: updateProtection)
+            updateProtection: updateProtection, showsTitle: false)
     }
 
     private func unavailable(_ message: String) -> some View {

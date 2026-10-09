@@ -1,5 +1,17 @@
 # Bloomy native polish and efficiency
 
+October 9 popup settings: embedded Energy, Appearance, Menu Bar, Provider,
+Updates and Support now use the fixed panel header without repeating the large
+dashboard banner. Stores, retained drafts, polling and action safeguards are
+unchanged. Native 360-point first creation, light/dark, electricity edit/reopen,
+lower-control scrolling and dashboard-title preservation pass against all 142
+optimized source inputs. The full 1,860 reported app tests plus 49 Companion
+tests, 49 staging checks and regular Release build pass. An older retained
+controller needed reopening after a height-budget change; this separate sizing
+path and broader native/delivery gates remain open. No installed replacement,
+provider mutation, push or release occurs. See
+[popup settings review](POPUP_SETTINGS_LAYOUT_REVIEW_20261009.md).
+
 October 9 legacy log efficiency: a source-owned actor rereads bounded bytes and
 reuses only matching line/date metadata, preserving raw public events and all
 service freshness, privacy and unified-event behavior. Cache retention is one
