@@ -14,6 +14,69 @@ struct PopupScrollSizingTests {
         }
     }
 
+    private struct BudgetedContent: View {
+        @Environment(\.popupContentHeightBudget) private var heightBudget
+
+        var body: some View {
+            PopupScrollingViewport(width: 528, maximumHeight: heightBudget) {
+                Content(height: 720, label: "Retained document")
+            }
+        }
+    }
+
+    @Test("Native placement caps oversized fitting input at the current budget while preserving natural smaller content")
+    func oversizedPlacementInput() {
+        let popover = NSPopover()
+        let host = FittingPopoverHostingController(
+            rootView: Color.clear.frame(width: 560, height: 720), popover: popover)
+        popover.contentViewController = host
+        for height: CGFloat in [580, 80, 360, 240, 360.9, 1_400] {
+            host.prepareForPresentation(maximumContentHeight: height)
+            #expect(popover.contentSize == NSSize(width: 560, height: min(720, floor(height))))
+            let visibleSize = popover.contentSize
+            NotificationCenter.default.post(name: NSPopover.didCloseNotification, object: popover)
+            host.preferredContentSize = NSSize(width: 560, height: 999)
+            #expect(popover.contentSize == visibleSize)
+        }
+        host.prepareForPresentation()
+        #expect(popover.contentSize == NSSize(width: 560, height: 720))
+        NotificationCenter.default.post(name: NSPopover.didCloseNotification, object: popover)
+    }
+
+    @Test("Retained popup height changes constrain stale preferred-size callbacks without replacing its document")
+    func retainedHeightTransitions() async throws {
+        let popover = NSPopover()
+        let host = FittingPopoverHostingController(rootView: BudgetedContent(), popover: popover)
+        popover.contentViewController = host
+        host.prepareForPresentation(maximumContentHeight: 580)
+        let scroll = try #require(findScroll(in: host.view))
+        let document = try #require(scroll.documentView)
+        defer {
+            NotificationCenter.default.post(name: NSPopover.didCloseNotification, object: popover)
+            scroll.invalidate()
+        }
+
+        for height: CGFloat in [360, 80, 580, 240, 360] {
+            NotificationCenter.default.post(name: NSPopover.willCloseNotification, object: popover)
+            let closedSize = popover.contentSize
+            host.preferredContentSize = NSSize(width: 528, height: 720)
+            #expect(popover.contentSize == closedSize)
+            host.prepareForPresentation(maximumContentHeight: height)
+            #expect(popover.contentSize.height > 0)
+            #expect(popover.contentSize.height <= height)
+
+            // A retained SwiftUI document can deliver its previous preferred
+            // size after the native screen budget has already changed.
+            host.preferredContentSize = NSSize(width: 528, height: 720)
+            #expect(popover.contentSize.height <= height)
+            try await Task.sleep(for: .milliseconds(40))
+            host.view.layoutSubtreeIfNeeded()
+            #expect(scroll.documentView === document)
+            #expect(scroll.intrinsicContentSize.height == height)
+            #expect(popover.contentSize.height <= height)
+        }
+    }
+
     @Test("Live height changes grow and shrink the document under a retained viewport", arguments: [80.0, 360.0])
     func contentChanges(maximumHeight: Double) async throws {
         let scroll = PopupScrollView(content: Content(height: 120, label: "Initial"),

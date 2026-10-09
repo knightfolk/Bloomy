@@ -383,7 +383,11 @@ final class FittingPopoverHostingController<Content: View>: NSHostingController<
     private func synchronizeSize(_ proposed: NSSize) {
         guard proposed.width.isFinite, proposed.height.isFinite,
               proposed.width > 0, proposed.height > 0, let popover else { return }
-        let fitted = NSSize(width: ceil(proposed.width), height: ceil(proposed.height))
+        // SwiftUI may still report an older or oversized ideal height while
+        // its environment catches up. AppKit placement must obey the native
+        // budget immediately; the retained scrolling document updates normally.
+        let height = min(ceil(proposed.height), layoutBudget.maximumContentHeight ?? .infinity)
+        let fitted = NSSize(width: ceil(proposed.width), height: height)
         guard popover.contentSize != fitted else { return }
         popover.contentSize = fitted
     }
