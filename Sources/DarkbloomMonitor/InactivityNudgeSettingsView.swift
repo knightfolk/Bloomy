@@ -39,15 +39,23 @@ struct InactivityNudgeSettingsView: View {
                     }
                 }
 
-                Text("When Bloomy is open, it may send one tiny exclusive self-route request through your own advertised warm model after the selected idle period. The request is capped at 8 output tokens. It does not restart or reconfigure models, and public jobs are never guaranteed.")
+                Label("Your warm model · up to 8 output tokens · work not guaranteed", systemImage: "hand.tap")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("The automatic watcher pauses for busy or stale evidence, missing account data, model switches, or multiple warm models. It waits at least 1 hour between attempts and allows at most 3 attempts in any 24 hours, including failures. Manual nudges use the same key but require a separate tap and fresh idle state. There is no paid fallback or keep-alive loop.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                DisclosureGroup("How nudges work") {
+                    Text("When Bloomy is open, it may send one tiny exclusive self-route request through your own advertised warm model after the selected idle period. The request is capped at 8 output tokens. It does not restart or reconfigure models, and public jobs are never guaranteed.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("The automatic watcher pauses for busy or stale evidence, missing account data, model switches, or multiple warm models. It waits at least 1 hour between attempts and allows at most 3 attempts in any 24 hours, including failures. Manual nudges use the same key but require a separate tap and fresh idle state. There is no paid fallback or keep-alive loop.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityIdentifier("settings.inactivityNudge.behavior")
             }
 
             if let notice = store.keyStatusNotice {

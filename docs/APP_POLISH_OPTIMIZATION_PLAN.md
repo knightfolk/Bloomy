@@ -1,5 +1,18 @@
 # Bloomy native polish and efficiency
 
+October 9 compact Nudge controls: the warm-model scope, eight-output-token cap
+and lack of guaranteed work stay visible; the unchanged full behavior text is
+now in a native disclosure. The setup heading appears in the first 360-point
+popup viewport. Native expansion/collapse, scrolling, masked setup and replacement
+draft retention, inert setup/saved-key state, timing/toggle controls, light/dark
+and wide Provider settings pass against all 142 optimized source inputs. The
+full 1,862 reported app tests plus 49 Companion tests, 49 staging checks and
+regular Release build pass. Native keyboard/VoiceOver, large text and broad
+runtime/delivery gates remain open. A real provider process and changed provider
+configuration appeared during this review; they were inspected read-only and
+preserved. No real key, nudge, configuration write, installed replacement, push
+or release occurred. See [compact Nudge review](POPUP_NUDGE_LAYOUT_REVIEW_20261009.md).
+
 October 9 compact popup Hosting: the fixed panel header now owns the title,
 with selected-mode status and Refresh immediately below it. Three tall mode
 cards become a native segmented selector with only the selected explanation.
