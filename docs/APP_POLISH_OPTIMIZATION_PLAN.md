@@ -1,5 +1,16 @@
 # Bloomy native polish and efficiency
 
+October 9 disabled-energy efficiency: electricity-off samples now skip the
+energy-specific account read and unchanged energy-earnings publications. Two
+regressions first fail on the baseline, then prove zero extra reads/empty
+publications across 360 calls, a single populated-result clear and fresh account
+validation after re-enabling. Focused 26 and full 1,854 reported app Release tests
+pass, alongside 49 Companion tests. The recorder's continuity break and
+independent account observation remain; the ten-second timer and outer energy
+publication remain. No whole-app CPU/power saving is inferred. See
+[disabled-energy review](DISABLED_ENERGY_WORK_REVIEW_20261009.md). This checkpoint
+is local; native popup, accessibility, production and delivery gates remain.
+
 October 9 popup diagnostics: More now opens Health & Logs directly, with readiness
 actions handing off to the existing Models and Hosting panels. Health's display
 clock follows popup visibility independently of the dashboard; no acquisition

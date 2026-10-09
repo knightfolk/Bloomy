@@ -1397,9 +1397,16 @@ final class MonitorStore: ObservableObject {
     }
 
     func updateEnergyEarnings(using result: EnergyRecordingSnapshot, enabled: Bool, at date: Date) async {
+        // Disabled tracking has no financial result to authenticate. Keep the
+        // independent account observer and all enabled-path validation intact.
+        guard enabled else {
+            if energyEarnings != nil { energyEarnings = nil }
+            energyEarningsDay = nil
+            return
+        }
         let state = await synchronizeFinancialSession()
         let calendar = Calendar.current
-        guard let context = state.context, state.ledgerReady, enabled,
+        guard let context = state.context, state.ledgerReady,
               result.issue == nil, !result.intervals.isEmpty,
               let day = calendar.dateInterval(of: .day, for: date) else {
             energyEarnings = nil
