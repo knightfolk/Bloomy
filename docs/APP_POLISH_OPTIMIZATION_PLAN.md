@@ -711,6 +711,16 @@ cleanup and evidence boundaries are in
 
 ## Current review priorities
 
+Kevin's October 9 requirement: the popup is the primary control center. Keep
+everyday provider, model, Autopilot, Auto, nudge, hosting, cooling, energy and
+protection actions reachable there. Use compact in-popup panels and More for
+less frequent settings; do not require dashboard navigation for an operational
+control. Larger history and analysis remain available in the dashboard.
+The current optimized review build exposes these routes; native Provider and
+Manage models panel handoffs were checked again without live mutations. See
+`POPUP_CONTROL_COVERAGE_20261009.md`. This is navigation evidence, not proof of
+every mutation, installed delivery or completion of the broader native gate.
+
 Kevin questioned the emphasis on keyboard controls on October 2. Keep ordinary
 native Tab/Space/Escape behavior and accessible control names, but prioritize
 visible layout, truthful state, reliable actions and measured resource use.

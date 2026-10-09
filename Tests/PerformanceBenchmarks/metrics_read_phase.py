@@ -1,6 +1,8 @@
 """Qualify finite Metrics profiles with the inert fixture's read counters."""
 
 COUNTERS = ("started", "completed", "failed", "cancelled", "empty", "cacheReleases")
+# Current Metrics picker scopes plus retained legacy history-proof scopes.
+PERIOD_SECONDS = (3_600, 7_200, 28_800, 43_200, 86_400, 604_800, 2_592_000)
 
 
 def phase(proof):
@@ -16,7 +18,7 @@ def phase(proof):
     values["periodSeconds"] = reads[-1]["intervalSeconds"] if reads else None
     if values["periodSeconds"] is not None and (
             type(values["periodSeconds"]) not in (int, float)
-            or values["periodSeconds"] not in (86_400, 604_800, 2_592_000)):
+            or values["periodSeconds"] not in PERIOD_SECONDS):
         raise ValueError("Metrics proof has an unsupported completed scope")
     values["pending"] = values["started"] - closed
     if proof.get("heldReadID") is not None:

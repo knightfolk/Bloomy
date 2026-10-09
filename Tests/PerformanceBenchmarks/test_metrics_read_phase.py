@@ -13,6 +13,26 @@ def proof(**changes):
 
 
 class MetricsReadPhaseTests(unittest.TestCase):
+    def test_current_hour_scopes_and_legacy_history_scopes_qualify(self):
+        for seconds in (3_600, 7_200, 28_800, 43_200, 86_400, 604_800, 2_592_000):
+            with self.subTest(seconds=seconds):
+                before = proof(recentReads=[dict(intervalSeconds=seconds)])
+                guard = MetricsReadPhase(before, "refresh")
+                guard.observe(proof(started=5, completed=5,
+                                    recentReads=[dict(intervalSeconds=seconds)]))
+                result = guard.finish()
+                self.assertEqual(result["completedDelta"], 1)
+                self.assertEqual(result["after"]["periodSeconds"], seconds)
+
+    def test_changed_short_scope_and_unrecognized_hours_are_rejected(self):
+        before = proof(recentReads=[dict(intervalSeconds=3_600)])
+        with self.assertRaisesRegex(ValueError, "scope, cache"):
+            MetricsReadPhase(before, "refresh").observe(
+                proof(recentReads=[dict(intervalSeconds=7_200)]))
+        for seconds in (True, 0, 10_800, 28_801, float("inf"), "3600"):
+            with self.subTest(seconds=seconds), self.assertRaises(ValueError):
+                MetricsReadPhase(proof(recentReads=[dict(intervalSeconds=seconds)]), "refresh")
+
     def test_complete_refresh_includes_pending_intermediate_phase(self):
         guard = MetricsReadPhase(proof(), "refresh")
         guard.observe(proof(started=5))
