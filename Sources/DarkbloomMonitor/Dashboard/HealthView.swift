@@ -4,15 +4,24 @@ import SwiftUI
 struct HealthView: View {
     @ObservedObject var store: MonitorStore
     var openReadinessDestination: ((ProviderReadinessPresentation.Destination) -> Void)? = nil
+    /// A popup owns its display lifecycle independently of the dashboard window.
+    var visibilityOverride: Bool? = nil
+    var showsTitle = true
     @State private var showsLogs = false
     @State private var showsProvider = false
     @State private var showsDaemon = false
     @State private var showsThermal = false
     @State private var expanded = false
 
+    private var isVisible: Bool { visibilityOverride ?? store.dashboardVisible }
+
+    var displaySchedule: VisibilityTimelineSchedule<PeriodicTimelineSchedule> {
+        VisibilityTimelineSchedule(base: .periodic(from: .now, by: 5), isVisible: isVisible)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Health & Logs").font(.largeTitle.bold())
+            if showsTitle { Text("Health & Logs").font(.largeTitle.bold()) }
             Picker("View", selection: $showsLogs) {
                 Text("Source health").tag(false)
                 Text("Logs").tag(true)
@@ -21,7 +30,7 @@ struct HealthView: View {
             if showsLogs {
                 LogsView(feed: store.snapshot.eventFeed)
             } else {
-                TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 5), isVisible: store.dashboardVisible)) { _ in
+                TimelineView(displaySchedule) { _ in
                     // A scheduled entry can predate newly published telemetry.
                     let now = Date()
                     ScrollView {
@@ -51,7 +60,7 @@ struct HealthView: View {
                             DisclosureGroup(isExpanded: $showsThermal) {
                                 VStack(alignment: .leading, spacing: 10) {
                                     if let extras = store.providerExtras {
-                                        ProviderThermalView(store: extras, isVisible: store.dashboardVisible && showsThermal)
+                                        ProviderThermalView(store: extras, isVisible: isVisible && showsThermal)
                                     }
                                     Text("macOS reports thermal state independently of provider health.")
                                         .font(.callout).foregroundStyle(.secondary)
@@ -72,7 +81,7 @@ struct HealthView: View {
                 }
             }
         }
-        .padding(24)
+        .padding(showsTitle ? 24 : 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 

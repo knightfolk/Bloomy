@@ -551,7 +551,8 @@ struct MonitorPopover: View {
                 hostingStore: hostingStore, settingsDraft: popupSettingsDraft,
                 hostingDraft: popupHostingDraft, updateProtection: updateProtection,
                 isVisible: isVisible && presentedPanel == destination,
-                ownsVisibleFanPolling: ownsVisibleFanPolling, maximumHeight: contentHeightBudget)
+                ownsVisibleFanPolling: ownsVisibleFanPolling, maximumHeight: contentHeightBudget,
+                openPanel: { presentedPanel = $0 })
         }
         .confirmationDialog(
             "Use \(ModelDisplayName.short(pendingSingleModelID ?? "model")) alone?",

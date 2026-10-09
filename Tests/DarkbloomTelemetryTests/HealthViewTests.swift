@@ -7,6 +7,22 @@ import Testing
 @Suite("Health rendering", .serialized)
 @MainActor
 struct HealthViewTests {
+    @Test("popup freshness clocks follow their own visibility, while dashboard clocks retain their lifecycle",
+          arguments: [false, true])
+    func independentlyOwnedClock(dashboardVisible: Bool) {
+        let store = MonitorStore(service: TelemetryService(source: HealthUnusedSource()),
+            initial: .unavailable(now: Date()))
+        store.setDashboardVisible(dashboardVisible)
+        for override in [nil, false, true] as [Bool?] {
+            let view = HealthView(store: store, visibilityOverride: override)
+            let dates = Array(view.displaySchedule.entries(from: Date(), mode: .normal).prefix(3))
+            #expect(dates.count == ((override ?? dashboardVisible) ? 3 : 1))
+            if dates.count == 3 {
+                #expect(abs(dates[2].timeIntervalSince(dates[1]) - 5) < 0.001)
+            }
+        }
+    }
+
     @Test("long unavailable diagnostics remain compact until expanded", arguments: [300.0, 540.0])
     func diagnosticDisclosure(width: Double) async throws {
         let reason = String(repeating: "The source could not complete its read; retry when it is available. ", count: 12)

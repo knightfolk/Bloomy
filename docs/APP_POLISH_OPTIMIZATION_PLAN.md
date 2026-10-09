@@ -1,5 +1,18 @@
 # Bloomy native polish and efficiency
 
+October 9 popup diagnostics: More now opens Health & Logs directly, with readiness
+actions handing off to the existing Models and Hosting panels. Health's display
+clock follows popup visibility independently of the dashboard; no acquisition
+or provider command is added. Native light/dark, 360-point scroll/Done, retained
+log filters and selected details, export preview cancellation and long missing
+source disclosures pass against 142 matching optimized source inputs. Eighteen
+focused, 1,852 reported app Release, 49 companion and 49 staging tests pass.
+Native hidden-window clock proof remains unqualified because Minimize was
+disabled; earlier activation, occlusion and broader qualification gaps remain
+open. The owned review remains available; no installed replacement, provider
+mutation, push or release occurs. See
+[popup Health review](POPUP_HEALTH_CONTROLS_REVIEW_20261009.md).
+
 October 9 popup model management: real controls now precede a collapsed optional
 forecast; selected hours stay visible and accessible. Detail demand retains
 explicitly stale counts and shares the complete snapshot's ruler; grades still

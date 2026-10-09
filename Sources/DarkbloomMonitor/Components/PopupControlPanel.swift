@@ -5,7 +5,7 @@ import SwiftUI
 /// One route owns the popup's operational panels. These panels use the same
 /// stores and retained drafts as the popup's quick controls.
 enum PopupControlDestination: Hashable, Identifiable {
-    case models, hosting, cooling, protection, profitSwitch, nudge
+    case models, hosting, cooling, protection, profitSwitch, nudge, health
     case settings(SettingsPage)
 
     var id: String {
@@ -16,6 +16,7 @@ enum PopupControlDestination: Hashable, Identifiable {
         case .protection: "protection"
         case .profitSwitch: "profitSwitch"
         case .nudge: "nudge"
+        case .health: "health"
         case .settings(let page): "settings.\(page.id)"
         }
     }
@@ -28,6 +29,7 @@ enum PopupControlDestination: Hashable, Identifiable {
         case .protection: "GPU protection"
         case .profitSwitch: "Profit switching"
         case .nudge: "Inactivity nudge"
+        case .health: "Health & Logs"
         case .settings(let page): page == .electricity ? "Energy & electricity" : page.rawValue
         }
     }
@@ -40,17 +42,26 @@ enum PopupControlDestination: Hashable, Identifiable {
         case .protection: "shield"
         case .profitSwitch: "arrow.triangle.2.circlepath"
         case .nudge: "hand.tap"
+        case .health: "waveform.path.ecg"
         case .settings(let page): page.symbol
         }
     }
 
     static let controlMenu: [Self] = [
         .models, .hosting, .settings(.provider), .protection, .settings(.electricity),
-        .cooling, .nudge, .profitSwitch
+        .cooling, .nudge, .profitSwitch, .health
     ]
     static let settingsMenu: [Self] = [
         .settings(.appearance), .settings(.menuBar), .settings(.updates), .settings(.support)
     ]
+
+    static func readiness(_ destination: ProviderReadinessPresentation.Destination) -> Self {
+        switch destination {
+        case .health: .health
+        case .models: .models
+        case .hosting: .hosting
+        }
+    }
 }
 
 /// AppKit dismisses its menu before presenting a SwiftUI panel, keeping the
@@ -133,6 +144,7 @@ struct PopupControlPanel: View {
     let isVisible: Bool
     let ownsVisibleFanPolling: Bool
     let maximumHeight: CGFloat?
+    let openPanel: (PopupControlDestination) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var modelVisibilityOwner = UUID()
 
@@ -234,6 +246,10 @@ struct PopupControlPanel: View {
                     InactivityNudgeSettingsView(store: nudge, updateProtection: updateProtection)
                 } else { unavailable("Inactivity nudge is not available in this session.") }
             }.formStyle(.grouped)
+        case .health:
+            HealthView(store: store,
+                openReadinessDestination: { openPanel(.readiness($0)) },
+                visibilityOverride: isVisible, showsTitle: false)
         }
     }
 
