@@ -218,7 +218,11 @@ struct CompactModelCard: View {
                     denseHistory(demandHistory).frame(width: 68, height: 12)
                 }
             }
-            .frame(minWidth: 166, maxWidth: .infinity, alignment: .trailing)
+            // Historical units and small hourly amounts must never become an
+            // ellipsis that reads like zero. Reserve their natural width; the
+            // model alias can truncate while its full ID remains in help.
+            .frame(minWidth: 166, maxWidth: liveThroughput == nil ? nil : .infinity, alignment: .trailing)
+            .fixedSize(horizontal: liveThroughput == nil, vertical: false)
             actionButtons
                 .fixedSize(horizontal: true, vertical: false)
         }

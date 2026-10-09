@@ -1,5 +1,19 @@
 # Bloomy native polish and efficiency
 
+October 9 dense Overview models: Overview now shares the popup's 52-point rows,
+canonical-ID help, history attribution and freshness-aware network-demand ruler.
+Rate history qualifies once per render, with one first-match serving index.
+Native mixed-history proof caught truncated micro-dollar text; the shared
+history column now preserves full numeric precision and units. Light/dark,
+Models and popup controls are inspected in an optimized synthetic fixture;
+45 focused tests and 49 staging checks pass. The negative Logs redraw experiment
+does not justify a new cache. Whole-app resource savings remain unmeasured.
+The final full regression result is recorded in the linked review. Pre-existing
+Models two-decimal hourly formatting is the concrete next follow-up, alongside
+the open native and distribution gates. No installed replacement, provider
+mutation, push or release occurred. See
+[dense Overview review](OVERVIEW_DENSE_MODEL_ROWS_REVIEW_20261009.md).
+
 October 9 retained popup fitting: native popup close now synchronously suspends
 forced and automatic preferred-content sizing while retaining its document and
 editors. Fresh geometry is prepared before reopening. The matched inert workload

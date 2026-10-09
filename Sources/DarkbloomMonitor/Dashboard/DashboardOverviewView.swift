@@ -133,11 +133,13 @@ private struct DashboardModelSummary: View {
                     currentTime: now
                 )
                 if case .models(let models) = presentation {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], spacing: 10) {
+                    let summary = OverviewModelSummaryPresentation(
+                        tokenRates: store.modelTokenRateAverages,
+                        servingAverages: store.modelServingProfitAverages,
+                        networkCapacity: store.networkCapacity, at: now)
+                    LazyVStack(spacing: 6) {
                         ForEach(models) { model in
-                            CompactModelCard(modelID: model.name, status: label(model.state),
-                                             tint: color(model.state), metrics: metrics(for: model.name),
-                                             selected: model.state == .active)
+                            OverviewModelSummaryRow(model: model, summary: summary)
                         }
                     }
                 } else {
@@ -147,13 +149,45 @@ private struct DashboardModelSummary: View {
         }
     }
 
-    private func metrics(for id: String) -> [ModelCardMetric] {
+}
+
+/// Immutable input for one render: qualify the calendar history once, then
+/// preserve the original first-match attribution without per-row array scans.
+struct OverviewModelSummaryPresentation {
+    private let rates: [String: ModelTokenRateAverage]
+    private let serving: [String: ModelServingProfitAverage]
+    private let telemetry: ModelManagerTelemetry
+    private let now: Date
+    let demandScale: ModelDemandScale
+
+    init(tokenRates: [ModelTokenRateAverage], servingAverages: [ModelServingProfitAverage],
+         networkCapacity: SourceAvailability<NetworkCapacitySnapshot>, at now: Date,
+         calendar: Calendar = .current) {
+        rates = Self.firstMatches(CalendarTokenRates.current(tokenRates, at: now, calendar: calendar), model: \.model)
+        serving = Self.firstMatches(servingAverages, model: \.model)
+        telemetry = ModelManagerTelemetry(networkCapacity: networkCapacity.value,
+            networkSourceAvailable: { if case .available = networkCapacity { true } else { false } }())
+        self.now = now
+        demandScale = ModelDemandScale(models: networkCapacity.value?.models ?? [])
+    }
+
+    private static func firstMatches<Value>(_ values: [Value], model: (Value) -> String) -> [String: Value] {
+        var indexed: [String: Value] = [:]
+        for value in values where indexed[model(value)] == nil { indexed[model(value)] = value }
+        return indexed
+    }
+
+    func demand(for id: String) -> ModelCardDemand {
+        telemetry.demand(modelID: id, at: now)
+    }
+
+    func metrics(for id: String) -> [ModelCardMetric] {
         var result: [ModelCardMetric] = []
-        if let rate = store.currentModelTokenRateAverages.first(where: { $0.model == id }) {
+        if let rate = rates[id] {
             result.append(ModelCardMetric(id: "speed", symbol: "speedometer",
                 value: String(format: "%.1f", rate.tokensPerSecond), caption: "avg tok/s today"))
         }
-        if let serving = store.modelServingProfitAverages.first(where: { $0.model == id }) {
+        if let serving = serving[id] {
             let value = serving.profitUSDPerActiveHour ?? serving.grossUSDPerActiveHour
             result.append(ModelCardMetric(id: "earnings", symbol: "dollarsign.circle",
                 value: ActivityAmountPresentation.hourlyAmount(value),
@@ -163,6 +197,19 @@ private struct DashboardModelSummary: View {
             result.append(ModelCardMetric(id: "learning", symbol: "clock", value: "Learning", caption: "No measured averages"))
         }
         return result
+    }
+}
+
+struct OverviewModelSummaryRow: View {
+    let model: DashboardModel
+    let summary: OverviewModelSummaryPresentation
+
+    var body: some View {
+        CompactModelCard(modelID: model.name, status: label(model.state),
+                         tint: color(model.state), metrics: summary.metrics(for: model.name),
+                         selected: model.state == .active, compact: true, horizontal: true,
+                         demand: summary.demand(for: model.name), demandScale: summary.demandScale)
+            .accessibilityIdentifier("overview.model.\(model.name)")
     }
 
     private func color(_ state: DashboardModelState) -> Color {
