@@ -10,10 +10,12 @@ public protocol TelemetrySource: Sendable {
 public struct LocalTelemetrySource: TelemetrySource, Sendable {
     public let policy: DarkbloomSourcePolicy
     public let runner: CappedProcessRunner
+    private let legacyTail: LegacyLogTailReader
 
     public init(policy: DarkbloomSourcePolicy, runner: CappedProcessRunner) {
         self.policy = policy
         self.runner = runner
+        legacyTail = LegacyLogTailReader(url: policy.legacyLog)
     }
 
     public func readDaemonState() async throws -> DaemonState {
@@ -43,11 +45,7 @@ public struct LocalTelemetrySource: TelemetrySource, Sendable {
     }
 
     public func readLegacyEvents(limit: Int) async throws -> [LogEvent] {
-        let data = try BoundedFileTail.read(
-            url: policy.legacyLog,
-            maxBytes: DarkbloomSourcePolicy.legacyLogByteLimit
-        )
-        return LegacyLogParser.parse(String(decoding: data, as: UTF8.self), limit: limit)
+        try await legacyTail.read(limit: limit)
     }
 
     private func retryingJSONRead<Value>(

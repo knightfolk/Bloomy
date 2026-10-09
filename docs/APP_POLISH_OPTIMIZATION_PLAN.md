@@ -1,5 +1,16 @@
 # Bloomy native polish and efficiency
 
+October 9 legacy log efficiency: a source-owned actor rereads bounded bytes and
+reuses only matching line/date metadata, preserving raw public events and all
+service freshness, privacy and unified-event behavior. Cache retention is one
+fingerprint/context and at most 100 ordinal/date pairs, with no log text. Six
+new regressions and the full 1,860 reported app Release tests plus 49 Companion
+tests pass. A frozen-original comparison measures ordinary repeats
+6.447 → 2.589 ms and quiet repeats 4.449 → 0.109 ms; changing-every-read cost
+increases 6.218 → 6.441 ms. These are component timings, not whole-app power or
+CPU qualification. See [legacy metadata review](LEGACY_LOG_METADATA_REUSE_REVIEW_20261009.md).
+The checkpoint stays local, with broader native and delivery gates open.
+
 October 9 disabled-energy efficiency: electricity-off samples now skip the
 energy-specific account read and unchanged energy-earnings publications. Two
 regressions first fail on the baseline, then prove zero extra reads/empty
