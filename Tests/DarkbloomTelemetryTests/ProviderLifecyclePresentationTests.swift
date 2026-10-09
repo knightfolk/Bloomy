@@ -859,6 +859,31 @@ struct ProviderLifecyclePresentationTests {
         #expect(state.cancellationCount == 1)
     }
 
+    @Test("covered parent cannot present or cancel the panel lifecycle confirmation")
+    @MainActor
+    func coveredParentCannotCancelPanelConfirmation() async throws {
+        let controller = InertStopTransitionController(risk: .active)
+        let store = ProviderControlStore(controller: controller)
+        await store.refresh()
+        await store.request(.stop)
+        #expect(store.pendingConfirmation != nil)
+        let parent = ProviderLifecycleControls.confirmationBinding(store: store, isOwner: false,
+            dismissalCoordinator: LifecycleConfirmationDismissalCoordinator())
+        let panel = ProviderLifecycleControls.confirmationBinding(store: store, isOwner: true,
+            dismissalCoordinator: LifecycleConfirmationDismissalCoordinator())
+        #expect(parent.wrappedValue == nil)
+        #expect(panel.wrappedValue != nil)
+        parent.wrappedValue = nil
+        // The dismissal coordinator defers cancellation to a later actor turn.
+        // Give an incorrectly scheduled callback time to run before confirming.
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(store.pendingConfirmation != nil)
+        #expect(panel.wrappedValue != nil)
+        await store.confirmPendingLifecycle()
+        #expect(await controller.executedActions == [.stop])
+        #expect(store.pendingConfirmation == nil)
+    }
+
     @Test("explicit cancel is not duplicated by binding teardown")
     @MainActor
     func explicitCancelRunsOnce() async {
@@ -997,6 +1022,9 @@ private func activeDaemonState() -> DaemonState {
 private actor InertStopTransitionController: ProviderControlling {
     private(set) var executedActions: [ProviderLifecycleAction] = []
     private var didExecute = false
+    private let risk: ProviderActivityRisk
+
+    init(risk: ProviderActivityRisk = .idle) { self.risk = risk }
 
     func refresh() async throws -> ProviderControlSnapshot {
         let selection = ProviderModelSelection(enabled: ["gpt-oss"], preloaded: [])
@@ -1036,7 +1064,7 @@ private actor InertStopTransitionController: ProviderControlling {
     ) async throws {}
 
     func delete(_ localModelID: String) async throws {}
-    func activityRisk() async -> ProviderActivityRisk { .idle }
+    func activityRisk() async -> ProviderActivityRisk { risk }
 
     func execute(
         _ action: ProviderLifecycleAction,

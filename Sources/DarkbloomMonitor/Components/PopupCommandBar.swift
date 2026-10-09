@@ -42,7 +42,11 @@ struct PopupHostingControl: View {
         }
         .accessibilityIdentifier("popup.hosting.details")
         .help("Hosting status, connection details and refresh")
-        .popover(isPresented: $showsDetails) {
+        .sheet(isPresented: $showsDetails, onDismiss: {
+            guard opensHostingAfterDismissal else { return }
+            opensHostingAfterDismissal = false
+            openHosting()
+        }) {
             VStack(alignment: .leading, spacing: 8) {
                 PopupHostingSummary(store: store, isVisible: isVisible && showsDetails,
                     now: now, coordinator: coordinator, openHosting: {
@@ -55,16 +59,6 @@ struct PopupHostingControl: View {
             .labelStyle(.titleAndIcon)
             .buttonStyle(.bordered)
             .padding(12).frame(width: 390)
-            .onDisappear {
-                guard opensHostingAfterDismissal else { return }
-                opensHostingAfterDismissal = false
-                // Let the child finish dismissal before its parent closes.
-                // Otherwise AppKit consumes the parent's close request here.
-                Task { @MainActor in
-                    await Task.yield()
-                    openHosting()
-                }
-            }
         }
     }
 }

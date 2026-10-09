@@ -1,7 +1,9 @@
 # Bounded model-demand history
 
-Design checkpoint against Bloomy `5658487`, following the BloomGauge comparison.
-This is a source-grounded integration design, not an implemented history feature.
+Implementation follows the BloomGauge comparison and `5658487` demand ruler.
+The local journal, accepted-snapshot recording, shared visible-screen read loop
+and native card sparklines are implemented. See the accompanying native review
+for verification and remaining qualification limits.
 
 ## Authority and acquisition
 
@@ -17,7 +19,7 @@ recording; do not republish capacity after that suspension. An immutable accepte
 payload avoids reentrancy changing what gets recorded. Recording participates in
 the store's existing joined shutdown, with no additional network acquisition.
 
-## Proposed storage contract
+## Implemented storage contract
 
 Use a separate lazily opened, actor-owned SQLite journal. Retain capture time,
 canonical model ID, active/queued requests and loaded-provider denominator.
@@ -25,15 +27,16 @@ An accepted snapshot writes atomically across its models. Exact replay is
 idempotent; conflicting replay fails. Missing models, draining observations and
 zero denominators never become zero demand.
 
-Start with five-minute local buckets and a 72-hour retention ceiling. For 128
-models this bounds occupied model buckets at 110,592; enforce an absolute row cap
-as well as age pruning. Retain the actual observation timestamp and observation
-count, with a documented latest-sample policy. This is sampled pressure while
+Five-minute local buckets and a 72-hour retention ceiling bound the database to
+864 atomic snapshot rows, containing at most 110,592 model values. Each row stores
+one validated JSON payload of at most 100,000 bytes. A newer capture replaces the
+whole occupied bucket; identical replay is ignored, conflicting timestamp replay
+fails, and older captures cannot replace newer captures. This is sampled pressure while
 Bloomy is collecting, not a continuous network history. Longer retention needs
 explicit rollups and measured storage/query costs.
 
-Follow `PerformanceHistoryDatabase`'s transactional retention, indexed time/model
-queries, private DB/WAL/SHM permissions and corrupt-read failure behavior. Follow
+The journal uses transactional retention, indexed capture-time queries,
+private DB/WAL/SHM permissions and corrupt-read failure behavior. Follow
 `PerformanceHistoryStore`'s lazy opening, bounded retry queue, separate read/write
 faults and cancellation handling. Do not run synchronous SQLite on MainActor.
 
@@ -49,15 +52,19 @@ original range and freshness.
 Models and Opportunity receive one screen report and prepared points. The popup
 currently does not pass demand to `CompactModelCard`; adding it needs explicit
 plumbing and proof within the fixed popup card budget. No card owns a database
-query or timer. Use a query/visibility/revision task and generation ticket; hiding
-or changing scope cancels publication. Coalesce reads after accepted captures or
-through one visible-screen refresh, without making every animation tick a query.
+query or timer. Use a visibility/revision task; hiding or changing scope cancels publication.
+Read after accepted captures and on one five-minute visible-screen cadence, which
+advances the rolling 24-hour window even when acquisition is unavailable. Search,
+body updates and individual cards do not initiate queries. Preparation runs
+outside MainActor, checks cancellation, and is joined before publication.
 
 Extend the shared ruler with a small native sparkline. Keep live/stale demand
 separate from recorded history. Preserve gaps, actual zeros, one-point readings
 and unknown zero-denominator points. Do not join lines across long missing
 intervals or label a demand ratio as earnings. A typical marker requires explicit
-coverage and a defined sample statistic; pay-colored zones require attributable
+coverage and a defined sample statistic: the dashed median is withheld until
+twelve valid recorded samples exist. All cards use the full report's historical
+scale, separately from the current snapshot's scale. Pay-colored zones require attributable
 financial evidence beyond this journal.
 
 ## Required proof

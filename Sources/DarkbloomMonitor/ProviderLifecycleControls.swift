@@ -318,19 +318,22 @@ struct ProviderLifecycleControls: View {
     let currentTime: Date?
     var compact = false
     var commandTile = false
+    let isConfirmationOwner: Bool
 
     init(
         store: ProviderControlStore,
         snapshot: TelemetrySnapshot,
         currentTime: Date? = nil,
         compact: Bool = false,
-        commandTile: Bool = false
+        commandTile: Bool = false,
+        isConfirmationOwner: Bool = true
     ) {
         self.store = store
         self.snapshot = snapshot
         self.currentTime = currentTime
         self.compact = compact
         self.commandTile = commandTile
+        self.isConfirmationOwner = isConfirmationOwner
     }
 
     private func presentation(currentTime: Date) -> ProviderLifecyclePresentation {
@@ -458,10 +461,17 @@ struct ProviderLifecycleControls: View {
     }
 
     private var confirmation: Binding<LifecycleConfirmation?> {
+        Self.confirmationBinding(store: store, isOwner: isConfirmationOwner,
+            dismissalCoordinator: dismissalCoordinator)
+    }
+
+    /// A covered popup must neither present nor dismiss its panel's action.
+    static func confirmationBinding(store: ProviderControlStore, isOwner: Bool,
+        dismissalCoordinator: LifecycleConfirmationDismissalCoordinator) -> Binding<LifecycleConfirmation?> {
         Binding(
-            get: { store.pendingConfirmation },
+            get: { isOwner ? store.pendingConfirmation : nil },
             set: { confirmation in
-                guard confirmation == nil else { return }
+                guard isOwner, confirmation == nil else { return }
                 dismissalCoordinator.scheduleCancellation(
                     isPending: { store.pendingConfirmation != nil },
                     cancel: { store.cancelPendingLifecycle() }

@@ -453,7 +453,6 @@ struct PopupContentLayout: Layout {
 
 struct MonitorPopover: View {
     private static let popupWidth: CGFloat = 560
-    private static let modelCardWidth: CGFloat = (popupWidth - 32 - 2 - 16) / 3
     @ObservedObject var cliUpdates = CLIUpdateStatusStore.shared
     @ObservedObject var store: MonitorStore
     @EnvironmentObject private var controlStore: ProviderControlStore
@@ -467,9 +466,12 @@ struct MonitorPopover: View {
     let hostingStore: HostingSettingsStore?
     let updateProtection: AppUpdateEditorProtection?
     @StateObject private var popupSettingsDraft: ProviderSettingsDraftState
-    @State private var showsFans = false
+    @StateObject private var popupHostingDraft: HostingSettingsDraftState
+    @State private var presentedPanel: PopupControlDestination?
+    @State private var showsPerformance = false
     @State private var pendingSingleModelID: String?
     @State private var pendingSwapModelID: String?
+    @State private var modelVisibilityOwner = UUID()
     @AppStorage("popover.availableExpanded") private var availableExpanded = false
     private static let machineName = Host.current().localizedName ?? "This Mac"
 
@@ -483,7 +485,8 @@ struct MonitorPopover: View {
         openHosting: @escaping () -> Void = {},
         hostingStore: HostingSettingsStore? = nil,
         updateProtection: AppUpdateEditorProtection? = nil,
-        popupSettingsDraft: ProviderSettingsDraftState? = nil
+        popupSettingsDraft: ProviderSettingsDraftState? = nil,
+        popupHostingDraft: HostingSettingsDraftState? = nil
     ) {
         self.store = store
         self.isVisible = isVisible
@@ -495,6 +498,8 @@ struct MonitorPopover: View {
         self.hostingStore = hostingStore
         self.updateProtection = updateProtection
         _popupSettingsDraft = StateObject(wrappedValue: popupSettingsDraft ?? ProviderSettingsDraftState())
+        _popupHostingDraft = StateObject(wrappedValue: popupHostingDraft
+            ?? HostingSettingsDraftState(options: hostingStore?.options ?? .default))
     }
 
     var body: some View {
@@ -503,6 +508,11 @@ struct MonitorPopover: View {
             // freshness at render time, not against the previous tick.
             content(currentTime: Date())
         }
+        .onAppear { store.setModelControlsVisible(isVisible, owner: modelVisibilityOwner) }
+        .onChange(of: isVisible) { _, visible in
+            store.setModelControlsVisible(visible, owner: modelVisibilityOwner)
+        }
+        .onDisappear { store.setModelControlsVisible(false, owner: modelVisibilityOwner) }
     }
 
     private var popupPadding: CGFloat {
@@ -522,7 +532,7 @@ struct MonitorPopover: View {
                     VStack(alignment: .leading, spacing: 14) {
                         if case .available(.updateAvailable(_, let latest), let checkedAt) = cliUpdates.status,
                            currentTime.timeIntervalSince(checkedAt) < 6 * 60 * 60 {
-                            Button("CLI \(latest) available") { openSettings(.updates) }.font(.caption)
+                            Button("CLI \(latest) available") { presentedPanel = .settings(.updates) }.font(.caption)
                                 .modifier(PopupKeyboardReveal())
                         }
                         if let error = controlStore.errorMessage {
@@ -531,7 +541,8 @@ struct MonitorPopover: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         if let swap = controlStore.swapStatus {
-                            ModelSwapFeedback(status: swap, nudgeStatus: controlStore.swapNudgeStatus, openHosting: openHosting)
+                            ModelSwapFeedback(status: swap, nudgeStatus: controlStore.swapNudgeStatus,
+                                openHosting: { presentedPanel = .hosting })
                         }
                         if let warmup = controlStore.switchWarmupStatus {
                             SwitchWarmupFeedback(status: warmup)
@@ -546,8 +557,16 @@ struct MonitorPopover: View {
                         if let protection = store.hostGPUProtection {
                             HostGPUProtectionSummaryView(protection: protection, slowdownWarning: store.servingSlowdownWarning)
                         }
-                        financePanel(currentTime: currentTime)
+                        PopupLivePerformanceView(store: store, now: currentTime, isVisible: isVisible)
                         compactModels(currentTime: currentTime)
+                        financePanel(currentTime: currentTime)
+                        DisclosureGroup("Performance history", isExpanded: $showsPerformance) {
+                            if showsPerformance {
+                                PerformanceMetricsView(history: store.performanceHistory,
+                                    isVisible: isVisible && showsPerformance, compact: true)
+                            }
+                        }
+                        .accessibilityIdentifier("popover.performanceHistory")
                         if case .available(let capacity, _) = store.networkCapacity,
                            capacity.isDraining, capacity.isFresh(at: currentTime) {
                             Label("Network maintenance", systemImage: "wrench.and.screwdriver")
@@ -564,14 +583,12 @@ struct MonitorPopover: View {
         .frame(width: Self.popupWidth, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
         .environment(\.popupKeyboardRevealEnabled, true)
-        .sheet(isPresented: $showsFans) {
-            if let extras = store.providerExtras {
-                PopupFanPanel(extras: extras, isVisible: isVisible, ownsVisibleFanPolling: ownsVisibleFanPolling,
-                    draft: popupSettingsDraft,
-                    providerActionBusy: controlStore.operation != .idle || !controlStore.canEditProviderSettings) { label, mutation in
-                    await controlStore.performSettingsMutation(label, mutation: mutation)
-                }
-            }
+        .sheet(item: $presentedPanel) { destination in
+            PopupControlPanel(destination: destination, store: store, controlStore: controlStore,
+                hostingStore: hostingStore, settingsDraft: popupSettingsDraft,
+                hostingDraft: popupHostingDraft, updateProtection: updateProtection,
+                isVisible: isVisible && presentedPanel == destination,
+                ownsVisibleFanPolling: ownsVisibleFanPolling, maximumHeight: contentHeightBudget)
         }
         .confirmationDialog(
             "Use \(ModelDisplayName.short(pendingSingleModelID ?? "model")) alone?",
@@ -633,9 +650,8 @@ struct MonitorPopover: View {
     private func popupBodyHeight(currentTime: Date) -> CGFloat {
         let advertised = displayedSelection(at: currentTime) ?? []
         let available = availableIDs(excluding: advertised)
-        let rows = (advertised.count + 2) / 3
-            + (availableExpanded ? (available.count + 2) / 3 : 0)
-        return min(470, CGFloat(rows) * (CompactModelCard.popupHeight + 8) + 270)
+        let rows = advertised.count + (availableExpanded ? available.count : 0)
+        return min(470, CGFloat(rows) * (CompactModelCard.horizontalPopupHeight + 8) + 370)
     }
 
     private func advertisedIDs(at now: Date) -> [String]? {
@@ -659,6 +675,11 @@ struct MonitorPopover: View {
         let advertised = displayedSelection(at: currentTime)
         let available = availableIDs(excluding: advertised ?? [])
         let liveSelectionUnknown = advertisedIDs(at: currentTime) == nil
+        let demandTelemetry = ModelManagerTelemetry(networkCapacity: store.networkCapacity.value,
+            networkSourceAvailable: { if case .available = store.networkCapacity { true } else { false } }())
+        // Advertised and available rows share the complete network's scale.
+        // Collapsing a group cannot change the meaning of a reading.
+        let demandScale = ModelDemandScale(models: demandTelemetry.networkCapacity?.models ?? [])
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label(isOffline(at: currentTime) ? "Selected · Offline"
@@ -672,6 +693,14 @@ struct MonitorPopover: View {
                 }
                 Spacer()
                 if let advertised { Text(advertised.count.formatted()).foregroundStyle(.secondary) }
+                Button { presentedPanel = .models } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .buttonStyle(.borderless)
+                .help("Manage models: selection, downloads, preload and capacity")
+                .accessibilityLabel("Manage models")
+                .accessibilityIdentifier("popover.models.manage")
+                .modifier(PopupKeyboardReveal())
                 Button {
                     Task { await controlStore.refreshPreservingDraft() }
                 } label: {
@@ -688,7 +717,9 @@ struct MonitorPopover: View {
                 if advertised.isEmpty {
                     Text(isOffline(at: currentTime) ? "No saved models selected" : "No models advertised")
                         .font(.caption).foregroundStyle(.secondary)
-                } else { modelGrid(advertised, now: currentTime) }
+                } else {
+                    modelGrid(advertised, now: currentTime, demandTelemetry: demandTelemetry, demandScale: demandScale)
+                }
             } else {
                 Label("Advertising state unavailable", systemImage: "clock")
                     .font(.caption).foregroundStyle(.secondary)
@@ -697,7 +728,8 @@ struct MonitorPopover: View {
                 if available.isEmpty {
                     Text("No other downloaded models").font(.caption).foregroundStyle(.secondary)
                 } else {
-                    modelGrid(available, now: currentTime, offersActivation: true)
+                    modelGrid(available, now: currentTime, offersActivation: true,
+                        demandTelemetry: demandTelemetry, demandScale: demandScale)
                 }
             } label: {
                 HStack {
@@ -712,10 +744,10 @@ struct MonitorPopover: View {
         }
     }
 
-    private func modelGrid(_ ids: [String], now: Date, offersActivation: Bool = false) -> some View {
+    private func modelGrid(_ ids: [String], now: Date, offersActivation: Bool = false,
+                           demandTelemetry: ModelManagerTelemetry, demandScale: ModelDemandScale) -> some View {
         let liveSelectionUnknown = isOffline(at: now) || advertisedIDs(at: now) == nil
-        return LazyVGrid(columns: Array(repeating: GridItem(.fixed(Self.modelCardWidth), spacing: 8), count: 3),
-                         alignment: .leading, spacing: 8) {
+        return LazyVStack(alignment: .leading, spacing: 8) {
             ForEach(ids, id: \.self) { id in
                 let state = models.first(where: { $0.name == id })?.state
                 let downloaded = controlStore.snapshot?.inventory.myCatalog.first(where: { $0.catalogID == id })?.isDownloaded == true
@@ -726,7 +758,12 @@ struct MonitorPopover: View {
                 CompactModelCard(modelID: id, status: status,
                                  tint: liveSelectionUnknown ? .secondary : state == .active ? .green : state == .loadedIdle ? .orange : .secondary,
                                  metrics: modelMetrics(id), selected: !liveSelectionUnknown && state == .active,
-                                 compact: true, compactWidth: Self.modelCardWidth,
+                                 compact: true, compactWidth: Self.popupWidth - popupPadding * 2 - 2,
+                                 horizontal: true,
+                                 liveThroughput: store.snapshot.state.value?.currentModel == id
+                                    ? ProviderLiveThroughput.make(snapshot: store.snapshot, now: now) : nil,
+                                 throughputPeak: store.providerThroughputPeak.value, isVisible: isVisible,
+                                 demand: demandTelemetry.demand(modelID: id, at: now), demandScale: demandScale,
                                  activate: offersActivation ? { _ = Task<Void, Never> { await controlStore.activateModel(id, providerKnownRunning: providerRunning(at: now)) } } : nil,
                                  activationUnavailableReason: controlStore.activationUnavailableReason(for: id, providerKnownRunning: providerRunning(at: now)),
                                  activationHelp: isOffline(at: now) ? "Save for the next provider start" : "Advertise this model alongside the others",
@@ -824,26 +861,32 @@ struct MonitorPopover: View {
                 if let hostingStore {
                     PopupHostingControl(store: hostingStore, isVisible: isVisible, now: currentTime,
                         coordinator: providerRunning(at: currentTime) == true ? store.snapshot.state.value?.coordinatorURL : nil,
-                        openHosting: openHosting)
+                        openHosting: { presentedPanel = .hosting })
                 } else {
-                    Button(action: openHosting) { Label("Hosting", systemImage: "network") }
+                    Button { presentedPanel = .hosting } label: { Label("Hosting", systemImage: "network") }
+                        .accessibilityIdentifier("popup.hosting.details")
+                        .help("Hosting settings, endpoints and security")
                 }
                 ProviderLifecycleControls(store: controlStore, snapshot: store.snapshot,
-                    currentTime: currentTime, compact: true, commandTile: true)
+                    currentTime: currentTime, compact: true, commandTile: true,
+                    isConfirmationOwner: isVisible && presentedPanel == nil)
                 if let extras = store.providerExtras {
                     PopupAutopilotControl(extras: extras, control: controlStore,
                         draft: popupSettingsDraft, isVisible: isVisible)
                 } else {
-                    Button { openSettings(.provider) } label: { Label("Pilot —", systemImage: "sparkles") }
+                    Button { presentedPanel = .settings(.provider) } label: { Label("Pilot —", systemImage: "sparkles") }
                         .help("Autopilot status unavailable. Open provider settings.")
                 }
-                PopupAutoModeControl(store: controlStore, openModels: openModels,
+                PopupAutoModeControl(store: controlStore, openModels: { presentedPanel = .models },
                     updateProtection: updateProtection, commandTile: true)
                 if let nudge = store.inactivityNudge {
                     PopupNudgeControl(store: nudge, updateProtection: updateProtection)
                 }
-                PopupMoreControl(openDashboard: openDashboard,
-                    openSettings: { openSettings(nil) }, quit: { Task { await store.quit() } })
+                PopupControlMoreMenu(openPanel: { presentedPanel = $0 }, openDashboard: openDashboard,
+                    quit: { Task { await store.quit() } })
+                    .frame(maxWidth: .infinity).frame(height: 47)
+                    .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+                    .modifier(PopupKeyboardReveal())
             }
             .labelStyle(PopupCommandLabelStyle())
             .buttonStyle(PopupCommandButtonStyle())
@@ -860,7 +903,7 @@ struct MonitorPopover: View {
                 Spacer(minLength: 0)
                 CompactGPUGauge(usage: store.gpuUsage, now: currentTime, compact: true)
                 Divider().frame(height: 24)
-                Button { openSettings(.electricity) } label: {
+                Button { presentedPanel = .settings(.electricity) } label: {
                     Label(powerCommandTitle(at: currentTime), systemImage: "bolt.fill")
                         .font(.caption.weight(.medium)).monospacedDigit()
                 }
@@ -871,9 +914,9 @@ struct MonitorPopover: View {
                 Divider().frame(height: 24)
                 if let extras = store.providerExtras {
                     PopupFanSummary(store: extras, now: currentTime, isVisible: isVisible,
-                        ownsVisibleFanPolling: ownsVisibleFanPolling, compact: true) { showsFans = true }
+                        ownsVisibleFanPolling: ownsVisibleFanPolling, compact: true) { presentedPanel = .cooling }
                 } else {
-                    Button { openSettings(.fans) } label: { Label("Fans —", systemImage: "fan") }
+                    Button { presentedPanel = .cooling } label: { Label("Fans —", systemImage: "fan") }
                         .buttonStyle(.plain).font(.caption)
                 }
             }

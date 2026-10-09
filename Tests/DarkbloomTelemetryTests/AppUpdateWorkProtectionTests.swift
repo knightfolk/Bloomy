@@ -113,6 +113,67 @@ struct AppUpdateWorkProtectionTests {
         await fixture.monitor.stop()
     }
 
+    @Test("popup Hosting buffers remain protected while closed without affecting dashboard edits")
+    func popupHostingDraftBlocks() async throws {
+        let fixture = try AppUpdateWorkFixture()
+        defer { fixture.close() }
+        let draft = fixture.status.popupHostingDraft
+        #expect(!fixture.status.popover.isShown)
+        #expect(fixture.delegate.canRelaunchForAppUpdate())
+        draft.portText = "8x"
+        draft.customAddressText = "192.168.1."
+        #expect(!fixture.delegate.canRelaunchForAppUpdate())
+        fixture.status.showDashboard(section: .hosting, activate: false)
+        let dashboard = try #require(fixture.status.dashboardWindowController)
+        #expect(dashboard.hostingDraft !== draft)
+        dashboard.close()
+        #expect(draft.portText == "8x")
+        draft.portText = String(fixture.hosting.options.port)
+        #expect(!fixture.delegate.canRelaunchForAppUpdate())
+        draft.discardInputEdits(comparedTo: fixture.hosting.options)
+        #expect(fixture.delegate.canRelaunchForAppUpdate())
+        await fixture.monitor.stop()
+    }
+
+    @Test("clean closed popup Hosting fields follow dashboard saves without blocking updates")
+    func popupHostingCleanFieldsFollowSavedOptions() async throws {
+        let fixture = try AppUpdateWorkFixture()
+        defer { fixture.close() }
+        let draft = fixture.status.popupHostingDraft
+        #expect(fixture.hosting.setPortText("8123"))
+        #expect(fixture.delegate.canRelaunchForAppUpdate())
+        #expect(draft.portText == "8123")
+        draft.portText = "8x"
+        #expect(fixture.hosting.setBindAddress("192.168.1.25"))
+        #expect(!fixture.delegate.canRelaunchForAppUpdate())
+        #expect(draft.portText == "8x")
+        #expect(draft.customAddressText == "192.168.1.25")
+        draft.discardInputEdits(comparedTo: fixture.hosting.options)
+        #expect(fixture.delegate.canRelaunchForAppUpdate())
+        await fixture.monitor.stop()
+    }
+
+    @Test("clean closed dashboard Hosting fields follow popup saves without blocking updates")
+    func dashboardHostingCleanFieldsFollowSavedOptions() async throws {
+        let fixture = try AppUpdateWorkFixture()
+        defer { fixture.close() }
+        fixture.status.showDashboard(section: .hosting, activate: false)
+        let dashboard = try #require(fixture.status.dashboardWindowController)
+        let draft = dashboard.hostingDraft
+        dashboard.close()
+        #expect(fixture.hosting.setPortText("8124"))
+        #expect(fixture.delegate.canRelaunchForAppUpdate())
+        #expect(draft.portText == "8124")
+        draft.portText = "8x"
+        #expect(fixture.hosting.setBindAddress("192.168.1.26"))
+        #expect(!fixture.delegate.canRelaunchForAppUpdate())
+        #expect(draft.portText == "8x")
+        #expect(draft.customAddressText == "192.168.1.26")
+        draft.discardInputEdits(comparedTo: fixture.hosting.options)
+        #expect(fixture.delegate.canRelaunchForAppUpdate())
+        await fixture.monitor.stop()
+    }
+
     @Test("partial Hosting port and address text remain protected after close until both buffers are discarded")
     func hostingInputsBlockUntilDiscarded() async throws {
         let fixture = try AppUpdateWorkFixture()

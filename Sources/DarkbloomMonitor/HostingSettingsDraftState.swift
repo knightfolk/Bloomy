@@ -23,10 +23,10 @@ final class HostingSettingsDraftState: ObservableObject {
 
     /// Refresh saved values independently, leaving partial input untouched.
     func synchronize(to options: HostingOptions) {
-        if !hasUnsavedPort(comparedTo: synchronizedOptions) {
+        if !hasUnsavedPort(comparedTo: synchronizedOptions), portText != String(options.port) {
             portText = String(options.port)
         }
-        if !hasUnsavedAddress(comparedTo: synchronizedOptions) {
+        if !hasUnsavedAddress(comparedTo: synchronizedOptions), customAddressText != Self.customAddress(for: options) {
             customAddressText = Self.customAddress(for: options)
         }
         synchronizedOptions = options

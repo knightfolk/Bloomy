@@ -6,6 +6,9 @@ import SwiftUI
 final class MonitorStore: ObservableObject {
     var actionHistory: ActionHistoryStore?
     var performanceHistory: PerformanceHistoryStore?
+    let networkDemandHistory: NetworkDemandHistoryStore?
+    private var networkDemandRecordingTasks: [UUID: Task<Void, Never>] = [:]
+    private var networkDemandRecordingStopping = false
     private var performanceSamplingTask: Task<Void, Never>?
     let providerExtras: ProviderExtrasStore?
     /// Whole-Mac GPU utilization sampler owned by the app lifecycle so the
@@ -52,8 +55,12 @@ final class MonitorStore: ObservableObject {
     static let earningsPollingInterval: Duration = .seconds(600)
     @Published private(set) var dashboardVisible = false
     private var networkPollingPolicy = NetworkPollingPolicy()
+    private var modelControlsVisibilityOwners: Set<UUID> = []
+    private var nextNetworkCapacityAttempt = Date.distantPast
+    private var networkCapacityPollingSleeping = false
 
     @Published private(set) var snapshot: TelemetrySnapshot
+    @Published private(set) var providerThroughputPeak = ProviderThroughputPeak()
     private let readinessProcessIdentityReader: @Sendable (Int32) -> ProcessIdentity?
     private var readinessIdentitySource: SourceAvailability<DaemonState>?
     private var readinessProcessIdentity: ProcessIdentity?
@@ -188,6 +195,7 @@ final class MonitorStore: ObservableObject {
         alertPolicy: OperationalAlertPolicy = .init(),
         tokenRateRecorder: (any ModelTokenRateRecording)? = nil,
         networkCapacityClient: (any NetworkCapacityFetching)? = nil,
+        networkDemandHistory: NetworkDemandHistoryStore? = nil,
         recommendationJournal: RecommendationJournal? = nil,
         publicCatalogClient: (any PublicCatalogFetching)? = nil,
         publicPricingClient: (any PublicPricingFetching)? = nil,
@@ -222,6 +230,7 @@ final class MonitorStore: ObservableObject {
         alertEngine = OperationalAlertEngine(policy: alertPolicy)
         self.tokenRateRecorder = tokenRateRecorder
         self.networkCapacityClient = networkCapacityClient
+        self.networkDemandHistory = networkDemandHistory
         self.recommendationJournal = recommendationJournal
         self.publicCatalogClient = publicCatalogClient
         self.publicPricingClient = publicPricingClient
@@ -865,20 +874,43 @@ final class MonitorStore: ObservableObject {
 
     func setDashboardVisible(_ visible: Bool) {
         guard dashboardVisible != visible else { return }
+        let demandWasVisible = networkCapacityPollingVisible
         dashboardVisible = visible
         let previousSeries = networkSeriesPollingTask
         previousSeries?.cancel()
         if visible, hasStarted, shutdownTask == nil {
             startNetworkSeriesPolling(after: previousSeries)
         }
-        // Wake a stale source on open, but never bypass failure backoff by
-        // repeatedly opening the dashboard. Keep a single owned polling task.
-        if visible, hasStarted, shutdownTask == nil, networkPollingPolicy.failures == 0,
-           networkCapacity.value?.isFresh(at: now()) != true {
-            let previous = networkCapacityPollingTask
-            previous?.cancel()
-            startNetworkCapacityPolling(after: previous)
-        }
+        updateNetworkCapacityPollingVisibility(previouslyVisible: demandWasVisible)
+    }
+
+    /// A popup model panel participates in the existing demand loop without
+    /// making the dashboard or its unrelated history polling visible.
+    func setModelControlsVisible(_ visible: Bool, owner: UUID) {
+        let demandWasVisible = networkCapacityPollingVisible
+        if visible { modelControlsVisibilityOwners.insert(owner) }
+        else { modelControlsVisibilityOwners.remove(owner) }
+        updateNetworkCapacityPollingVisibility(previouslyVisible: demandWasVisible)
+    }
+
+    private var networkCapacityPollingVisible: Bool {
+        dashboardVisible || !modelControlsVisibilityOwners.isEmpty || profitSwitch?.enabled == true
+    }
+
+    private func updateNetworkCapacityPollingVisibility(previouslyVisible: Bool) {
+        let visible = networkCapacityPollingVisible
+        guard visible != previouslyVisible, hasStarted, shutdownTask == nil,
+              networkPollingPolicy.failures == 0, networkCapacityPollingSleeping else { return }
+        // Fresh opens replace a hidden five-minute wait with a one-minute
+        // wait. Stale opens wake immediately. Existing retry deadlines survive
+        // repeated closes/opens, and an active read is never cancelled here.
+        nextNetworkCapacityAttempt = now().addingTimeInterval(
+            visible && networkCapacity.value?.isFresh(at: now()) != true ? 0
+                : networkPollingPolicy.delay(dashboardVisible: visible, jitter: publicPollingJitter())
+        )
+        let previous = networkCapacityPollingTask
+        previous?.cancel()
+        startNetworkCapacityPolling(after: previous)
     }
 
     private func startNetworkCapacityPolling(after previous: Task<Void, Never>? = nil) {
@@ -886,14 +918,24 @@ final class MonitorStore: ObservableObject {
         networkCapacityPollingTask = Task { [weak self] in
             await previous?.value
             while !Task.isCancelled {
+                guard let delay = self.map({ max(0, $0.nextNetworkCapacityAttempt.timeIntervalSince($0.now())) }),
+                      let sleep = self?.publicPollingSleep else { return }
+                if delay > 0 {
+                    self?.networkCapacityPollingSleeping = true
+                    do { try await sleep(delay) }
+                    catch {
+                        self?.networkCapacityPollingSleeping = false
+                        return
+                    }
+                    self?.networkCapacityPollingSleeping = false
+                }
+                guard !Task.isCancelled else { return }
                 await self?.refreshNetworkCapacity()
-                guard let delay = self?.networkPollingPolicy.delay(
-                    dashboardVisible: self?.dashboardVisible == true || self?.profitSwitch?.enabled == true,
-                    jitter: self?.publicPollingJitter() ?? 0
-                ) else { return }
-                guard let sleep = self?.publicPollingSleep else { return }
-                do { try await sleep(delay) }
-                catch { return }
+                guard !Task.isCancelled, let self else { return }
+                self.nextNetworkCapacityAttempt = self.now().addingTimeInterval(self.networkPollingPolicy.delay(
+                    dashboardVisible: self.networkCapacityPollingVisible,
+                    jitter: self.publicPollingJitter()
+                ))
             }
         }
     }
@@ -958,14 +1000,15 @@ final class MonitorStore: ObservableObject {
     }
 
     func refreshNetworkCapacity() async {
-        guard let networkCapacityClient else { return }
+        guard !Task.isCancelled, shutdownTask == nil, !networkDemandRecordingStopping,
+              let networkCapacityClient else { return }
         networkCapacityRefreshGeneration &+= 1
         let refreshGeneration = networkCapacityRefreshGeneration
         let capturedAt = now()
         do {
             let value = try await networkCapacityClient.fetch(at: capturedAt)
             guard !Task.isCancelled,
-                  shutdownTask == nil,
+                  shutdownTask == nil, !networkDemandRecordingStopping,
                   refreshGeneration == networkCapacityRefreshGeneration
             else { return }
             guard value.isFresh(at: now()) else {
@@ -982,10 +1025,23 @@ final class MonitorStore: ObservableObject {
             networkPollingPolicy.succeeded()
             observeProfitSwitch()
             await refreshRecommendation()
+            // Publication and decision work precede disk suspension. Keep the
+            // accepted value even if another refresh starts during that await.
+            guard !Task.isCancelled, shutdownTask == nil, !networkDemandRecordingStopping,
+                  let networkDemandHistory else { return }
+            let recordingID = UUID()
+            let recording = Task { await networkDemandHistory.observe(value) }
+            networkDemandRecordingTasks[recordingID] = recording
+            await withTaskCancellationHandler {
+                await recording.value
+            } onCancel: {
+                recording.cancel()
+            }
+            networkDemandRecordingTasks[recordingID] = nil
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled, shutdownTask == nil else { return }
+            guard !Task.isCancelled, shutdownTask == nil, !networkDemandRecordingStopping else { return }
             guard refreshGeneration == networkCapacityRefreshGeneration else { return }
             markNetworkCapacityRefreshFailed()
             observeProfitSwitch()
@@ -1125,6 +1181,11 @@ final class MonitorStore: ObservableObject {
 
     func stop() async {
         financialStopping = true
+        // Close the manual-refresh recording boundary before the first await.
+        networkDemandRecordingStopping = true
+        let networkDemandRecordingTasks = Array(networkDemandRecordingTasks.values)
+        networkDemandRecordingTasks.forEach { $0.cancel() }
+        for recording in networkDemandRecordingTasks { await recording.value }
         financialSessionObservationID = nil
         financialSessionTask?.cancel()
         await financialSessionTask?.value
@@ -1232,6 +1293,9 @@ final class MonitorStore: ObservableObject {
     }
 
     func accept(_ snapshot: TelemetrySnapshot) async {
+        var peak = providerThroughputPeak
+        peak.observe(snapshot, now: now())
+        if peak != providerThroughputPeak { providerThroughputPeak = peak }
         // Compare with the recorded baseline before adding this observation.
         observeServingSlowdown(snapshot)
         if let state = snapshot.state.value {

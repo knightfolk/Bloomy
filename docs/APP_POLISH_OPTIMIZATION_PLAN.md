@@ -1,5 +1,19 @@
 # Bloomy native polish and efficiency
 
+October 8–9 popup control and live graphics checkpoint: operational panels now
+open directly from the popup, with retained Hosting drafts, safe sheet handoffs
+and one lifecycle confirmation owner. Model rows are 52 points in the popup and
+64 points in Models. Accepted live measurements, bounded demand history and
+1/2/8/12/24-hour native charts preserve unavailable/stale/idle states. Native
+light/dark, scroll/collapse, panel navigation and graceful Stop/Restart Cancel
+checks pass; the actual isolated app reads live provider/demand data. The serial
+Release run reports 1,826 app tests with seven existing opt-in skips, plus 49
+companion tests; 54 final focused, 47 staging and 17 packaging checks pass.
+Production/fixture builds, signature checks and all 253 frozen source hashes
+pass. No provider mutation, push, release or installed replacement occurred.
+Broader motion, accessibility, resource, financial and Companion qualification
+remains open. See [native review](NATIVE_LIVE_REVIEW_20261008.md).
+
 October 7 mixed model-card history: a private synthetic scenario now qualifies
 earnings-only, speed-plus-earnings and learning cards together. Actual card faces
 have equal heights at 300/344/460 points; native wide light/dark and compact

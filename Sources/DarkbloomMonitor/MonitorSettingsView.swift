@@ -8,6 +8,9 @@ struct MonitorSettingsView: View {
     /// The dashboard supplies its sidebar selection. The standalone Settings
     /// scene uses the same pages with its own native sidebar.
     var selection: SettingsPage? = nil
+    /// Popup panels supply their own visibility rather than borrowing the
+    /// dashboard window's lifecycle. Nil preserves existing scene behavior.
+    private let visibilityOverride: Bool?
     private let updateProtection: AppUpdateEditorProtection?
     @AppStorage(ApplicationAppearance.defaultsKey) private var appearanceModeRaw =
         AppAppearanceMode.system.rawValue
@@ -24,6 +27,7 @@ struct MonitorSettingsView: View {
         controlStore: ProviderControlStore? = nil,
         monitorStore: MonitorStore? = nil,
         selection: SettingsPage? = nil,
+        isVisible: Bool? = nil,
         draft: ProviderSettingsDraftState? = nil,
         updateProtection: AppUpdateEditorProtection? = nil
     ) {
@@ -31,6 +35,7 @@ struct MonitorSettingsView: View {
         self.controlStore = controlStore
         self.monitorStore = monitorStore
         self.selection = selection
+        self.visibilityOverride = isVisible
         self.updateProtection = updateProtection
         _draft = StateObject(wrappedValue: draft ?? ProviderSettingsDraftState())
     }
@@ -56,9 +61,9 @@ struct MonitorSettingsView: View {
                 }
             }
         }
-        .task(id: "\((selection ?? standaloneSelection).rawValue):\(monitorStore?.dashboardVisible ?? true)") {
+        .task(id: "\((selection ?? standaloneSelection).rawValue):\(isVisible)") {
             let selected = selection ?? standaloneSelection
-            guard monitorStore?.dashboardVisible ?? true, let extrasStore,
+            guard isVisible, let extrasStore,
                   selected == .provider || selected == .updates || selected == .fans else { return }
             await extrasStore.refresh()
             // Editable static settings keep their existing 45-second freshness
@@ -79,8 +84,12 @@ struct MonitorSettingsView: View {
     /// Mount only the selected page. Draft state outlives these views without
     /// retaining their controls, polling tasks, or unrelated local edit buffers.
     private func pages(selected: SettingsPage) -> some View {
-        pageForm(selected, isVisible: monitorStore?.dashboardVisible ?? true)
+        pageForm(selected, isVisible: isVisible)
             .id(selected)
+    }
+
+    private var isVisible: Bool {
+        visibilityOverride ?? monitorStore?.dashboardVisible ?? true
     }
 
     @ViewBuilder

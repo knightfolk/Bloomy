@@ -18,6 +18,7 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
     var hasUnsavedChatEdits: Bool { chatDraft.hasUnsentText(in: chatStore?.conversation?.id) }
     var hasUnsavedHostingEdits: Bool {
         guard let hostingStore else { return false }
+        hostingDraft.synchronize(to: hostingStore.options)
         return hostingDraft.hasUnsavedEdits(comparedTo: hostingStore.options)
     }
     init(

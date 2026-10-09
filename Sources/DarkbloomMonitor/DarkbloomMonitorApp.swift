@@ -219,6 +219,9 @@ final class DarkbloomMonitorAppDelegate: NSObject, NSApplicationDelegate, Observ
             alertNotifier: OperationalNotificationCenter(),
             tokenRateRecorder: tokenRateDatabase,
             networkCapacityClient: PublicNetworkCapacityClient(),
+            networkDemandHistory: NetworkDemandHistoryStore(
+                url: applicationSupport.appendingPathComponent("network-demand-history.sqlite3")
+            ),
             recommendationJournal: recommendationJournal,
             publicCatalogClient: PublicCatalogClient(),
             publicPricingClient: PublicPricingClient(),

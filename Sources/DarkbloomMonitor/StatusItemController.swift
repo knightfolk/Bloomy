@@ -30,6 +30,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let chatStore: ChatStore?
     let updateProtection = AppUpdateEditorProtection()
     let popupSettingsDraft = ProviderSettingsDraftState()
+    let popupHostingDraft: HostingSettingsDraftState
 
     var statusItemLength: CGFloat { statusItem.length }
     var popoverContentSize: NSSize { popover.contentSize }
@@ -37,11 +38,15 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     /// Read retained drafts as well as mounted editors at the updater's actual
     /// relaunch decision. Closing a window does not discard its nonsecret input.
     var hasBlockingUpdateWork: Bool {
-        hasUnsavedSettingsEdits
+        // Saved values can change in the dashboard while this editor is closed.
+        // Refresh clean fields, retaining partial user input independently.
+        if let hostingStore { popupHostingDraft.synchronize(to: hostingStore.options) }
+        return hasUnsavedSettingsEdits
             || dashboardWindowController?.hasUnsavedChatEdits == true
             || dashboardWindowController?.hasUnsavedHostingEdits == true
             || chatWindowController?.hasUnsavedChatEdits == true
             || popupSettingsDraft.hasChanges
+            || hostingStore.map { popupHostingDraft.hasUnsavedEdits(comparedTo: $0.options) } == true
             || updateProtection.hasBlockingEditors
             || chatStore?.isSending == true
             || hostingStore?.pendingExposureConfirmation != nil
@@ -57,6 +62,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         self.store = store
         self.defaults = defaults
         self.hostingStore = hostingStore
+        popupHostingDraft = HostingSettingsDraftState(options: hostingStore?.options ?? .default)
         self.chatStore = chatStore
         statusItem = NSStatusBar.system.statusItem(withLength: Self.itemWidth)
         self.controlStore = controlStore
@@ -90,7 +96,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                 openModels: { [weak self] in self?.showDashboard(section: .models) },
                 openHosting: { [weak self] in self?.showDashboard(section: .hosting) },
                 updateProtection: updateProtection,
-                popupSettingsDraft: popupSettingsDraft
+                popupSettingsDraft: popupSettingsDraft,
+                popupHostingDraft: popupHostingDraft
             ),
             popover: popover
         )
@@ -262,11 +269,12 @@ private struct PopoverRootView: View {
     let openHosting: () -> Void
     let updateProtection: AppUpdateEditorProtection
     let popupSettingsDraft: ProviderSettingsDraftState
+    let popupHostingDraft: HostingSettingsDraftState
 
     @ViewBuilder
     var body: some View {
         if let controlStore {
-            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting, hostingStore: hostingStore, updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft)
+            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting, hostingStore: hostingStore, updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft, popupHostingDraft: popupHostingDraft)
                 .environmentObject(controlStore)
         } else {
             VStack(alignment: .leading, spacing: 12) {

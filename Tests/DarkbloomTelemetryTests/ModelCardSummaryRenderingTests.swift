@@ -66,11 +66,9 @@ struct ModelCardSummaryRenderingTests {
         #expect(ModelCardLayout.cardWidth(for: 680) == 333)
         #expect(ModelCardLayout.cardWidth(for: 600) == 460)
         #expect(ModelCardLayout.cardWidth(for: 260) == 260)
-        // The compact card must stay far below its ~530pt predecessor while
-        // still fitting the identity row, three stats, what-if slider, and
-        // one controls row.
-        #expect(ModelCardLayout.estimatedCardHeight > 150)
-        #expect(ModelCardLayout.estimatedCardHeight < 300)
+        // Kevin requested collapsed rows at most one third of the previous
+        // 192pt cards. Details and the forecast remain in Manage.
+        #expect(ModelCardLayout.estimatedCardHeight <= 64)
     }
 
     @Test("demand keeps failed and expired readings visibly stale")

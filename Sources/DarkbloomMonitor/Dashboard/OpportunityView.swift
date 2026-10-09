@@ -190,6 +190,12 @@ private struct OpportunityModelListView: View {
     @State private var refreshing = false
 
     var body: some View {
+        ModelDemandHistoryScope(store: store.networkDemandHistory, isVisible: store.dashboardVisible) { history in
+            modelContent(history: history)
+        }
+    }
+
+    private func modelContent(history: ModelDemandHistoryPresentation?) -> some View {
         GeometryReader { geometry in
             TimelineView(VisibilityTimelineSchedule(base: .periodic(from: .now, by: 10), isVisible: store.dashboardVisible)) { _ in
                 let now = Date()
@@ -263,12 +269,12 @@ private struct OpportunityModelListView: View {
                                                     OpportunityLocalModelCard(model: model, controlStore: controlStore,
                                                         metadata: metadata(model.id), price: store.publicPricing.value?.price(for: model.id),
                                                         metadataIsCurrent: catalogCurrent(now), priceIsCurrent: pricingCurrent(now), networkIsCurrent: current,
-                                                        demandScale: demandScale)
+                                                        demandScale: demandScale, demandHistory: history?.history(for: model.id))
                                                 } else {
                                                     OpportunityModelCard(model: model, local: nil, metadata: metadata(model.id),
                                                         price: store.publicPricing.value?.price(for: model.id), metadataIsCurrent: catalogCurrent(now),
                                                         priceIsCurrent: pricingCurrent(now), networkIsCurrent: current,
-                                                        demandScale: demandScale)
+                                                        demandScale: demandScale, demandHistory: history?.history(for: model.id))
                                                 }
                                             }
                                         }
@@ -426,12 +432,13 @@ private struct OpportunityLocalModelCard: View {
     let priceIsCurrent: Bool
     let networkIsCurrent: Bool
     let demandScale: ModelDemandScale
+    var demandHistory: ModelDemandHistorySeries? = nil
     var body: some View {
         let inventory = controlStore.snapshot?.inventory
         let local = ((inventory?.myCatalog ?? []) + (inventory?.available ?? [])).first { $0.catalogID == model.id }
         OpportunityModelCard(model: model, local: local, metadata: metadata, price: price,
             metadataIsCurrent: metadataIsCurrent, priceIsCurrent: priceIsCurrent, networkIsCurrent: networkIsCurrent,
-            demandScale: demandScale)
+            demandScale: demandScale, demandHistory: demandHistory)
     }
 }
 
@@ -444,6 +451,7 @@ struct OpportunityModelCard: View {
     var priceIsCurrent = false
     var networkIsCurrent = true
     var demandScale: ModelDemandScale? = nil
+    var demandHistory: ModelDemandHistorySeries? = nil
     var installedMemoryBytes = ProcessInfo.processInfo.physicalMemory
 
     private var tint: Color {
@@ -486,6 +494,9 @@ struct OpportunityModelCard: View {
             fitLabel.font(.caption)
             if let demandScale {
                 ModelDemandRuler(modelID: model.id, demand: .init(model: model, isCurrent: networkIsCurrent), scale: demandScale)
+            }
+            if let demandHistory {
+                ModelDemandHistorySparkline(modelID: model.id, series: demandHistory)
             }
             HStack(spacing: 12) {
                 metric("In progress", model.activeRequests, symbol: "bolt.horizontal")

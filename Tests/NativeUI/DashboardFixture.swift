@@ -27,6 +27,7 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     case timelineActions = "Timeline actions"
     case demandRulerStates = "Demand ruler states"
     case mixedModelCards = "Mixed model history"
+    case demandHistory = "Demand history states"
     var id: String { rawValue }
     var hasCurrentRuntime: Bool { self != .stale && self != .offline && self != .unavailableRuntime }
     var hasStaleCatalog: Bool { self == .stale || self == .staleCatalog }
@@ -216,6 +217,21 @@ private enum FixtureData {
             menuStatus: mode == .stale ? .stale : mode == .stopped ? .offline : .online)
     }
 
+    static func liveTelemetrySnapshot(_ mode: FixtureLiveTelemetryMode, now: Date, events: [LogEvent]) -> TelemetrySnapshot {
+        let base = readinessSnapshot(mode == .idle ? .idle : mode == .stale ? .stale : .working,
+            now: now, events: events)
+        let rate: Double? = switch mode {
+        case .low, .stale: 45
+        case .high: 135
+        case .scenario, .idle, .waiting: nil
+        }
+        return TelemetrySnapshot(state: base.state, loadedModels: base.loadedModels,
+            status: base.status, eventFeed: base.eventFeed,
+            tokenRate: rate.map { .available(tokensPerSecond: $0, label: "Synthetic accepted provider measurement") }
+                ?? .unavailable(reason: "Synthetic idle or missing progress"),
+            diagnostics: [], capturedAt: now, menuStatus: base.menuStatus)
+    }
+
     #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF || FIXTURE_SETTINGS_PREVIEW_PROOF
     static func statusItemSnapshot(active: Bool) -> TelemetrySnapshot {
         let now = Date()
@@ -257,6 +273,19 @@ private actor FixtureLogFeed {
         }
         if retained.count > 100 { retained.removeLast(retained.count - 100) }
     }
+}
+
+private enum FixtureLiveTelemetryMode: String, CaseIterable {
+    case scenario = "Scenario readings"
+    case low = "Measured 45 tok/s · GPU 25%"
+    case high = "Measured 135 tok/s · GPU 82%"
+    case idle = "Measured idle · GPU 0%"
+    case waiting = "Serving · rate unavailable"
+    case stale = "Stale provider · GPU last reading"
+}
+
+@MainActor private enum FixtureLiveGPUReading {
+    static var value: Double?
 }
 
 private struct FixtureTelemetrySource: TelemetrySource {
@@ -373,6 +402,49 @@ private actor FixtureModelRates: ModelTokenRateRecording {
     }
     func history(in range: DateInterval, unit: ActivityCalendarUnit, calendar: Calendar,
         model: String) -> [ModelRateBucket]? { nil }
+}
+
+/// One actor/read for the screen, with a private count for proving search and
+/// ordinary redraws do not acquire history per card. Never real provider data.
+private actor FixtureDemandHistoryReads {
+    private let url: URL
+    private let proofURL: URL
+    private var database: NetworkDemandHistoryDatabase?
+    private var fail = false
+    private var readCount = 0
+    init(url: URL, proofURL: URL) { self.url = url; self.proofURL = proofURL }
+    func setFailure(_ value: Bool) { fail = value }
+    func report(in range: DateInterval) throws -> NetworkDemandHistoryReport {
+        readCount += 1
+        let proof: [String: Any] = ["synthetic": true, "readCount": readCount,
+            "failing": fail, "rangeStart": range.start.timeIntervalSince1970, "rangeEnd": range.end.timeIntervalSince1970]
+        try JSONSerialization.data(withJSONObject: proof, options: [.sortedKeys])
+            .write(to: proofURL, options: .atomic)
+        if fail { throw FixtureError.offline }
+        if database == nil { database = try NetworkDemandHistoryDatabase(url: url) }
+        return try database!.report(in: range)
+    }
+
+    static func seed(at url: URL, now: Date) throws {
+        let database = try NetworkDemandHistoryDatabase(url: url)
+        let end = floor(now.timeIntervalSince1970 / 300) * 300
+        for index in 0..<288 {
+            // A real missing stretch, and one model with undefined ratios.
+            if (40..<72).contains(index) { continue }
+            let capturedAt = Date(timeIntervalSince1970: end - Double(288 - index) * 300 + 30)
+            let ids = index == 287 ? FixtureData.modelIDs : Array(FixtureData.modelIDs.prefix(2))
+            let models = ids.enumerated().map { offset, id in
+                NetworkModelCapacity(id: id, ready: true, canAccept: true, routableProviders: 8,
+                    warmProviders: offset == 1 && (120..<130).contains(index) ? 0 : 4,
+                    runningProviders: 1, coldProviders: 2,
+                    activeRequests: offset >= 2 ? 0 : Int((sin(Double(index) / 19 + Double(offset)) + 1) * 12),
+                    queuedRequests: index.isMultiple(of: 31) ? 2 : 0, queueLimit: 8,
+                    aggregateTokensPerSecond: 100, estimatedTimeToFirstTokenMS: 100,
+                    tokenBudgetRemaining: 100, tokenBudgetTotal: 200)
+            }
+            try database.record(.init(models: models, capturedAt: capturedAt))
+        }
+    }
 }
 
 private enum FixtureEarningsReadMode: String, CaseIterable, Identifiable, Codable, Sendable {
@@ -664,7 +736,7 @@ private actor FixtureEarnings: AccountEarningsFetching {
         if calendarSummaryMode == .accountFailure { throw FixtureError.offline }
         return switch scenario {
         case .microEarnings: .observed(microUSD: 1, observedSeconds: 10_800)
-        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .healthPartial, .largeActionHistory, .acceptedWork, .matchedEnergy, .unmeasuredMetrics, .idleMetrics, .timelineActions, .demandRulerStates, .mixedModelCards:
+        case .fresh, .staleCatalog, .expiredSettings, .expiredHelper, .unavailableSettings, .partialCooling, .disabledHelper, .coolingHelperError, .quietNetwork, .aliasStartup, .liveHosting, .frozenSettings, .fanConfirmation, .noLANAddresses, .multipleStartup, .missingStartupModel, .ambiguousStartup, .startupLoadingOff, .emptyCatalog, .unavailableCatalog, .healthLongMixed, .healthLongMissing, .healthPartial, .largeActionHistory, .acceptedWork, .matchedEnergy, .unmeasuredMetrics, .idleMetrics, .timelineActions, .demandRulerStates, .mixedModelCards, .demandHistory:
             .observed(microUSD: 6_420_000, observedSeconds: 10_800)
         case .stale: .stale(microUSD: 6_420_000, reason: "Synthetic account source stale")
         case .offline, .unavailableRuntime: .unavailable(reason: "Synthetic account source unavailable")
@@ -1308,6 +1380,7 @@ private final class FixtureModel: ObservableObject {
     let popupSettingsDraft = ProviderSettingsDraftState()
     let updateProtection = AppUpdateEditorProtection()
     let hostingDraft: HostingSettingsDraftState
+    let popupHostingDraft: HostingSettingsDraftState
     var presentDashboard: ((DashboardDestination?, SettingsPage?) -> Void)?
     var presentMenuBarPopup: (() -> Void)?
     lazy var popup = FixturePopoverController(model: self)
@@ -1319,12 +1392,15 @@ private final class FixtureModel: ObservableObject {
     @Published var issue: String?
     @Published var scenario: FixtureScenario = .fresh
     @Published var readinessMode = FixtureReadinessMode.scenario
+    @Published var liveTelemetryMode = FixtureLiveTelemetryMode.scenario
     @Published var cliUpdateRead: FixtureCLIUpdateRead = .current
     @Published var fanReadback: FixtureFanReadback = .held
     private var extrasClient: FixtureExtras
     private var controllerClient: FixtureController
     private var earningsClient: FixtureEarnings
     private var logFeed: FixtureLogFeed
+    private var demandHistoryReads: FixtureDemandHistoryReads
+    @Published var demandHistoryReadFailure = false
     @Published var limitedActivityModels = false
     @Published var activityRead = FixtureActivityRead.normal
     @Published var calendarSummaryMode = FixtureCalendarSummaryMode.normal
@@ -1388,10 +1464,12 @@ private final class FixtureModel: ObservableObject {
         monitor = stores.0; control = stores.1; hosting = stores.2; chat = stores.3; extrasClient = stores.4
         controllerClient = stores.5; earningsClient = stores.6
         logFeed = stores.7
+        demandHistoryReads = stores.8
         hostingDraft = HostingSettingsDraftState(options: stores.2.options)
+        popupHostingDraft = HostingSettingsDraftState(options: stores.2.options)
     }
     private static func makeStores(_ scenario: FixtureScenario, defaults: UserDefaults, directory: URL,
-        capacityCapturedAt: Date? = nil) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore, FixtureExtras, FixtureController, FixtureEarnings, FixtureLogFeed) {
+        capacityCapturedAt: Date? = nil) -> (MonitorStore, ProviderControlStore, HostingSettingsStore, ChatStore, FixtureExtras, FixtureController, FixtureEarnings, FixtureLogFeed, FixtureDemandHistoryReads) {
         let tokens = FixtureTokens()
         let autopilot = FixtureAutopilot()
         defaults.set(scenario == .matchedEnergy || scenario == .microEarnings || scenario == .mixedModelCards, forKey: "electricity.enabled")
@@ -1413,15 +1491,21 @@ private final class FixtureModel: ObservableObject {
                 ? EnergyRecordingSnapshot(reading: nil, intervals: savedEnergy.intervals, issue: nil) : savedEnergy
         let initialSnapshot = FixtureData.snapshot(scenario, now: seededAt, events: events)
         let inertProcessIdentity = initialSnapshot.state.value?.processIdentity
+        let demandURL = directory.appendingPathComponent("demand-history-\(scenario.id).sqlite")
+        let demandReads = FixtureDemandHistoryReads(url: demandURL,
+            proofURL: directory.appendingPathComponent("fixture-demand-history-reads.json"))
         let monitor = MonitorStore(service: TelemetryService(source: FixtureTelemetrySource(scenario: scenario, logFeed: logFeed)),
             initial: initialSnapshot, providerExtras: extras,
             initialEnergy: fixtureEnergy,
             earningsClient: earningsClient,
             tokenRateRecorder: scenario == .mixedModelCards ? FixtureModelRates() : nil,
-            networkCapacityClient: FixtureCapacity(scenario: scenario, fixedCapture: capacityCapturedAt), publicCatalogClient: FixtureCatalog(scenario: scenario),
+            networkCapacityClient: FixtureCapacity(scenario: scenario, fixedCapture: capacityCapturedAt),
+            networkDemandHistory: NetworkDemandHistoryStore(url: demandURL,
+                readReport: { range in try await demandReads.report(in: range) }),
+            publicCatalogClient: FixtureCatalog(scenario: scenario),
             publicPricingClient: FixturePricing(scenario: scenario), networkSeriesClient: FixtureSeries(scenario: scenario),
             energyPreferences: defaults, energyRecorder: EnergyRecorder(file: directory.appendingPathComponent("energy.json"), readPower: { _ in nil }),
-            gpuUsage: SystemGPUUsageStore(read: { nil }), menuAttentionPreferences: defaults,
+            gpuUsage: SystemGPUUsageStore(read: { FixtureLiveGPUReading.value }), menuAttentionPreferences: defaults,
             readinessProcessIdentityReader: { pid in inertProcessIdentity?.pid == pid ? inertProcessIdentity : nil })
         monitor.inactivityNudge = InactivityNudgeStore(keyStore: tokens, defaults: defaults,
             evidence: { _ in .unavailable }, canAct: { false }, send: { _, _ in nil })
@@ -1442,7 +1526,13 @@ private final class FixtureModel: ObservableObject {
         monitor.attachRecommendationInventory { control.snapshot }
         monitor.setDashboardVisible(true)
         hosting.refreshEnvironment()
-        return (monitor, control, hosting, chat, extrasClient, controller, earningsClient, logFeed)
+        return (monitor, control, hosting, chat, extrasClient, controller, earningsClient, logFeed, demandReads)
+    }
+
+    func setDemandHistoryReadFailure(_ value: Bool) async {
+        await demandHistoryReads.setFailure(value)
+        demandHistoryReadFailure = value
+        await monitor.refreshNetworkCapacity()
     }
     func limitActivityModels(_ value: Bool) async {
         guard ready, !isTerminating, await earningsClient.setLimitedModels(value) else { return }
@@ -1576,6 +1666,18 @@ private final class FixtureModel: ObservableObject {
         readinessMode = mode
         await publishTelemetry(scenario: scenario, monitor: monitor, logFeed: logFeed)
     }
+    func setLiveTelemetryMode(_ mode: FixtureLiveTelemetryMode) async {
+        guard ready, !isTerminating, !proofRunning else { return }
+        liveTelemetryMode = mode
+        FixtureLiveGPUReading.value = switch mode {
+        case .low: 25
+        case .high: 82
+        case .idle: 0
+        case .scenario, .waiting, .stale: nil
+        }
+        monitor.gpuUsage.refresh()
+        await publishTelemetry(scenario: scenario, monitor: monitor, logFeed: logFeed)
+    }
     func tick() async {
         #if FIXTURE_SETTINGS_PREVIEW_PROOF
         guard !settingsPreviewProofRunning else { return }
@@ -1606,7 +1708,9 @@ private final class FixtureModel: ObservableObject {
             guard !Task.isCancelled, self.ready, !self.isTerminating,
                   !self.metricsReview, generation == self.loadGeneration else { return }
             let now = Date()
-            let snapshot = scenario == .fresh && self.readinessMode != .scenario
+            let snapshot = self.liveTelemetryMode != .scenario
+                ? FixtureData.liveTelemetrySnapshot(self.liveTelemetryMode, now: now, events: events)
+                : scenario == .fresh && self.readinessMode != .scenario
                 ? FixtureData.readinessSnapshot(self.readinessMode, now: now, events: events)
                 : FixtureData.snapshot(scenario, now: now, events: events)
             await monitor.accept(snapshot)
@@ -1778,6 +1882,8 @@ private final class FixtureModel: ObservableObject {
         if generation == loadGeneration { loadTask = nil }
     }
     private func prepare(_ requestedScenario: FixtureScenario, generation: Int) async {
+        liveTelemetryMode = .scenario
+        FixtureLiveGPUReading.value = nil
         await popup.closeAndWait(resetContent: true)
         await control.cancelCurrentOperationAndWait()
         await earningsClient.cancelHeldAndWait()
@@ -1789,6 +1895,11 @@ private final class FixtureModel: ObservableObject {
         var preparationIssue: String?
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            if requestedScenario == .demandHistory {
+                let url = directory.appendingPathComponent("demand-history-\(requestedScenario.id).sqlite")
+                let seed = Task.detached(priority: .utility) { try FixtureDemandHistoryReads.seed(at: url, now: Date()) }
+                try await withTaskCancellationHandler { try await seed.value } onCancel: { seed.cancel() }
+            }
             try await FixtureNetworkCacheProbe.shared.configure(directory: directory)
             let performanceURL = directory.appendingPathComponent("performance-\(requestedScenario.id).sqlite")
             // Copy only a completed bundled synthetic database into this app's
@@ -1801,8 +1912,9 @@ private final class FixtureModel: ObservableObject {
             let seedPerformance = !FileManager.default.fileExists(atPath: performanceURL.path)
             let database = try PerformanceHistoryDatabase(url: performanceURL)
             let now = Date()
-            for index in 0..<(seedPerformance ? 360 : 0) {
-                let date = now.addingTimeInterval(Double(index - 359) * 30)
+            let sampleCount = requestedScenario == .demandHistory ? 2_880 : 360
+            for index in 0..<(seedPerformance ? sampleCount : 0) {
+                let date = now.addingTimeInterval(Double(index - sampleCount + 1) * 30)
                 // A bounded 90-second Bonsai visit: switch in at sample 356,
                 // remain singly resident/idle with flat counters through 358,
                 // switch back to Gemma at 359 without a counter increment.
@@ -1882,6 +1994,8 @@ private final class FixtureModel: ObservableObject {
         monitor = preparedMonitor; control = preparedControl; hosting = stores.2; chat = stores.3; extrasClient = stores.4
         controllerClient = stores.5; earningsClient = stores.6
         logFeed = stores.7
+        demandHistoryReads = stores.8
+        demandHistoryReadFailure = false
         limitedActivityModels = false
         activityRead = .normal
         calendarSummaryMode = .normal
@@ -2172,7 +2286,8 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
                 openDashboard: { [weak self] in self?.navigate() },
                 openModels: { [weak self] in self?.navigate(.models) },
                 openHosting: { [weak self] in self?.navigate(.hosting) },
-                updateProtection: model.updateProtection, popupSettingsDraft: model.popupSettingsDraft)
+                updateProtection: model.updateProtection, popupSettingsDraft: model.popupSettingsDraft,
+                popupHostingDraft: model.popupHostingDraft)
             let contentController = FittingPopoverHostingController(rootView: content, popover: popover)
             popover.contentViewController = contentController
             contentController.view.postsFrameChangedNotifications = true
@@ -2328,18 +2443,20 @@ private struct FixturePopoverContent: View {
     let openHosting: () -> Void
     let updateProtection: AppUpdateEditorProtection
     let popupSettingsDraft: ProviderSettingsDraftState
+    let popupHostingDraft: HostingSettingsDraftState
 
     init(model: FixtureModel, store: MonitorStore, control: ProviderControlStore, visibility: PopoverVisibility,
          defaults: UserDefaults, openSettings: @escaping (SettingsPage?) -> Void,
          openDashboard: @escaping () -> Void, openModels: @escaping () -> Void,
          openHosting: @escaping () -> Void, updateProtection: AppUpdateEditorProtection,
-         popupSettingsDraft: ProviderSettingsDraftState) {
+         popupSettingsDraft: ProviderSettingsDraftState, popupHostingDraft: HostingSettingsDraftState) {
         self.model = model; self.store = store; self.control = control; self.visibility = visibility
         self.defaults = defaults
         _appearance = AppStorage(wrappedValue: "light", ApplicationAppearance.defaultsKey, store: defaults)
         self.openSettings = openSettings; self.openDashboard = openDashboard
         self.openModels = openModels; self.openHosting = openHosting
         self.updateProtection = updateProtection; self.popupSettingsDraft = popupSettingsDraft
+        self.popupHostingDraft = popupHostingDraft
     }
 
     var body: some View {
@@ -2347,7 +2464,8 @@ private struct FixturePopoverContent: View {
             ownsVisibleFanPolling: false, openSettings: openSettings,
             openDashboard: openDashboard, openModels: openModels, openHosting: openHosting,
             hostingStore: model.hosting,
-            updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft)
+            updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft,
+            popupHostingDraft: popupHostingDraft)
             .environmentObject(control)
             .defaultAppStorage(defaults)
             .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
@@ -2907,6 +3025,11 @@ private struct FixtureReviewView: View {
                     .frame(width: 210)
                     .help("Synthetic popup height budget only; the Mac's screen and preferences stay unchanged.")
                     Menu("Data checks") {
+                        Menu("Synthetic live measurements") {
+                            ForEach(FixtureLiveTelemetryMode.allCases, id: \.self) { mode in
+                                Button(mode.rawValue) { Task { await model.setLiveTelemetryMode(mode) } }
+                            }
+                        }
                         Menu("Next Hosting version read") {
                             ForEach(["0.9.17", "0.9.6", "", "private-version-canary"], id: \.self) { version in
                                 Button(version.isEmpty ? "Unavailable" : version) {
@@ -3049,6 +3172,9 @@ private struct FixtureReviewView: View {
                             Task { await model.removeGemmaFromInventory() }
                         }
                         Button("Save model control state") { Task { await model.saveModelControlProof() } }
+                        Button(model.demandHistoryReadFailure ? "Restore demand history reads" : "Fail demand history reads") {
+                            Task { await model.setDemandHistoryReadFailure(!model.demandHistoryReadFailure) }
+                        }
                         Button("Limit model sheet to 360 pt") { model.modelSheetHeightLimit = 360 }
                         Button("Use screen height for model sheet") { model.modelSheetHeightLimit = nil }
                         Button(model.networkExpiryReview ? "End network expiry review" : "Network expiry in 20 seconds") {

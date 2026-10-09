@@ -8,6 +8,7 @@ struct PopupAutoModeControl: View {
     var updateProtection: AppUpdateEditorProtection? = nil
     var commandTile = false
     @State private var showsSetup = false
+    @State private var opensModelsAfterDismissal = false
 
     var body: some View {
         Button {
@@ -20,8 +21,13 @@ struct PopupAutoModeControl: View {
         .help("Advertise selected models with one slot and a chosen startup model")
         .accessibilityIdentifier("popover.auto")
         .modifier(PopupKeyboardReveal())
-        .sheet(isPresented: $showsSetup) {
-            PopupAutoModeSetup(store: store, openModels: openModels, updateProtection: updateProtection)
+        .sheet(isPresented: $showsSetup, onDismiss: {
+            guard opensModelsAfterDismissal else { return }
+            opensModelsAfterDismissal = false
+            openModels()
+        }) {
+            PopupAutoModeSetup(store: store, openModels: { opensModelsAfterDismissal = true },
+                updateProtection: updateProtection)
                 .labelStyle(.titleAndIcon).buttonStyle(.bordered)
         }
     }

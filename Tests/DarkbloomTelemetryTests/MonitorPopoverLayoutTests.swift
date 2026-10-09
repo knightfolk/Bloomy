@@ -10,6 +10,28 @@ private let layoutNow = Date()
 @Suite("Monitor popover layout")
 @MainActor
 struct MonitorPopoverLayoutTests {
+    @Test("full-width popup rows stay within the requested third-height budget", arguments: [false, true])
+    func densePopupRowGeometry(dark: Bool) {
+        let states: [ProviderLiveThroughput?] = [nil,
+            .init(value: 135, age: 1, state: .measured),
+            .init(value: nil, age: 1, state: .idle),
+            .init(value: nil, age: 1, state: .waiting),
+            .init(value: 135, age: 20, state: .stale)]
+        for live in states {
+            let view = CompactModelCard(modelID: "nvidia-nemotron-3.5-lightning",
+                status: "Loads on request", metrics: [
+                    .init(id: "speed", symbol: "speedometer", value: "124.7", caption: "avg tok/s today"),
+                    .init(id: "earnings", symbol: "dollarsign.circle", value: "$0.0124", caption: "est. net / active h")
+                ], compact: true, compactWidth: 526, horizontal: true,
+                liveThroughput: live, throughputPeak: 150, isVisible: false,
+                swapModel: {}, switchModel: {})
+                .environment(\.colorScheme, dark ? .dark : .light)
+            let fitted = NSHostingView(rootView: view).fittingSize
+            #expect(fitted.width == 526)
+            #expect(fitted.height > 0 && fitted.height <= 52)
+        }
+    }
+
     @Test("graphical popup earnings fit without truncating the compact layout", arguments: [false, true], [false, true])
     func earningsGraphic(dark: Bool, retained: Bool) async throws {
         let start = Calendar.current.startOfDay(for: layoutNow)
@@ -564,7 +586,8 @@ struct MonitorPopoverLayoutTests {
                 #expect(outer.documentVisibleRect.origin.y != original.y)
             }
             if height == 1_400 {
-                if expanded { #expect(fitted.height > (collapsedHeight ?? 0)) }
+                // Expanded rows can use the existing capped scrolling viewport.
+                if expanded { #expect(fitted.height >= (collapsedHeight ?? 0)) }
                 else if let collapsedHeight { #expect(fitted.height == collapsedHeight) }
                 else { collapsedHeight = fitted.height }
             }

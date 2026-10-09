@@ -739,6 +739,9 @@ struct ModelManagerView: View {
     var networkContext: (String, Date) -> [String] = { _, _ in [] }
     var telemetry = ModelManagerTelemetry()
     var refreshDemand: (() async -> Void)? = nil
+    var demandHistory: ModelDemandHistoryPresentation? = nil
+    var liveSnapshot: TelemetrySnapshot? = nil
+    var providerThroughputPeak: Double? = nil
     var isVisible = true
     var providerStatus: SourceAvailability<StatusSnapshot> = .unavailable(reason: "Provider status unavailable")
     var providerDaemonState: SourceAvailability<DaemonState> = .unavailable(reason: "Provider activity unavailable")
@@ -974,7 +977,7 @@ struct ModelManagerView: View {
             ?? "Demand unavailable"
         return Label(text, systemImage: current ? "dot.radiowaves.left.and.right" : "clock")
             .font(.caption).foregroundStyle(.secondary)
-            .help("Network demand refreshes automatically while the dashboard is open.")
+            .help("Network demand refreshes automatically while model controls are visible.")
             .accessibilityIdentifier("models.demandFreshness")
     }
 
@@ -1000,8 +1003,7 @@ struct ModelManagerView: View {
                     .font(.callout).foregroundStyle(.secondary)
                     .padding(.vertical, 6)
             } else {
-                LazyVGrid(columns: ModelCardLayout.columns(for: gridWidth),
-                          alignment: .leading, spacing: ModelCardLayout.rowSpacing) {
+                LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(items) { item in
                         modelCard(item, at: Date(), presentation: presentation)
                     }
@@ -1160,7 +1162,7 @@ struct ModelManagerView: View {
         let runPercent = whatIfRunPercent[item.catalogID] ?? 0
         let forecast = ModelRunForecast.calculate(runPercent: runPercent, serving: calibratedServing, tokenRate: rate)
         let grade = presentation.grades[item.catalogID]
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: expanded ? 12 : 2) {
             ModelCardSummary(
                 item: item,
                 installedMemoryGB: Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824,
@@ -1174,6 +1176,14 @@ struct ModelManagerView: View {
                 showsDetails: expanded,
                 demandPresentation: presentation.demand(for: item),
                 demandScale: presentation.demandScale,
+                demandHistory: demandHistory?.history(for: item.catalogID),
+                horizontal: !expanded,
+                liveThroughput: liveSnapshot.flatMap { snapshot in
+                    snapshot.state.value?.currentModel == item.catalogID
+                        ? ProviderLiveThroughput.make(snapshot: snapshot, now: date) : nil
+                },
+                throughputPeak: providerThroughputPeak,
+                isVisible: isVisible,
                 residencyPresentation: presentation.residencyEvidence.presentation(for: item)
             )
             if expanded {
@@ -1190,12 +1200,14 @@ struct ModelManagerView: View {
                 }
                 modelDetails(item, at: date)
             } else {
-                Divider()
                 cardControls(item: item, at: date)
+                    .frame(height: 22)
             }
         }
-        .padding(expanded ? 16 : 12)
-        .frame(maxWidth: .infinity, minHeight: expanded ? nil : 192, alignment: .topLeading)
+        .padding(.horizontal, expanded ? 16 : 10)
+        .padding(.vertical, expanded ? 16 : 2)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: expanded ? nil : ModelCardLayout.estimatedCardHeight, alignment: .topLeading)
         .background(
             Color(nsColor: .controlBackgroundColor).opacity(item.isDownloaded ? 1 : 0.65),
             in: RoundedRectangle(cornerRadius: 14)
@@ -1477,8 +1489,8 @@ enum ModelCardLayout {
     static let minimumCardWidth: CGFloat = 300
     static let maximumCardWidth: CGFloat = 460
     static let rowSpacing: CGFloat = 14
-    /// Expected compact-card height; the previous card measured ~530pt.
-    static let estimatedCardHeight: CGFloat = 192
+    /// 36pt summary + 22pt controls + 2pt spacing + 4pt vertical padding.
+    static let estimatedCardHeight: CGFloat = 64
 
     static func columnCount(for width: CGFloat) -> Int {
         let threeColumnWidth = CGFloat(maximumColumns) * minimumCardWidth
@@ -1517,6 +1529,11 @@ struct ModelCardSummary: View {
     var showsDetails = false
     var demandPresentation: ModelCardDemand? = nil
     var demandScale: ModelDemandScale? = nil
+    var demandHistory: ModelDemandHistorySeries? = nil
+    var horizontal = false
+    var liveThroughput: ProviderLiveThroughput? = nil
+    var throughputPeak: Double? = nil
+    var isVisible = true
     var residencyPresentation: ModelCardResidencyPresentation = .unavailable
 
     /// Informational content of not-yet-downloaded cards is muted, while the
@@ -1543,8 +1560,10 @@ struct ModelCardSummary: View {
             symbol: displayedResidency == .unavailable ? "questionmark.circle" : modelSymbol,
             tint: item.isDownloaded && displayedResidency != .unavailable ? accent : .secondary,
             metrics: compactMetrics, contentOnly: true,
+            horizontal: horizontal, liveThroughput: liveThroughput,
+            throughputPeak: throughputPeak, isVisible: isVisible,
             demand: demandPresentation ?? ModelCardDemand(model: capacity, isCurrent: capacity != nil),
-            demandScale: demandScale)
+            demandScale: demandScale, demandHistory: demandHistory)
     }
 
     private var compactMetrics: [ModelCardMetric] {
