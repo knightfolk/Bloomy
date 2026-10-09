@@ -1,5 +1,18 @@
 # Bloomy native polish and efficiency
 
+October 9 popup Autopilot actions: shorter contextual labels keep Pause/Resume,
+Leave and Refresh together in the first popover view after enrollment. Full
+accessibility names, dashboard labels, consent, mutation guards and vertical
+fallback remain unchanged. Native dark shadow/paused, light active, stale-consent
+Refresh recovery, unavailable retained-state guards and inert Enable/Pause/Resume/
+Cancel/Leave pass against all 142 optimized source inputs. One inert enrollment
+and three policy actions are recorded. The full 1,862 reported app tests plus
+49 Companion tests, 49 staging checks and regular Release build pass. Leave's
+confirmation capture still returns blank pixels; a scoped human visual check was
+requested and remains unanswered. Its appearance is unaccepted. No real provider
+action, config write, installed replacement, push or release occurs. See
+[popup Autopilot review](POPUP_AUTOPILOT_ACTIONS_REVIEW_20261009.md).
+
 October 9 compact Nudge controls: the warm-model scope, eight-output-token cap
 and lack of guaranteed work stay visible; the unchanged full behavior text is
 now in a native disclosure. The setup heading appears in the first 360-point

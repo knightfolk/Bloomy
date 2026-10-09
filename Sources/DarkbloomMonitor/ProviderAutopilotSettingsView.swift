@@ -103,6 +103,7 @@ struct ProviderAutopilotSettingsView: View {
     let performMutation: ProviderExtrasMutationExecutor
     let isVisible: Bool
     @ObservedObject var draft: ProviderSettingsDraftState
+    var compactActions = false
     @State private var showsConsent = false
     @State private var showsLeaveConfirmation = false
     @State private var isSubmitting = false
@@ -172,21 +173,27 @@ struct ProviderAutopilotSettingsView: View {
         return layout {
             if presentation.status?.isEnrolled == true {
                 let action: ProviderAutopilotPolicyAction = presentation.status?.configuredPaused == true ? .resume : .pause
-                Button(action == .pause ? "Pause Autopilot" : "Resume Autopilot") { submit(action) }
+                Button(compactActions
+                    ? (action == .pause ? "Pause" : "Resume")
+                    : (action == .pause ? "Pause Autopilot" : "Resume Autopilot")) { submit(action) }
                     .disabled(isBusy || hasUnsavedSettings || !presentation.canPerform(action))
+                    .accessibilityLabel(action == .pause ? "Pause Autopilot" : "Resume Autopilot")
                     .accessibilityIdentifier("settings.autopilot.pauseResume")
             } else {
-                Button("Enable Autopilot…") { feedback = nil; consentIssue = nil; showsConsent = true }
+                Button(compactActions ? "Enable…" : "Enable Autopilot…") { feedback = nil; consentIssue = nil; showsConsent = true }
                     .disabled(isBusy || !presentation.canEnroll || enrollmentReason != nil)
+                    .accessibilityLabel("Enable Autopilot…")
                     .accessibilityIdentifier("settings.autopilot.enable")
             }
             if presentation.status?.configuredEnabled == true {
-                Button("Leave Autopilot…") { showsLeaveConfirmation = true }
+                Button(compactActions ? "Leave…" : "Leave Autopilot…") { showsLeaveConfirmation = true }
                     .disabled(isBusy || hasUnsavedSettings || !presentation.canPerform(.disable))
+                    .accessibilityLabel("Leave Autopilot…")
                     .accessibilityIdentifier("settings.autopilot.leave")
             }
-            Button("Refresh Autopilot") { Task { await store.refreshAutopilot() } }
+            Button(compactActions ? "Refresh" : "Refresh Autopilot") { Task { await store.refreshAutopilot() } }
                 .disabled(isBusy || store.isRefreshing)
+                .accessibilityLabel("Refresh Autopilot")
                 .accessibilityIdentifier("settings.autopilot.refresh")
         }
     }

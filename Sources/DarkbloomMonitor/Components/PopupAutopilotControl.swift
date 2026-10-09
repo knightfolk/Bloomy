@@ -29,7 +29,7 @@ struct PopupAutopilotControl: View {
                     ProviderAutopilotSettingsView(store: extras, control: control,
                         performMutation: { label, mutation in
                             await control.performSettingsMutation(label, mutation: mutation)
-                        }, isVisible: showsControls && isVisible, draft: draft)
+                        }, isVisible: showsControls && isVisible, draft: draft, compactActions: true)
                 }.formStyle(.grouped)
             }.labelStyle(.titleAndIcon).buttonStyle(.bordered).padding(16).frame(width: 420)
         }
