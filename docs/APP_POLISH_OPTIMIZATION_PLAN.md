@@ -1,5 +1,19 @@
 # Bloomy native polish and efficiency
 
+October 9 compact popup Hosting: the fixed panel header now owns the title,
+with selected-mode status and Refresh immediately below it. Three tall mode
+cards become a native segmented selector with only the selected explanation.
+All three choices, Terminal-managed guidance, unavailable-CLI guards, retained
+invalid port input after closing/reopening/refreshing, lower endpoint/Apply
+scrolling, light/dark appearance and the original dashboard layout pass native
+review against all 142 optimized source inputs. The full 1,862 reported app
+tests plus 49 Companion tests, 49 staging checks and regular Release build pass.
+Independent source review found no actionable findings. This is a presentation
+checkpoint: native keyboard/VoiceOver, large text and accepted-work dialog
+pixels remain open. The installed app and real provider configuration are
+unchanged; no push or release occurs. See
+[compact Hosting review](POPUP_HOSTING_LAYOUT_REVIEW_20261009.md).
+
 October 9 popup height boundary: native placement now caps oversized ideal
 heights at the current budget while preserving natural smaller content and
 retained documents. An identical optimized probe changes four baseline 720-point
@@ -10,8 +24,9 @@ Companion tests, 49 staging checks and the Release build pass. Native
 Screen→80→360, Available retention and unfinished Hosting input pass against all
 142 optimized source inputs. Tiny-window wheel routing and later scrollbar
 references have tool limits; every tiny-budget footer and panel is unqualified.
-Hosting's large repeated heading is the next concrete compact-panel polish
-candidate. No provider mutation, installed replacement, push or release occurs.
+Hosting's large repeated heading was the next compact-panel polish candidate
+at that checkpoint; the follow-up above implements it. No provider mutation,
+installed replacement, push or release occurred.
 See [popup height review](POPUP_HEIGHT_BOUNDARY_REVIEW_20261009.md).
 
 October 9 popup settings: embedded Energy, Appearance, Menu Bar, Provider,

@@ -6,9 +6,14 @@ import SwiftUI
 /// OpenAI-compatible endpoints. It configures CLI flags only; it never starts
 /// an app-owned inference server or writes hosting values into provider.toml.
 struct HostingSettingsView: View {
+    enum Presentation {
+        case dashboard, popup
+    }
+
     @ObservedObject var store: HostingSettingsStore
     @StateObject private var draft: HostingSettingsDraftState
     private let updateProtection: AppUpdateEditorProtection?
+    private let presentation: Presentation
     @State private var tokenEditorOwner = UUID()
     @State private var confirmationOwner = UUID()
     @State private var dismissalCoordinator = HostingExposureDismissalCoordinator()
@@ -20,11 +25,13 @@ struct HostingSettingsView: View {
     init(
         store: HostingSettingsStore,
         draft: HostingSettingsDraftState? = nil,
-        updateProtection: AppUpdateEditorProtection? = nil
+        updateProtection: AppUpdateEditorProtection? = nil,
+        presentation: Presentation = .dashboard
     ) {
         self.store = store
         _draft = StateObject(wrappedValue: draft ?? HostingSettingsDraftState(options: store.options))
         self.updateProtection = updateProtection
+        self.presentation = presentation
     }
 
     private var isPortValid: Bool {
@@ -43,8 +50,16 @@ struct HostingSettingsView: View {
     var body: some View {
         let confirmation = store.exposureConfirmation(for: confirmationOwner)
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                header
+            VStack(alignment: .leading, spacing: presentation == .popup ? 16 : 20) {
+                if presentation == .popup {
+                    HStack {
+                        statusBadge
+                        Spacer(minLength: 8)
+                        refreshControl
+                    }
+                } else {
+                    header
+                }
 
                 if draft.hasUnsavedEdits(comparedTo: store.options) {
                     HStack {
@@ -89,7 +104,7 @@ struct HostingSettingsView: View {
                 connectionDetailsCard
                 applyCard
             }
-            .padding(24)
+            .padding(presentation == .popup ? 16 : 24)
             .frame(maxWidth: 1120, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .coordinateSpace(name: "hosting.document")
@@ -147,19 +162,23 @@ struct HostingSettingsView: View {
             }
             Spacer(minLength: 0)
             statusBadge
-            Button {
-                store.refreshEnvironment()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help("Refresh the CLI version and detected LAN addresses")
-            .accessibilityLabel("Refresh hosting environment")
-            .accessibilityIdentifier("hosting.refresh")
-            .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
+            refreshControl
         }
         .padding(.bottom, 2)
+    }
+
+    private var refreshControl: some View {
+        Button {
+            store.refreshEnvironment()
+        } label: {
+            Image(systemName: "arrow.clockwise")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help("Refresh the CLI version and detected LAN addresses")
+        .accessibilityLabel("Refresh hosting environment")
+        .accessibilityIdentifier("hosting.refresh")
+        .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
     }
 
     private var statusBadge: some View {
@@ -193,28 +212,75 @@ struct HostingSettingsView: View {
     private var servingModeCard: some View {
         HostingCard(
             title: "How this Mac serves",
-            subtitle: "Choose a mode; Apply uses the installed Darkbloom CLI with the matching start options."
+            subtitle: presentation == .popup
+                ? "Select how this Mac serves."
+                : "Choose a mode; Apply uses the installed Darkbloom CLI with the matching start options."
         ) {
-            HostingChoiceLayout(minimumWidth: 205, spacing: 12) {
-                modeCard(
-                    .off,
-                    title: "Fleet only",
-                    detail: "Keep serving the Darkbloom network. No local API endpoint is started.",
-                    symbol: "network"
-                )
-                modeCard(
-                    .unified,
-                    title: "Fleet + local API",
-                    detail: "Accept local API requests while remaining available to the fleet. Both share model slots.",
-                    symbol: "arrow.triangle.branch"
-                )
-                modeCard(
-                    .standalone,
-                    title: "Local only",
-                    detail: "Uses `--local`. Runs in Terminal; this app cannot start or stop it.",
-                    symbol: "desktopcomputer"
-                )
+            if presentation == .popup {
+                compactModeSelector
+            } else {
+                HostingChoiceLayout(minimumWidth: 205, spacing: 12) {
+                    modeCard(
+                        .off,
+                        title: "Fleet only",
+                        detail: "Keep serving the Darkbloom network. No local API endpoint is started.",
+                        symbol: "network"
+                    )
+                    modeCard(
+                        .unified,
+                        title: "Fleet + local API",
+                        detail: "Accept local API requests while remaining available to the fleet. Both share model slots.",
+                        symbol: "arrow.triangle.branch"
+                    )
+                    modeCard(
+                        .standalone,
+                        title: "Local only",
+                        detail: "Uses `--local`. Runs in Terminal; this app cannot start or stop it.",
+                        symbol: "desktopcomputer"
+                    )
+                }
             }
+        }
+    }
+
+    private var compactModeSelector: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("Hosting mode", selection: Binding(
+                get: { store.options.mode.rawValue },
+                set: { if let mode = HostingEndpointMode(rawValue: $0) { store.setMode(mode) } }
+            )) {
+                Text("Fleet only").tag(HostingEndpointMode.off.rawValue)
+                    .accessibilityIdentifier("hosting.mode.off")
+                Text("Fleet + local API").tag(HostingEndpointMode.unified.rawValue)
+                    .accessibilityIdentifier("hosting.mode.unified")
+                Text("Local only").tag(HostingEndpointMode.standalone.rawValue)
+                    .accessibilityIdentifier("hosting.mode.standalone")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .disabled(!store.cliSupportsHosting)
+            .accessibilityLabel("Hosting mode")
+            .accessibilityIdentifier("hosting.mode")
+            .modifier(ScrollControlKeyboardReveal(documentSpace: "hosting.document"))
+
+            Text(compactModeDescription)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("hosting.mode.description")
+            if store.options.mode == .standalone {
+                Label("Managed in Terminal", systemImage: "terminal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var compactModeDescription: String {
+        switch store.options.mode {
+        case .off: "Keep serving the Darkbloom network. No local API endpoint is started."
+        case .unified: "Accept local API requests while remaining available to the fleet. Both share model slots."
+        case .standalone: "Runs in Terminal; Bloomy cannot start or stop this local-only provider."
         }
     }
 

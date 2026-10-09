@@ -203,7 +203,8 @@ struct PopupControlPanel: View {
             .onDisappear { store.setModelControlsVisible(false, owner: modelVisibilityOwner) }
         case .hosting:
             if let hostingStore {
-                HostingSettingsView(store: hostingStore, draft: hostingDraft, updateProtection: updateProtection)
+                HostingSettingsView(store: hostingStore, draft: hostingDraft,
+                    updateProtection: updateProtection, presentation: .popup)
             } else { unavailable("Hosting controls are not available in this session.") }
         case .settings(let page):
             if page == .provider {
