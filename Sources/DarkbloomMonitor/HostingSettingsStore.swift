@@ -2,6 +2,73 @@ import AppKit
 import DarkbloomTelemetry
 import Foundation
 
+/// A confirmation authorizes one captured request from one editor. Retained
+/// dashboard and popup editors must not consume each other's dialog callbacks.
+struct HostingExposureConfirmation: Equatable, Identifiable {
+    let id = UUID()
+    let owner: UUID?
+    let options: HostingOptions
+
+    var title: String {
+        if !options.requiresAuthentication {
+            return options.bindScope == .loopback
+                ? "Disable API-key authentication?" : "Expose an unauthenticated endpoint?"
+        }
+        return "Allow access from the network?"
+    }
+
+    var message: String {
+        var details: [String] = []
+        if options.bindScope == .allInterfaces {
+            details.append("0.0.0.0 listens on every network interface, not only your LAN.")
+        } else if options.bindScope == .specificInterface {
+            details.append("The endpoint will listen on \(options.bindAddress), which other devices able to reach that address can access.")
+        }
+        if !options.requiresAuthentication {
+            details.append("API-key authentication will be disabled; anyone who can reach this endpoint can send requests to this Mac.")
+        } else {
+            details.append("API-key authentication stays on. The token remains in Darkbloom's protected local storage.")
+        }
+        details.append("The endpoint uses HTTP without TLS or rate limiting.")
+        return details.joined(separator: " ")
+    }
+
+    var actionTitle: String {
+        if !options.requiresAuthentication {
+            return options.bindScope == .loopback ? "Disable API-key authentication" : "Expose without API-key authentication"
+        }
+        return options.bindScope == .allInterfaces ? "Expose on all interfaces" : "Allow LAN access"
+    }
+}
+
+/// Suppress teardown only for the request whose Confirm was clicked. A later
+/// dialog can still be dismissed while an earlier graceful restart is draining.
+@MainActor
+final class HostingExposureDismissalCoordinator {
+    private var confirmingRequests = Set<UUID>()
+
+    func beginConfirmation(_ request: HostingExposureConfirmation) {
+        confirmingRequests.insert(request.id)
+    }
+
+    func endConfirmation(_ request: HostingExposureConfirmation) {
+        confirmingRequests.remove(request.id)
+    }
+
+    @discardableResult
+    func scheduleCancellation(
+        _ request: HostingExposureConfirmation,
+        isPending: @escaping @MainActor () -> Bool,
+        cancel: @escaping @MainActor () -> Void
+    ) -> Task<Void, Never> {
+        Task { @MainActor in
+            await Task.yield()
+            guard !confirmingRequests.contains(request.id), isPending() else { return }
+            cancel()
+        }
+    }
+}
+
 /// A failed capability check does not establish that the installed CLI is old.
 struct HostingCLIRequirementPresentation: Equatable {
     let title: String
@@ -45,7 +112,8 @@ final class HostingSettingsStore: ObservableObject {
     @Published private(set) var lanAddresses: [String] = []
     @Published private(set) var cliVersion: String?
     @Published private(set) var cliSupportsHosting = false
-    @Published private(set) var pendingExposureConfirmation: HostingOptions?
+    @Published private(set) var pendingExposureRequest: HostingExposureConfirmation?
+    var pendingExposureConfirmation: HostingOptions? { pendingExposureRequest?.options }
     @Published private(set) var errorMessage: String?
     @Published private(set) var endpointDetails: LocalEndpointAvailability?
     @Published private(set) var endpointDetailsCheckedAt: Date?
@@ -164,9 +232,9 @@ final class HostingSettingsStore: ObservableObject {
 
     /// Requests application of the current options. Network exposure and
     /// disabling API-key authentication both require fresh confirmation.
-    func requestApply() async {
+    func requestApply(confirmationOwner: UUID? = nil) async {
         errorMessage = nil
-        pendingExposureConfirmation = nil
+        pendingExposureRequest = nil
         guard cliSupportsHosting else {
             errorMessage = Self.unsupportedMessage(cliVersion: cliVersion)
             return
@@ -186,20 +254,36 @@ final class HostingSettingsStore: ObservableObject {
             return
         }
         if options.requiresExposureConfirmation {
-            pendingExposureConfirmation = options
+            pendingExposureRequest = HostingExposureConfirmation(owner: confirmationOwner, options: options)
             return
         }
         await apply(options)
     }
 
     func confirmPendingExposureConfirmation() async {
-        guard let pending = pendingExposureConfirmation else { return }
-        pendingExposureConfirmation = nil
-        await apply(pending)
+        guard let request = pendingExposureRequest, request.owner == nil else { return }
+        await confirmExposure(request)
     }
 
     func cancelPendingExposureConfirmation() {
-        pendingExposureConfirmation = nil
+        guard let request = pendingExposureRequest, request.owner == nil else { return }
+        cancelExposure(request)
+    }
+
+    func exposureConfirmation(for owner: UUID) -> HostingExposureConfirmation? {
+        guard let request = pendingExposureRequest, request.owner == owner else { return nil }
+        return request
+    }
+
+    func confirmExposure(_ request: HostingExposureConfirmation) async {
+        guard pendingExposureRequest == request else { return }
+        pendingExposureRequest = nil
+        await apply(request.options)
+    }
+
+    func cancelExposure(_ request: HostingExposureConfirmation) {
+        guard pendingExposureRequest == request else { return }
+        pendingExposureRequest = nil
     }
 
     func clearErrorMessage() {
@@ -322,30 +406,11 @@ final class HostingSettingsStore: ObservableObject {
     }
 
     var exposureConfirmationTitle: String {
-        guard let pendingExposureConfirmation else { return "Confirm local endpoint access" }
-        if !pendingExposureConfirmation.requiresAuthentication {
-            return pendingExposureConfirmation.bindScope == .loopback
-                ? "Disable API-key authentication?"
-                : "Expose an unauthenticated endpoint?"
-        }
-        return "Allow access from the network?"
+        pendingExposureRequest?.title ?? "Confirm local endpoint access"
     }
 
     var exposureConfirmationMessage: String {
-        guard let pendingExposureConfirmation else { return "Review the endpoint settings before applying." }
-        var details: [String] = []
-        if pendingExposureConfirmation.bindScope == .allInterfaces {
-            details.append("0.0.0.0 listens on every network interface, not only your LAN.")
-        } else if pendingExposureConfirmation.bindScope == .specificInterface {
-            details.append("The endpoint will listen on \(pendingExposureConfirmation.bindAddress), which other devices able to reach that address can access.")
-        }
-        if !pendingExposureConfirmation.requiresAuthentication {
-            details.append("API-key authentication will be disabled; anyone who can reach this endpoint can send requests to this Mac.")
-        } else {
-            details.append("API-key authentication stays on. The token remains in Darkbloom's protected local storage.")
-        }
-        details.append("The endpoint uses HTTP without TLS or rate limiting.")
-        return details.joined(separator: " ")
+        pendingExposureRequest?.message ?? "Review the endpoint settings before applying."
     }
 
     var unauthenticatedAccessWarning: String {

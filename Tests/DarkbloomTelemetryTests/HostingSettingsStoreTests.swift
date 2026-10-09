@@ -520,6 +520,132 @@ struct HostingSettingsStoreTests {
         #expect(store.pendingExposureConfirmation != nil)
     }
 
+    @Test("only the requesting Hosting editor receives its confirmation")
+    func exposureHasOneEditorOwner() async throws {
+        let (store, controller) = try makeStore(defaults: makeDefaults())
+        let dashboard = UUID(), popup = UUID()
+        store.setMode(.unified)
+        store.setBindAddress("192.168.1.20")
+        await store.requestApply(confirmationOwner: popup)
+        let request = try #require(store.exposureConfirmation(for: popup))
+        #expect(store.exposureConfirmation(for: dashboard) == nil)
+        #expect(store.pendingExposureConfirmation == request.options)
+        // Legacy unowned callbacks cannot consume an editor-owned request.
+        store.cancelPendingExposureConfirmation()
+        await store.confirmPendingExposureConfirmation()
+        #expect(store.exposureConfirmation(for: popup) == request)
+        #expect(await controller.hostingExecutions.isEmpty)
+        store.cancelExposure(request)
+        #expect(store.pendingExposureRequest == nil)
+    }
+
+    @Test("a stale dialog cannot cancel or authorize its owner's replacement request")
+    func replacementExposureIsRequestScoped() async throws {
+        let (store, controller) = try makeStore(defaults: makeDefaults())
+        let owner = UUID()
+        store.setMode(.unified)
+        store.setBindAddress("192.168.1.20")
+        await store.requestApply(confirmationOwner: owner)
+        let older = try #require(store.exposureConfirmation(for: owner))
+        store.setPortText("8123")
+        await store.requestApply(confirmationOwner: owner)
+        let replacement = try #require(store.exposureConfirmation(for: owner))
+        #expect(older.id != replacement.id)
+        store.cancelExposure(older)
+        await store.confirmExposure(older)
+        #expect(store.pendingExposureRequest == replacement)
+        #expect(await controller.hostingExecutions.isEmpty)
+        store.setPortText("8222")
+        await store.confirmExposure(replacement)
+        let executions = await controller.hostingExecutions
+        #expect(executions.count == 1)
+        #expect(executions.first?.hosting.port == 8123)
+    }
+
+    @Test("another editor's new request survives the old editor's delayed dismissal")
+    func anotherEditorExposureSurvivesDismissal() async throws {
+        let (store, controller) = try makeStore(defaults: makeDefaults())
+        let dashboard = UUID(), popup = UUID()
+        store.setMode(.unified)
+        store.setBindAddress("192.168.1.20")
+        await store.requestApply(confirmationOwner: dashboard)
+        let older = try #require(store.exposureConfirmation(for: dashboard))
+        await store.requestApply(confirmationOwner: popup)
+        let current = try #require(store.exposureConfirmation(for: popup))
+        #expect(store.exposureConfirmation(for: dashboard) == nil)
+        let dismissal = HostingExposureDismissalCoordinator().scheduleCancellation(
+            older, isPending: { store.pendingExposureRequest == older },
+            cancel: { store.cancelExposure(older) })
+        await dismissal.value
+        await store.confirmExposure(older)
+        #expect(store.pendingExposureRequest == current)
+        #expect(await controller.hostingExecutions.isEmpty)
+    }
+
+    @Test("Confirm survives dialog teardown before its asynchronous action starts")
+    func exposureConfirmationSurvivesBindingTeardown() async throws {
+        let (store, controller) = try makeStore(defaults: makeDefaults())
+        let owner = UUID()
+        store.setMode(.unified)
+        store.setBindAddress("192.168.1.20")
+        await store.requestApply(confirmationOwner: owner)
+        let request = try #require(store.exposureConfirmation(for: owner))
+        let coordinator = HostingExposureDismissalCoordinator()
+        let dismissal = coordinator.scheduleCancellation(
+            request, isPending: { store.exposureConfirmation(for: owner) == request },
+            cancel: { store.cancelExposure(request) })
+        coordinator.beginConfirmation(request)
+        await dismissal.value
+        #expect(store.pendingExposureRequest == request)
+        await store.confirmExposure(request)
+        coordinator.endConfirmation(request)
+        await store.confirmExposure(request)
+        #expect(await controller.hostingExecutions.count == 1)
+        #expect(store.pendingExposureRequest == nil)
+    }
+
+    @Test("system dismissal cancels only its exact request without dispatch")
+    func exposureSystemDismissalCancelsExactRequest() async throws {
+        let (store, controller) = try makeStore(defaults: makeDefaults())
+        let owner = UUID()
+        store.setMode(.unified)
+        store.setBindAddress("192.168.1.20")
+        await store.requestApply(confirmationOwner: owner)
+        let request = try #require(store.exposureConfirmation(for: owner))
+        let dismissal = HostingExposureDismissalCoordinator().scheduleCancellation(
+            request, isPending: { store.exposureConfirmation(for: owner) == request },
+            cancel: { store.cancelExposure(request) })
+        await dismissal.value
+        #expect(store.pendingExposureRequest == nil)
+        #expect(await controller.hostingExecutions.isEmpty)
+    }
+
+    @Test("dismissing a newer dialog during an older restart clears the newer request")
+    func newerExposureDismissesDuringOlderRestart() async throws {
+        let controller = HostingSpyController(delaysHostingCompletion: true)
+        let (store, _) = try makeStore(defaults: makeDefaults(), controller: controller)
+        let owner = UUID()
+        let coordinator = HostingExposureDismissalCoordinator()
+        store.setMode(.unified)
+        store.setBindAddress("192.168.1.20")
+        await store.requestApply(confirmationOwner: owner)
+        let older = try #require(store.exposureConfirmation(for: owner))
+        coordinator.beginConfirmation(older)
+        let applying = Task { await store.confirmExposure(older) }
+        await controller.waitForHostingRestart()
+        await store.requestApply(confirmationOwner: owner)
+        let newer = try #require(store.exposureConfirmation(for: owner))
+        let dismissal = coordinator.scheduleCancellation(
+            newer, isPending: { store.exposureConfirmation(for: owner) == newer },
+            cancel: { store.cancelExposure(newer) })
+        await dismissal.value
+        #expect(store.pendingExposureRequest == nil)
+        await controller.completeHostingRestart()
+        await applying.value
+        coordinator.endConfirmation(older)
+        #expect(await controller.hostingExecutions.count == 1)
+    }
+
     @Test("a saved private address must still belong to an active LAN interface")
     func staleLANAddressIsRejected() async throws {
         let (store, controller) = try makeStore(

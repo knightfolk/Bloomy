@@ -10,6 +10,8 @@ struct HostingSettingsView: View {
     @StateObject private var draft: HostingSettingsDraftState
     private let updateProtection: AppUpdateEditorProtection?
     @State private var tokenEditorOwner = UUID()
+    @State private var confirmationOwner = UUID()
+    @State private var dismissalCoordinator = HostingExposureDismissalCoordinator()
     @State private var bindSelection = HostingBindSelectionState()
     @State private var customAddressError: String?
     @State private var bearerTokenText = ""
@@ -39,6 +41,7 @@ struct HostingSettingsView: View {
     }
 
     var body: some View {
+        let confirmation = store.exposureConfirmation(for: confirmationOwner)
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
@@ -103,20 +106,27 @@ struct HostingSettingsView: View {
         .onDisappear {
             bearerTokenText = ""
             updateProtection?.endEditing(owner: tokenEditorOwner)
+            dismissExposureConfirmation(confirmation)
         }
         .confirmationDialog(
-            store.exposureConfirmationTitle,
-            isPresented: exposureConfirmationBinding,
+            confirmation?.title ?? "Confirm local endpoint access",
+            isPresented: exposureConfirmationBinding(confirmation),
             titleVisibility: .visible
         ) {
-            Button(confirmationActionTitle) {
-                Task { await store.confirmPendingExposureConfirmation() }
-            }
-            Button("Cancel", role: .cancel) {
-                store.cancelPendingExposureConfirmation()
+            if let confirmation {
+                Button(confirmation.actionTitle) {
+                    dismissalCoordinator.beginConfirmation(confirmation)
+                    Task {
+                        defer { dismissalCoordinator.endConfirmation(confirmation) }
+                        await store.confirmExposure(confirmation)
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    store.cancelExposure(confirmation)
+                }
             }
         } message: {
-            Text(store.exposureConfirmationMessage)
+            Text(confirmation?.message ?? "Review the endpoint settings before applying.")
         }
     }
 
@@ -650,7 +660,7 @@ struct HostingSettingsView: View {
             } else {
                 HStack(alignment: .center, spacing: 14) {
                     Button(applyTitle) {
-                        Task { await store.requestApply() }
+                        Task { await store.requestApply(confirmationOwner: confirmationOwner) }
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
@@ -711,14 +721,6 @@ struct HostingSettingsView: View {
         return "Choose one active LAN or tailnet interface"
     }
 
-    private var confirmationActionTitle: String {
-        guard let pending = store.pendingExposureConfirmation else { return "Continue" }
-        if !pending.requiresAuthentication {
-            return pending.bindScope == .loopback ? "Disable API-key authentication" : "Expose without API-key authentication"
-        }
-        return pending.bindScope == .allInterfaces ? "Expose on all interfaces" : "Allow LAN access"
-    }
-
     private var portBinding: Binding<String> {
         Binding(
             get: { draft.portText },
@@ -755,10 +757,19 @@ struct HostingSettingsView: View {
         )
     }
 
-    private var exposureConfirmationBinding: Binding<Bool> {
+    private func exposureConfirmationBinding(_ confirmation: HostingExposureConfirmation?) -> Binding<Bool> {
         Binding(
-            get: { store.pendingExposureConfirmation != nil },
-            set: { if !$0 { store.cancelPendingExposureConfirmation() } }
+            get: { confirmation != nil && store.exposureConfirmation(for: confirmationOwner) == confirmation },
+            set: { if !$0 { dismissExposureConfirmation(confirmation) } }
+        )
+    }
+
+    private func dismissExposureConfirmation(_ confirmation: HostingExposureConfirmation?) {
+        guard let confirmation else { return }
+        dismissalCoordinator.scheduleCancellation(
+            confirmation,
+            isPending: { store.exposureConfirmation(for: confirmationOwner) == confirmation },
+            cancel: { store.cancelExposure(confirmation) }
         )
     }
 

@@ -1,5 +1,19 @@
 # Bloomy native polish and efficiency
 
+October 9 popup Hosting ownership: dashboard and popup confirmations now belong
+to one editor and immutable request. Stale callbacks cannot consume newer input;
+request-specific teardown protection lets a newer dialog dismiss while an older
+restart drains. A held-restart regression reproduced the initial suppression
+race. Six new cases, 99 focused checks, 1,838 app plus 49 companion Release tests
+and 49 staging checks pass. Native Cancel/Confirm return, independent invalid
+input, parent-popup dismissal, dark reopen and Discard are checked against all
+142 frozen source inputs. Ordinary panels render; blank dialog capture remains
+failed visual evidence. Installed resource observations identify hidden fitting
+as the next controlled experiment, without claiming savings. No provider
+mutation, installed replacement, push or release occurred. See
+[Hosting ownership review](POPUP_HOSTING_OWNERSHIP_REVIEW_20261009.md) and
+[fitting investigation](POPUP_HIDDEN_FITTING_INVESTIGATION_20261009.md).
+
 October 9 Settings capture-delivery comparison: the actual-host proof now has
 opt-in finite autostart, three cover stages sharing the original three-second
 budget, and a bounded passive notification trace. Matched tool-quiet/continuous
