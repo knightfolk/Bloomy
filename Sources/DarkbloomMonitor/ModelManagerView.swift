@@ -781,10 +781,12 @@ struct ModelManagerView: View {
             }
         }
         .task(id: ModelResidencyFreshnessTaskInput(sources: store.snapshot?.sources,
-            status: providerStatus, daemon: providerDaemonState, isVisible: isVisible)) {
+            status: providerStatus, daemon: providerDaemonState, isVisible: isVisible,
+            loadedModels: liveSnapshot?.loadedModels ?? .unavailable(reason: "Loaded models unavailable"))) {
             guard isVisible else { return }
             let input = ModelResidencyFreshnessTaskInput(sources: store.snapshot?.sources,
-                status: providerStatus, daemon: providerDaemonState, isVisible: isVisible)
+                status: providerStatus, daemon: providerDaemonState, isVisible: isVisible,
+                loadedModels: liveSnapshot?.loadedModels ?? .unavailable(reason: "Loaded models unavailable"))
             while let transition = ModelResidencyFreshnessSchedule.nextTransition(input: input, at: Date()) {
                 do { try await Task.sleep(for: .seconds(max(0.001, transition.timeIntervalSinceNow))) }
                 catch { return }
@@ -891,7 +893,8 @@ struct ModelManagerView: View {
             enabledSelectors: store.draft?.selection.enabled,
             search: search, telemetry: telemetry, at: date,
             controlSnapshot: store.snapshot, providerStatus: providerStatus,
-            providerDaemonState: providerDaemonState
+            providerDaemonState: providerDaemonState,
+            providerLoadedModels: liveSnapshot?.loadedModels ?? .unavailable(reason: "Loaded models unavailable")
         )
     }
 

@@ -90,8 +90,8 @@ enum PopupModelPresentation: Equatable {
         // Telemetry remains a valid fallback when both of its model records
         // are fresh. A stale or unavailable record is never promoted to a
         // loaded/active pill merely because the provider status says running.
-        if let telemetry = freshTelemetryResidency(
-            from: input,
+        if let telemetry = ProviderTelemetryResidency.make(
+            daemon: input.daemonState, loadedModels: input.loadedModels,
             at: currentTime
         ) {
             return .models(DashboardModelDeriver.models(
@@ -110,11 +110,6 @@ enum PopupModelPresentation: Equatable {
     private struct ControlResidency {
         let residentModelIDs: Set<String>
         let daemonState: DaemonState?
-    }
-
-    private struct TelemetryResidency {
-        let daemonState: DaemonState
-        let loadedModels: [String]
     }
 
     private static func freshControlResidency(
@@ -141,38 +136,6 @@ enum PopupModelPresentation: Equatable {
             residentModelIDs: snapshot.residentModelIDs,
             daemonState: snapshot.daemonState
         )
-    }
-
-    private static func freshTelemetryResidency(
-        from input: PopupModelSourceInput,
-        at currentTime: Date
-    ) -> TelemetryResidency? {
-        guard case .available(let daemon, let daemonCapturedAt) = input.daemonState,
-              case .available(let loaded, let loadedCapturedAt) = input.loadedModels,
-              fresh(capturedAt: daemonCapturedAt, at: currentTime),
-              fresh(capturedAt: loadedCapturedAt, at: currentTime),
-              fresh(timestamp: daemon.writtenAt, at: currentTime),
-              loaded.updatedAt.isFinite,
-              daemon.startedAt.isFinite,
-              loaded.updatedAt >= daemon.startedAt,
-              loaded.updatedAt <= currentTime.timeIntervalSince1970
-        else { return nil }
-        return TelemetryResidency(
-            daemonState: daemon,
-            loadedModels: loaded.models
-        )
-    }
-
-    private static func fresh(capturedAt: Date, at currentTime: Date) -> Bool {
-        fresh(timestamp: capturedAt.timeIntervalSince1970, at: currentTime)
-    }
-
-    private static func fresh(timestamp: TimeInterval, at currentTime: Date) -> Bool {
-        guard timestamp.isFinite,
-              currentTime.timeIntervalSince1970.isFinite
-        else { return false }
-        let age = currentTime.timeIntervalSince1970 - timestamp
-        return age.isFinite && age >= 0 && age <= ProviderControlSourceState.maximumEvidenceAge
     }
 
     private static func configuredModels(filter: String?) -> Self {

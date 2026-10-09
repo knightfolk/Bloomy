@@ -94,6 +94,71 @@ struct ModelManagerResidencyTests {
         #expect(ModelCardResidencyPresentation.notDownloaded.status == "Not downloaded")
     }
 
+    @Test("live telemetry keeps residency current after the one-time controls read expires")
+    func liveTelemetryFallback() throws {
+        let model = item()
+        let daemon = try runtimeDaemon(writtenAt: now.timeIntervalSince1970, model: model.catalogID)
+        let old = ProviderControlSourceState.fresh(evidenceAt: now.addingTimeInterval(-11))
+        let evidence = ModelManagerResidencyEvidence.make(control: snapshot(model, daemon: old, loaded: old),
+            status: missingStatus, daemon: .available(value: daemon, capturedAt: now),
+            loadedModels: .available(value: LoadedModelsState(schema: 1, models: [model.catalogID],
+                updatedAt: daemon.startedAt), capturedAt: now), at: now)
+        #expect(evidence.presentation(for: model) == .known(.loadedIdle))
+    }
+
+    @Test("live inference matches local aliases and a retained current name alone does not mean loaded")
+    func telemetryStates() throws {
+        let model = item(localID: "local/gemma")
+        for (active, resident, expected) in [(true, false, InventoryLiveState.active),
+                                           (false, true, .loadedIdle), (false, false, .unloaded)] {
+            let daemon = try runtimeDaemon(writtenAt: now.timeIntervalSince1970, model: "local/gemma",
+                active: active, resident: resident)
+            let evidence = ModelManagerResidencyEvidence.make(control: nil, status: missingStatus,
+                daemon: .available(value: daemon, capturedAt: now),
+                loadedModels: .available(value: LoadedModelsState(schema: 1, models: [],
+                    updatedAt: daemon.startedAt), capturedAt: now), at: now)
+            #expect(evidence.presentation(for: model) == .known(expected))
+        }
+    }
+
+    @Test("live fallback requires both fresh reads and loaded state from this provider lifetime")
+    func rejectsInvalidLiveTelemetry() throws {
+        let model = item(state: .active)
+        let daemon = try runtimeDaemon(writtenAt: now.timeIntervalSince1970, model: model.catalogID)
+        let loaded = LoadedModelsState(schema: 1, models: [model.catalogID], updatedAt: daemon.startedAt)
+        for capturedAt in [now.addingTimeInterval(-10.001), now.addingTimeInterval(0.001),
+                           Date(timeIntervalSince1970: .infinity), Date(timeIntervalSince1970: .nan)] {
+            for (daemonAt, loadedAt) in [(capturedAt, now), (now, capturedAt)] {
+                #expect(ModelManagerResidencyEvidence.make(control: nil, status: missingStatus,
+                    daemon: .available(value: daemon, capturedAt: daemonAt),
+                    loadedModels: .available(value: loaded, capturedAt: loadedAt), at: now)
+                    .presentation(for: model) == .unavailable)
+            }
+        }
+        for updatedAt in [daemon.startedAt - 1, now.timeIntervalSince1970 + 1, Double.infinity, Double.nan] {
+            #expect(ModelManagerResidencyEvidence.make(control: nil, status: missingStatus,
+                daemon: .available(value: daemon, capturedAt: now),
+                loadedModels: .available(value: LoadedModelsState(schema: 1, models: [model.catalogID],
+                    updatedAt: updatedAt), capturedAt: now), at: now).presentation(for: model) == .unavailable)
+        }
+        #expect(ModelManagerResidencyEvidence.make(control: nil, status: missingStatus,
+            daemon: missingDaemon, loadedModels: .available(value: loaded, capturedAt: now), at: now)
+            .presentation(for: model) == .unavailable)
+        #expect(ModelManagerResidencyEvidence.make(control: nil, status: missingStatus,
+            daemon: .available(value: daemon, capturedAt: now), at: now)
+            .presentation(for: model) == .unavailable)
+    }
+
+    @Test("fresh controls retain precedence over fallback telemetry")
+    func freshControlWins() throws {
+        let model = item(state: .unloaded)
+        let daemon = try runtimeDaemon(writtenAt: now.timeIntervalSince1970, model: model.catalogID, active: true)
+        #expect(ModelManagerResidencyEvidence.make(control: snapshot(model), status: missingStatus,
+            daemon: .available(value: daemon, capturedAt: now),
+            loadedModels: .available(value: LoadedModelsState(schema: 1, models: [model.catalogID],
+                updatedAt: daemon.startedAt), capturedAt: now), at: now).presentation(for: model) == .known(.unloaded))
+    }
+
     @Test("changing evidence invalidates residency without rebuilding catalog telemetry or grades")
     func cacheUpdatesOnlyResidency() {
         let model = item()
@@ -113,6 +178,40 @@ struct ModelManagerResidencyTests {
         #expect(cache.gradeBuildCount == 1)
     }
 
+    @Test("telemetry changes update card state without rebuilding shared indexes")
+    func cacheTracksLiveResidency() throws {
+        let model = item()
+        let cache = ModelManagerPresentationCache()
+        for active in [false, true, false] {
+            let daemon = try runtimeDaemon(writtenAt: now.timeIntervalSince1970, model: model.catalogID, active: active)
+            let value = cache.prepare(myCatalog: [model], available: [], enabledSelectors: nil,
+                search: "", telemetry: ModelManagerTelemetry(), at: now,
+                providerDaemonState: .available(value: daemon, capturedAt: now),
+                providerLoadedModels: .available(value: LoadedModelsState(schema: 1, models: [model.catalogID],
+                    updatedAt: daemon.startedAt), capturedAt: now))
+            #expect(value.residencyEvidence.presentation(for: model) == .known(active ? .active : .loadedIdle))
+        }
+        #expect(cache.groupingBuildCount == 1)
+        #expect(cache.telemetryIndexBuildCount == 1)
+        #expect(cache.gradeBuildCount == 1)
+    }
+
+    @Test("fresh loaded reads expire even if daemon reads continue")
+    func loadedReadExpiry() throws {
+        let model = item()
+        let daemon = try runtimeDaemon(writtenAt: now.timeIntervalSince1970, model: model.catalogID)
+        let loaded = LoadedModelsState(schema: 1, models: [model.catalogID], updatedAt: daemon.startedAt)
+        let input = ModelResidencyFreshnessTaskInput(sources: nil, status: missingStatus,
+            daemon: .available(value: daemon, capturedAt: now), isVisible: true,
+            loadedModels: .available(value: loaded, capturedAt: now.addingTimeInterval(-5)))
+        #expect(ModelResidencyFreshnessSchedule.nextTransition(input: input, at: now) == now.addingTimeInterval(5.001))
+        #expect(ModelManagerResidencyEvidence.make(control: nil, status: missingStatus,
+            daemon: input.daemon, loadedModels: input.loadedModels, at: now).presentation(for: model) == .known(.loadedIdle))
+        #expect(ModelManagerResidencyEvidence.make(control: nil, status: missingStatus,
+            daemon: input.daemon, loadedModels: input.loadedModels, at: now.addingTimeInterval(5.001))
+            .presentation(for: model) == .unavailable)
+    }
+
     @Test("residency schedules finite boundary transitions without new payloads")
     func freshnessSchedule() {
         let input = ModelResidencyFreshnessTaskInput(sources: snapshot(item()).sources,
@@ -126,8 +225,8 @@ struct ModelManagerResidencyTests {
         #expect(ModelResidencyFreshnessSchedule.nextTransition(input: invalid, at: now) == nil)
     }
 
-    private func item(state: InventoryLiveState = .unloaded, downloaded: Bool = true) -> ModelInventoryItem {
-        ModelInventoryItem(catalogID: "google/gemma", localID: downloaded ? "google/gemma" : nil,
+    private func item(state: InventoryLiveState = .unloaded, downloaded: Bool = true, localID: String = "google/gemma") -> ModelInventoryItem {
+        ModelInventoryItem(catalogID: "google/gemma", localID: downloaded ? localID : nil,
             displayName: "Gemma", modelType: "text", capabilities: [], sizeGB: 1, minimumRAMGB: 1,
             isDownloaded: downloaded, isEnabled: true, isPreloaded: false, liveState: state, issue: nil)
     }
@@ -143,10 +242,16 @@ struct ModelManagerResidencyTests {
                 loadedModels: loaded ?? .fresh(evidenceAt: now)))
     }
 
-    private func runtimeDaemon(writtenAt: Double) throws -> DaemonState {
+    private func runtimeDaemon(writtenAt: Double, model: String? = nil, active: Bool = false, resident: Bool = true) throws -> DaemonState {
         let url = try #require(Bundle.module.url(forResource: "daemon-state-online", withExtension: "json", subdirectory: "Fixtures"))
         var json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         json["written_at"] = writtenAt
+        if let model {
+            json["current_model"] = model
+            json["inference_active"] = active
+            json["warm_models"] = resident ? [model] : []
+            json["slots"] = []
+        }
         return try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: json))
     }
 }

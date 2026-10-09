@@ -1,5 +1,16 @@
 # Bloomy native polish and efficiency
 
+October 9 live model residency follow-up: Models now shares validated live
+loaded/daemon reads with popup pills after independent control evidence expires.
+Finite read deadlines preserve unknown states, and live changes do not rebuild
+catalog/index/grades or add polling. The initial native failure and red regression
+were reproduced; 1,832 serial Release app tests plus 49 companion tests pass.
+Optimized native fixture Serving/Ready/Unavailable transitions pass without
+refreshing controls; actual stopped/resumed provider states are checked read-only.
+The earlier October 8 review artifacts remain historical checkpoints, not the
+current source build. See [live residency review](MODEL_RESIDENCY_LIVE_REVIEW_20261009.md).
+
+
 October 8–9 popup control and live graphics checkpoint: operational panels now
 open directly from the popup, with retained Hosting drafts, safe sheet handoffs
 and one lifecycle confirmation owner. Model rows are 52 points in the popup and

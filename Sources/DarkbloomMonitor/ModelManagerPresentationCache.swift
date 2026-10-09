@@ -55,17 +55,20 @@ enum ModelCardResidencyPresentation: Equatable {
 struct ModelManagerResidencyEvidence: Equatable {
     var providerKnownStopped = false
     var controlResidencyIsFresh = false
+    var telemetryResidency: ProviderTelemetryResidency? = nil
 
     func presentation(for item: ModelInventoryItem) -> ModelCardResidencyPresentation {
         guard item.isDownloaded else { return .notDownloaded }
         if providerKnownStopped { return .known(.unloaded) }
-        return controlResidencyIsFresh ? .known(item.liveState) : .unavailable
+        if controlResidencyIsFresh { return .known(item.liveState) }
+        return telemetryResidency.map { .known($0.liveState(for: item)) } ?? .unavailable
     }
 
     static func make(
         control: ProviderControlSnapshot?,
         status: SourceAvailability<StatusSnapshot>,
         daemon: SourceAvailability<DaemonState>,
+        loadedModels: SourceAvailability<LoadedModelsState> = .unavailable(reason: "Loaded models unavailable"),
         at date: Date
     ) -> Self {
         let lifecycle = ProviderLifecycleSourceInput(
@@ -80,7 +83,8 @@ struct ModelManagerResidencyEvidence: Equatable {
                 .isMarkedFresh == true
         }
         return Self(providerKnownStopped: lifecycle.providerKnownRunning == false,
-            controlResidencyIsFresh: fresh(control?.sources.daemon) && fresh(control?.sources.loadedModels))
+            controlResidencyIsFresh: fresh(control?.sources.daemon) && fresh(control?.sources.loadedModels),
+            telemetryResidency: ProviderTelemetryResidency.make(daemon: daemon, loadedModels: loadedModels, at: date))
     }
 
     private static func freshAvailability<Value: Equatable & Sendable>(
@@ -164,10 +168,11 @@ final class ModelManagerPresentationCache {
         telemetry: ModelManagerTelemetry, at date: Date,
         controlSnapshot: ProviderControlSnapshot? = nil,
         providerStatus: SourceAvailability<StatusSnapshot> = .unavailable(reason: "Provider status unavailable"),
-        providerDaemonState: SourceAvailability<DaemonState> = .unavailable(reason: "Provider activity unavailable")
+        providerDaemonState: SourceAvailability<DaemonState> = .unavailable(reason: "Provider activity unavailable"),
+        providerLoadedModels: SourceAvailability<LoadedModelsState> = .unavailable(reason: "Loaded models unavailable")
     ) -> ModelManagerPreparedPresentation {
         prepared.residencyEvidence = ModelManagerResidencyEvidence.make(control: controlSnapshot,
-            status: providerStatus, daemon: providerDaemonState, at: date)
+            status: providerStatus, daemon: providerDaemonState, loadedModels: providerLoadedModels, at: date)
         let selectors = enabledSelectors.map(Set.init)
         func isEnabled(_ item: ModelInventoryItem) -> Bool {
             guard let selectors else { return item.isEnabled }
@@ -239,6 +244,7 @@ struct ModelResidencyFreshnessTaskInput: Equatable {
     let status: SourceAvailability<StatusSnapshot>
     let daemon: SourceAvailability<DaemonState>
     let isVisible: Bool
+    var loadedModels: SourceAvailability<LoadedModelsState> = .unavailable(reason: "Loaded models unavailable")
 }
 
 enum ModelResidencyFreshnessSchedule {
@@ -263,6 +269,13 @@ enum ModelResidencyFreshnessSchedule {
         if case .available(let daemon, let capturedAt) = input.daemon {
             include(capturedAt.timeIntervalSince1970, maximumAge: ProviderControlSourceState.maximumEvidenceAge)
             include(daemon.writtenAt, maximumAge: ProviderControlSourceState.maximumEvidenceAge)
+        }
+        if case .available(let loaded, let capturedAt) = input.loadedModels {
+            include(capturedAt.timeIntervalSince1970, maximumAge: ProviderControlSourceState.maximumEvidenceAge)
+            // A future file timestamp can become valid without a new read.
+            if loaded.updatedAt.isFinite, loaded.updatedAt > date.timeIntervalSince1970 {
+                transitions.append(Date(timeIntervalSince1970: loaded.updatedAt))
+            }
         }
         return transitions.min()
     }
