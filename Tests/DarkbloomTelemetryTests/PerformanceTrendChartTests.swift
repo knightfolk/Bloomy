@@ -97,6 +97,38 @@ struct PerformanceTrendChartTests {
         #expect(read.period == .lastHour)
     }
 
+    @Test("dense chart symbols are derived separately from unchanged line observations and summaries")
+    func denseSymbolsPreserveMeasurements() {
+        let samples = (0..<300).map { index in
+            let date = end.addingTimeInterval(Double(index) * 30)
+            return PerformanceSample(observedAt: date, sourceCapturedAt: date,
+                quality: .current, providerSession: "1:2", model: "model", residentModels: ["model"],
+                inferenceActive: true, tokensPerSecond: 45 + Double(index % 5),
+                tokensGenerated: Int64(index * 1_500), requestsServed: Int64(index),
+                gpuUtilizationPercent: Double(index % 100), gpuMemoryGB: 4, powerWatts: 20)
+        }
+        let range = DateInterval(start: end, duration: 86_400)
+        let snapshot = PerformanceMetricsSnapshot(samples: samples, range: range, model: nil)
+        let expectedRates = PerformanceMetricsPresentation.ratePoints(samples: samples)
+        #expect(snapshot.ratePoints.map(\.id) == expectedRates.map(\.id))
+        #expect(snapshot.ratePoints.map(\.rate) == expectedRates.map(\.rate))
+        #expect(snapshot.ratePoints.map(\.run) == expectedRates.map(\.run))
+        #expect(snapshot.rateMarkerIDs.count < 60)
+        #expect(snapshot.rateSingletonIDs.isEmpty)
+        #expect(snapshot.rateMarkerIDs.isSubset(of: Set(expectedRates.map(\.id))))
+        let expectedSummary = PerformanceSummary(samples: samples)
+        #expect(snapshot.summary == expectedSummary)
+        for trend in snapshot.trends {
+            let expected = PerformanceTrend(metric: trend.metric, samples: samples, range: range)
+            #expect(trend.points.count == samples.count)
+            #expect(trend.points.map(\.id) == expected.points.map(\.id))
+            #expect(trend.points.map(\.value) == expected.points.map(\.value))
+            #expect(trend.markerIDs.count < 60)
+            #expect(trend.markerIDs.isSubset(of: Set(trend.points.map(\.id))))
+            #expect(trend.measurementCount == samples.count)
+        }
+    }
+
     private func sample(_ offset: Double, quality: PerformanceSampleQuality = .current,
                         gpu: Double? = 10, model: String = "model", session: String = "1:2",
                         counter: Int64 = 0, captureOffset: Double = 0) -> PerformanceSample {

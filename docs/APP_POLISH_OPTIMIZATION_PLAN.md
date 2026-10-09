@@ -1,5 +1,18 @@
 # Bloomy native polish and efficiency
 
+October 9 Metrics chart symbols: dense charts reduce duplicate point symbols
+while retaining all plotted line observations, run gaps, summary totals and
+model legends. Connected dense token-rate symbols are smaller; singleton and
+short-history symbols retain their original size. Native compact light/dark,
+grayscale, wide dark and sparse one-hour evidence passes against all 143 source
+inputs. The full 1,874 app tests, 49 Companion checks, 68 focused optimized
+checks, 49 staging checks, ordinary Release build and optimized fixture signature
+pass. Thinning alone was insufficient for fragmented history and was followed
+by the smaller connected-run symbols. Actual VoiceOver, large text, the broader
+chart matrix and production/distribution gates remain open; the sparse native
+status also exposed "1 samples" for the next text-polish pass. No push or release.
+See [chart symbol review](METRICS_CHART_POLISH_20261009.md).
+
 October 9 current Metrics review: all five hour scopes, model/without-work
 filters, compact light/dark and wide dark layouts have fresh native evidence
 against a 100,000-record journal. A separate rolling-refresh qualifier validates

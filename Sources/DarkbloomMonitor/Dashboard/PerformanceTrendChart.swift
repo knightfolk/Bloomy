@@ -45,13 +45,14 @@ struct PerformanceTrendPoint: Identifiable, Sendable {
 struct PerformanceTrend: Identifiable, Sendable {
     let metric: PerformanceTrendMetric
     let points: [PerformanceTrendPoint]
+    let markerIDs: Set<UUID>
     let measurementCount: Int
     let latest: PerformanceSample?
     let wasReduced: Bool
     let upperBound: Double
     var id: PerformanceTrendMetric { metric }
 
-    init(metric: PerformanceTrendMetric, samples: [PerformanceSample], model: String? = nil, limit: Int = 600) {
+    init(metric: PerformanceTrendMetric, samples: [PerformanceSample], model: String? = nil, limit: Int = 600, range: DateInterval? = nil) {
         self.metric = metric
         latest = samples.last { model == nil || $0.model == model }
         var points: [PerformanceTrendPoint] = []
@@ -91,6 +92,11 @@ struct PerformanceTrend: Identifiable, Sendable {
                 points[Int(Double(index) * Double(points.count - 1) / Double(budget - 1))]
             }
         } else { self.points = points }
+        let markerStart = self.points.first?.date ?? .distantPast
+        let markerRange = range ?? DateInterval(start: markerStart,
+            duration: max(0, (self.points.last?.date ?? markerStart).timeIntervalSince(markerStart)))
+        markerIDs = PerformanceChartMarkers.retainedIDs(in: self.points,
+            id: \.id, date: \.date, value: \.value, run: \.run, visibleRange: markerRange)
         upperBound = metric == .gpu ? 100 : max(1, maximum * 1.1)
     }
 
@@ -134,8 +140,10 @@ struct PerformanceTrendChart: View {
                         series: .value("Measured run", point.run))
                         .interpolationMethod(.linear)
                         .lineStyle(StrokeStyle(lineWidth: 1.8))
-                    PointMark(x: .value("Observed", point.date), y: .value(trend.metric.unit, point.value))
-                        .symbolSize(12)
+                    if trend.markerIDs.contains(point.id) {
+                        PointMark(x: .value("Observed", point.date), y: .value(trend.metric.unit, point.value))
+                            .symbolSize(12)
+                    }
                 }
                 .foregroundStyle(Color.accentColor)
                 .chartXScale(domain: range.start...range.end)

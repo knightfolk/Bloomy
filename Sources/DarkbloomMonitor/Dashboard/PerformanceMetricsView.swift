@@ -502,10 +502,12 @@ struct PerformanceMetricsContent: View {
                         .foregroundStyle(by: .value("Model", point.model))
                         .lineStyle(by: .value("Model", point.model))
                         .interpolationMethod(.linear)
-                    PointMark(x: .value("Observed", point.date), y: .value("Tokens per second", point.rate))
-                        .foregroundStyle(by: .value("Model", point.model))
-                        .symbol(by: .value("Model", point.model))
-                        .symbolSize(24)
+                    if presentation.rateMarkerIDs.contains(point.id) {
+                        PointMark(x: .value("Observed", point.date), y: .value("Tokens per second", point.rate))
+                            .foregroundStyle(by: .value("Model", point.model))
+                            .symbol(by: .value("Model", point.model))
+                            .symbolSize(ratePoints.count > 60 && !presentation.rateSingletonIDs.contains(point.id) ? 9 : 24)
+                    }
                 }
                 .chartXScale(domain: range.start...range.end)
                 .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
@@ -816,6 +818,8 @@ struct PerformanceMetricsSnapshot: Sendable {
     let latest: PerformanceSample?
     let latestForModel: PerformanceSample?
     let ratePoints: [PerformanceRatePoint]
+    let rateMarkerIDs: Set<UUID>
+    let rateSingletonIDs: Set<UUID>
     let chartWasReduced: Bool
     let trends: [PerformanceTrend]
     let transitions: [PerformanceModelTransition]
@@ -849,7 +853,7 @@ struct PerformanceMetricsSnapshot: Sendable {
         let ratePoints = PerformanceMetricsPresentation.reducedRatePoints(points)
         if cancellationRequested() { self = Self.empty; return }
         let trends = PerformanceTrendMetric.allCases.map {
-            PerformanceTrend(metric: $0, samples: residentMeasurements, model: model)
+            PerformanceTrend(metric: $0, samples: residentMeasurements, model: model, range: range)
         }
         if cancellationRequested() { self = Self.empty; return }
         let changes = PerformanceMetricsPresentation.transitions(samples: inPeriod)
@@ -865,6 +869,9 @@ struct PerformanceMetricsSnapshot: Sendable {
         self.latestForModel = latestForModel
         chartWasReduced = points.count > 600
         self.ratePoints = ratePoints
+        rateMarkerIDs = PerformanceChartMarkers.retainedIDs(in: ratePoints,
+            id: \.id, date: \.date, value: \.rate, run: \.run, visibleRange: range)
+        rateSingletonIDs = PerformanceChartMarkers.isolatedIDs(in: ratePoints, id: \.id, run: \.run)
         self.trends = trends
         transitionCount = changes.count
         transitions = Array(changes.suffix(100))
