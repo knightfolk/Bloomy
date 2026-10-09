@@ -1,5 +1,19 @@
 # Bloomy native polish and efficiency
 
+October 9 retained popup fitting: native popup close now synchronously suspends
+forced and automatic preferred-content sizing while retaining its document and
+editors. Fresh geometry is prepared before reopening. The matched inert workload
+makes zero explicit closed-document fits versus 31 previously, with unchanged
+scroll position and current reopening geometry; this is not a whole-app CPU
+claim. Red geometry failures, 35 focused checks, 1,840 reported app Release tests
+(seven existing opt-in skips), 49 companion tests and 49 staging checks pass.
+Native first open, Available/scroll retention, unfinished Hosting input across
+dark reopening, in-popup model management, accepted-work Cancel and a changed
+240-point viewport are checked against all 142 frozen source inputs. Review app
+and finite jobs exit normally. Dialog pixels, native occlusion and broader
+resource qualification remain open; no installed replacement, provider mutation,
+push or release occurred. See [fitting isolation review](POPUP_FITTING_ISOLATION_REVIEW_20261009.md).
+
 October 9 popup Hosting ownership: dashboard and popup confirmations now belong
 to one editor and immutable request. Stale callbacks cannot consume newer input;
 request-specific teardown protection lets a newer dialog dismiss while an older

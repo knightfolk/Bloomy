@@ -466,14 +466,15 @@ struct MonitorPopoverLayoutTests {
 
         #expect(controller.statusItemLength == 80)
         #expect(controller.dashboardWindowController == nil)
+        let initialPopupSize = controller.popoverContentSize
         controller.showDashboard(activate: false)
         let firstWindow = controller.dashboardWindowController?.window
         controller.showSettings(activate: false)
         #expect(controller.dashboardWindowController?.window === firstWindow)
         #expect(controller.dashboardWindowController?.navigation.selected == .settings)
         controller.invalidate()
-        #expect(controller.popoverContentSize.width == 560)
-        #expect(controller.popoverContentSize.height > 0)
+        // Dashboard navigation must not fit a popup that has never been presented.
+        #expect(controller.popoverContentSize == initialPopupSize)
     }
 
     @Test("popover placement uses its complete content height after content changes")
@@ -483,6 +484,8 @@ struct MonitorPopoverLayoutTests {
             rootView: Color.clear.frame(width: 560, height: 605), popover: popover
         )
         popover.contentViewController = host
+        #expect(!host.isFittingActive)
+        #expect(host.sizingOptions.isEmpty)
         host.prepareForPresentation()
         #expect(popover.contentSize == NSSize(width: 560, height: 605))
         #expect(host.sizingOptions == .preferredContentSize)

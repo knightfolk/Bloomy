@@ -28,16 +28,62 @@ private struct PopupContentHeightBudgetKey: EnvironmentKey {
     static let defaultValue: CGFloat? = nil
 }
 
+private struct PopupFittingActiveKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+private struct PopupFittingPresentationKey: EnvironmentKey {
+    static let defaultValue: PopupPresentationLayoutBudget? = nil
+}
+
 extension EnvironmentValues {
     var popupContentHeightBudget: CGFloat? {
         get { self[PopupContentHeightBudgetKey.self] }
         set { self[PopupContentHeightBudgetKey.self] = newValue }
     }
+
+    /// Standalone documents fit normally. The popup controller suspends fitting
+    /// while retaining its hosted document between presentations.
+    var popupFittingActive: Bool {
+        get { self[PopupFittingActiveKey.self] }
+        set { self[PopupFittingActiveKey.self] = newValue }
+    }
+
+    var popupFittingPresentation: PopupPresentationLayoutBudget? {
+        get { self[PopupFittingPresentationKey.self] }
+        set { self[PopupFittingPresentationKey.self] = newValue }
+    }
+}
+
+@MainActor
+private protocol PopupFittingActivityReceiving: AnyObject {
+    func setFittingActive(_ active: Bool)
 }
 
 @MainActor
 final class PopupPresentationLayoutBudget: ObservableObject {
     @Published var maximumContentHeight: CGFloat?
+    @Published private(set) var fittingActive = false
+    private let documents = NSHashTable<AnyObject>.weakObjects()
+
+    fileprivate func register(_ document: any PopupFittingActivityReceiving) {
+        documents.add(document)
+        document.setFittingActive(fittingActive)
+    }
+
+    fileprivate func unregister(_ document: any PopupFittingActivityReceiving) {
+        documents.remove(document)
+    }
+
+    fileprivate func setFittingActive(_ active: Bool) {
+        guard fittingActive != active else { return }
+        fittingActive = active
+        // Native dismissal must cancel already queued fits synchronously.
+        // Waiting for SwiftUI to propagate the environment leaves an actor-turn race.
+        for case let document as any PopupFittingActivityReceiving in documents.allObjects {
+            document.setFittingActive(active)
+        }
+    }
 }
 
 struct PopoverFittingRoot<Content: View>: View {
@@ -46,6 +92,8 @@ struct PopoverFittingRoot<Content: View>: View {
 
     var body: some View {
         content.environment(\.popupContentHeightBudget, budget.maximumContentHeight)
+            .environment(\.popupFittingActive, budget.fittingActive)
+            .environment(\.popupFittingPresentation, budget)
     }
 }
 
@@ -94,7 +142,7 @@ private struct PopupScrollDocument<Content: View>: View {
 }
 
 @MainActor
-final class PopupScrollView<Content: View>: NSScrollView {
+final class PopupScrollView<Content: View>: NSScrollView, PopupFittingActivityReceiving {
     private let host: PopupScrollDocumentController<Content>
     private var contentWidth: CGFloat
     private var maximumHeight: CGFloat?
@@ -102,10 +150,14 @@ final class PopupScrollView<Content: View>: NSScrollView {
     private var needsInitialScrollPosition = true
     private var pendingMeasurement: Task<Void, Never>?
     private var isInvalidated = false
+    private var fittingActive = false
+    private var retainedIntrinsicSize: NSSize?
+    private weak var presentation: PopupPresentationLayoutBudget?
 
     init(content: Content, environment: EnvironmentValues, width: CGFloat, maximumHeight: CGFloat?) {
         contentWidth = width
         self.maximumHeight = maximumHeight
+        retainedIntrinsicSize = NSSize(width: width, height: 0)
         host = PopupScrollDocumentController(rootView: PopupScrollDocument(content: content, environment: environment, width: width))
         super.init(frame: .zero)
         drawsBackground = false
@@ -121,7 +173,7 @@ final class PopupScrollView<Content: View>: NSScrollView {
         setAccessibilityIdentifier("popover.outerScroll")
         setAccessibilityLabel("Popup content")
         host.sizeChanged = { [weak self] size in self?.setDocumentSize(size) }
-        host.sizingOptions = .preferredContentSize
+        updatePresentation(environment)
         measureDocument()
     }
 
@@ -131,35 +183,64 @@ final class PopupScrollView<Content: View>: NSScrollView {
     func update(content: Content, environment: EnvironmentValues, width: CGFloat, maximumHeight: CGFloat?) {
         guard !isInvalidated else { return }
         let oldSize = intrinsicContentSize
+        let wasActive = fittingActive
+        updatePresentation(environment)
         let widthChanged = contentWidth != width
         contentWidth = width
         self.maximumHeight = maximumHeight
         host.rootView = PopupScrollDocument(content: content, environment: environment, width: width)
         // Several observed sources can arrive in one UI cycle. Fit their latest
         // content once, while keeping width changes and layout requests immediate.
-        if widthChanged { measureDocument() } else { scheduleMeasurement() }
+        if fittingActive {
+            if widthChanged || !wasActive { measureDocument() } else { scheduleMeasurement() }
+        }
         if intrinsicContentSize != oldSize { invalidateIntrinsicContentSize() }
     }
 
+    private func updatePresentation(_ environment: EnvironmentValues) {
+        let nextPresentation = environment.popupFittingPresentation
+        if presentation !== nextPresentation {
+            presentation?.unregister(self)
+            presentation = nextPresentation
+            nextPresentation?.register(self)
+        }
+        setFittingActive(nextPresentation?.fittingActive ?? environment.popupFittingActive)
+    }
+
+    fileprivate func setFittingActive(_ active: Bool) {
+        guard !isInvalidated, fittingActive != active else { return }
+        if !active {
+            if fittingActive { retainedIntrinsicSize = intrinsicContentSize }
+            fittingActive = false
+            pendingMeasurement?.cancel()
+            pendingMeasurement = nil
+            host.sizingOptions = []
+        } else {
+            fittingActive = true
+            retainedIntrinsicSize = nil
+            host.sizingOptions = .preferredContentSize
+        }
+    }
+
     private func scheduleMeasurement() {
-        guard pendingMeasurement == nil else { return }
+        guard fittingActive, pendingMeasurement == nil else { return }
         pendingMeasurement = Task { @MainActor [weak self] in
             await Task.yield()
-            guard !Task.isCancelled, let self, !self.isInvalidated else { return }
+            guard !Task.isCancelled, let self, !self.isInvalidated, self.fittingActive else { return }
             self.pendingMeasurement = nil
             self.measureDocument()
         }
     }
 
     func measureDocument() {
-        guard !isInvalidated else { return }
+        guard !isInvalidated, fittingActive else { return }
         pendingMeasurement?.cancel()
         pendingMeasurement = nil
         setDocumentSize(host.sizeThatFits(in: NSSize(width: contentWidth, height: 0)))
     }
 
     private func setDocumentSize(_ proposed: NSSize) {
-        guard proposed.height.isFinite, proposed.height > 0, contentWidth.isFinite, contentWidth > 0 else { return }
+        guard fittingActive, proposed.height.isFinite, proposed.height > 0, contentWidth.isFinite, contentWidth > 0 else { return }
         let size = NSSize(width: contentWidth, height: ceil(proposed.height))
         guard documentSize != size else { return }
         documentSize = size
@@ -169,7 +250,8 @@ final class PopupScrollView<Content: View>: NSScrollView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: contentWidth, height: min(documentSize.height, maximumHeight ?? documentSize.height))
+        retainedIntrinsicSize
+            ?? NSSize(width: contentWidth, height: min(documentSize.height, maximumHeight ?? documentSize.height))
     }
 
     override func layout() {
@@ -186,6 +268,8 @@ final class PopupScrollView<Content: View>: NSScrollView {
         isInvalidated = true
         pendingMeasurement?.cancel()
         pendingMeasurement = nil
+        presentation?.unregister(self)
+        presentation = nil
         host.sizeChanged = nil
         host.sizingOptions = []
         // Release the hosted SwiftUI subtree even if AppKit retains this view.
@@ -210,6 +294,8 @@ final class FittingPopoverHostingController<Content: View>: NSHostingController<
     private let layoutBudget: PopupPresentationLayoutBudget
     private var injectedMaximumContentHeight: CGFloat?
 
+    var isFittingActive: Bool { layoutBudget.fittingActive }
+
     var content: Content {
         get { rootView.content }
         set { rootView = PopoverFittingRoot(content: newValue, budget: layoutBudget) }
@@ -220,16 +306,22 @@ final class FittingPopoverHostingController<Content: View>: NSHostingController<
         layoutBudget = budget
         super.init(rootView: PopoverFittingRoot(content: rootView, budget: budget))
         self.popover = popover
-        sizingOptions = .preferredContentSize
+        sizingOptions = []
         NotificationCenter.default.addObserver(self, selector: #selector(screenBudgetChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(popoverWillShow),
+            name: NSPopover.willShowNotification, object: popover)
+        for name in [NSPopover.willCloseNotification, NSPopover.didCloseNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(popoverClosed),
+                name: name, object: popover)
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("Use init(rootView:popover:)") }
 
     override var preferredContentSize: NSSize {
-        didSet { synchronizeSize(preferredContentSize) }
+        didSet { if isFittingActive { synchronizeSize(preferredContentSize) } }
     }
 
     deinit { NotificationCenter.default.removeObserver(self) }
@@ -245,12 +337,32 @@ final class FittingPopoverHostingController<Content: View>: NSHostingController<
         }
         injectedMaximumContentHeight = maximumContentHeight.flatMap { $0.isFinite && $0 > 0 ? max(1, floor($0)) : nil }
         updateHeightBudget()
+        resumeFitting()
         view.layoutSubtreeIfNeeded()
         synchronizeSize(sizeThatFits(in: NSSize(width: 560, height: 0)))
     }
 
+    private func resumeFitting() {
+        layoutBudget.setFittingActive(true)
+        sizingOptions = .preferredContentSize
+    }
+
+    @objc private func popoverWillShow() {
+        guard !isFittingActive else { return }
+        updateHeightBudget()
+        resumeFitting()
+        view.layoutSubtreeIfNeeded()
+        synchronizeSize(sizeThatFits(in: NSSize(width: 560, height: 0)))
+    }
+
+    @objc private func popoverClosed() {
+        layoutBudget.setFittingActive(false)
+        sizingOptions = []
+    }
+
     @objc private func screenBudgetChanged() {
         updateHeightBudget()
+        guard isFittingActive else { return }
         view.layoutSubtreeIfNeeded()
         synchronizeSize(sizeThatFits(in: NSSize(width: 560, height: 0)))
     }

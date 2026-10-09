@@ -2313,7 +2313,6 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
             contentController.view.postsFrameChangedNotifications = true
             NotificationCenter.default.addObserver(self, selector: #selector(contentFrameChanged),
                 name: NSView.frameDidChangeNotification, object: contentController.view)
-            contentController.prepareForPresentation()
         }
         let control = model.control
         Task { @MainActor [weak control] in await control?.refreshPreservingDraft() }

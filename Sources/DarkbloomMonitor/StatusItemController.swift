@@ -102,7 +102,6 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             popover: popover
         )
         popover.contentViewController = contentController
-        contentController.prepareForPresentation()
     }
 
     func invalidate() {
