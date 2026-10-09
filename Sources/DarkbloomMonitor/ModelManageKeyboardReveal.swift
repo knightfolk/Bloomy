@@ -3,7 +3,7 @@ import SwiftUI
 
 /// One model is presented per Manage sheet; these IDs belong only to its reader.
 enum ModelManageFocusTarget: Hashable, Sendable {
-    case header, runtime, enabled, preload, delete, details, download, refresh
+    case header, runtime, enabled, preload, delete, details, forecast, download, refresh
 }
 
 private struct ModelManageFocusRevealKey: EnvironmentKey {

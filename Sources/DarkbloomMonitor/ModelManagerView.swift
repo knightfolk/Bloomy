@@ -809,7 +809,7 @@ struct ModelManagerView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
-                                Text("Model settings & forecast").font(.title2.bold())
+                                Text("Model settings").font(.title2.bold())
                                 Spacer()
                                 Button("Done") { inspectedModel = nil }.keyboardShortcut(.cancelAction)
                                     .accessibilityIdentifier("models.manage.done")
@@ -1201,6 +1201,9 @@ struct ModelManagerView: View {
                 } else {
                     AvailableModelRow(item: item, store: store)
                 }
+                Divider()
+                ModelWhatIfForecast(item: item, serving: serving, forecast: forecast,
+                    runPercent: runPercent, setRunPercent: { setWhatIfRunPercent($0, for: item) })
                 modelDetails(item, at: date)
             } else {
                 cardControls(item: item, at: date)
@@ -1565,7 +1568,7 @@ struct ModelCardSummary: View {
             metrics: compactMetrics, contentOnly: true,
             horizontal: horizontal, liveThroughput: liveThroughput,
             throughputPeak: throughputPeak, isVisible: isVisible,
-            demand: demandPresentation ?? ModelCardDemand(model: capacity, isCurrent: capacity != nil),
+            demand: displayedDemand,
             demandScale: demandScale, demandHistory: demandHistory)
     }
 
@@ -1589,6 +1592,12 @@ struct ModelCardSummary: View {
             metrics.append(.init(id: "unknown", symbol: "clock", value: "Learning", caption: "No history yet"))
         }
         return metrics
+    }
+
+    /// Detail and compact faces share retained demand without treating it as
+    /// a fresh input for opportunity grades or forecast calculations.
+    var displayedDemand: ModelCardDemand {
+        demandPresentation ?? ModelCardDemand(model: capacity, isCurrent: capacity != nil)
     }
 
     private var identityRow: some View {
@@ -1971,22 +1980,25 @@ struct ModelCardSummary: View {
 
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
                       alignment: .leading, spacing: 8) {
-                ModelMetricTile(icon: "speedometer", title: "Measured speed", accent: accent) {
+                ModelMetricTile(icon: "speedometer", title: "Average speed today", accent: accent) {
                     if let rate, rate.tokensPerSecond.isFinite, rate.tokensPerSecond > 0, rate.sampleCount > 0 {
                         ModelMetricCopy(
                             value: "\(rate.tokensPerSecond.formatted(.number.precision(.fractionLength(1)))) tok/s",
-                            detail: "\(rate.sampleCount) recent samples"
+                            detail: "\(rate.sampleCount) samples today"
                         )
                     } else {
                         ModelMetricCopy(value: "Collecting speed samples", detail: "Run this model to measure it")
                     }
                 }
-                ModelMetricTile(icon: "chart.line.uptrend.xyaxis", title: "Live demand", accent: accent) {
-                    if let capacity {
+                ModelMetricTile(icon: "chart.line.uptrend.xyaxis", title: "Network demand", accent: accent) {
+                    let demand = displayedDemand
+                    if let model = demand.model {
                         ModelMetricCopy(
-                            value: demandTitle(capacity.demandBand),
-                            detail: "\(capacity.activeRequests) active · \(capacity.queuedRequests) queued · \(capacity.warmProviders) warm"
+                            value: demand.title,
+                            detail: "\(demand.isCurrent ? "" : "Last known: ")\(demand.counts) · \(model.warmProviders) loaded"
                         )
+                        ModelDemandRuler(modelID: item.catalogID, demand: demand,
+                            scale: demandScale ?? ModelDemandScale(models: [model]))
                     } else {
                         ModelMetricCopy(value: "Demand unavailable", detail: "Waiting for a fresh network reading")
                     }
@@ -2019,73 +2031,8 @@ struct ModelCardSummary: View {
                 }
             }
 
-            Divider()
-            scheduleControl
         }
         .accessibilityElement(children: .contain)
-    }
-
-    private var scheduleControl: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline) {
-                Label("What-if daily runtime", systemImage: "clock")
-                    .font(.callout.weight(.semibold))
-                Spacer(minLength: 5)
-                Text("\(runPercent)% · \(hours(runPercent)) h/day")
-                    .font(.callout.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(accent)
-            }
-            Slider(value: Binding(
-                get: { Double(runPercent) },
-                set: { setRunPercent(Int($0.rounded())) }
-            ), in: 0...100, step: 5)
-                .tint(accent)
-                .accessibilityLabel("What-if daily runtime for \(item.displayName)")
-                .accessibilityValue("\(runPercent) percent, \(hours(runPercent)) hours per day")
-                .accessibilityHint(Self.whatIfEstimateHint)
-                .modifier(ModelManageKeyboardReveal(target: .runtime))
-
-            if runPercent > 0, let profit = forecast.profitUSDPerDay {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(accent)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Estimated net \(Self.money(profit))/day · \(Self.money(forecast.profitUSDPerClockHour ?? 0))/clock hour")
-                            .font(.callout.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
-                        if let gross = forecast.grossUSDPerDay,
-                           let electricity = forecast.incrementalElectricityUSDPerDay {
-                            Text("Gross \(Self.money(gross)) · incremental adapter power estimate \(Self.money(electricity)) per day")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        if let tokens = forecast.tokensPerDay {
-                            Text("About \(tokens.formatted(.number.notation(.compactName).precision(.fractionLength(1)))) tokens/day at recent measured speed")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .accessibilityIdentifier("model.\(item.catalogID).forecast")
-            } else if runPercent > 0, let serving, serving.activeHours < 2 {
-                VStack(alignment: .leading, spacing: 3) {
-                    Label("Calibrating payout and power · \(serving.activeHours.formatted(.number.precision(.fractionLength(1)))) of 2 active hours measured", systemImage: "hourglass")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    if let tokens = forecast.tokensPerDay {
-                        Text("Speed-only projection: about \(tokens.formatted(.number.notation(.compactName).precision(.fractionLength(1)))) tokens/day.")
-                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            } else if runPercent > 0, let gross = forecast.grossUSDPerDay {
-                Label("Estimated gross \(Self.money(gross))/day; net awaits a measured idle-power baseline and electricity price.", systemImage: "info.circle")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            } else if runPercent > 0 {
-                Label("No dollar estimate yet: this model needs measured earning, serving-time, and power data first.", systemImage: "info.circle")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            } else {
-                Label("0% runtime selected · the what-if estimate is $0/day. Drag to explore a scenario.", systemImage: "info.circle")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Text("Estimate from recent local model activity, local token speed, and whole-Mac adapter draw above idle. Earnings history is account-level: until provider-aware tracking ships, this what-if assumes this Mac produced the account earnings recorded for this model. Each model’s runtime is an independent what-if, not a schedule or a shared allocation.")
-                .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
-        }
     }
 
     static func companyColor(for modelID: String) -> Color {
@@ -2149,6 +2096,103 @@ struct ModelCardSummary: View {
     }
 }
 
+/// Optional exploration stays after real model controls and owns only its disclosure.
+private struct ModelWhatIfForecast: View {
+    let item: ModelInventoryItem
+    let serving: ModelServingProfitAverage?
+    let forecast: ModelRunForecast
+    let runPercent: Int
+    let setRunPercent: (Int) -> Void
+    @State private var expanded = false
+
+    private var accent: Color { ModelCardSummary.companyColor(for: item.catalogID) }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            scheduleControl.padding(.top, 8)
+        } label: {
+            HStack {
+                Label("What-if forecast", systemImage: "clock")
+                    .font(.callout.weight(.semibold))
+                Spacer(minLength: 8)
+                Text("\(runPercent)% · \(hours(runPercent)) h/day")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            .help(ModelCardSummary.whatIfEstimateHelp)
+        }
+        .disclosureGroupStyle(ModelDetailsDisclosureStyle(focusTarget: .forecast))
+        .accessibilityIdentifier("model.\(item.catalogID).forecastDisclosure")
+    }
+
+    private var scheduleControl: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("What-if daily runtime", systemImage: "clock")
+                    .font(.callout.weight(.semibold))
+                Spacer(minLength: 5)
+                Text("\(runPercent)% · \(hours(runPercent)) h/day")
+                    .font(.callout.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(accent)
+            }
+            Slider(value: Binding(
+                get: { Double(runPercent) },
+                set: { setRunPercent(Int($0.rounded())) }
+            ), in: 0...100, step: 5)
+                .tint(accent)
+                .accessibilityLabel("What-if daily runtime for \(item.displayName)")
+                .accessibilityValue("\(runPercent) percent, \(hours(runPercent)) hours per day")
+                .accessibilityHint(ModelCardSummary.whatIfEstimateHint)
+                .modifier(ModelManageKeyboardReveal(target: .runtime))
+
+            if runPercent > 0, let profit = forecast.profitUSDPerDay {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(accent)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Estimated net \(ModelCardSummary.money(profit))/day · \(ModelCardSummary.money(forecast.profitUSDPerClockHour ?? 0))/clock hour")
+                            .font(.callout.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                        if let gross = forecast.grossUSDPerDay,
+                           let electricity = forecast.incrementalElectricityUSDPerDay {
+                            Text("Gross \(ModelCardSummary.money(gross)) · incremental adapter power estimate \(ModelCardSummary.money(electricity)) per day")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let tokens = forecast.tokensPerDay {
+                            Text("About \(tokens.formatted(.number.notation(.compactName).precision(.fractionLength(1)))) tokens/day at recent measured speed")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .accessibilityIdentifier("model.\(item.catalogID).forecast")
+            } else if runPercent > 0, let serving, serving.activeHours < 2 {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("Calibrating payout and power · \(serving.activeHours.formatted(.number.precision(.fractionLength(1)))) of 2 active hours measured", systemImage: "hourglass")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let tokens = forecast.tokensPerDay {
+                        Text("Speed-only projection: about \(tokens.formatted(.number.notation(.compactName).precision(.fractionLength(1)))) tokens/day.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } else if runPercent > 0, let gross = forecast.grossUSDPerDay {
+                Label("Estimated gross \(ModelCardSummary.money(gross))/day; net awaits a measured idle-power baseline and electricity price.", systemImage: "info.circle")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else if runPercent > 0 {
+                Label("No dollar estimate yet: this model needs measured earning, serving-time, and power data first.", systemImage: "info.circle")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Label("0% runtime selected · the what-if estimate is $0/day. Drag to explore a scenario.", systemImage: "info.circle")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Estimate from recent local model activity, local token speed, and whole-Mac adapter draw above idle. Earnings history is account-level: until provider-aware tracking ships, this what-if assumes this Mac produced the account earnings recorded for this model. Each model’s runtime is an independent what-if, not a schedule or a shared allocation.")
+                .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func hours(_ percent: Int) -> String {
+        ModelManagerPresentation.runHoursPerDay(percent: percent)
+            .formatted(.number.precision(.fractionLength(0...1)))
+    }
+}
+
 private struct ModelMetricTile<Content: View>: View {
     let icon: String
     let title: String
@@ -2189,6 +2233,8 @@ private struct ModelMetricCopy: View {
 }
 
 private struct ModelDetailsDisclosureStyle: DisclosureGroupStyle {
+    var focusTarget: ModelManageFocusTarget = .details
+
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Button {
@@ -2205,7 +2251,7 @@ private struct ModelDetailsDisclosureStyle: DisclosureGroupStyle {
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
-            .modifier(ModelManageKeyboardReveal(target: .details))
+            .modifier(ModelManageKeyboardReveal(target: focusTarget))
             if configuration.isExpanded {
                 configuration.content.padding(.leading, 14)
             }

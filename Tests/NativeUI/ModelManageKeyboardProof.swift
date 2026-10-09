@@ -8,7 +8,8 @@ import DarkbloomTelemetry
 @MainActor
 enum ModelManageKeyboardProof {
     static func run(outputDirectory: URL) async -> Bool {
-        let expected = ["forward_reveals_native_controls", "backward_reveals_native_controls", "footer_closes_sheet"]
+        let expected = ["forward_reveals_native_controls", "backward_reveals_native_controls", "footer_closes_sheet",
+            "forecast_starts_collapsed_and_opens_without_mutation"]
         let deadline = ContinuousClock.now.advanced(by: .seconds(45))
         var cases: [[String: Any]] = [], events: [[String: Any]] = [], failures: [String] = []
         var fixture: ManageKeyboardFixture?
@@ -56,6 +57,16 @@ enum ModelManageKeyboardProof {
                 "Manage sheet is not constrained to 360 points")
             try manageKeyboardRequire(scroll.documentView!.bounds.height > scroll.contentView.bounds.height + 40,
                 "Fixture content does not actually overflow its viewport")
+            try manageKeyboardRequire(owned.matching("What-if daily runtime for Keyboard fixture",
+                roles: ["AXSlider"], in: sheet).isEmpty, "Optional forecast starts expanded")
+            try await owned.seek("forecast", sheet: sheet, deadline: deadline, evidence: &events)
+            try manageKeyboardPress(owned.control("forecast", in: sheet))
+            try await manageKeyboardWait("Forecast disclosure did not reveal its runtime control", deadline: deadline) {
+                owned.layout()
+                return owned.matching("What-if daily runtime for Keyboard fixture", roles: ["AXSlider"], in: sheet).count == 1
+            }
+            try owned.assertUnchanged()
+            cases.append(["name": expected[3], "passed": true])
             // Native disabled Delete is the only optional control; mandatory
             // runtime/switch/Details controls are never skipped for preferences.
             let delete = owned.matching("Delete Keyboard fixture", roles: ["AXButton"], in: sheet)
@@ -150,7 +161,7 @@ private final class ManageKeyboardFixture {
     let window: NSWindow
     private var baselineDraft: ProviderConfigDraft?
     private var baselineDefaults: [String: Any] = [:]
-    private let required: Set<String> = ["header", "footer", "runtime", "enabled", "preload", "details"]
+    private let required: Set<String> = ["header", "footer", "runtime", "enabled", "preload", "details", "forecast"]
 
     init() {
         defaults = UserDefaults(suiteName: namespace)!
@@ -221,6 +232,13 @@ private final class ManageKeyboardFixture {
     }
     func control(_ target: String, in sheet: NSWindow) throws -> NSObject {
         switch target {
+        case "forecast":
+            let found = manageKeyboardNodes(sheet).filter {
+                ["AXButton", "AXDisclosureTriangle"].contains(manageKeyboardRole($0))
+                    && manageKeyboardName($0).hasPrefix("What-if forecast")
+            }
+            try manageKeyboardRequire(found.count == 1, "Expected one forecast disclosure; found \(found.count)")
+            return found[0]
         case "runtime": return try exact("What-if daily runtime for Keyboard fixture", roles: ["AXSlider"], in: sheet)
         case "enabled": return try exact("Disable Keyboard fixture", roles: ["AXSwitch", "AXCheckBox"], in: sheet)
         case "preload": return try exact("Preload Keyboard fixture", roles: ["AXSwitch", "AXCheckBox"], in: sheet)

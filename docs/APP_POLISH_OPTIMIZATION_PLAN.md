@@ -1,5 +1,18 @@
 # Bloomy native polish and efficiency
 
+October 9 popup model management: real controls now precede a collapsed optional
+forecast; selected hours stay visible and accessible. Detail demand retains
+explicitly stale counts and shares the complete snapshot's ruler; grades still
+use fresh inputs only. Speed labels match today's qualified samples. Final dark
+popup, 25% scenario retention, independent model identity and light 360-point
+dashboard-sheet scroll/footer proof pass against all 142 frozen source inputs.
+The 39 focused checks, 1,851 reported app Release tests, 49 companion tests and
+49 staging checks pass. Automated keyboard traversal stops before semantic cases
+because the owned review app cannot activate; that gate remains open, with the
+final review left at Overview awaiting foreground activation. No installed
+replacement, provider mutation, push or release occurs. See
+[model-management review](MODEL_MANAGEMENT_POLISH_REVIEW_20261009.md).
+
 October 9 model earnings precision: Models, its detail/what-if panels and popup
 summaries now share Overview/Activity's amount formatting. Small nonzero amounts
 and losses remain visible; nonfinite values stay unknown. Native optimized
