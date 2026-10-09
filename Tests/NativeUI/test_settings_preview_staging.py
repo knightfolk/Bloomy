@@ -57,9 +57,40 @@ class SettingsPreviewStagingTests(unittest.TestCase):
                          'probe["passed"] as? Bool == true', 'session.coverProbes.append(probe)',
                          'throw CancellationError()', 'defer { window.setFrame(originalFrame, display: false) }']:
             self.assertIn(required, block)
-        self.assertEqual(block.count('session.wait('), 1)
+        self.assertEqual(block.count('session.wait('), 3)
+        self.assertEqual(block.count('deadline: prerequisiteDeadline'), 3)
+        self.assertIn('let prerequisiteDeadline = CACurrentMediaTime() + 3', block)
+        wait = self.source.split('func wait(_ code:', 1)[1].split('func eligible()', 1)[0]
+        self.assertLess(wait.index('guard CACurrentMediaTime() < end'), wait.index('if try predicate()'))
+        for stage in ['opaque_coverage', 'native_occlusion', 'product_response']:
+            self.assertIn('record("' + stage + '")', block)
         for forbidden in ['postNotification', 'synchronizeAnimation', 'configure(', 'CATransaction', 'displayIfNeeded', 'layoutSubtree']:
             self.assertNotIn(forbidden, block)
+
+    def test_notifications_are_passive_bounded_and_removed(self):
+        self.assertIn('NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main', self.source)
+        self.assertIn('defer { NotificationCenter.default.removeObserver(occlusionObserver) }', self.source)
+        self.assertIn('if occlusionNotifications.count > 64', self.source)
+        self.assertIn('droppedOcclusionNotifications += dropped', self.source)
+        self.assertIn('"occlusionNotificationCapacity": 64', self.source)
+        self.assertIn('"droppedOcclusionNotifications": droppedOcclusionNotifications', self.source)
+        observer = self.source.split('func recordOcclusionNotification()', 1)[1].split('func host()', 1)[0]
+        for forbidden in ['refreshVisibility', 'configure', 'add(', 'post(', 'setFrame', 'presentation()']:
+            self.assertNotIn(forbidden, observer)
+
+    def test_autostart_is_once_after_ready_and_uses_existing_joined_termination(self):
+        fixture = Path(__file__).with_name('DashboardFixture.swift').read_text()
+        block = fixture.split('if generation == loadGeneration { loadTask = nil }', 1)[1].split('private func prepare', 1)[0]
+        self.assertIn('#if FIXTURE_SETTINGS_PREVIEW_PROOF', block)
+        for required in ['ready, !isTerminating, !proofRunning', 'scenario == .fresh, !settingsPreviewAutostarted',
+                         'CommandLine.arguments.contains("--settings-preview-autostart")',
+                         'settingsPreviewAutostarted = true', 'runSettingsPreviewProof()']:
+            self.assertIn(required, block)
+        proof = fixture.split('func runSettingsPreviewProof()', 1)[1].split('func runCacheVisibilityProof()', 1)[0]
+        self.assertIn('nativeProofTask = nil', proof)
+        self.assertIn('DispatchQueue.main.async { NSApplication.shared.terminate(nil) }', proof)
+        self.assertIn('SETTINGS_PREVIEW_OUTPUT=', proof)
+        self.assertIn('cleanup: {\n                await self.model.stopForTermination()', fixture)
 
 
 if __name__ == '__main__':

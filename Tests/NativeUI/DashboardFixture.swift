@@ -1428,6 +1428,7 @@ private final class FixtureModel: ObservableObject {
     #if FIXTURE_SETTINGS_PREVIEW_PROOF
     @Published private(set) var settingsPreviewProofStatus = "Settings preview proof"
     private var settingsPreviewProofRunning = false
+    private var settingsPreviewAutostarted = false
     #endif
     private var nativeProofTask: Task<Void, Never>?
     @Published private(set) var cacheProofStatus = "Cache visibility proof"
@@ -1880,6 +1881,14 @@ private final class FixtureModel: ObservableObject {
         loadTask = task
         await task.value
         if generation == loadGeneration { loadTask = nil }
+        #if FIXTURE_SETTINGS_PREVIEW_PROOF
+        if generation == loadGeneration, ready, !isTerminating, !proofRunning,
+           scenario == .fresh, !settingsPreviewAutostarted,
+           CommandLine.arguments.contains("--settings-preview-autostart") {
+            settingsPreviewAutostarted = true
+            runSettingsPreviewProof()
+        }
+        #endif
     }
     private func prepare(_ requestedScenario: FixtureScenario, generation: Int) async {
         liveTelemetryMode = .scenario
@@ -2127,12 +2136,23 @@ private final class FixtureModel: ObservableObject {
         settingsPreviewProofStatus = "Settings preview proof running…"
         settingsPreviewProofRunning = true
         nativeProofTask = Task { @MainActor in
-            defer { settingsPreviewProofRunning = false; nativeProofTask = nil }
+            defer {
+                settingsPreviewProofRunning = false
+                nativeProofTask = nil
+                if settingsPreviewAutostarted {
+                    // Return from the proof task before the fixture's existing
+                    // termination gate cancels and joins its owned work.
+                    DispatchQueue.main.async { NSApplication.shared.terminate(nil) }
+                }
+            }
             let publication = telemetryPublicationTask
             publication?.cancel()
             await publication?.value
             let output = directory.appendingPathComponent("settings-preview", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            if settingsPreviewAutostarted {
+                FileHandle.standardOutput.write(Data("SETTINGS_PREVIEW_OUTPUT=\(output.path)\n".utf8))
+            }
             let suite = "dev.darkbloom.settings-preview-proof.\(UUID().uuidString)"
             let proofDefaults = UserDefaults(suiteName: suite)!
             defer { proofDefaults.removePersistentDomain(forName: suite) }

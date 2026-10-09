@@ -1,5 +1,17 @@
 # Bloomy native polish and efficiency
 
+October 9 Settings capture-delivery comparison: the actual-host proof now has
+opt-in finite autostart, three cover stages sharing the original three-second
+budget, and a bounded passive notification trace. Matched tool-quiet/continuous
+capture pairs, including a fresh identifier, each pass eleven of twelve cases.
+Opaque coverage is established; native occlusion never arrives, so genuine
+stopped/recovered motion remains unverified. All owned processes exit normally;
+49 staging checks and exact 142-input matching pass. No product workaround or
+release-gate substitution is made. Further unchanged cover/capture/identity
+repeats are not justified; continue independent native UI/accessibility/resource
+qualification. See [capture delivery review](SETTINGS_CAPTURE_DELIVERY_REVIEW_20261009.md).
+
+
 October 9 live model residency follow-up: Models now shares validated live
 loaded/daemon reads with popup pills after independent control evidence expires.
 Finite read deadlines preserve unknown states, and live changes do not rebuild

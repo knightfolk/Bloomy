@@ -12,6 +12,14 @@ enum SettingsPreviewProof {
                     reopen: @MainActor () -> Void, extrasClient: SettingsProofExtras,
                     outputDirectory: URL) async -> [String: Any] {
         let session = Session(window: window, navigation: navigation, store: store, output: outputDirectory)
+        let occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
+        ) { [weak session] _ in
+            MainActor.assumeIsolated {
+                session?.recordOcclusionNotification()
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(occlusionObserver) }
         func fresh(_ active: Bool = true) async throws {
             try Task.checkCancellation()
             session.active = active
@@ -239,18 +247,39 @@ enum SettingsPreviewProof {
                         && (32...1_024).contains(coverFrame.height), "cover_actual_frame_out_of_bounds")
             let probe = await MenuBarMotionProof.settingsCoverProbe(frame: coverFrame) { number, process, ready in
                 var server = [[String: Any]]()
+                var stages = [[String: Any]]()
                 do {
-                    // One bounded prerequisite respects the child's existing
-                    // eight-second lifetime. Geometry alone cannot pass it.
-                    try await session.wait("supported_cover_not_genuinely_occluded") {
+                    // Split delivery from product response without extending
+                    // the original total three-second prerequisite budget.
+                    let prerequisiteDeadline = CACurrentMediaTime() + 3
+                    @MainActor func covered() throws -> Bool {
                         try session.requireIdentity(host)
                         try require(host.geometry == geometry, "covered_geometry_changed")
                         server = session.windowServerEntries(numbers: [window.windowNumber, number])
                         return process.isRunning && window.isVisible && !window.isMiniaturized
                             && session.opaqueCoverage(server, coverNumber: number, coverPID: Int(process.processIdentifier))
-                            && !window.occlusionState.contains(.visible) && !store.dashboardVisible
-                            && (host.layer.animationKeys() ?? []).isEmpty
                     }
+                    @MainActor func record(_ stage: String) {
+                        let evidence: [String: Any] = ["stage": stage, "window": session.windowState,
+                            "dashboardVisible": store.dashboardVisible, "animationKeys": host.layer.animationKeys() ?? [],
+                            "server": server, "uptime": CACurrentMediaTime()]
+                        stages.append(evidence)
+                        session.coverStages.append(evidence)
+                        session.write()
+                    }
+                    try await session.wait("supported_cover_missing_opaque_coverage", deadline: prerequisiteDeadline) {
+                        try covered()
+                    }
+                    record("opaque_coverage")
+                    try await session.wait("supported_cover_native_occlusion_not_delivered", deadline: prerequisiteDeadline) {
+                        try covered() && !window.occlusionState.contains(.visible)
+                    }
+                    record("native_occlusion")
+                    try await session.wait("supported_cover_clocks_not_stopped", deadline: prerequisiteDeadline) {
+                        try covered() && !window.occlusionState.contains(.visible)
+                            && !store.dashboardVisible && (host.layer.animationKeys() ?? []).isEmpty
+                    }
+                    record("product_response")
                     let before = session.windowState
                     let started = CACurrentMediaTime()
                     try await Task.sleep(for: .milliseconds(1_700))
@@ -262,10 +291,11 @@ enum SettingsPreviewProof {
                     try require(session.opaqueCoverage(server, coverNumber: number, coverPID: Int(process.processIdentifier)),
                                 "covered_order_or_geometry_lost")
                     return ["beforeHold": before, "afterHold": session.windowState,
-                            "holdSeconds": CACurrentMediaTime() - started, "server": server, "ready": ready]
+                            "holdSeconds": CACurrentMediaTime() - started, "server": server, "ready": ready,
+                            "stages": stages]
                 } catch {
                     session.coverFailures.append(["window": session.windowState, "native": host.json,
-                                                  "server": server, "ready": ready])
+                                                  "server": server, "ready": ready, "stages": stages])
                     throw error
                 }
             }
@@ -420,8 +450,20 @@ enum SettingsPreviewProof {
         var writeErrors = [String]()
         var coverProbes = [[String: Any]]()
         var coverFailures = [[String: Any]]()
+        var coverStages = [[String: Any]]()
+        var occlusionNotifications = [[String: Any]]()
+        var droppedOcclusionNotifications = 0
         init(window: NSWindow, navigation: DashboardNavigation, store: MonitorStore, output: URL) {
             self.window = window; self.navigation = navigation; self.store = store; self.output = output
+        }
+        func recordOcclusionNotification() {
+            occlusionNotifications.append(["uptime": CACurrentMediaTime(), "currentCase": currentCase,
+                "window": windowState, "dashboardVisible": store.dashboardVisible])
+            if occlusionNotifications.count > 64 {
+                let dropped = occlusionNotifications.count - 64
+                droppedOcclusionNotifications += dropped
+                occlusionNotifications.removeFirst(dropped)
+            }
         }
         func host() -> Host? {
             let views = nativeArcs()
@@ -487,14 +529,15 @@ enum SettingsPreviewProof {
                   let coverRect = CGRect(dictionaryRepresentation: coverBounds as CFDictionary) else { return false }
             return coverRect.contains(targetRect)
         }
-        func wait(_ code: String, _ predicate: () throws -> Bool) async throws {
-            let start = CACurrentMediaTime()
+        func wait(_ code: String, deadline: TimeInterval? = nil, _ predicate: () throws -> Bool) async throws {
+            let end = deadline ?? CACurrentMediaTime() + 3
             repeat {
                 try Task.checkCancellation()
                 try requireSource()
+                guard CACurrentMediaTime() < end else { throw Failure(code: code) }
                 if try predicate() { return }
                 try await Task.sleep(for: .milliseconds(20))
-            } while CACurrentMediaTime() - start < 3
+            } while CACurrentMediaTime() < end
             throw Failure(code: code)
         }
         func eligible() async throws -> Host {
@@ -607,7 +650,10 @@ enum SettingsPreviewProof {
              "results": results, "cleanupVerified": cleanupVerified, "retainedHosts": hosts.map(\.json),
              "angleSamples": angleSamples,
              "window": windowState, "source": source, "reportWriteErrors": writeErrors,
-             "coverProbes": coverProbes, "coverFailures": coverFailures]
+             "coverProbes": coverProbes, "coverFailures": coverFailures, "coverStages": coverStages,
+             "occlusionNotifications": occlusionNotifications,
+             "occlusionNotificationCapacity": 64,
+             "droppedOcclusionNotifications": droppedOcclusionNotifications]
         }
         func write() {
             do {
