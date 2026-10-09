@@ -1,3 +1,4 @@
+import Combine
 import DarkbloomTelemetry
 import Foundation
 import Testing
@@ -6,6 +7,90 @@ import Testing
 @Suite("Provider extras polling", .serialized)
 @MainActor
 struct ProviderExtrasPollingTests {
+    @Test("repeated retained failures stay quiet while fresh evidence and recovery publish", arguments: ["fan", "autopilot"])
+    func retainedFailurePublications(source: String) async {
+        let clock = ExtrasPollingClock()
+        let client = ExtrasPollingClient(clock: clock)
+        let store = ProviderExtrasStore(client: client, now: clock.now)
+        await store.refresh()
+        let initial = store.snapshot
+        var publications = 0
+        let subscription = store.$snapshot.dropFirst().sink { _ in publications += 1 }
+        defer { subscription.cancel() }
+
+        await client.setFailure(source)
+        clock.advance(to: 30)
+        await refresh(source, store: store)
+        let retained = store.snapshot
+        #expect(publications == 1)
+        if source == "fan" {
+            #expect(staleTimestamp(retained?.fanStatus) == initial?.capturedAt)
+            #expect(!store.fanEvidenceIsFresh)
+        } else {
+            #expect(staleTimestamp(retained?.autopilotStatus) == initial?.capturedAt)
+            #expect(!store.autopilotEvidenceIsFresh)
+        }
+
+        clock.advance(to: 60)
+        await refresh(source, store: store)
+        #expect(store.snapshot == retained)
+        #expect(publications == 1)
+        #expect(!store.isRefreshing)
+
+        await client.setFailure(nil)
+        clock.advance(to: 90)
+        await refresh(source, store: store)
+        #expect(publications == 2)
+        #expect(source == "fan" ? store.fanEvidenceIsFresh : store.autopilotEvidenceIsFresh)
+        // An unchanged value with a new capture time renews usable evidence.
+        clock.advance(to: 120)
+        await refresh(source, store: store)
+        #expect(publications == 3)
+        #expect(store.snapshot?.capturedAt == initial?.capturedAt)
+        #expect(store.snapshot?.idlePolicy == initial?.idlePolicy)
+        await refresh(source, store: store)
+        #expect(publications == 3)
+        #expect(await client.fanReads == (source == "fan" ? 5 : 0))
+        #expect(await client.autopilotReads == (source == "autopilot" ? 5 : 0))
+        #expect(await client.mutations == 0)
+        await store.stop()
+    }
+
+    @Test("unavailable evidence publishes changed diagnostics and its first successful recovery", arguments: ["fan", "autopilot"])
+    func unavailablePublications(source: String) async {
+        let clock = ExtrasPollingClock()
+        let client = ExtrasPollingClient(clock: clock)
+        await client.setFailure(source)
+        let store = ProviderExtrasStore(client: client, now: clock.now)
+        await store.refresh()
+        var publications = 0
+        let subscription = store.$snapshot.dropFirst().sink { _ in publications += 1 }
+        defer { subscription.cancel() }
+
+        await refresh(source, store: store)
+        #expect(publications == 0)
+        await client.setFailure(source, reason: "changed diagnostic")
+        await refresh(source, store: store)
+        #expect(publications == 1)
+        if source == "fan" {
+            #expect(store.snapshot?.fanStatus == .unavailable(reason: "changed diagnostic"))
+        } else {
+            #expect(store.snapshot?.autopilotStatus == .unavailable(reason: "changed diagnostic"))
+        }
+        await client.setFailure(nil)
+        clock.advance(to: 30)
+        await refresh(source, store: store)
+        #expect(publications == 2)
+        #expect(source == "fan" ? store.fanEvidenceIsFresh : store.autopilotEvidenceIsFresh)
+        #expect(await client.mutations == 0)
+        await store.stop()
+    }
+
+    private func refresh(_ source: String, store: ProviderExtrasStore) async {
+        if source == "fan" { await store.refreshFan() }
+        else { await store.refreshAutopilot() }
+    }
+
     @Test("native subscription release cancels queued reads and leaves background refresh available")
     func nativeSubscriptionRelease() async {
         let clock = ExtrasPollingClock()
@@ -208,13 +293,18 @@ private final class ExtrasPollingClock: @unchecked Sendable {
 private actor ExtrasPollingClient: ProviderExtrasProviding {
     let clock: ExtrasPollingClock
     private var failure: String?
+    private var failureReason = "fixture"
     private var shouldBlockFan = false
     private var fanContinuation: CheckedContinuation<Void, Never>?
     private(set) var fullReads = 0
     private(set) var fanReads = 0
+    private(set) var autopilotReads = 0
     private(set) var mutations = 0
     init(clock: ExtrasPollingClock) { self.clock = clock }
-    func setFailure(_ failure: String?) { self.failure = failure }
+    func setFailure(_ failure: String?, reason: String = "fixture") {
+        self.failure = failure
+        self.failureReason = reason
+    }
     func blockNextFanRead() { shouldBlockFan = true }
     func releaseFanRead() {
         fanContinuation?.resume()
@@ -231,7 +321,8 @@ private actor ExtrasPollingClient: ProviderExtrasProviding {
             ),
             betaFeatures: failure == "beta" ? .unavailable(reason: "fixture") : .available(value: [], capturedAt: date),
             fanStatus: fanStatus(),
-            autoUpdateStatus: failure == "auto" ? .unavailable(reason: "fixture") : .available(value: ProviderAutoUpdateStatus(enabled: true), capturedAt: date)
+            autoUpdateStatus: failure == "auto" ? .unavailable(reason: "fixture") : .available(value: ProviderAutoUpdateStatus(enabled: true), capturedAt: date),
+            autopilotStatus: autopilotStatus()
         )
     }
     func refreshFan() async -> SourceAvailability<ProviderFanStatus> {
@@ -243,11 +334,23 @@ private actor ExtrasPollingClient: ProviderExtrasProviding {
         return fanStatus()
     }
     private func fanStatus() -> SourceAvailability<ProviderFanStatus> {
-        .available(value: ProviderFanStatus(
+        if failure == "fan" { return .unavailable(reason: failureReason) }
+        return .available(value: ProviderFanStatus(
             capability: ProviderFanStatus.controlCapability,
             installed: false, loaded: false, helper: nil,
             diagnostic: ProviderFanDiagnostic(chip: "fixture", supported: true, gpuTemperatures: [], fans: []),
             helperErrorPresent: false, diagnosticErrorPresent: false
+        ), capturedAt: clock.now())
+    }
+    func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus> {
+        autopilotReads += 1
+        return autopilotStatus()
+    }
+    private func autopilotStatus() -> SourceAvailability<ProviderAutopilotStatus> {
+        if failure == "autopilot" { return .unavailable(reason: failureReason) }
+        return .available(value: ProviderAutopilotStatus(
+            configuredEnabled: false, consentRecorded: false, configuredPaused: false,
+            selectedModels: [], pinnedModels: [], configuredRevision: "fixture"
         ), capturedAt: clock.now())
     }
     func saveIdle(minutes: Int) async throws { mutations += 1 }

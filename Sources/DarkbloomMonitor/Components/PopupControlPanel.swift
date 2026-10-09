@@ -68,6 +68,7 @@ enum PopupControlDestination: Hashable, Identifiable {
 /// transient parent popup available for the user's next command.
 struct PopupControlMoreMenu: NSViewRepresentable {
     let openPanel: (PopupControlDestination) -> Void
+    let openChat: () -> Void
     let openDashboard: () -> Void
     let quit: () -> Void
 
@@ -102,6 +103,9 @@ struct PopupControlMoreMenu: NSViewRepresentable {
             menu.addItem(.separator())
             for destination in PopupControlDestination.settingsMenu { menu.addItem(panelItem(destination)) }
             menu.addItem(.separator())
+            let chatItem = item("Open Chat", symbol: "bubble.left.and.bubble.right", action: #selector(chat))
+            chatItem.setAccessibilityIdentifier("popup.more.chat")
+            menu.addItem(chatItem)
             menu.addItem(item("Dashboard & history", symbol: "rectangle.grid.2x2", action: #selector(dashboard)))
             menu.addItem(item("Quit Bloomy", symbol: "rectangle.portrait.and.arrow.right", action: #selector(quitApp)))
             menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.minY), in: sender)
@@ -129,6 +133,7 @@ struct PopupControlMoreMenu: NSViewRepresentable {
             selectedAction = { [actions] in actions.openPanel(destination) }
         }
         @objc private func dashboard() { selectedAction = actions.openDashboard }
+        @objc private func chat() { selectedAction = actions.openChat }
         @objc private func quitApp() { selectedAction = actions.quit }
     }
 }

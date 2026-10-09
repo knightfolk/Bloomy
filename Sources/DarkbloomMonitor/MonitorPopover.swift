@@ -424,6 +424,7 @@ struct MonitorPopover: View {
     let ownsVisibleFanPolling: Bool
     let openSettings: (SettingsPage?) -> Void
     let openDashboard: () -> Void
+    let openChat: () -> Void
     let openModels: () -> Void
     let openHosting: () -> Void
     let hostingStore: HostingSettingsStore?
@@ -444,6 +445,7 @@ struct MonitorPopover: View {
         ownsVisibleFanPolling: Bool = true,
         openSettings: @escaping (SettingsPage?) -> Void = { _ in },
         openDashboard: @escaping () -> Void = {},
+        openChat: @escaping () -> Void = {},
         openModels: @escaping () -> Void = {},
         openHosting: @escaping () -> Void = {},
         hostingStore: HostingSettingsStore? = nil,
@@ -456,6 +458,7 @@ struct MonitorPopover: View {
         self.ownsVisibleFanPolling = ownsVisibleFanPolling
         self.openSettings = openSettings
         self.openDashboard = openDashboard
+        self.openChat = openChat
         self.openModels = openModels
         self.openHosting = openHosting
         self.hostingStore = hostingStore
@@ -846,7 +849,7 @@ struct MonitorPopover: View {
                 if let nudge = store.inactivityNudge {
                     PopupNudgeControl(store: nudge, updateProtection: updateProtection)
                 }
-                PopupControlMoreMenu(openPanel: { presentedPanel = $0 }, openDashboard: openDashboard,
+                PopupControlMoreMenu(openPanel: { presentedPanel = $0 }, openChat: openChat, openDashboard: openDashboard,
                     quit: { Task { await store.quit() } })
                     .frame(maxWidth: .infinity).frame(height: 47)
                     .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))

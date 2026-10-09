@@ -93,6 +93,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                 hostingStore: hostingStore,
                 openSettings: { [weak self] page in self?.showSettings(page: page) },
                 openDashboard: { [weak self] in self?.showDashboard() },
+                openChat: { [weak self] in self?.showChatWindow() },
                 openModels: { [weak self] in self?.showDashboard(section: .models) },
                 openHosting: { [weak self] in self?.showDashboard(section: .hosting) },
                 updateProtection: updateProtection,
@@ -264,6 +265,7 @@ private struct PopoverRootView: View {
     let hostingStore: HostingSettingsStore?
     let openSettings: (SettingsPage?) -> Void
     let openDashboard: () -> Void
+    let openChat: () -> Void
     let openModels: () -> Void
     let openHosting: () -> Void
     let updateProtection: AppUpdateEditorProtection
@@ -273,7 +275,7 @@ private struct PopoverRootView: View {
     @ViewBuilder
     var body: some View {
         if let controlStore {
-            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openModels: openModels, openHosting: openHosting, hostingStore: hostingStore, updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft, popupHostingDraft: popupHostingDraft)
+            MonitorPopover(store: store, isVisible: visibility.isVisible, ownsVisibleFanPolling: false, openSettings: openSettings, openDashboard: openDashboard, openChat: openChat, openModels: openModels, openHosting: openHosting, hostingStore: hostingStore, updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft, popupHostingDraft: popupHostingDraft)
                 .environmentObject(controlStore)
         } else {
             VStack(alignment: .leading, spacing: 12) {

@@ -2304,6 +2304,7 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
                 visibility: visibility, defaults: model.defaults,
                 openSettings: { [weak self] page in self?.navigate(.settings, settingsPage: page) },
                 openDashboard: { [weak self] in self?.navigate() },
+                openChat: { [weak self] in self?.openChat() },
                 openModels: { [weak self] in self?.navigate(.models) },
                 openHosting: { [weak self] in self?.navigate(.hosting) },
                 updateProtection: model.updateProtection, popupSettingsDraft: model.popupSettingsDraft,
@@ -2439,6 +2440,14 @@ private final class FixturePopoverController: NSObject, NSPopoverDelegate {
         }
     }
 
+    private func openChat() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await closeAndWait()
+            model?.openChatWindow()
+        }
+    }
+
     private func navigate(_ destination: DashboardDestination? = nil, settingsPage: SettingsPage? = nil) {
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -2458,6 +2467,7 @@ private struct FixturePopoverContent: View {
     @AppStorage private var appearance: String
     let openSettings: (SettingsPage?) -> Void
     let openDashboard: () -> Void
+    let openChat: () -> Void
     let openModels: () -> Void
     let openHosting: () -> Void
     let updateProtection: AppUpdateEditorProtection
@@ -2466,13 +2476,14 @@ private struct FixturePopoverContent: View {
 
     init(model: FixtureModel, store: MonitorStore, control: ProviderControlStore, visibility: PopoverVisibility,
          defaults: UserDefaults, openSettings: @escaping (SettingsPage?) -> Void,
-         openDashboard: @escaping () -> Void, openModels: @escaping () -> Void,
+         openDashboard: @escaping () -> Void, openChat: @escaping () -> Void, openModels: @escaping () -> Void,
          openHosting: @escaping () -> Void, updateProtection: AppUpdateEditorProtection,
          popupSettingsDraft: ProviderSettingsDraftState, popupHostingDraft: HostingSettingsDraftState) {
         self.model = model; self.store = store; self.control = control; self.visibility = visibility
         self.defaults = defaults
         _appearance = AppStorage(wrappedValue: "light", ApplicationAppearance.defaultsKey, store: defaults)
         self.openSettings = openSettings; self.openDashboard = openDashboard
+        self.openChat = openChat
         self.openModels = openModels; self.openHosting = openHosting
         self.updateProtection = updateProtection; self.popupSettingsDraft = popupSettingsDraft
         self.popupHostingDraft = popupHostingDraft
@@ -2481,7 +2492,7 @@ private struct FixturePopoverContent: View {
     var body: some View {
         MonitorPopover(store: store, isVisible: visibility.isVisible,
             ownsVisibleFanPolling: false, openSettings: openSettings,
-            openDashboard: openDashboard, openModels: openModels, openHosting: openHosting,
+            openDashboard: openDashboard, openChat: openChat, openModels: openModels, openHosting: openHosting,
             hostingStore: model.hosting,
             updateProtection: updateProtection, popupSettingsDraft: popupSettingsDraft,
             popupHostingDraft: popupHostingDraft)

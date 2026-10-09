@@ -190,7 +190,7 @@ final class ProviderExtrasStore: ObservableObject {
             let fan = await client.refreshFan()
             guard let self, !Task.isCancelled, self.refreshGeneration == generation,
                   let current = self.snapshot else { return }
-            self.snapshot = ProviderExtrasSnapshot(
+            let next = ProviderExtrasSnapshot(
                 capturedAt: current.capturedAt,
                 idlePolicy: current.idlePolicy,
                 betaFeatures: current.betaFeatures,
@@ -199,6 +199,9 @@ final class ProviderExtrasStore: ObservableObject {
                 autoUpdateStatus: current.autoUpdateStatus,
                 autopilotStatus: current.autopilotStatus
             )
+            // Retained failures can repeat without new evidence. Equality
+            // includes timestamps, so successful fresh readings still publish.
+            if next != current { self.snapshot = next }
         }
         refreshTask = task
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
@@ -223,13 +226,14 @@ final class ProviderExtrasStore: ObservableObject {
             let status = await client.refreshAutopilot()
             guard let self, !Task.isCancelled, self.refreshGeneration == generation,
                   let current = self.snapshot else { return }
-            self.snapshot = ProviderExtrasSnapshot(
+            let next = ProviderExtrasSnapshot(
                 capturedAt: current.capturedAt, idlePolicy: current.idlePolicy,
                 betaFeatures: current.betaFeatures, fanStatus: current.fanStatus,
                 autoUpdateStatus: current.autoUpdateStatus,
                 autopilotStatus: Self.retainLastGood(status, previous: current.autopilotStatus,
                     reason: "Darkbloom Autopilot refresh failed")
             )
+            if next != current { self.snapshot = next }
         }
         refreshTask = task
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }

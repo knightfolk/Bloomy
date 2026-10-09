@@ -1,5 +1,20 @@
 # Bloomy native polish and efficiency
 
+October 9 popup Chat and status efficiency: More now opens the retained Chat
+window directly, preserving its conversation and update guards. Native light/dark
+handoff, unsent draft retention on repeated opening and expired Autopilot Refresh
+recovery pass against all 142 optimized inputs. Fan-only/Autopilot-only refreshes
+suppress exactly unchanged snapshot publications while preserving first failure,
+fresh timestamps, diagnostics, retries and progress. Two parameterized regressions
+fail on the baseline then pass; 68 focused checks, 1,864 reported app tests plus
+49 Companion tests, 49 staging checks and regular Release build pass. Accepted
+30-second inert-source windows observe 1.220% of one core with Overview visible
+and 0.496% with both review windows minimized, without a before/after savings or
+power claim. Native Chat close/keyboard activation and broader production gates
+remain open. The real provider stopped and restarted independently with a changed saved
+configuration; its current processes, installed Bloomy and saved choices are preserved. No push or release occurs. See
+[popup Chat and status review](POPUP_CHAT_AND_STATUS_REVIEW_20261009.md).
+
 October 9 popup Autopilot actions: shorter contextual labels keep Pause/Resume,
 Leave and Refresh together in the first popover view after enrollment. Full
 accessibility names, dashboard labels, consent, mutation guards and vertical
