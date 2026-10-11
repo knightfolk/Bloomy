@@ -1237,3 +1237,16 @@ default presentation remains covered by the layout regression tests. See
 [popup history review](POPUP_ACTION_HISTORY_REVIEW_20261010.md). Detailed Activity
 and Opportunity analysis stay dashboard surfaces; all current everyday provider
 and model controls are reachable from the popup. Broader qualification remains.
+
+October 10 native refinement checkpoint: popup History uses complete compact
+action rows with inline details and one scroll. Compact dashboard dates leave
+readable space for full action names. Light and short dark native checks,
+1,881 app plus 49 companion tests, 49 staging checks, final focused rendering
+tests and Release compilation pass. All 144 final fixture inputs match source.
+The review sidebar issue was narrowed to inactive-app computer-use interaction:
+normal Finder foreground activation restores Models, History and Hosting; no
+production navigation workaround was added. Synthetic controls and telemetry
+now share the same idle/active/stale observation. See
+[native refinement review](NATIVE_HISTORY_REFINEMENT_20261010.md). Installed
+production is preserved; broader motion, spoken accessibility, performance
+and distribution qualification remain open.

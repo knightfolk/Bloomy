@@ -36,6 +36,8 @@ struct ActionHistoryView: View {
                     controls
                     if presentation.events.isEmpty {
                         emptyState
+                    } else if !showsTitle {
+                        embeddedHistory(presentation)
                     } else {
                         GeometryReader { geometry in
                             historyTable(presentation.events, width: geometry.size.width)
@@ -57,6 +59,7 @@ struct ActionHistoryView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .accessibilityIdentifier("actionHistory.scroll")
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -66,6 +69,22 @@ struct ActionHistoryView: View {
         .onChange(of: store.events.map(\.id)) { _, ids in
             if let selectedID, !ids.contains(selectedID) { self.selectedID = nil }
         }
+    }
+
+    private func embeddedHistory(_ presentation: ActionHistoryPresentation) -> some View {
+        LazyVStack(alignment: .leading, spacing: 6) {
+            ForEach(presentation.events) { event in
+                VStack(alignment: .leading, spacing: 6) {
+                    ActionHistoryCompactRow(event: event, isSelected: selectedID == event.id) {
+                        selectedID = selectedID == event.id ? nil : event.id
+                    }
+                    if presentation.selectedEvent?.id == event.id {
+                        details(for: event)
+                    }
+                }
+            }
+        }
+        .accessibilityLabel("Action and job history")
     }
 
     @ViewBuilder
@@ -95,16 +114,18 @@ struct ActionHistoryView: View {
 
     private func timeColumn(compact: Bool) -> some TableColumnContent<ActionHistoryEvent, Never> {
         TableColumn("Time") { (event: ActionHistoryEvent) in
-            Text(event.occurredAt, format: .dateTime.month().day().hour().minute())
+            Text(event.occurredAt, format: compact
+                 ? .dateTime.month(.twoDigits).day(.twoDigits).hour().minute()
+                 : .dateTime.month().day().hour().minute())
                 .monospacedDigit().lineLimit(1)
                 .help(event.occurredAt.formatted(date: .complete, time: .complete))
-        }.width(min: compact ? 116 : 112, ideal: compact ? 124 : 145, max: compact ? 128 : .infinity)
+        }.width(min: 112, ideal: compact ? 116 : 145, max: compact ? 124 : .infinity)
     }
 
     private func actionColumn(compact: Bool) -> some TableColumnContent<ActionHistoryEvent, Never> {
         TableColumn("Action") { (event: ActionHistoryEvent) in
             Text(Self.actionLabel(event)).lineLimit(1).help(Self.actionLabel(event))
-        }.width(min: compact ? 68 : 100, ideal: compact ? 76 : 135, max: compact ? 82 : .infinity)
+        }.width(min: compact ? 104 : 100, ideal: compact ? 114 : 135, max: compact ? 122 : .infinity)
     }
 
     private func resultColumn(compact: Bool) -> some TableColumnContent<ActionHistoryEvent, Never> {
@@ -112,13 +133,13 @@ struct ActionHistoryView: View {
             Label(Self.titleCase(event.outcome.rawValue), systemImage: Self.outcomeSymbol(event.outcome.rawValue))
                 .foregroundStyle(Self.outcomeColor(event.outcome.rawValue)).lineLimit(1)
                 .help(Self.titleCase(event.outcome.rawValue))
-        }.width(min: compact ? 92 : 94, ideal: compact ? 100 : 118, max: compact ? 106 : .infinity)
+        }.width(min: compact ? 90 : 94, ideal: compact ? 94 : 118, max: compact ? 102 : .infinity)
     }
 
     private func modelColumn(compact: Bool) -> some TableColumnContent<ActionHistoryEvent, Never> {
         TableColumn("Model") { (event: ActionHistoryEvent) in
             Text(Self.modelLabel(event)).lineLimit(1).help(event.model ?? "No model recorded")
-        }.width(min: compact ? 100 : 110, ideal: compact ? 136 : 190, max: compact ? 150 : .infinity)
+        }.width(min: compact ? 100 : 110, ideal: compact ? 118 : 190, max: compact ? 130 : .infinity)
     }
 
     private var header: some View {
@@ -148,23 +169,28 @@ struct ActionHistoryView: View {
                     .foregroundStyle(.secondary)
             }
             DisclosureGroup("About this history", isExpanded: $showsRecordingNotes) {
-                // Keep long wrapping notes from contributing an unbounded
-                // ideal height during native split-view size negotiation.
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Action tracking starts from that date; older actions are not backfilled. Reported jobs and base rewards may include up to 30 days of earlier account history, subject to the server’s history limit. Entries are retained for up to 30 days, with a 5,000-entry limit.")
-                        Text("Job and reward records come from account-wide earnings history and may be incomplete because the server limits history. They may reflect another owned machine and do not prove this Mac served the work.")
-                    }
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if showsTitle {
+                    // Bound native split-view negotiation in the dashboard.
+                    ScrollView { recordingNoteText }.frame(maxHeight: 140)
+                } else {
+                    // Embedded notes and row details share the outer scroll.
+                    recordingNoteText
                 }
-                .frame(maxHeight: 140)
             }.font(.caption)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var recordingNoteText: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Action tracking starts from that date; older actions are not backfilled. Reported jobs and base rewards may include up to 30 days of earlier account history, subject to the server’s history limit. Entries are retained for up to 30 days, with a 5,000-entry limit.")
+            Text("Job and reward records come from account-wide earnings history and may be incomplete because the server limits history. They may reflect another owned machine and do not prove this Mac served the work.")
+        }
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var recordingStartLabel: String {
@@ -271,9 +297,10 @@ struct ActionHistoryView: View {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .frame(width: 170, alignment: .trailing)
+                .frame(width: showsTitle ? 170 : 96, alignment: .trailing)
             Text(value)
                 .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
                 .help(help ?? value)
         }
@@ -302,7 +329,7 @@ struct ActionHistoryView: View {
         ActionHistoryPresentation.titleCase(rawValue)
     }
 
-    private static func outcomeSymbol(_ rawValue: String) -> String {
+    fileprivate static func outcomeSymbol(_ rawValue: String) -> String {
         switch rawValue.lowercased() {
         case "succeeded", "success": "checkmark.circle.fill"
         case "failed": "xmark.circle.fill"
@@ -311,7 +338,7 @@ struct ActionHistoryView: View {
         }
     }
 
-    private static func outcomeColor(_ rawValue: String) -> Color {
+    fileprivate static func outcomeColor(_ rawValue: String) -> Color {
         switch rawValue.lowercased() {
         case "succeeded", "success": .green
         case "failed", "interrupted": .red
@@ -322,5 +349,82 @@ struct ActionHistoryView: View {
 
     static func currency(_ amountMicroUSD: Int64) -> String {
         ActionHistoryPresentation.currency(amountMicroUSD)
+    }
+}
+
+/// A compact native button; its details live beneath it in the owning scroll.
+struct ActionHistoryCompactRow: View {
+    let event: ActionHistoryEvent
+    let isSelected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            HStack(alignment: .center, spacing: 9) {
+                Image(systemName: ActionHistoryView.outcomeSymbol(event.outcome.rawValue))
+                    .font(.system(size: 16))
+                    .foregroundStyle(ActionHistoryView.outcomeColor(event.outcome.rawValue))
+                    .frame(width: 20)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(ActionHistoryPresentation.actionLabel(event))
+                            .font(.callout.weight(.medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .layoutPriority(1)
+                        Spacer(minLength: 0)
+                        Text(event.occurredAt, format: .dateTime.month(.twoDigits).day(.twoDigits).hour().minute())
+                            .font(.caption2).monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .fixedSize()
+                            .help(event.occurredAt.formatted(date: .complete, time: .complete))
+                    }
+                    HStack(spacing: 6) {
+                        Text(secondaryLabel)
+                            .lineLimit(1)
+                            .help(event.model ?? "No model recorded")
+                        Spacer(minLength: 0)
+                        Text(ActionHistoryPresentation.titleCase(event.outcome.rawValue))
+                            .fixedSize()
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+                Image(systemName: isSelected ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor),
+                        in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(isSelected ? Color.accentColor.opacity(0.45) : .clear, lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .help("Entry ID: \(event.id.uuidString)")
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(isSelected ? "Details expanded" : "Details collapsed")
+        .accessibilityHint("Show or hide entry details")
+        .accessibilityIdentifier("actionHistory.row.\(event.id.uuidString)")
+    }
+
+    private var secondaryLabel: String {
+        let trigger = ActionHistoryPresentation.titleCase(event.trigger.rawValue)
+        guard let model = event.model else { return trigger }
+        return "\(ActionHistoryPresentation.displayModel(model)) · \(trigger)"
+    }
+
+    private var accessibilityLabel: String {
+        [ActionHistoryPresentation.actionLabel(event), event.model,
+         ActionHistoryPresentation.titleCase(event.trigger.rawValue),
+         ActionHistoryPresentation.titleCase(event.outcome.rawValue),
+         event.occurredAt.formatted(date: .abbreviated, time: .shortened)]
+            .compactMap { $0 }.joined(separator: ", ")
     }
 }

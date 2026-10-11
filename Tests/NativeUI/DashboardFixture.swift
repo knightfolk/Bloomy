@@ -40,7 +40,7 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-private enum FixtureReadinessMode: String, CaseIterable {
+private enum FixtureReadinessMode: String, CaseIterable, Sendable {
     case scenario = "Scenario observation"
     case idle = "Ready and idle", working = "Active inference"
     case scheduled = "Scheduled waiting", draining = "Finishing accepted work"
@@ -235,6 +235,20 @@ private enum FixtureData {
             diagnostics: [], capturedAt: now, menuStatus: base.menuStatus)
     }
 
+    // Both passive telemetry and controls describe the same synthetic provider.
+    // Keep mode precedence in one place so a ready/idle observation cannot
+    // coexist with a separately regenerated active control record.
+    static func selectedSnapshot(_ scenario: FixtureScenario, readiness: FixtureReadinessMode,
+        liveTelemetry: FixtureLiveTelemetryMode, now: Date, events: [LogEvent]) -> TelemetrySnapshot {
+        if liveTelemetry != .scenario {
+            return liveTelemetrySnapshot(liveTelemetry, now: now, events: events)
+        }
+        if scenario == .fresh, readiness != .scenario {
+            return readinessSnapshot(readiness, now: now, events: events)
+        }
+        return snapshot(scenario, now: now, events: events)
+    }
+
     #if FIXTURE_PRODUCTION_STATUS_ITEM_PROOF || FIXTURE_SETTINGS_PREVIEW_PROOF
     static func statusItemSnapshot(active: Bool) -> TelemetrySnapshot {
         let now = Date()
@@ -278,7 +292,7 @@ private actor FixtureLogFeed {
     }
 }
 
-private enum FixtureLiveTelemetryMode: String, CaseIterable {
+private enum FixtureLiveTelemetryMode: String, CaseIterable, Sendable {
     case scenario = "Scenario readings"
     case low = "Measured 45 tok/s · GPU 25%"
     case high = "Measured 135 tok/s · GPU 82%"
@@ -1008,6 +1022,12 @@ private actor FixtureController: ProviderControlling {
     private var delayNextRead = false
     private var transientGemmaHidden = false
     private var failNextRead = false
+    private var readinessMode = FixtureReadinessMode.scenario
+    private var liveTelemetryMode = FixtureLiveTelemetryMode.scenario
+    func setObservationModes(readiness: FixtureReadinessMode, liveTelemetry: FixtureLiveTelemetryMode) {
+        readinessMode = readiness
+        liveTelemetryMode = liveTelemetry
+    }
     func delayNextControlRead() { delayNextRead = true }
     func hideGemmaTemporarily(_ hidden: Bool) { transientGemmaHidden = hidden }
     func failNextControlRead() { failNextRead = true }
@@ -1059,8 +1079,23 @@ private actor FixtureController: ProviderControlling {
         let now = Date()
         // Match ProviderControlService: expired runtime evidence is omitted
         // before building inventory, never retained as current residency.
-        let daemon = scenario.hasCurrentRuntime ? FixtureData.snapshot(scenario, now: now).state.value : nil
-        let loadedModelIDs = scenario.hasCurrentRuntime ? Array(FixtureData.modelIDs.prefix(2)).filter { !removedModels.contains($0) } : []
+        let observation = FixtureData.selectedSnapshot(scenario, readiness: readinessMode,
+            liveTelemetry: liveTelemetryMode, now: now, events: [])
+        let observedDaemon = observation.state.value
+        let runtimeSource: ProviderControlSourceState
+        if case .available = observation.state, let observedDaemon {
+            runtimeSource = ProviderControlSourceState.fresh(evidenceAt: Date(timeIntervalSince1970: observedDaemon.writtenAt))
+                .evaluated(at: now, invalidReason: "Synthetic runtime timestamp invalid",
+                    staleReason: "Synthetic runtime source stale", futureReason: "Synthetic runtime timestamp in future")
+        } else if case .stale = observation.state {
+            runtimeSource = .stale("Synthetic runtime source stale")
+        } else {
+            runtimeSource = .unavailable("Synthetic source offline")
+        }
+        let daemon = runtimeSource.isMarkedFresh ? observedDaemon : nil
+        let providerStopped = daemon?.lifecycle?.outcome == .stopped || daemon?.lifecycle?.outcome == .drained
+        let loadedModelIDs = runtimeSource.isMarkedFresh && !providerStopped
+            ? (observation.loadedModels.value?.models ?? []).filter { !removedModels.contains($0) } : []
         // Bonsai and Qwen 3 8B are downloaded but neither selected nor resident.
         // Keep the three advertised models and two saved preload models intact.
         let catalog = scenario == .emptyCatalog ? [] : FixtureData.catalog.filter {
@@ -1068,11 +1103,9 @@ private actor FixtureController: ProviderControlling {
         }
         let local = catalog.filter { scenario != .missingStartupModel || $0.id != FixtureData.modelIDs[0] }
             .map { LocalModel(id: $0.id, modelType: "text", sizeBytes: Int64($0.sizeGB * 1e9), estimatedMemoryGB: nil) }
-        let runtimeSource: ProviderControlSourceState = scenario.hasCurrentRuntime
-            ? .fresh(evidenceAt: now) : scenario == .stale
-            ? .stale("Synthetic runtime source stale") : .unavailable("Synthetic source offline")
         let catalogSource: ProviderControlSourceState = scenario.hasStaleCatalog
-            ? .stale("Synthetic catalog/local inventory retained") : runtimeSource
+            ? .stale("Synthetic catalog/local inventory retained") : scenario.hasCurrentRuntime
+            ? .fresh(evidenceAt: now) : .unavailable("Synthetic source offline")
         return ProviderControlSnapshot(inventory: ModelInventoryBuilder.build(catalog: catalog,
             local: local, selection: selection, daemon: daemon, loadedModels: loadedModelIDs),
             draft: ProviderConfigDraft(sourceRevision: "synthetic", original: selection, selection: selection,
@@ -1668,11 +1701,14 @@ private final class FixtureModel: ObservableObject {
     func setReadinessMode(_ mode: FixtureReadinessMode) async {
         guard ready, !isTerminating, !proofRunning, scenario == .fresh else { return }
         readinessMode = mode
+        await controllerClient.setObservationModes(readiness: readinessMode, liveTelemetry: liveTelemetryMode)
         await publishTelemetry(scenario: scenario, monitor: monitor, logFeed: logFeed)
+        await control.refreshPreservingDraft()
     }
     func setLiveTelemetryMode(_ mode: FixtureLiveTelemetryMode) async {
         guard ready, !isTerminating, !proofRunning else { return }
         liveTelemetryMode = mode
+        await controllerClient.setObservationModes(readiness: readinessMode, liveTelemetry: liveTelemetryMode)
         FixtureLiveGPUReading.value = switch mode {
         case .low: 25
         case .high: 82
@@ -1681,6 +1717,7 @@ private final class FixtureModel: ObservableObject {
         }
         monitor.gpuUsage.refresh()
         await publishTelemetry(scenario: scenario, monitor: monitor, logFeed: logFeed)
+        await control.refreshPreservingDraft()
     }
     func tick() async {
         #if FIXTURE_SETTINGS_PREVIEW_PROOF
@@ -1712,11 +1749,8 @@ private final class FixtureModel: ObservableObject {
             guard !Task.isCancelled, self.ready, !self.isTerminating,
                   !self.metricsReview, generation == self.loadGeneration else { return }
             let now = Date()
-            let snapshot = self.liveTelemetryMode != .scenario
-                ? FixtureData.liveTelemetrySnapshot(self.liveTelemetryMode, now: now, events: events)
-                : scenario == .fresh && self.readinessMode != .scenario
-                ? FixtureData.readinessSnapshot(self.readinessMode, now: now, events: events)
-                : FixtureData.snapshot(scenario, now: now, events: events)
+            let snapshot = FixtureData.selectedSnapshot(scenario, readiness: self.readinessMode,
+                liveTelemetry: self.liveTelemetryMode, now: now, events: events)
             await monitor.accept(snapshot)
         }
         telemetryPublicationID = publicationID
@@ -1911,6 +1945,7 @@ private final class FixtureModel: ObservableObject {
         #endif
     }
     private func prepare(_ requestedScenario: FixtureScenario, generation: Int) async {
+        readinessMode = .scenario
         liveTelemetryMode = .scenario
         FixtureLiveGPUReading.value = nil
         await popup.closeAndWait(resetContent: true)
@@ -3378,6 +3413,7 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
         add("Fail next model controls read (synthetic)", action: #selector(failNextReviewModelRead), target: self, to: windowMenu)
         add("Save model draft state (synthetic)", action: #selector(saveReviewModelState), target: self, to: windowMenu)
         add("Check model feedback layout (synthetic)", action: #selector(checkReviewModelLayout), target: self, to: windowMenu)
+        add("Record window state", action: #selector(recordReviewWindowState), target: self, to: windowMenu)
         application.mainMenu = mainMenu
         application.windowsMenu = windowMenu
     }
@@ -3402,6 +3438,76 @@ private final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate,
         let result = ModelFeedbackLayoutProof.run(window: window)
         if let data = try? JSONEncoder().encode(result) {
             try? data.write(to: model.directory.appendingPathComponent("fixture-model-layout-proof.json"), options: .atomic)
+        }
+    }
+
+    @objc private func recordReviewWindowState() {
+        // Only this fixture process's window metadata is recorded. Exclude
+        // responder text, view contents, account data and object descriptions.
+        func title(_ window: NSWindow) -> String {
+            String(window.title.components(separatedBy: .controlCharacters).joined().prefix(160))
+        }
+        func reference(_ window: NSWindow?) -> Any {
+            guard let window else { return NSNull() }
+            return ["windowNumber": window.windowNumber, "title": title(window)] as [String: Any]
+        }
+        func nativeControls(_ window: NSWindow) -> [String: Any] {
+            var pending = window.contentView.map { [$0] } ?? []
+            var visited = 0
+            var tables: [[String: Any]] = []
+            var controls: [[String: Any]] = []
+            // One finite structural scan per window; never read cell contents,
+            // text values, responder descriptions or accessibility values.
+            while visited < 2_048, let view = pending.popLast() {
+                visited += 1
+                let className = NSStringFromClass(type(of: view))
+                if let table = view as? NSTableView, tables.count < 16 {
+                    tables.append(["class": className, "selectedRow": table.selectedRow,
+                                   "isEnabled": table.isEnabled,
+                                   "allowsSelection": NSNull(),
+                                   "allowsSelectionUnavailable": "NSTableView has no allowsSelection property",
+                                   "allowsEmptySelection": table.allowsEmptySelection,
+                                   "allowsMultipleSelection": table.allowsMultipleSelection,
+                                   "allowsColumnSelection": table.allowsColumnSelection])
+                }
+                if let control = view as? NSControl, controls.count < 80 {
+                    controls.append(["class": className, "isEnabled": control.isEnabled])
+                }
+                pending.append(contentsOf: view.subviews.reversed())
+            }
+            return ["tables": tables, "controls": controls, "visitedViewCount": visited,
+                    "viewTraversalTruncated": !pending.isEmpty,
+                    "tableLimitReached": tables.count == 16, "controlLimitReached": controls.count == 80]
+        }
+        let application = NSApplication.shared
+        let result: [String: Any] = [
+            "synthetic": true,
+            "proofRunning": model.proofRunning,
+            "ready": model.ready,
+            "mainRootEnabled": !model.proofRunning,
+            "isActive": application.isActive,
+            "isHidden": application.isHidden,
+            "modalWindow": reference(application.modalWindow),
+            "keyWindow": reference(application.keyWindow),
+            "mainWindow": reference(application.mainWindow),
+            "windows": application.windows.map { window in
+                ["windowNumber": window.windowNumber, "class": NSStringFromClass(type(of: window)),
+                 "title": title(window), "isSheet": window.isSheet,
+                 "sheetParent": reference(window.sheetParent), "parent": reference(window.parent),
+                 "childWindows": (window.childWindows ?? []).map(\.windowNumber),
+                 "attachedSheet": reference(window.attachedSheet), "isKey": window.isKeyWindow,
+                 "isMain": window.isMainWindow, "isVisible": window.isVisible,
+                 "canBecomeKey": window.canBecomeKey, "canBecomeMain": window.canBecomeMain,
+                 "ignoresMouseEvents": window.ignoresMouseEvents, "styleMask": window.styleMask.rawValue,
+                 "nativeControls": nativeControls(window)] as [String: Any]
+            },
+        ]
+        do {
+            try FileManager.default.createDirectory(at: model.directory, withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: model.directory.appendingPathComponent("fixture-window-state.json"), options: .atomic)
+        } catch {
+            model.issue = "Synthetic window-state diagnostic could not be saved."
         }
     }
 
