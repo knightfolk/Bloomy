@@ -130,6 +130,38 @@ struct ActionHistoryViewTests {
         try #require(bitmap.representation(using: .png, properties: [:]))
             .write(to: URL(fileURLWithPath: "/tmp/darkbloom-action-history-900x650.png"))
     }
+
+    @Test("embedded history keeps all table columns and selected details inside short popup panels",
+          arguments: [300.0, 620.0], [false, true])
+    func popupHistoryFits(height: Double, selected: Bool) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("popup-history-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ActionHistoryStore(url: directory.appendingPathComponent("actions.sqlite3"))
+        for _ in 0..<48 {
+            store.record(action: .nudge, trigger: .manual, outcome: .succeeded,
+                         model: "gemma-4-26b-qat-4bit", reason: .completed)
+        }
+        let host = NSHostingController(rootView:
+            ActionHistoryView(store: store, selectedID: selected ? store.events.first?.id : nil,
+                              showsRecordingNotes: true, showsTitle: false)
+                .frame(width: 560, height: height))
+        let window = NSWindow(contentViewController: host)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 560, height: height))
+        window.orderBack(nil)
+        defer { window.close() }
+        try await Task.sleep(for: .milliseconds(250))
+        host.view.layoutSubtreeIfNeeded()
+        #expect(host.view.bounds.width <= 561)
+        #expect(host.view.bounds.height <= height + 1)
+        let table = try #require(historySubviews(host.view).compactMap { $0 as? NSTableView }.first)
+        let clip = try #require(table.enclosingScrollView?.contentView)
+        let modelIndex = try #require(table.tableColumns.firstIndex { $0.title == "Model" })
+        let visible = clip.convert(clip.bounds, to: host.view)
+        let model = table.convert(table.rect(ofColumn: modelIndex), to: host.view)
+        #expect(model.minX >= visible.minX - 1)
+        #expect(model.maxX <= visible.maxX + 1)
+    }
 }
 
 @MainActor

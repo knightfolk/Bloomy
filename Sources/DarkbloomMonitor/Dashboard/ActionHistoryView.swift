@@ -3,13 +3,16 @@ import SwiftUI
 
 struct ActionHistoryView: View {
     @ObservedObject var store: ActionHistoryStore
+    let showsTitle: Bool
     @State private var filter = ActionHistoryFilter.all
     @State private var searchText = ""
     @State private var selectedID: UUID?
     @State private var showsRecordingNotes: Bool
 
-    init(store: ActionHistoryStore, selectedID: UUID? = nil, showsRecordingNotes: Bool = false) {
+    init(store: ActionHistoryStore, selectedID: UUID? = nil, showsRecordingNotes: Bool = false,
+         showsTitle: Bool = true) {
         self.store = store
+        self.showsTitle = showsTitle
         _selectedID = State(initialValue: selectedID)
         _showsRecordingNotes = State(initialValue: showsRecordingNotes)
     }
@@ -120,7 +123,12 @@ struct ActionHistoryView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("History").font(.largeTitle.bold())
+            if showsTitle {
+                Text("History").font(.largeTitle.bold())
+            } else {
+                Label(recordingStartLabel, systemImage: "clock")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Spacer()
             Button { store.refresh() } label: {
                 Label("Refresh history", systemImage: "arrow.clockwise")
@@ -128,14 +136,17 @@ struct ActionHistoryView: View {
             .labelStyle(.iconOnly)
             .help("Refresh history")
             .accessibilityLabel("Refresh history")
+            .accessibilityIdentifier("actionHistory.refresh")
         }
     }
 
     private var recordingNotes: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Label(recordingStartLabel, systemImage: "clock")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if showsTitle {
+                Label(recordingStartLabel, systemImage: "clock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             DisclosureGroup("About this history", isExpanded: $showsRecordingNotes) {
                 // Keep long wrapping notes from contributing an unbounded
                 // ideal height during native split-view size negotiation.

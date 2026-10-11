@@ -1812,6 +1812,23 @@ private final class FixtureModel: ObservableObject {
             try? data.write(to: directory.appendingPathComponent("history-arrival-proof.json"), options: .atomic)
         }
     }
+    func replaceHistoryForReview(unavailable: Bool = false, storageFailure: Bool = false) {
+        guard ready, !isTerminating else { return }
+        let history: ActionHistoryStore?
+        if unavailable {
+            history = nil
+        } else {
+            let root = directory.appendingPathComponent("history-review-\(UUID())")
+            if storageFailure { try? Data("inert fixture obstruction".utf8).write(to: root) }
+            history = ActionHistoryStore(url: root.appendingPathComponent("actions.sqlite"))
+        }
+        // History is injected at startup in production. These fixture-only
+        // replacements must also invalidate an already open panel, including
+        // when synthetic telemetry publications are paused.
+        monitor.objectWillChange.send()
+        monitor.actionHistory = history
+        control.actionHistory = history
+    }
     func runHistoryFieldsProof() {
         guard !proofRunning, ready, !isTerminating else { return }
         nativeProofStatus = "History fields running…"
@@ -2999,6 +3016,9 @@ private struct FixtureHistoryReviewControls: View {
                 .help("Adds one inert history entry through the production recorder. No network nudge is sent.")
             Button("History field accessibility proof") { model.runHistoryFieldsProof() }
                 .disabled(!model.ready || model.proofRunning)
+            Button("Empty history") { model.replaceHistoryForReview() }
+            Button("History storage failure") { model.replaceHistoryForReview(storageFailure: true) }
+            Button("History unavailable") { model.replaceHistoryForReview(unavailable: true) }
         }
     }
 }

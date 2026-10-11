@@ -1227,3 +1227,13 @@ cleanup timing assertion; failures are retained and no assertion was weakened.
 See [popup readiness review](POPUP_READINESS_REVIEW_20261010.md). No production
 mutation, installed replacement or distribution proof is claimed. The model
 card Serving now versus Idle wording remains a separate audit.
+
+October 10 popup completeness checkpoint: More now opens shared Action History
+with search, type filters, Refresh and selected outcome details. Exact-source
+light/short-dark popup rendering, distinct empty/error/unavailable states,
+1,880 app plus 49 companion tests, staging checks and Release compilation pass.
+Interactive fixture dashboard sidebar navigation could not be confirmed; its
+default presentation remains covered by the layout regression tests. See
+[popup history review](POPUP_ACTION_HISTORY_REVIEW_20261010.md). Detailed Activity
+and Opportunity analysis stay dashboard surfaces; all current everyday provider
+and model controls are reachable from the popup. Broader qualification remains.

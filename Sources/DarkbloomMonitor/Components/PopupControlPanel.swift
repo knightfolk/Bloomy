@@ -5,7 +5,7 @@ import SwiftUI
 /// One route owns the popup's operational panels. These panels use the same
 /// stores and retained drafts as the popup's quick controls.
 enum PopupControlDestination: Hashable, Identifiable {
-    case models, hosting, cooling, protection, profitSwitch, nudge, health
+    case models, hosting, cooling, protection, profitSwitch, nudge, health, history
     case settings(SettingsPage)
 
     var id: String {
@@ -17,6 +17,7 @@ enum PopupControlDestination: Hashable, Identifiable {
         case .profitSwitch: "profitSwitch"
         case .nudge: "nudge"
         case .health: "health"
+        case .history: "history"
         case .settings(let page): "settings.\(page.id)"
         }
     }
@@ -30,6 +31,7 @@ enum PopupControlDestination: Hashable, Identifiable {
         case .profitSwitch: "Profit switching"
         case .nudge: "Inactivity nudge"
         case .health: "Health & Logs"
+        case .history: "Action History"
         case .settings(let page): page == .electricity ? "Energy & electricity" : page.rawValue
         }
     }
@@ -43,13 +45,14 @@ enum PopupControlDestination: Hashable, Identifiable {
         case .profitSwitch: "arrow.triangle.2.circlepath"
         case .nudge: "hand.tap"
         case .health: "waveform.path.ecg"
+        case .history: "clock.arrow.circlepath"
         case .settings(let page): page.symbol
         }
     }
 
     static let controlMenu: [Self] = [
         .models, .hosting, .settings(.provider), .protection, .settings(.electricity),
-        .cooling, .nudge, .profitSwitch, .health
+        .cooling, .nudge, .profitSwitch, .health, .history
     ]
     static let settingsMenu: [Self] = [
         .settings(.appearance), .settings(.menuBar), .settings(.updates), .settings(.support)
@@ -106,7 +109,7 @@ struct PopupControlMoreMenu: NSViewRepresentable {
             let chatItem = item("Open Chat", symbol: "bubble.left.and.bubble.right", action: #selector(chat))
             chatItem.setAccessibilityIdentifier("popup.more.chat")
             menu.addItem(chatItem)
-            menu.addItem(item("Dashboard & history", symbol: "rectangle.grid.2x2", action: #selector(dashboard)))
+            menu.addItem(item("Open Dashboard", symbol: "rectangle.grid.2x2", action: #selector(dashboard)))
             menu.addItem(item("Quit Bloomy", symbol: "rectangle.portrait.and.arrow.right", action: #selector(quitApp)))
             menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.minY), in: sender)
             let action = selectedAction
@@ -257,6 +260,10 @@ struct PopupControlPanel: View {
             HealthView(store: store,
                 openReadinessDestination: { openPanel(.readiness($0)) },
                 visibilityOverride: isVisible, showsTitle: false)
+        case .history:
+            if let history = store.actionHistory {
+                ActionHistoryView(store: history, showsTitle: false)
+            } else { unavailable("Action history is not available in this session.") }
         }
     }
 
