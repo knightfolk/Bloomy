@@ -859,14 +859,10 @@ struct MonitorPopover: View {
             .buttonStyle(PopupCommandButtonStyle())
             Divider()
             HStack(spacing: 12) {
-                HStack(spacing: 5) {
-                    DarkbloomLogo(image: DarkbloomLogoAsset.sourceImage, tint: logoColor)
-                        .frame(width: 18, height: 20)
-                    Text(providerRunning(at: currentTime).map { $0 ? "Online" : "Offline" } ?? "Unknown")
-                        .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                PopupProviderReadinessControl(presentation: store.providerReadiness(at: currentTime),
+                    machineName: Self.machineName) { destination in
+                    presentedPanel = .readiness(destination)
                 }
-                .help("\(Self.machineName) · \(store.snapshot.menuStatus.accessibilityLabel)")
-                .accessibilityElement(children: .combine)
                 Spacer(minLength: 0)
                 CompactGPUGauge(usage: store.gpuUsage, now: currentTime, compact: true)
                 Divider().frame(height: 24)
@@ -1156,14 +1152,6 @@ struct MonitorPopover: View {
     private var models: [DashboardModel] {
         guard case .models(let models) = modelPresentation() else { return [] }
         return models
-    }
-
-    private var logoColor: Color {
-        switch models.first?.state {
-        case .active: .green
-        case .loadedIdle: .yellow
-        case .availableUnloaded, nil: .secondary
-        }
     }
 
 }

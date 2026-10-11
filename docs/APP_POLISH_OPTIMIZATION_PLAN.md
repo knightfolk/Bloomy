@@ -1217,3 +1217,13 @@ tests, 49 staging checks, Release application compilation and 143 fixture input
 hashes pass. Dashboard recovery has static/build evidence only. No real provider
 action, installed replacement, push or release; broader qualification remains
 open. See [popup Hosting review](POPUP_HOSTING_APPLY_REVIEW_20261009.md).
+
+October 10 popup readiness checkpoint: the mascot now reports the same verified
+readiness as Overview and opens Health, Models or Hosting inside the popup.
+Nine exact-source inert native states and all three recovery routes pass;
+1,879 application plus 49 companion checks pass nonparallel, final focused
+checks and Release compilation pass. Two parallel runs hit an unchanged child
+cleanup timing assertion; failures are retained and no assertion was weakened.
+See [popup readiness review](POPUP_READINESS_REVIEW_20261010.md). No production
+mutation, installed replacement or distribution proof is claimed. The model
+card Serving now versus Idle wording remains a separate audit.

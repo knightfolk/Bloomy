@@ -9,6 +9,29 @@ struct MonitorStoreReadinessTests {
     private let now = Date(timeIntervalSince1970: 1_000)
     private let identity = ProcessIdentity(pid: 42, startTimeMicros: 900_000_000)
 
+    @Test("popup readiness cannot label a running but unmatched process online")
+    func popupUsesVerifiedReadiness() async {
+        let reader = ReadinessIdentityReader(nil)
+        let store = makeStore(snapshot(), reader: reader)
+        let unconfirmed = PopupProviderReadinessControl(presentation: store.providerReadiness(at: now),
+            machineName: "Fixture Mac", openDestination: { _ in })
+        #expect(unconfirmed.title == "Unconfirmed")
+        #expect(unconfirmed.presentation.tone == .caution)
+        #expect(unconfirmed.presentation.suggestedAction == .health)
+        reader.set(identity)
+        await store.accept(snapshot(at: now.addingTimeInterval(1)))
+        let ready = PopupProviderReadinessControl(presentation: store.providerReadiness(at: now.addingTimeInterval(1)),
+            machineName: "Fixture Mac", openDestination: { _ in })
+        #expect(ready.title == "Ready")
+        #expect(ready.presentation.tone == .positive)
+        let expired = PopupProviderReadinessControl(presentation: store.providerReadiness(at: now.addingTimeInterval(12)),
+            machineName: "Fixture Mac", openDestination: { _ in })
+        #expect(expired.title == "Needs refresh")
+        #expect(expired.presentation.tone == .caution)
+        #expect(reader.count == 2)
+        await store.stop()
+    }
+
     @Test("screen redraws reuse identity but clock expiry still invalidates readiness")
     func redrawAndExpiry() async {
         let reader = ReadinessIdentityReader(identity)

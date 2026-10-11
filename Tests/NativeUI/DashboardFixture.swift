@@ -46,6 +46,7 @@ private enum FixtureReadinessMode: String, CaseIterable {
     case scheduled = "Scheduled waiting", draining = "Finishing accepted work"
     case stopped = "Provider stopped", expired = "Expired authorization"
     case cold = "Models on demand", unknown = "Unknown lifecycle phase"
+    case validating = "Validating model selection", preloading = "Preparing startup models"
     case stale = "Expired daemon observation"
 }
 
@@ -206,6 +207,8 @@ private enum FixtureData {
             processIdentity: .init(pid: 4242, startTimeMicros: 1_800_000_000),
             advertisedModels: Array(modelIDs.prefix(3)), coordinatorURL: "wss://coordinator.example:8443/ws/provider",
             lifecycle: .init(outcome: outcome, remainingRequests: mode == .draining ? 2 : 0, coordinatorAcknowledged: true),
+            startupPreloadPendingModels: mode == .preloading ? [modelIDs[1]] : nil,
+            modelSwitch: mode == .validating ? .init(outcome: .validating, models: [modelIDs[1]]) : nil,
             availability: mode == .scheduled ? .init(phase: .waitingForSchedule) : nil)
         var status = StatusSnapshot()
         status.version = "0.9.17"

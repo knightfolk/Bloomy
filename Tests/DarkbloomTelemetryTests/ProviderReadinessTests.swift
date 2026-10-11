@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import DarkbloomMonitor
 @testable import DarkbloomTelemetry
 
 @Suite("Pure provider readiness")
@@ -36,6 +37,7 @@ struct ProviderReadinessTests {
     }
 
     @Test("absent expired unknown or pre-start authorization cannot claim ready")
+    @MainActor
     func authorizationGates() {
         let cases: [TrustState?] = [
             nil,
@@ -45,7 +47,12 @@ struct ProviderReadinessTests {
             trust(authorization: ProviderAuthorizationStatus(protocolVersion: 2, path: "app_attest", expiresAt: 1_100)),
             trust(authorization: ProviderAuthorizationStatus(path: "app_attest", expiresAt: 1_100)),
         ]
-        for value in cases { #expect(present(state(trust: value)).state == .authorizationRequired) }
+        for value in cases {
+            let result = present(state(trust: value))
+            #expect(result.state == .authorizationRequired)
+            #expect(PopupProviderReadinessControl(presentation: result, machineName: "Fixture Mac",
+                openDestination: { _ in }).title == "Check access")
+        }
         #expect(present(state(startedAt: 998)).state == .authorizationRequired)
         #expect(present(state(trust: trust(status: "offline"))).state == .offline)
         #expect(present(state(coordinator: "https://different.example")).state == .unconfirmed)
@@ -129,14 +136,19 @@ struct ProviderReadinessTests {
     }
 
     @Test("preload and live model changes are transitions with no recovery action")
+    @MainActor
     func modelTransitions() {
         let preloading = present(state(preload: ["model"]))
         #expect(preloading.state == .transitioning)
         #expect(preloading.suggestedAction == nil)
+        #expect(PopupProviderReadinessControl(presentation: preloading, machineName: "Fixture Mac",
+            openDestination: { _ in }).title == "Transitioning")
         for outcome in [ProviderModelSwitchOutcome.validating, .draining, .switching] {
             let switching = present(state(modelSwitch: ProviderModelSwitchState(outcome: outcome, models: ["model"])))
             #expect(switching.state == .transitioning)
             #expect(switching.suggestedAction == nil)
+            #expect(PopupProviderReadinessControl(presentation: switching, machineName: "Fixture Mac",
+                openDestination: { _ in }).title == "Transitioning")
         }
         #expect(present(state(modelSwitch: ProviderModelSwitchState(outcome: .timedOut, models: []))).state == .interrupted)
         #expect(present(state(modelSwitch: ProviderModelSwitchState(outcome: .busy, models: []))).state == .busy)
