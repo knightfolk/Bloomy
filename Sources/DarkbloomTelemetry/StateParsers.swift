@@ -37,7 +37,10 @@ public enum DaemonStateParser {
                 MemoryCapacity(
                     totalMemoryGB: $0.totalMemoryGB,
                     gpuMemoryActiveGB: $0.gpuMemoryActiveGB,
-                    gpuMemoryCacheGB: $0.gpuMemoryCacheGB
+                    gpuMemoryCacheGB: $0.gpuMemoryCacheGB,
+                    loadUsableGB: $0.loadUsableGB, loadHeadroomGB: $0.loadHeadroomGB,
+                    freeForLoadGB: $0.freeForLoadGB, loadTransitionActive: $0.loadTransitionActive,
+                    activityObservedAt: $0.activityObservedAt
                 )
             },
             slots: raw.slots.compactMap { slot in
@@ -372,12 +375,37 @@ private struct RawAuthorization: Decodable {
 private struct RawCapacity: Decodable {
     let totalMemoryGB: Double
     let gpuMemoryActiveGB: Double
-    let gpuMemoryCacheGB: Double
+    let gpuMemoryCacheGB: Double?
+    let loadUsableGB: Double?
+    let loadHeadroomGB: Double?
+    let freeForLoadGB: Double?
+    let loadTransitionActive: Bool?
+    let activityObservedAt: TimeInterval?
 
     enum CodingKeys: String, CodingKey {
         case totalMemoryGB = "total_memory_gb"
         case gpuMemoryActiveGB = "gpu_memory_active_gb"
         case gpuMemoryCacheGB = "gpu_memory_cache_gb"
+        case loadUsableGB = "load_usable_gb"
+        case loadHeadroomGB = "load_headroom_gb"
+        case freeForLoadGB = "free_for_load_gb"
+        case loadTransitionActive = "load_transition_active"
+        case activityObservedAt = "activity_observed_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        totalMemoryGB = try values.decode(Double.self, forKey: .totalMemoryGB)
+        gpuMemoryActiveGB = try values.decode(Double.self, forKey: .gpuMemoryActiveGB)
+        gpuMemoryCacheGB = try values.decodeIfPresent(Double.self, forKey: .gpuMemoryCacheGB)
+        func number(_ key: CodingKeys) -> Double? {
+            guard let value = try? values.decode(Double.self, forKey: key), value.isFinite, value >= 0 else { return nil }
+            return value
+        }
+        loadUsableGB = number(.loadUsableGB); loadHeadroomGB = number(.loadHeadroomGB)
+        freeForLoadGB = number(.freeForLoadGB)
+        loadTransitionActive = try? values.decode(Bool.self, forKey: .loadTransitionActive)
+        activityObservedAt = number(.activityObservedAt)
     }
 }
 

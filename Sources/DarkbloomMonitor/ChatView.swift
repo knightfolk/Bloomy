@@ -36,7 +36,9 @@ struct ChatEntryPresentation: Equatable {
         messageAccessibilityLabel = "\(speaker): \(entry.text)"
         switch entry.phase {
         case .complete: phaseAccessibilityLabel = nil
-        case .sending: phaseAccessibilityLabel = "\(speaker): Waiting for the destination."
+        case .sending: phaseAccessibilityLabel = entry.text.isEmpty
+            ? "\(speaker): Waiting for the destination."
+            : "\(speaker): Receiving response."
         case .failed(let message): phaseAccessibilityLabel = "\(speaker): \(message)"
         case .cancelled:
             phaseAccessibilityLabel = "\(speaker): Cancelled — the request may already have been delivered on this route."
@@ -567,7 +569,7 @@ private struct ChatEntryRow: View {
             case .complete:
                 provenanceLine
             case .sending:
-                Text("Waiting for the destination…")
+                Text(entry.text.isEmpty ? "Waiting for the destination…" : "Receiving response…")
                     .accessibilityLabel(presentation.phaseAccessibilityLabel ?? "")
                     .font(.caption2)
                     .foregroundStyle(.secondary)

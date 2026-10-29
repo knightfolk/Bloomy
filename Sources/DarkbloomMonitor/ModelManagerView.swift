@@ -782,11 +782,13 @@ struct ModelManagerView: View {
         }
         .task(id: ModelResidencyFreshnessTaskInput(sources: store.snapshot?.sources,
             status: providerStatus, daemon: providerDaemonState, isVisible: isVisible,
-            loadedModels: liveSnapshot?.loadedModels ?? .unavailable(reason: "Loaded models unavailable"))) {
+            loadedModels: liveSnapshot?.loadedModels ?? .unavailable(reason: "Loaded models unavailable"),
+            loadCapacityObservedAt: store.snapshot?.daemonState?.capacity?.activityObservedAt)) {
             guard isVisible else { return }
             let input = ModelResidencyFreshnessTaskInput(sources: store.snapshot?.sources,
                 status: providerStatus, daemon: providerDaemonState, isVisible: isVisible,
-                loadedModels: liveSnapshot?.loadedModels ?? .unavailable(reason: "Loaded models unavailable"))
+                loadedModels: liveSnapshot?.loadedModels ?? .unavailable(reason: "Loaded models unavailable"),
+                loadCapacityObservedAt: store.snapshot?.daemonState?.capacity?.activityObservedAt)
             while let transition = ModelResidencyFreshnessSchedule.nextTransition(input: input, at: Date()) {
                 do { try await Task.sleep(for: .seconds(max(0.001, transition.timeIntervalSinceNow))) }
                 catch { return }
@@ -1165,6 +1167,7 @@ struct ModelManagerView: View {
         let runPercent = whatIfRunPercent[item.catalogID] ?? 0
         let forecast = ModelRunForecast.calculate(runPercent: runPercent, serving: calibratedServing, tokenRate: rate)
         let grade = presentation.grades[item.catalogID]
+        let loadReadiness = presentation.residencyEvidence.loadReadiness(for: item)
         VStack(alignment: .leading, spacing: expanded ? 12 : 2) {
             ModelCardSummary(
                 item: item,
@@ -1187,9 +1190,16 @@ struct ModelManagerView: View {
                 },
                 throughputPeak: providerThroughputPeak,
                 isVisible: isVisible,
-                residencyPresentation: presentation.residencyEvidence.presentation(for: item)
+                residencyPresentation: presentation.residencyEvidence.presentation(for: item),
+                loadReadiness: loadReadiness
             )
             if expanded {
+                if let loadReadiness, let text = ModelLoadReadinessText.detail(loadReadiness) {
+                    Label(text, systemImage: "memorychip")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("model.loadReadiness")
+                }
                 if item.isDownloaded, let snapshot = store.snapshot {
                     DownloadedModelRow(item: item, draft: store.draft,
                         operation: store.operation, sources: snapshot.sources,
@@ -1541,6 +1551,7 @@ struct ModelCardSummary: View {
     var throughputPeak: Double? = nil
     var isVisible = true
     var residencyPresentation: ModelCardResidencyPresentation = .unavailable
+    var loadReadiness: ProviderModelLoadReadiness? = nil
 
     /// Informational content of not-yet-downloaded cards is muted, while the
     /// Download action stays fully opaque and enabled whenever it is allowed.
@@ -1562,7 +1573,7 @@ struct ModelCardSummary: View {
 
     private var cardFace: some View {
         CompactModelCard(modelID: item.catalogID,
-            status: displayedResidency.status,
+            status: loadReadiness.flatMap(ModelLoadReadinessText.short) ?? displayedResidency.status,
             symbol: displayedResidency == .unavailable ? "questionmark.circle" : modelSymbol,
             tint: item.isDownloaded && displayedResidency != .unavailable ? accent : .secondary,
             metrics: compactMetrics, contentOnly: true,

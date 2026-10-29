@@ -76,7 +76,7 @@ public struct ChatMessagePayload: Equatable, Sendable, Codable {
     }
 }
 
-/// The validated, non-streaming completion request. The URL is fixed by the
+/// The validated text completion request. The URL is fixed by the
 /// route; the body is bounded before transmission.
 public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
     public static let maximumBodyBytes = 256 * 1_024
@@ -96,14 +96,16 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
     public static func makeNetwork(
         consumerKey: String,
         model: String,
-        messages: [ChatMessagePayload]
+        messages: [ChatMessagePayload],
+        stream: Bool = false
     ) throws -> Self {
         try make(
             url: URL(string: "https://api.darkbloom.dev/v1/chat/completions")!,
             token: consumerKey,
             model: model,
             messages: messages,
-            timeout: networkTimeoutInterval
+            timeout: networkTimeoutInterval,
+            stream: stream
         )
     }
 
@@ -135,7 +137,8 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
         token: String?,
         model: String,
         messages: [ChatMessagePayload],
-        maxTokens: Int? = nil
+        maxTokens: Int? = nil,
+        stream: Bool = false
     ) throws -> Self {
         if let token {
             guard !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -152,7 +155,7 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
         else { throw ChatClientError.invalidEndpoint }
         return try make(
             url: url, token: token, model: model, messages: messages,
-            timeout: localTimeoutInterval, maxTokens: maxTokens
+            timeout: localTimeoutInterval, maxTokens: maxTokens, stream: stream
         )
     }
 
@@ -162,15 +165,16 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
         model: String,
         messages: [ChatMessagePayload],
         timeout: TimeInterval,
-        maxTokens: Int? = nil
+        maxTokens: Int? = nil,
+        stream: Bool = false
     ) throws -> Self {
         try validate(model: model, messages: messages)
-        let body = try Self.encode(model: model, messages: messages, maxTokens: maxTokens)
+        let body = try Self.encode(model: model, messages: messages, maxTokens: maxTokens, stream: stream)
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(stream ? "text/event-stream" : "application/json", forHTTPHeaderField: "Accept")
         if let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -190,14 +194,18 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
         }
     }
 
-    static func encode(model: String, messages: [ChatMessagePayload], maxTokens: Int? = nil) throws -> Data {
+    static func encode(model: String, messages: [ChatMessagePayload], maxTokens: Int? = nil, stream: Bool = false) throws -> Data {
         struct Body: Encodable {
             let model: String
             let messages: [ChatMessagePayload]
-            let stream = false
+            let stream: Bool
             let max_tokens: Int?
+            let stream_options: StreamOptions?
         }
-        let data = try JSONEncoder().encode(Body(model: model, messages: messages, max_tokens: maxTokens))
+        struct StreamOptions: Encodable {
+            let include_usage = true
+        }
+        let data = try JSONEncoder().encode(Body(model: model, messages: messages, stream: stream, max_tokens: maxTokens, stream_options: stream ? StreamOptions() : nil))
         guard data.count <= maximumBodyBytes else { throw ChatClientError.requestTooLarge }
         return data
     }

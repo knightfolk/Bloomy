@@ -90,6 +90,8 @@ public struct ProviderControlSnapshot: Equatable, Sendable {
     public let sources: ProviderControlSourceStates
     /// Read-only effective model cache reported by the same CLI inventory read.
     public let effectiveCacheDirectory: String?
+    /// Whether the daemon and local model inventory use the same config.
+    public let inventoryMatchesDaemonConfig: Bool
     public let liveSwitchAvailability: ProviderLiveSwitchAvailability
 
     public init(
@@ -100,6 +102,7 @@ public struct ProviderControlSnapshot: Equatable, Sendable {
         capturedAt: Date,
         sources: ProviderControlSourceStates = .unknown,
         effectiveCacheDirectory: String? = nil,
+        inventoryMatchesDaemonConfig: Bool = false,
         liveSwitchAvailability: ProviderLiveSwitchAvailability = .unavailable(
             "Refresh current provider state before applying live"
         )
@@ -115,6 +118,7 @@ public struct ProviderControlSnapshot: Equatable, Sendable {
         self.capturedAt = capturedAt
         self.sources = sources
         self.effectiveCacheDirectory = effectiveCacheDirectory
+        self.inventoryMatchesDaemonConfig = inventoryMatchesDaemonConfig
         self.liveSwitchAvailability = liveSwitchAvailability
     }
 
@@ -1046,6 +1050,9 @@ public actor ProviderControlService: ProviderControlling, ProviderSavedCapacityR
                 loadedModels: loadedModelsState
             ),
             effectiveCacheDirectory: modelSources.effectiveCacheDirectory,
+            inventoryMatchesDaemonConfig: daemon?.configPath.map {
+                URL(fileURLWithPath: $0).standardizedFileURL == policy.providerConfig.standardizedFileURL
+            } ?? false,
             liveSwitchAvailability: ProviderLiveSwitchAvailability.evaluate(
                 daemon: daemonRead,
                 daemonSource: daemonState,

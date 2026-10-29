@@ -210,6 +210,8 @@ public struct ModelInventoryItem: Equatable, Identifiable, Sendable {
     public let modelType: String
     public let capabilities: [String]
     public let sizeGB: Double
+    /// Current scanner estimate, distinct from catalog download size.
+    public let estimatedMemoryGB: Double?
     public let minimumRAMGB: Int
     public let requiredProviderCapabilities: [String]?
     public let quantization: String?
@@ -242,7 +244,8 @@ public struct ModelInventoryItem: Equatable, Identifiable, Sendable {
         issue: String?,
         enabledSelector: String? = nil,
         preloadSelector: String? = nil,
-        downloadedSizeBytes: Int64? = nil
+        downloadedSizeBytes: Int64? = nil,
+        estimatedMemoryGB: Double? = nil
     ) {
         self.catalogID = catalogID
         self.localID = localID
@@ -256,6 +259,7 @@ public struct ModelInventoryItem: Equatable, Identifiable, Sendable {
         self.modelType = modelType
         self.capabilities = capabilities
         self.sizeGB = sizeGB
+        self.estimatedMemoryGB = estimatedMemoryGB
         self.minimumRAMGB = minimumRAMGB
         self.requiredProviderCapabilities = requiredProviderCapabilities
         self.quantization = quantization
@@ -341,7 +345,8 @@ public enum ModelInventoryBuilder {
                 isPreloaded: resolvedPreloaded[model.id] != nil, liveState: live, issue: itemIssues[model.id],
                 enabledSelector: resolvedEnabled[model.id],
                 preloadSelector: resolvedPreloaded[model.id],
-                downloadedSizeBytes: downloadedSize
+                downloadedSizeBytes: downloadedSize,
+                estimatedMemoryGB: records.count == 1 ? records[0].estimatedMemoryGB : nil
             )
         }
         let sorted = items.sorted {

@@ -380,12 +380,23 @@ public struct ModelLoadFailure: Equatable, Sendable {
 public struct MemoryCapacity: Equatable, Sendable {
     public let totalMemoryGB: Double
     public let gpuMemoryActiveGB: Double
-    public let gpuMemoryCacheGB: Double
+    public let gpuMemoryCacheGB: Double?
+    public let loadUsableGB: Double?
+    public let loadHeadroomGB: Double?
+    public let freeForLoadGB: Double?
+    public let loadTransitionActive: Bool?
+    public let activityObservedAt: TimeInterval?
 
-    public init(totalMemoryGB: Double, gpuMemoryActiveGB: Double, gpuMemoryCacheGB: Double) {
+    public init(totalMemoryGB: Double, gpuMemoryActiveGB: Double, gpuMemoryCacheGB: Double?,
+                loadUsableGB: Double? = nil, loadHeadroomGB: Double? = nil,
+                freeForLoadGB: Double? = nil, loadTransitionActive: Bool? = nil,
+                activityObservedAt: TimeInterval? = nil) {
         self.totalMemoryGB = totalMemoryGB
         self.gpuMemoryActiveGB = gpuMemoryActiveGB
         self.gpuMemoryCacheGB = gpuMemoryCacheGB
+        self.loadUsableGB = loadUsableGB; self.loadHeadroomGB = loadHeadroomGB
+        self.freeForLoadGB = freeForLoadGB; self.loadTransitionActive = loadTransitionActive
+        self.activityObservedAt = activityObservedAt
     }
 }
 

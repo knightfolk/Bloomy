@@ -627,12 +627,16 @@ final class ChatStore: ObservableObject {
                 // Local: no fallback. If the endpoint is gone, this throws
                 // and the failure is recorded; only the user can start a new
                 // conversation on the network route.
-                let outcome = try await localClient.complete(model: modelID, messages: history)
+                let outcome = try await localClient.completeStreaming(model: modelID, messages: history) { [weak self] delta in
+                    await self?.appendStreamText(delta, conversationID: conversationID, placeholderID: placeholderID)
+                }
                 finish(conversationID: conversationID, placeholderID: placeholderID, route: route, modelID: modelID, outcome: outcome)
 
             case .network:
                 try await enforceNetworkGates(conversationID: conversationID, credentialGeneration: credentialGeneration, modelID: modelID)
-                let outcome = try await networkClient.complete(model: modelID, messages: history)
+                let outcome = try await networkClient.completeStreaming(model: modelID, messages: history) { [weak self] delta in
+                    await self?.appendStreamText(delta, conversationID: conversationID, placeholderID: placeholderID)
+                }
                 finish(conversationID: conversationID, placeholderID: placeholderID, route: route, modelID: modelID, outcome: outcome)
             }
         } catch {
@@ -728,6 +732,14 @@ final class ChatStore: ObservableObject {
         guard credentialGeneration == networkCredentialGeneration else {
             throw ChatSendBlocked.credentialChanged
         }
+    }
+
+    private func appendStreamText(_ delta: String, conversationID: UUID, placeholderID: UUID) {
+        guard !Task.isCancelled, var conversation, conversation.id == conversationID,
+              let index = conversation.entries.firstIndex(where: { $0.id == placeholderID }),
+              conversation.entries[index].phase == .sending else { return }
+        conversation.entries[index].text.append(delta)
+        self.conversation = conversation
     }
 
     private func finish(

@@ -126,6 +126,26 @@ public protocol ChatModelListing: Sendable {
 
 public protocol ChatCompleting: Sendable {
     func complete(model: String, messages: [ChatMessagePayload]) async throws -> ChatCompletionOutcome
+    /// Delivers visible text deltas while a response is arriving. The return
+    /// value is authoritative only after the server finishes successfully.
+    func completeStreaming(
+        model: String, messages: [ChatMessagePayload],
+        onText: @escaping @Sendable (String) async -> Void
+    ) async throws -> ChatCompletionOutcome
+}
+
+extension ChatCompleting {
+    /// Existing non-streaming clients keep their behavior without a second
+    /// request or any automatic retry if streaming fails.
+    public func completeStreaming(
+        model: String, messages: [ChatMessagePayload],
+        onText: @escaping @Sendable (String) async -> Void
+    ) async throws -> ChatCompletionOutcome {
+        let outcome = try await complete(model: model, messages: messages)
+        try Task.checkCancellation()
+        await onText(outcome.content)
+        return outcome
+    }
 }
 
 /// Chat client for this Mac's own hosting endpoint. Reachability and model
@@ -169,6 +189,18 @@ public struct LocalChatClient: ChatModelListing, ChatCompleting, Sendable {
         ) { data in
             try ChatCompletionParser.parse(data)
         }
+    }
+
+    public func completeStreaming(
+        model: String, messages: [ChatMessagePayload],
+        onText: @escaping @Sendable (String) async -> Void
+    ) async throws -> ChatCompletionOutcome {
+        let endpoint = try await resolvedEndpoint()
+        let request = try ChatCompletionRequest.makeLocal(
+            origin: endpoint.origin, token: endpoint.withToken { $0 },
+            model: model, messages: messages, stream: true
+        )
+        return try await ChatStreamingExecutor.execute(request: request.urlRequest, session: session, onText: onText)
     }
 
     private func resolvedEndpoint() async throws -> ChatLocalEndpoint {
@@ -248,6 +280,21 @@ public struct NetworkChatClient: ChatModelListing, ChatCompleting, Sendable {
             ) { data in
                 try ChatCompletionParser.parse(data)
             }
+        } catch ChatClientError.unauthorized {
+            throw ChatClientError.consumerKeyRejected
+        }
+    }
+
+    public func completeStreaming(
+        model: String, messages: [ChatMessagePayload],
+        onText: @escaping @Sendable (String) async -> Void
+    ) async throws -> ChatCompletionOutcome {
+        let token = try await consumerKey()
+        let request = try ChatCompletionRequest.makeNetwork(
+            consumerKey: token, model: model, messages: messages, stream: true
+        )
+        do {
+            return try await ChatStreamingExecutor.execute(request: request.urlRequest, session: session, onText: onText)
         } catch ChatClientError.unauthorized {
             throw ChatClientError.consumerKeyRejected
         }

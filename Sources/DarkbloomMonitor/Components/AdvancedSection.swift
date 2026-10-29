@@ -33,7 +33,7 @@ enum HealthPresentation {
         }
         if let capacity = state.capacity {
             rows.append(DisplayRow(label: "GPU active memory", value: "\(capacity.gpuMemoryActiveGB.formatted(.number.precision(.fractionLength(1)))) GB"))
-            rows.append(DisplayRow(label: "GPU cache memory", value: "\(capacity.gpuMemoryCacheGB.formatted(.number.precision(.fractionLength(1)))) GB"))
+            rows.append(DisplayRow(label: "GPU cache memory", value: capacity.gpuMemoryCacheGB.map { "\($0.formatted(.number.precision(.fractionLength(1)))) GB" } ?? "Not reported"))
         }
         return rows
     }

@@ -56,6 +56,12 @@ struct ModelManagerResidencyEvidence: Equatable {
     var providerKnownStopped = false
     var controlResidencyIsFresh = false
     var telemetryResidency: ProviderTelemetryResidency? = nil
+    var loadReadinessState: DaemonState? = nil
+
+    func loadReadiness(for item: ModelInventoryItem) -> ProviderModelLoadReadiness? {
+        guard let state = loadReadinessState, let id = item.localID else { return nil }
+        return ProviderModelLoadReadiness.make(modelID: id, estimatedMemoryGB: item.estimatedMemoryGB, state: state)
+    }
 
     func presentation(for item: ModelInventoryItem) -> ModelCardResidencyPresentation {
         guard item.isDownloaded else { return .notDownloaded }
@@ -82,9 +88,25 @@ struct ModelManagerResidencyEvidence: Equatable {
                 staleReason: "Residency is stale", futureReason: "Residency timestamp is in the future")
                 .isMarkedFresh == true
         }
+        let loadState: DaemonState? = {
+            guard let control, control.inventoryMatchesDaemonConfig,
+                  fresh(control.sources.daemon), fresh(control.sources.localModels), let original = control.daemonState else { return nil }
+            var state = original
+            if case .available(let newer, _) = freshDaemon(daemon, at: date), newer.writtenAt > original.writtenAt {
+                guard newer.processIdentity == original.processIdentity,
+                      newer.configPath == original.configPath else { return nil }
+                state = newer
+            }
+            guard
+                  ProcessIdentity.read(pid: state.pid) == state.processIdentity,
+                  let observed = state.capacity?.activityObservedAt,
+                  freshTimestamp(observed, maximumAge: ProviderControlSourceState.maximumEvidenceAge, at: date) else { return nil }
+            return state
+        }()
         return Self(providerKnownStopped: lifecycle.providerKnownRunning == false,
             controlResidencyIsFresh: fresh(control?.sources.daemon) && fresh(control?.sources.loadedModels),
-            telemetryResidency: ProviderTelemetryResidency.make(daemon: daemon, loadedModels: loadedModels, at: date))
+            telemetryResidency: ProviderTelemetryResidency.make(daemon: daemon, loadedModels: loadedModels, at: date),
+            loadReadinessState: loadState)
     }
 
     private static func freshAvailability<Value: Equatable & Sendable>(
@@ -107,6 +129,38 @@ struct ModelManagerResidencyEvidence: Equatable {
         guard timestamp.isFinite, date.timeIntervalSince1970.isFinite else { return false }
         let age = date.timeIntervalSince1970 - timestamp
         return age.isFinite && (0...maximumAge).contains(age)
+    }
+}
+
+enum ModelLoadReadinessText {
+    static func short(_ value: ProviderModelLoadReadiness) -> String? {
+        switch value.kind {
+        case .preloading: "Preloading"
+        case .onDemand: "On demand"
+        case .temporarilyBusy: "Checking after work"
+        case .preloadSkipped: "Preload needs space"
+        case .preloadBlocked: "Preload needs memory"
+        case .coldLoadBlocked: "Load needs memory"
+        }
+    }
+
+    static func detail(_ value: ProviderModelLoadReadiness) -> String? {
+        switch value.kind {
+        case .preloading: return "Startup preload is in progress."
+        case .onDemand: return "The provider can attempt to load this advertised model when requested; memory can change."
+        case .temporarilyBusy: return "A request or model change is in progress. Recheck load memory when the provider is idle."
+        case .preloadSkipped, .preloadBlocked, .coldLoadBlocked:
+            guard let model = value.modelGB, let headroom = value.headroomGB,
+                  let usable = value.usableGB, let shortfall = value.noEvictionShortfallGB else { return nil }
+            let figures = String(format: "%.1f GB model + %.1f GB reserve; %.1f GB available now. Preloading without eviction is %.1f GB short.", model, headroom, usable, shortfall)
+            switch value.kind {
+            case .preloadSkipped: return figures + " A request may load it by evicting idle models."
+            case .coldLoadBlocked:
+                guard let cold = value.coldLoadShortfallGB else { return nil }
+                return figures + String(format: " Even after idle eviction, the estimated load is %.1f GB short.", cold)
+            default: return figures + " Whether idle eviction can make room is not reported."
+            }
+        }
     }
 }
 
@@ -245,6 +299,7 @@ struct ModelResidencyFreshnessTaskInput: Equatable {
     let daemon: SourceAvailability<DaemonState>
     let isVisible: Bool
     var loadedModels: SourceAvailability<LoadedModelsState> = .unavailable(reason: "Loaded models unavailable")
+    var loadCapacityObservedAt: TimeInterval? = nil
 }
 
 enum ModelResidencyFreshnessSchedule {
@@ -260,6 +315,12 @@ enum ModelResidencyFreshnessSchedule {
         }
         for source in [input.sources?.daemon, input.sources?.loadedModels] {
             if case .fresh(let evidenceAt) = source {
+                include(evidenceAt.timeIntervalSince1970, maximumAge: ProviderControlSourceState.maximumEvidenceAge)
+            }
+        }
+        if let observed = input.loadCapacityObservedAt {
+            include(observed, maximumAge: ProviderControlSourceState.maximumEvidenceAge)
+            if case .fresh(let evidenceAt) = input.sources?.localModels {
                 include(evidenceAt.timeIntervalSince1970, maximumAge: ProviderControlSourceState.maximumEvidenceAge)
             }
         }

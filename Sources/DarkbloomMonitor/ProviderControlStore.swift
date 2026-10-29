@@ -759,6 +759,7 @@ final class ProviderControlStore: ObservableObject {
                         capturedAt: snapshot.capturedAt,
                         sources: snapshot.sources,
                         effectiveCacheDirectory: snapshot.effectiveCacheDirectory,
+                        inventoryMatchesDaemonConfig: snapshot.inventoryMatchesDaemonConfig,
                         liveSwitchAvailability: snapshot.liveSwitchAvailability
                     )
                 }

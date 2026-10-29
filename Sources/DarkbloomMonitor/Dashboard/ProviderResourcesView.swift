@@ -208,7 +208,7 @@ struct ProviderResourcesView: View {
             Text("\(capacity.gpuMemoryActiveGB.formatted(.number.precision(.fractionLength(1)))) GB active")
                 .font(.title3.weight(.semibold))
                 .monospacedDigit()
-            Text("\(capacity.gpuMemoryCacheGB.formatted(.number.precision(.fractionLength(1)))) GB cached")
+            Text(capacity.gpuMemoryCacheGB.map { "\($0.formatted(.number.precision(.fractionLength(1)))) GB cached" } ?? "GPU cache not reported")
                 .font(.callout)
                 .monospacedDigit()
             Text("Provider-reported allocations")
@@ -219,7 +219,7 @@ struct ProviderResourcesView: View {
         .padding(11)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("GPU memory, \(capacity.gpuMemoryActiveGB.formatted(.number.precision(.fractionLength(1)))) gigabytes active, \(capacity.gpuMemoryCacheGB.formatted(.number.precision(.fractionLength(1)))) gigabytes cached\(stale ? ", last report" : "")")
+        .accessibilityLabel("GPU memory, \(capacity.gpuMemoryActiveGB.formatted(.number.precision(.fractionLength(1)))) gigabytes active, \(capacity.gpuMemoryCacheGB.map { "\($0.formatted(.number.precision(.fractionLength(1)))) gigabytes cached" } ?? "GPU cache not reported")\(stale ? ", last report" : "")")
         .accessibilityIdentifier("provider-resource.gpu-memory")
     }
 

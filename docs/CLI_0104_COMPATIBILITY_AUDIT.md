@@ -118,10 +118,22 @@ and the installed CLI's read-only help and status output.
   affect other apps and needs a separate design and safe testing. No add-on
   hold/release command was issued during testing.
 - Further model-load, Autopilot and coordinator diagnostics remain to audit.
-- Darkbloom now reports per-model memory fit and preload skip reasons; Bloomy
-  currently presents unloaded models generically. Its chat is also text-only
-  and non-streaming, while the local API supports streaming, media and tools.
-  These require contract and capability review before implementation.
+- Model load memory: Bloomy now derives a current no-eviction shortfall and,
+  when available, the remaining shortfall after idle eviction from the daemon's
+  capacity and local scanner estimate. It requires fresh capacity, local
+  inventory, matching configuration and process identity; activity prevents a
+  definitive shortfall verdict. This is an estimate, not a record proving a
+  preload was skipped or a promise that a later load will succeed. Missing
+  GPU-cache figures are shown as unreported instead of rejecting the snapshot.
+  Automated tests cover the distinctions and freshness. An isolated native
+  fixture displayed the current shortfall in a model card and its detail sheet.
+  Installed-app review remains outstanding.
+- Chat now accepts incrementally streamed text for local and network requests,
+  preserving partial output on cancellation or failure. Parser and store tests
+  cover framing, cancellation and errors. Media and tool-call conversations are
+  not yet supported and require capability and contract review. No live
+  inference was run for this work; an isolated native fixture displayed partial
+  text followed by a completed response. Installed-app review remains outstanding.
 - Provider-internal inference features and performance changes do not
   automatically imply Bloomy UI controls. Review model capabilities and chat
   transport against actual supported API contracts; do not infer entitlement

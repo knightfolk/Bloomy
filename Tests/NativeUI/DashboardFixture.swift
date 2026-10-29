@@ -1040,6 +1040,8 @@ private actor FixtureController: ProviderControlling {
     private var failNextRead = false
     private var readinessMode = FixtureReadinessMode.scenario
     private var liveTelemetryMode = FixtureLiveTelemetryMode.scenario
+    private var loadMemoryReview = false
+    func setLoadMemoryReview(_ enabled: Bool) { loadMemoryReview = enabled }
     func setObservationModes(readiness: FixtureReadinessMode, liveTelemetry: FixtureLiveTelemetryMode) {
         readinessMode = readiness
         liveTelemetryMode = liveTelemetry
@@ -1097,7 +1099,19 @@ private actor FixtureController: ProviderControlling {
         // before building inventory, never retained as current residency.
         let observation = FixtureData.selectedSnapshot(scenario, readiness: readinessMode,
             liveTelemetry: liveTelemetryMode, now: now, events: [])
-        let observedDaemon = observation.state.value
+        let observedDaemon: DaemonState? = {
+            guard loadMemoryReview, let identity = ProcessIdentity.current() else { return observation.state.value }
+            return DaemonState(schema: 1, version: "0.10.4", currentModel: FixtureData.modelIDs[0],
+                warmModels: Array(FixtureData.modelIDs.prefix(2)),
+                stats: .init(tokensGenerated: 0, requestsServed: 0, usageGaps: 0), trust: nil,
+                capacity: .init(totalMemoryGB: 64, gpuMemoryActiveGB: 32, gpuMemoryCacheGB: 6,
+                    loadUsableGB: 20, loadHeadroomGB: 6.5, freeForLoadGB: 12,
+                    loadTransitionActive: false, activityObservedAt: now.timeIntervalSince1970),
+                slots: [], inferenceActive: false, startedAt: now.addingTimeInterval(-10).timeIntervalSince1970,
+                writtenAt: now.timeIntervalSince1970, pid: identity.pid, processIdentity: identity,
+                advertisedModels: Array(FixtureData.modelIDs.prefix(3)), startupPreloadPendingModels: [],
+                requestWorkPending: false, loadTransitionActive: false)
+        }()
         let runtimeSource: ProviderControlSourceState
         if case .available = observation.state, let observedDaemon {
             runtimeSource = ProviderControlSourceState.fresh(evidenceAt: Date(timeIntervalSince1970: observedDaemon.writtenAt))
@@ -1118,7 +1132,7 @@ private actor FixtureController: ProviderControlling {
             !removedModels.contains($0.id) && !(transientGemmaHidden && $0.id == FixtureData.modelIDs[1])
         }
         let local = catalog.filter { scenario != .missingStartupModel || $0.id != FixtureData.modelIDs[0] }
-            .map { LocalModel(id: $0.id, modelType: "text", sizeBytes: Int64($0.sizeGB * 1e9), estimatedMemoryGB: nil) }
+            .map { LocalModel(id: $0.id, modelType: "text", sizeBytes: Int64($0.sizeGB * 1e9), estimatedMemoryGB: loadMemoryReview ? 15 : nil) }
         let catalogSource: ProviderControlSourceState = scenario.hasStaleCatalog
             ? .stale("Synthetic catalog/local inventory retained") : scenario.hasCurrentRuntime
             ? .fresh(evidenceAt: now) : .unavailable("Synthetic source offline")
@@ -1129,7 +1143,8 @@ private actor FixtureController: ProviderControlling {
                 originalStartupPreload: startupPreload, startupPreload: startupPreload,
                 originalEngineV2MaxConcurrent: concurrent, engineV2MaxConcurrent: concurrent),
             daemonState: daemon, capturedAt: now,
-            sources: ProviderControlSourceStates(catalog: catalogSource, localModels: catalogSource, daemon: runtimeSource, loadedModels: runtimeSource))
+            sources: ProviderControlSourceStates(catalog: catalogSource, localModels: catalogSource, daemon: runtimeSource, loadedModels: runtimeSource),
+            inventoryMatchesDaemonConfig: loadMemoryReview)
     }
     func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult {
         saveCount += 1
@@ -1365,6 +1380,16 @@ private struct FixtureChat: LocalChatRouteClient, NetworkChatRouteClient {
         if !scenario.hasCurrentRuntime { throw FixtureError.offline }
         return ChatCompletionOutcome(content: "Synthetic reply — no model was called. This review conversation lives only in fixture memory.", model: model,
             finishReason: "stop", promptTokens: 12, completionTokens: 22)
+    }
+    func completeStreaming(model: String, messages: [ChatMessagePayload],
+                           onText: @escaping @Sendable (String) async -> Void) async throws -> ChatCompletionOutcome {
+        let outcome = try await complete(model: model, messages: messages)
+        for part in ["Synthetic reply — ", "no model was called. ", "This review conversation lives only in fixture memory."] {
+            try Task.checkCancellation()
+            await onText(part)
+            try await Task.sleep(for: .seconds(1))
+        }
+        return outcome
     }
 }
 
@@ -1741,6 +1766,11 @@ private final class FixtureModel: ObservableObject {
         readinessMode = mode
         await controllerClient.setObservationModes(readiness: readinessMode, liveTelemetry: liveTelemetryMode)
         await publishTelemetry(scenario: scenario, monitor: monitor, logFeed: logFeed)
+        await control.refreshPreservingDraft()
+    }
+    func showLoadMemoryReview() async {
+        guard ready, !isTerminating, scenario == .fresh else { return }
+        await controllerClient.setLoadMemoryReview(true)
         await control.refreshPreservingDraft()
     }
     func setLiveTelemetryMode(_ mode: FixtureLiveTelemetryMode) async {
@@ -3176,6 +3206,8 @@ private struct FixtureReviewView: View {
                                 Button(mode.rawValue) { Task { await model.setReadinessMode(mode) } }
                             }
                         }
+                        Button("Synthetic model load memory") { Task { await model.showLoadMemoryReview() } }
+                            .disabled(!model.ready || model.scenario != .fresh || model.proofRunning)
                         .disabled(!model.ready || model.scenario != .fresh || model.proofRunning)
                         .help("Changes inert daemon evidence only; no provider commands or credentials are read.")
                         Menu("Synthetic Autopilot") {
