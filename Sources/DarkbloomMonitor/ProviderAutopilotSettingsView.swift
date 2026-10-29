@@ -163,7 +163,7 @@ struct ProviderAutopilotSettingsView: View {
             Text(presentation.explanation).font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let status = presentation.status {
-                if let title = presentation.pinnedModelsTitle {
+                if !status.isEnrolled, let title = presentation.pinnedModelsTitle {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(title).font(.caption.weight(.semibold))
                         ForEach(status.pinnedModels, id: \.self) { model in
@@ -174,6 +174,25 @@ struct ProviderAutopilotSettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .accessibilityIdentifier("settings.autopilot.pinnedModels")
+                }
+                if status.isEnrolled {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Manage model pins").font(.caption.weight(.semibold))
+                        ForEach(Array(Set(status.selectedModels + status.pinnedModels)).sorted(), id: \.self) { model in
+                            let pinned = status.pinnedModels.contains(model)
+                            HStack(alignment: .center) {
+                                Text(model).font(.caption).textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 8)
+                                Button(pinned ? "Unpin" : "Pin") { submitPin(model, status: status) }
+                                    .disabled(!presentation.isFresh || isBusy || hasUnsavedSettings)
+                                    .accessibilityLabel("\(pinned ? "Unpin" : "Pin") \(model)")
+                            }
+                        }
+                        Text(presentation.pinExplanation).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .accessibilityIdentifier("settings.autopilot.managePins")
                 }
                 if presentation.isFresh, status.isLiveConfirmed, let reasons = status.live?.busyReasons, !reasons.isEmpty {
                     Text("Autopilot is waiting: " + reasons.map(\.explanation).joined(separator: " "))
@@ -398,6 +417,24 @@ struct ProviderAutopilotSettingsView: View {
                 feedback = store.errorMessage == unsupported ? unsupported
                     : "The change could not be confirmed. Refresh Autopilot before trying again."
             }
+        }
+    }
+
+    private func submitPin(_ model: String, status: ProviderAutopilotStatus) {
+        guard !isBusy, !hasUnsavedSettings, evidence.isFresh, status.isEnrolled else { return }
+        var pins = Set(status.pinnedModels)
+        let adding = !pins.contains(model)
+        if adding { pins.insert(model) } else { pins.remove(model) }
+        let desired = pins.sorted()
+        isSubmitting = true
+        feedback = nil
+        Task { @MainActor in
+            let confirmed = await performMutation(adding ? "Pin model" : "Unpin model") {
+                try await store.setAutopilotPins(expected: status, desired: desired)
+            }
+            isSubmitting = false
+            feedback = confirmed ? "Model pin change saved. The provider may take time to apply it."
+                : (store.errorMessage ?? "The pin change could not be confirmed. Refresh Autopilot before trying again.")
         }
     }
 }

@@ -951,6 +951,7 @@ private actor FixtureAutopilot {
     private var mode: FixtureAutopilotMode = .off
     private var enrollmentCount = 0
     private var policyCount = 0
+    private var pins = [FixtureData.modelIDs[0]]
     private var downloadPolicy = AutopilotDownloadPolicy(enabled: true, maxStorageGB: 120, maxModels: 3, reserveGB: 50)
     func setDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) throws {
         guard downloadPolicy == expected else { throw ProviderExtrasMutationError.commandFailed }
@@ -962,7 +963,7 @@ private actor FixtureAutopilot {
         let enabled = mode != .off && mode != .blockedPreload
         return .available(value: .init(configuredEnabled: enabled, consentRecorded: enabled,
             configuredPaused: mode == .paused, selectedModels: enabled ? FixtureData.modelIDs : [],
-            pinnedModels: enabled ? [FixtureData.modelIDs[0]] : [], configuredRevision: "fixture",
+            pinnedModels: enabled ? pins : [], configuredRevision: "fixture",
             live: enabled ? .init(protocolVersion: 3, enabled: true, active: mode == .active,
                 observeOnly: mode == .shadow, paused: mode == .paused, cachedOnly: true,
                 revision: mode == .mismatch ? "old" : "fixture",
@@ -976,6 +977,10 @@ private actor FixtureAutopilot {
     func apply(_ action: ProviderAutopilotPolicyAction) {
         policyCount += 1
         mode = action == .disable ? .off : action == .pause ? .paused : .shadow
+    }
+    func setPins(expected: ProviderAutopilotStatus, desired: [String]) throws {
+        guard read().value?.hasSameEnrollment(as: expected) == true else { throw ProviderExtrasMutationError.commandFailed }
+        pins = desired
     }
     func proof() -> [String: Int] { ["synthetic": 1, "enrollmentCount": enrollmentCount, "policyCount": policyCount] }
 }
@@ -1197,6 +1202,9 @@ private actor FixtureExtras: ProviderExtrasProviding {
     init(scenario: FixtureScenario, autopilot: FixtureAutopilot) { self.scenario = scenario; self.autopilot = autopilot }
     func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus> { await autopilot.read() }
     func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws { await autopilot.apply(action) }
+    func setAutopilotPins(expected: ProviderAutopilotStatus, desired: [String]) async throws {
+        try await autopilot.setPins(expected: expected, desired: desired)
+    }
     func setAutopilotDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) async throws {
         try await autopilot.setDownloads(expected: expected, desired: desired)
     }

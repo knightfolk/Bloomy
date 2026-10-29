@@ -80,6 +80,60 @@ public struct ProviderConfigDocument: Equatable, Sendable {
         return result
     }
 
+    /// Change only the enrolled pin set and its revision. Comments inside a
+    /// replaced array cannot be attached reliably to the new model list.
+    static func renderingAutopilotPins(_ pinnedModels: [String], expected: ProviderAutopilotStatus,
+                                       in data: Data, revision: UUID = UUID()) throws -> Data {
+        guard expected.isEnrolled, data.count <= 1_048_576,
+              String(data: data, encoding: .utf8) != nil else { throw ProviderConfigError.changedExternally }
+        guard validAutopilotModels(pinnedModels), validAutopilotModels(expected.selectedModels),
+              validAutopilotModels(expected.pinnedModels),
+              Set(pinnedModels).subtracting(expected.pinnedModels).isSubset(of: Set(expected.selectedModels)) else {
+            throw ProviderConfigError.validationFailed("Pinned models must be valid selected models")
+        }
+        var scanner = ProviderConfigScanner(data: data)
+        let fields = try scanner.autopilotPolicyRanges()
+        guard expected.matchesConfiguredRevision(fields.revisionValue), fields.enabledValue == expected.configuredEnabled,
+              fields.consentValue == expected.consentRecorded, (fields.pausedValue ?? false) == expected.configuredPaused,
+              fields.selectedModels == expected.selectedModels, fields.pinnedModels == expected.pinnedModels else {
+            throw ProviderConfigError.changedExternally
+        }
+        let desired = pinnedModels.sorted()
+        guard desired != fields.pinnedModels.sorted() else { return data }
+        guard !fields.pinnedModelsHaveComments else {
+            throw ProviderConfigError.validationFailed("Comments inside pinned models cannot be preserved")
+        }
+        let newline = Self.detectLineEnding(in: data)
+        let rendered = "[" + desired.map { "\"\($0)\"" }.joined(separator: ", ") + "]"
+        var edits: [(Range<Int>, Data)] = [(fields.revision, Data("\"\(revision.uuidString)\"".utf8))]
+        if let range = fields.pinnedModelsRange { edits.append((range, Data(rendered.utf8))) }
+        else {
+            let prefix = fields.headerEnd == data.count && data.last != 10 && data.last != 13 ? newline : ""
+            edits.append((fields.headerEnd..<fields.headerEnd, Data("\(prefix)pinned_models = \(rendered)\(newline)".utf8)))
+        }
+        var result = data
+        for (range, replacement) in edits.sorted(by: { $0.0.lowerBound > $1.0.lowerBound }) {
+            result.replaceSubrange(range, with: replacement)
+        }
+        var verification = ProviderConfigScanner(data: result)
+        let saved = try verification.autopilotPolicyRanges()
+        guard saved.pinnedModels == desired, saved.revisionValue == revision.uuidString,
+              saved.selectedModels == fields.selectedModels, saved.enabledValue == fields.enabledValue,
+              saved.consentValue == fields.consentValue, saved.pausedValue == fields.pausedValue else {
+            throw ProviderConfigError.validationFailed("Pinned models could not be verified")
+        }
+        return result
+    }
+
+    private static func validAutopilotModels(_ values: [String]) -> Bool {
+        values.count <= 256 && Set(values).count == values.count && values.allSatisfy {
+            !$0.isEmpty && $0.utf8.count <= 256 && $0.unicodeScalars.allSatisfy {
+                (48...57).contains($0.value) || (65...90).contains($0.value) || (97...122).contains($0.value)
+                    || [45, 46, 47, 95].contains($0.value)
+            }
+        }
+    }
+
     static func renderingAutopilotDownloads(expected: AutopilotDownloadPolicy,
                                             desired: AutopilotDownloadPolicy, in data: Data) throws -> Data {
         guard data.count <= 1_048_576, String(data: data, encoding: .utf8) != nil,
@@ -545,6 +599,8 @@ private struct ProviderConfigScanner {
         let revisionValue: String
         let selectedModels: [String]
         let pinnedModels: [String]
+        let pinnedModelsRange: Range<Int>?
+        let pinnedModelsHaveComments: Bool
     }
 
     fileprivate struct DownloadInteger {
@@ -707,6 +763,8 @@ private struct ProviderConfigScanner {
         var booleans: [String: ProviderConfigBoolean] = [:]
         var revision: (Range<Int>, String)?
         var arrays: [String: [String]] = [:]
+        var pinnedModelsRange: Range<Int>?
+        var pinnedModelsHaveComments = false
         while true {
             skipStatementTrivia()
             guard index < bytes.count else { break }
@@ -749,7 +807,12 @@ private struct ProviderConfigScanner {
                 try consumeTargetStatementRemainder(arrayKey: key)
             } else if key == "selected_models" || key == "pinned_models" {
                 guard arrays[key] == nil, index < bytes.count, bytes[index] == Self.openBracket else { throw failure }
-                arrays[key] = try parseStringArray(key: key).values
+                let array = try parseStringArray(key: key)
+                arrays[key] = array.values
+                if key == "pinned_models" {
+                    pinnedModelsRange = array.range
+                    pinnedModelsHaveComments = bytes[array.range].contains(Self.comment)
+                }
                 try consumeTargetStatementRemainder(arrayKey: key)
             } else { index = skipStatement(from: index) }
         }
@@ -757,7 +820,8 @@ private struct ProviderConfigScanner {
         return AutopilotPolicyRanges(headerEnd: headerEnd, enabled: enabled.range, enabledValue: enabled.value,
             consent: consent.range, consentValue: consent.value, paused: booleans["paused"]?.range,
             pausedValue: booleans["paused"]?.value, revision: revision.0, revisionValue: revision.1,
-            selectedModels: arrays["selected_models"] ?? [], pinnedModels: arrays["pinned_models"] ?? [])
+            selectedModels: arrays["selected_models"] ?? [], pinnedModels: arrays["pinned_models"] ?? [],
+            pinnedModelsRange: pinnedModelsRange, pinnedModelsHaveComments: pinnedModelsHaveComments)
     }
 
     fileprivate struct ScheduleEditRanges {

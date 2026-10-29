@@ -8,6 +8,7 @@ public protocol ProviderExtrasProviding: Sendable {
     func setCache(expected: ProviderCacheStatus, change: ProviderCacheChange) async throws
     func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus>
     func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws
+    func setAutopilotPins(expected: ProviderAutopilotStatus, desired: [String]) async throws
     func setAutopilotDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) async throws
     func refreshFan() async -> SourceAvailability<ProviderFanStatus>
     func saveIdle(minutes: Int) async throws
@@ -30,6 +31,10 @@ public extension ProviderExtrasProviding {
     }
 
     func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws {
+        throw ProviderExtrasMutationError.commandFailed
+    }
+
+    func setAutopilotPins(expected: ProviderAutopilotStatus, desired: [String]) async throws {
         throw ProviderExtrasMutationError.commandFailed
     }
 
@@ -524,6 +529,41 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
               afterPolicy == beforePolicy, commandSucceeded, case .available(let status, _) = after,
               status.confirms(action), status.selectedModels == before.selectedModels,
               status.pinnedModels == before.pinnedModels else {
+            throw ProviderExtrasMutationError.commandFailed
+        }
+    }
+
+    public func setAutopilotPins(expected: ProviderAutopilotStatus, desired: [String]) async throws {
+        guard let executable = resolveExecutable() else { throw ProviderExtrasMutationError.executableUnavailable }
+        try await requireQualifiedConfigCLI(executable, error: .unsupportedAutopilotPolicyVersion)
+        let config = LocalProviderConfigStore(configURL: policy.providerConfig, executable: executable, runner: runner)
+        let sourceRevision = try await config.cacheSourceRevision()
+        guard case .available(let before, _) = await refreshAutopilot(), before.hasSameEnrollment(as: expected),
+              before.isEnrolled, Set(desired).count == desired.count,
+              Set(desired).subtracting(before.pinnedModels).isSubset(of: Set(before.selectedModels)),
+              Set(desired).symmetricDifference(Set(before.pinnedModels)).count == 1 else {
+            throw ProviderExtrasMutationError.commandFailed
+        }
+        let document = try ProviderConfigDocument(data: Data(contentsOf: policy.providerConfig))
+        if desired.count > before.pinnedModels.count {
+            let result = try await runner.run(DarkbloomCommand.localModels(executable: executable, config: policy.providerConfig),
+                                              timeout: DarkbloomSourcePolicy.catalogTimeout,
+                                              outputLimit: DarkbloomSourcePolicy.mutationOutputByteLimit, onOutput: nil)
+            guard result.exitCode == 0 else { throw ProviderAutopilotPinError.modelsUnavailable }
+            let models = try LocalModelListDecoder.decode(result.standardOutput).models
+            try ProviderAutopilotPinValidation.validate(pins: desired, slots: document.maxModelSlots ?? 3,
+                models: models, physicalBytes: ProcessInfo.processInfo.physicalMemory,
+                environment: ProcessInfo.processInfo.environment)
+        }
+        var saved = false
+        do {
+            try await config.saveAutopilotPins(desired, expected: before, expectedSourceRevision: sourceRevision)
+            saved = true
+        } catch { }
+        let after = await Task.detached { await self.refreshAutopilot() }.value
+        guard saved, case .available(let status, _) = after, status.isEnrolled,
+              status.selectedModels == before.selectedModels,
+              Set(status.pinnedModels) == Set(desired), status.configuredPaused == before.configuredPaused else {
             throw ProviderExtrasMutationError.commandFailed
         }
     }

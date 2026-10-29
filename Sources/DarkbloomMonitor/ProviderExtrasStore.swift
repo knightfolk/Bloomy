@@ -329,6 +329,31 @@ final class ProviderExtrasStore: ObservableObject {
         }
     }
 
+    func setAutopilotPins(expected: ProviderAutopilotStatus, desired: [String]) async throws {
+        try requireFreshEvidence(snapshot?.autopilotStatus)
+        guard snapshot?.autopilotStatus?.value?.hasSameEnrollment(as: expected) == true, !mutationInFlight else {
+            throw ProviderExtrasMutationError.commandFailed
+        }
+        mutationInFlight = true
+        errorMessage = nil
+        defer { mutationInFlight = false }
+        var failure: (any Error)?
+        do { try await client.setAutopilotPins(expected: expected, desired: desired) }
+        catch { failure = error }
+        await Task.detached { await self.refresh(force: true) }.value
+        if let failure {
+            errorMessage = (failure as? ProviderAutopilotPinError)?.userMessage
+                ?? (failure as? ProviderExtrasMutationError)?.userMessage
+                ?? "Pins could not be confirmed. Refresh Autopilot before trying again."
+            throw failure
+        }
+        guard autopilotEvidenceIsFresh, let status = snapshot?.autopilotStatus?.value,
+              Set(status.pinnedModels) == Set(desired) else {
+            errorMessage = "Pins could not be confirmed. Refresh Autopilot before trying again."
+            throw ProviderExtrasMutationError.commandFailed
+        }
+    }
+
     func setAutopilotDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) async throws {
         try requireFreshEvidence(snapshot?.autopilotStatus)
         guard snapshot?.autopilotStatus?.value?.downloads == expected, !mutationInFlight else {

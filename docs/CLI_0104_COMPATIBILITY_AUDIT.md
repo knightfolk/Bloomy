@@ -96,19 +96,18 @@ and the installed CLI's read-only help and status output.
   a disposable config, verified Darkbloom's output, and confirmed unrelated
   unknown fields survived. Live-config writes and installed-app review remain
   outstanding. No live schedule changes were made during the audit.
-- Autopilot model pins: Bloomy displays saved pins and labels stale readings;
-  pin and unpin controls are not yet exposed. The upstream desktop app checks selected models, available slots,
-  and estimated memory before pinning; these safeguards need to be carried into
-  any implementation. The desktop service supports a private discovery directory
-  via `DARKBLOOM_DESKTOP_DIR`, a possible route to its own checks; operation
-  coordination and lifecycle still need investigation. Its memory allowance
-  derives from the unified-memory cap and activation reserve, both of which
-  can be changed by environment variables. A hard-coded RAM percentage would
-  therefore not reliably reproduce the provider's decision. A disposable-config
-  0.10.4 pin command removed an unfamiliar backend key and an unfamiliar table,
-  so directly invoking it would not preserve arbitrary future configuration.
-  The CLI says pins remain protected during an explicit pause; the presentation
-  now reflects that distinction. No live pins were changed during the audit.
+- Autopilot model pins: Bloomy now offers pin and unpin controls for enrolled
+  models. For 0.10.4 it checks downloaded models, configured slots and the
+  desktop's memory budget, including its environment overrides. The CLI's
+  filtered inventory still includes every model that can pass this budget: its
+  ceiling is physical memory minus 4 GiB, while the desktop budget is at most
+  physical memory minus 8.5 GiB. A preserving, revision-checked config edit
+  avoids the CLI serializer dropping unfamiliar settings. Tests cover limits,
+  conflicts, comments, preservation and disposable CLI readback; the positive
+  pin test uses a synthetic inventory. A fresh isolated dashboard fixture showed
+  the pin list and successfully changed a synthetic model from Pin to Unpin and
+  back. The CLI says pins remain protected during an explicit pause. No live
+  pins were changed during the audit; installed-app review remains outstanding.
 - Add-on holds can leave the provider connected while inference is paused.
   Bloomy now recognizes held, draining and unrecognized hold states without
   retaining add-on identifiers, blocks idle-driven work and live model apply,
@@ -119,6 +118,10 @@ and the installed CLI's read-only help and status output.
   affect other apps and needs a separate design and safe testing. No add-on
   hold/release command was issued during testing.
 - Further model-load, Autopilot and coordinator diagnostics remain to audit.
+- Darkbloom now reports per-model memory fit and preload skip reasons; Bloomy
+  currently presents unloaded models generically. Its chat is also text-only
+  and non-streaming, while the local API supports streaming, media and tools.
+  These require contract and capability review before implementation.
 - Provider-internal inference features and performance changes do not
   automatically imply Bloomy UI controls. Review model capabilities and chat
   transport against actual supported API contracts; do not infer entitlement

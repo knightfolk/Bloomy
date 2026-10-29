@@ -204,6 +204,50 @@ struct ProviderScheduleCLIContractTests {
         #expect(saved.contains("future_setting = 73"))
         #expect(saved.contains("[future_section]\nkeep = \"untouched\""))
     }
+    @Test("unpin preserves unfamiliar configuration and missing models cannot be pinned", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
+    func autopilotPinsClientContract() async throws {
+        let cli = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"]))
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("BloomyPinsClient-\(UUID().uuidString)")
+        let directory = home.appendingPathComponent(".config/darkbloom")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: home) }
+        let url = directory.appendingPathComponent("provider.toml")
+        try Data("""
+        [provider]
+        name = "Synthetic pins contract"
+        auto_update = false
+        [backend]
+        enabled_models = ["synthetic/missing-model"]
+        preload_models = []
+        future_setting = 73
+        [backend.model_autopilot]
+        enabled = true
+        consent_recorded = true
+        paused = false
+        selected_models = ["synthetic/missing-model"]
+        pinned_models = ["synthetic/missing-model"]
+        revision = "synthetic-revision"
+        [future_section]
+        keep = "untouched"
+        """.utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let client = ProviderExtrasClient(policy: DarkbloomSourcePolicy(homeDirectory: home, environmentPath: cli.deletingLastPathComponent().path), runner: CappedProcessRunner())
+        let before = try #require(await client.refreshAutopilot().value)
+        try await client.setAutopilotPins(expected: before, desired: [])
+        let after = try #require(await client.refreshAutopilot().value)
+        #expect(after.pinnedModels.isEmpty)
+        await #expect(throws: ProviderAutopilotPinError.modelsUnavailable) {
+            try await client.setAutopilotPins(expected: after, desired: ["synthetic/missing-model"])
+        }
+        let simulated = ProviderExtrasClient(policy: DarkbloomSourcePolicy(homeDirectory: home, environmentPath: cli.deletingLastPathComponent().path), runner: PinInventoryContractRunner())
+        try await simulated.setAutopilotPins(expected: after, desired: ["synthetic/missing-model"])
+        let repinned = try #require(await client.refreshAutopilot().value)
+        #expect(repinned.pinnedModels == ["synthetic/missing-model"])
+        let saved = try String(contentsOf: url, encoding: .utf8)
+        #expect(saved.contains("future_setting = 73"))
+        #expect(saved.contains("[future_section]\nkeep = \"untouched\""))
+    }
+
     @Test("preserving Autopilot pause, resume and disable are accepted by Darkbloom", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
     func autopilotPauseContract() async throws {
         let path = try #require(ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"])
@@ -292,5 +336,19 @@ struct ProviderScheduleCLIContractTests {
         #expect(saved.contains("future_setting = 73"))
         #expect(saved.contains("[future_section]\nkeep = \"untouched\""))
         #expect(try await store.loadSchedule() == schedule)
+    }
+}
+
+/// Real CLI for config validation/status; synthetic downloaded inventory avoids
+/// creating model files or relying on the user's private model cache.
+private struct PinInventoryContractRunner: ProcessExecuting {
+    func run(_ command: ProcessCommand, timeout: Duration, outputLimit: Int,
+             onOutput: (@Sendable (ProcessOutputChunk) -> Void)?) async throws -> CommandResult {
+        if command.arguments.starts(with: ["models", "list"]) {
+            return CommandResult(exitCode: 0, standardOutput: Data("""
+            {"cacheDirectory":"/synthetic/cache","filteredByConfig":false,"models":[{"id":"synthetic/missing-model","model_type":"mlx","size_bytes":1,"estimated_memory_gb":1.0}]}
+            """.utf8), standardError: Data())
+        }
+        return try await CappedProcessRunner().run(command, timeout: timeout, outputLimit: outputLimit, onOutput: onOutput)
     }
 }

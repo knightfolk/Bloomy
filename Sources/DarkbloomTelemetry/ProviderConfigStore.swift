@@ -251,6 +251,15 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
         _ = try await publishValidated(data, expectedState: snapshot.state)
     }
 
+    func saveAutopilotPins(_ pinnedModels: [String], expected: ProviderAutopilotStatus,
+                           expectedSourceRevision: String) async throws {
+        let snapshot = try await readLockedSnapshot(lockFlag: O_SHLOCK)
+        guard snapshot.state.revision == expectedSourceRevision else { throw ProviderConfigError.changedExternally }
+        let data = try ProviderConfigDocument.renderingAutopilotPins(pinnedModels, expected: expected, in: snapshot.data)
+        guard data != snapshot.data else { return }
+        _ = try await publishValidated(data, expectedState: snapshot.state)
+    }
+
     func saveAutopilotDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) async throws {
         let snapshot = try await readLockedSnapshot(lockFlag: O_SHLOCK)
         let data = try ProviderConfigDocument.renderingAutopilotDownloads(expected: expected, desired: desired, in: snapshot.data)
