@@ -38,6 +38,16 @@ public struct ProviderConfigDocument: Equatable, Sendable {
     private let engineV2MaxConcurrentRange: Range<Int>?
     private let lineEnding: String
 
+    /// Read only recognized schedule syntax. Unsupported shapes are reported as
+    /// unavailable, never silently interpreted as an always-on schedule.
+    public static func readSchedule(data: Data) throws -> ProviderSchedule {
+        guard data.count <= 1_048_576, String(data: data, encoding: .utf8) != nil else {
+            throw ProviderConfigError.validationFailed("Saved schedule cannot be read")
+        }
+        var scanner = ProviderConfigScanner(data: data)
+        return try scanner.scanSchedule()
+    }
+
     public init(data: Data) throws {
         guard String(data: data, encoding: .utf8) != nil else {
             throw ProviderConfigError.invalidUTF8
@@ -311,6 +321,94 @@ private struct ProviderConfigScanner {
 
     init(data: Data) {
         self.bytes = [UInt8](data)
+    }
+
+    mutating func scanSchedule() throws -> ProviderSchedule {
+        enum Scope { case root, other, schedule, window }
+        struct WindowFields {
+            var days: [String]?
+            var start: String?
+            var end: String?
+        }
+        let failure = ProviderConfigError.validationFailed("Saved schedule cannot be read")
+        var scope = Scope.root
+        var enabled: Bool?
+        var seenTable = false
+        var windows: [WindowFields] = []
+        while true {
+            skipStatementTrivia()
+            guard index < bytes.count else { break }
+            if bytes[index] == Self.openBracket {
+                let start = index
+                let end = skipStatement(from: start)
+                let raw = String(decoding: bytes[start..<end], as: UTF8.self)
+                let header = raw.split(separator: "#", maxSplits: 1).first.map(String.init) ?? ""
+                let compact = header.filter { !$0.isWhitespace }
+                if compact == "[schedule]" {
+                    guard !seenTable else { throw failure }
+                    seenTable = true; scope = .schedule
+                } else if compact == "[[schedule.windows]]" {
+                    windows.append(WindowFields()); scope = .window
+                    guard windows.count <= 256 else { throw failure }
+                } else {
+                    if compact.lowercased().contains("schedule") { throw failure }
+                    scope = .other
+                }
+                index = end
+                continue
+            }
+            let statement = index
+            guard let key = parseBareKey() else {
+                if scope == .root || scope == .schedule || scope == .window { throw failure }
+                index = skipStatement(from: statement); continue
+            }
+            skipHorizontalWhitespace()
+            guard index < bytes.count, bytes[index] == Self.equals else {
+                if scope == .root && key == "schedule" || scope == .schedule || scope == .window { throw failure }
+                index = skipStatement(from: statement); continue
+            }
+            index += 1
+            if scope == .root && key == "schedule" { throw failure }
+            if scope == .schedule && key == "windows" { throw failure }
+            if scope == .schedule && key == "enabled" {
+                guard enabled == nil else { throw failure }
+                skipHorizontalWhitespace()
+                enabled = try parseBoolean(key: key).value
+                try consumeTargetStatementRemainder(booleanKey: key)
+            } else if scope == .window && key == "days" {
+                guard windows[windows.count - 1].days == nil else { throw failure }
+                skipHorizontalWhitespace()
+                guard index < bytes.count, bytes[index] == Self.openBracket else { throw failure }
+                windows[windows.count - 1].days = try parseStringArray(key: key).values
+                try consumeTargetStatementRemainder(arrayKey: key)
+            } else if scope == .window && (key == "start" || key == "end") {
+                skipHorizontalWhitespace()
+                guard index < bytes.count, bytes[index] == Self.doubleQuote || bytes[index] == Self.singleQuote else { throw failure }
+                let value = try parseString(key: key)
+                try consumeTargetStatementRemainder(arrayKey: key)
+                if key == "start" {
+                    guard windows[windows.count - 1].start == nil else { throw failure }
+                    windows[windows.count - 1].start = value
+                } else {
+                    guard windows[windows.count - 1].end == nil else { throw failure }
+                    windows[windows.count - 1].end = value
+                }
+            } else {
+                index = skipStatement(from: index)
+            }
+        }
+        let aliases: [String: ProviderScheduleDay] = ["mon": .monday, "monday": .monday, "tue": .tuesday, "tuesday": .tuesday, "wed": .wednesday, "wednesday": .wednesday, "thu": .thursday, "thursday": .thursday, "fri": .friday, "friday": .friday, "sat": .saturday, "saturday": .saturday, "sun": .sunday, "sunday": .sunday]
+        let parsed = try windows.map { fields -> ProviderScheduleWindow in
+            guard let names = fields.days, let start = fields.start, let end = fields.end else { throw failure }
+            let days = names.compactMap { aliases[$0.lowercased()] }
+            guard days.count == names.count, !days.isEmpty else { throw failure }
+            let window = ProviderScheduleWindow(days: Set(days), start: start, end: end)
+            guard window.durationMinutes != nil else { throw failure }
+            return window
+        }
+        let schedule = ProviderSchedule(enabled: enabled ?? false, windows: parsed)
+        guard !schedule.enabled || !parsed.isEmpty else { throw failure }
+        return schedule
     }
 
     mutating func scan() throws -> ProviderConfigScan {

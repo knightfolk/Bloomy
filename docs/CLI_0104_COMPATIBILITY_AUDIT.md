@@ -51,8 +51,10 @@ and the installed CLI's read-only help and status output.
   path has been extracted for reuse; the existing 26 configuration-store tests
   passed after this refactor. Saved changes require a provider
   restart. Bloomy now has a tested schedule value model for local wall time,
-  overnight and full-day windows, and the desktop's 14-window limit; it is not
-  yet connected to configuration or a user interface. No live schedule changes
+  overnight and full-day windows, and the desktop's 14-window limit. A bounded
+  configuration reader handles the CLI's schedule tables and reports malformed
+  or unsupported forms as unreadable instead of guessing that scheduling is off.
+  It is not yet connected to a writer or user interface. No live schedule changes
   were made during the audit.
 - Autopilot model pins: Bloomy displays saved pins and labels stale readings;
   pin and unpin controls are not yet exposed. The upstream desktop app checks selected models, available slots,

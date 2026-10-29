@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import DarkbloomTelemetry
 
@@ -29,5 +30,48 @@ struct ProviderScheduleTests {
         let window = ProviderScheduleWindow(days: [.monday], start: "08:00", end: "09:00")
         #expect(ProviderSchedule(enabled: true, windows: Array(repeating: window, count: 14)).isValidForEditing)
         #expect(!ProviderSchedule(enabled: true, windows: Array(repeating: window, count: 15)).isValidForEditing)
+    }
+
+    @Test("reads CLI schedule tables without mistaking text in unrelated settings")
+    func readsSchedule() throws {
+        let source = #"""
+        note = """
+        [schedule]
+        enabled = true
+        """
+        [provider]
+        name = "schedule # is text"
+        [schedule] # local time
+        enabled = true
+        [[schedule.windows]]
+        days = ["Monday", # a comment
+                'wed',]
+        start = '22:00'
+        end = "02:00"
+        [unrelated]
+        enabled = false
+        """#
+        let result = try ProviderConfigDocument.readSchedule(data: Data(source.utf8))
+        #expect(result.enabled)
+        #expect(result.windows == [.init(days: [.monday, .wednesday], start: "22:00", end: "02:00")])
+    }
+
+    @Test("defaults to always available only when schedule is absent")
+    func absentSchedule() throws {
+        let result = try ProviderConfigDocument.readSchedule(data: Data("[backend]\nenabled_models = []\n".utf8))
+        #expect(result == .init(enabled: false, windows: []))
+    }
+
+    @Test("unsupported and malformed schedule shapes do not appear disabled", arguments: [
+        "schedule.enabled = true\n", "schedule = { enabled = true }\n",
+        "[schedule]\nwindows = []\n", "[schedule]\nenabled = true\n",
+        "[schedule]\nenabled = true\nenabled = false\n",
+        "[[schedule.windows]]\ndays = ['mon']\nstart = '22:00'\nend = '25:00'\n",
+        "[[schedule.windows]]\ndays = ['noday']\nstart = '22:00'\nend = '02:00'\n"
+    ])
+    func rejectsUnclearSchedule(source: String) {
+        #expect(throws: (any Error).self) {
+            try ProviderConfigDocument.readSchedule(data: Data(source.utf8))
+        }
     }
 }
