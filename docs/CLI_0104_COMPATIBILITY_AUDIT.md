@@ -44,10 +44,13 @@ and the installed CLI's read-only help and status output.
   authenticated service writes a shared discovery file. Integrating it requires
   preserving those fields and the existing service lifecycle. Saved changes
   require a provider restart. No schedule changes were made during the audit.
-- Autopilot model pins: the CLI exposes pin and unpin, but Bloomy does not yet
-  expose them. The upstream desktop app checks selected models, available slots,
+- Autopilot model pins: Bloomy displays saved pins and labels stale readings;
+  pin and unpin controls are not yet exposed. The upstream desktop app checks selected models, available slots,
   and estimated memory before pinning; these safeguards need to be carried into
-  any implementation. No pins were changed during the audit.
+  any implementation. The desktop service supports a private discovery directory
+  via `DARKBLOOM_DESKTOP_DIR`, a possible route to its own checks; operation
+  coordination and lifecycle still need investigation. No pins were changed
+  during the audit.
 - Add-on holds can leave the provider connected while inference is paused.
   Bloomy now recognizes held, draining and unrecognized hold states without
   retaining add-on identifiers, blocks idle-driven work and live model apply,

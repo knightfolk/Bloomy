@@ -95,6 +95,11 @@ struct ProviderAutopilotPresentation {
     func canPerform(_ action: ProviderAutopilotPolicyAction) -> Bool {
         isFresh && status?.allows(action) == true
     }
+
+    var pinnedModelsTitle: String? {
+        guard let status, !status.pinnedModels.isEmpty else { return nil }
+        return isFresh ? "Pinned models · saved" : "Pinned models · last known"
+    }
 }
 
 struct ProviderAutopilotSettingsView: View {
@@ -154,6 +159,18 @@ struct ProviderAutopilotSettingsView: View {
             Text(presentation.explanation).font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let status = presentation.status {
+                if let title = presentation.pinnedModelsTitle {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title).font(.caption.weight(.semibold))
+                        ForEach(status.pinnedModels, id: \.self) { model in
+                            Text(model).font(.caption).textSelection(.enabled)
+                        }
+                        Text("Pins protect these models only while Autopilot has active control. They do not guarantee a model is loaded while Autopilot is paused or observing.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .accessibilityIdentifier("settings.autopilot.pinnedModels")
+                }
                 if presentation.isFresh, status.isLiveConfirmed, let reasons = status.live?.busyReasons, !reasons.isEmpty {
                     Text("Autopilot is waiting: " + reasons.map(\.explanation).joined(separator: " "))
                         .font(.caption).foregroundStyle(.secondary)

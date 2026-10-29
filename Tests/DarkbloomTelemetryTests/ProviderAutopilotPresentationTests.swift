@@ -47,6 +47,17 @@ struct ProviderAutopilotPresentationTests {
         #expect(!draft.hasChanges)
     }
 
+    @Test("saved pins are labeled as last known when their evidence expires")
+    func pinFreshness() {
+        let pinned = ProviderAutopilotStatus(configuredEnabled: true, consentRecorded: true,
+            configuredPaused: false, selectedModels: ["org/model"], pinnedModels: ["org/model"],
+            configuredRevision: "r1", live: nil, phase: nil)
+        let source: SourceAvailability<ProviderAutopilotStatus> = .available(value: pinned, capturedAt: date)
+        #expect(ProviderAutopilotPresentation(source: source, at: date).pinnedModelsTitle == "Pinned models · saved")
+        #expect(ProviderAutopilotPresentation(source: source, at: date.addingTimeInterval(46)).pinnedModelsTitle == "Pinned models · last known")
+        #expect(presentation(status()).pinnedModelsTitle == nil)
+    }
+
     private func status(enabled: Bool = true, consent: Bool = true, paused: Bool = false,
                         livePaused: Bool = false, active: Bool = false, observeOnly: Bool = true,
                         matches: Bool = true, phase: ProviderAutopilotPhase? = .shadow,

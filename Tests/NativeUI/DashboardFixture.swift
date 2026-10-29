@@ -962,7 +962,7 @@ private actor FixtureAutopilot {
         let enabled = mode != .off && mode != .blockedPreload
         return .available(value: .init(configuredEnabled: enabled, consentRecorded: enabled,
             configuredPaused: mode == .paused, selectedModels: enabled ? FixtureData.modelIDs : [],
-            pinnedModels: [], configuredRevision: "fixture",
+            pinnedModels: enabled ? [FixtureData.modelIDs[0]] : [], configuredRevision: "fixture",
             live: enabled ? .init(protocolVersion: 3, enabled: true, active: mode == .active,
                 observeOnly: mode == .shadow, paused: mode == .paused, cachedOnly: true,
                 revision: mode == .mismatch ? "old" : "fixture",
