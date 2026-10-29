@@ -40,6 +40,17 @@ and the installed CLI's read-only help and status output.
   Changes are labeled restart-required and leave old files in place. Tests and
   an isolated native fixture cover the main paths; actual-provider writes and
   installed-app review remain outstanding.
+- Configuration preservation caveat: the 0.10.4 CLI's `autopilot pin`,
+  `unpin`, `pause`, and `resume` share `changeAutopilotPolicy`, which saves via
+  `ConfigManager.save`. A disposable pin probe showed that this serializer drops
+  unknown configuration fields and tables. Bloomy's already-implemented pause
+  and resume controls use this CLI path; their existing readback checks cover
+  selected policies but do not prove preservation of arbitrary unknown fields.
+  The current CLI source also uses `ConfigManager.save` for Autopilot download
+  limits and encrypted cache edits, so those newer Bloomy controls share this
+  preservation concern even though their own settings are read back.
+  This requires a preserving mutation path or a reliable preflight before those
+  controls can be considered fully compatible with future configurations.
 - Weekly availability schedules: introduced in 0.9.15. Bloomy reports scheduled
   waiting but has no schedule editor. The supported CLI editor is interactive;
   the 0.10.4 desktop API supports editing with a configuration revision, but
@@ -72,8 +83,11 @@ and the installed CLI's read-only help and status output.
   and estimated memory before pinning; these safeguards need to be carried into
   any implementation. The desktop service supports a private discovery directory
   via `DARKBLOOM_DESKTOP_DIR`, a possible route to its own checks; operation
-  coordination and lifecycle still need investigation. No pins were changed
-  during the audit.
+  coordination and lifecycle still need investigation. A disposable-config
+  0.10.4 pin command removed an unfamiliar backend key and an unfamiliar table,
+  so directly invoking it would not preserve arbitrary future configuration.
+  The CLI says pins remain protected during an explicit pause; the presentation
+  now reflects that distinction. No live pins were changed during the audit.
 - Add-on holds can leave the provider connected while inference is paused.
   Bloomy now recognizes held, draining and unrecognized hold states without
   retaining add-on identifiers, blocks idle-driven work and live model apply,

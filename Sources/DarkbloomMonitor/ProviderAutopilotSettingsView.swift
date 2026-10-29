@@ -100,6 +100,10 @@ struct ProviderAutopilotPresentation {
         guard let status, !status.pinnedModels.isEmpty else { return nil }
         return isFresh ? "Pinned models · saved" : "Pinned models · last known"
     }
+
+    var pinExplanation: String {
+        "Pins are protected while Autopilot controls residency or is explicitly paused. Otherwise the saved idle policy applies. A pin does not prove a model is loaded."
+    }
 }
 
 struct ProviderAutopilotSettingsView: View {
@@ -165,7 +169,7 @@ struct ProviderAutopilotSettingsView: View {
                         ForEach(status.pinnedModels, id: \.self) { model in
                             Text(model).font(.caption).textSelection(.enabled)
                         }
-                        Text("Pins protect these models only while Autopilot has active control. They do not guarantee a model is loaded while Autopilot is paused or observing.")
+                        Text(presentation.pinExplanation)
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }

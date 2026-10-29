@@ -54,6 +54,7 @@ struct ProviderAutopilotPresentationTests {
             configuredRevision: "r1", live: nil, phase: nil)
         let source: SourceAvailability<ProviderAutopilotStatus> = .available(value: pinned, capturedAt: date)
         #expect(ProviderAutopilotPresentation(source: source, at: date).pinnedModelsTitle == "Pinned models · saved")
+        #expect(ProviderAutopilotPresentation(source: source, at: date).pinExplanation.contains("explicitly paused"))
         #expect(ProviderAutopilotPresentation(source: source, at: date.addingTimeInterval(46)).pinnedModelsTitle == "Pinned models · last known")
         #expect(presentation(status()).pinnedModelsTitle == nil)
     }
