@@ -329,7 +329,7 @@ public extension ProviderExtrasMutationError {
         case .unsupportedAutopilotPolicyVersion:
             "This Darkbloom version has not been verified for safe Autopilot policy changes in Bloomy."
         case .unsupportedCacheSettingsVersion:
-            "This Darkbloom version has not been verified for safe cache limit changes in Bloomy."
+            "This Darkbloom version has not been verified for safe cache setting changes in Bloomy."
         case .executableUnavailable:
             "The Darkbloom command is unavailable."
         case .commandFailed:

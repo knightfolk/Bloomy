@@ -261,6 +261,14 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
         _ = try await publishValidated(data, expectedState: snapshot.state)
     }
 
+    func saveCacheDirectory(expected: ProviderCacheStatus, selected: ProviderCacheVolumeIdentity?,
+                            verify: @escaping @Sendable (URL) async throws -> Void) async throws {
+        let snapshot = try await readLockedSnapshot(lockFlag: O_SHLOCK)
+        let data = try ProviderConfigDocument.renderingCacheDirectory(expected: expected, selected: selected, in: snapshot.data)
+        guard data != snapshot.data else { return }
+        _ = try await publishValidated(data, expectedState: snapshot.state, validateCandidate: verify)
+    }
+
     public func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult {
         guard draft.hasChanges else {
             return ProviderConfigSaveResult(draft: try await load(), restartRequired: false)
@@ -303,7 +311,8 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
 
     /// All configuration editors must use the same validation, security metadata,
     /// conflict detection and atomic publication path.
-    private func publishValidated(_ candidateData: Data, expectedState: ProviderConfigFileState) async throws -> ProviderConfigFileState {
+    private func publishValidated(_ candidateData: Data, expectedState: ProviderConfigFileState,
+                                  validateCandidate: (@Sendable (URL) async throws -> Void)? = nil) async throws -> ProviderConfigFileState {
         let candidateURL = uniqueSibling(named: "candidate")
         var candidateNeedsCleanup = false
         let publishedState: ProviderConfigFileState
@@ -320,6 +329,7 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
                 expectedState: expectedState
             )
             try await validate(candidateURL)
+            try await validateCandidate?(candidateURL)
             publishedState = try await publish(
                 candidateURL,
                 expectedState: expectedState,

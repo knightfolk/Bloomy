@@ -132,13 +132,7 @@ public struct ProviderConfigDocument: Equatable, Sendable {
         let fields = try scanner.cacheDailyRanges()
         let bytes = fields.dailyValue.map { Int64($0 * 1_000_000_000) }
         guard bytes == expected.dailyWriteBytes else { throw ProviderConfigError.changedExternally }
-        if let directory = fields.directory {
-            guard expected.hasVolume, let observed = expected.selectedDirectory,
-                  let selected = ProviderCacheParser.normalizedSelectedDirectory(directory),
-                  selected == ProviderCacheParser.normalizedSelectedDirectory(observed) else { throw ProviderConfigError.changedExternally }
-        } else {
-            guard !expected.hasVolume, expected.selectedDirectory == nil else { throw ProviderConfigError.changedExternally }
-        }
+        guard cacheSelectionMatches(fields.directory, uuid: fields.volumeUUID, expected: expected) else { throw ProviderConfigError.changedExternally }
         let newValue = String(value)
         if fields.dailyValue == value { return data }
         var result = data
@@ -157,6 +151,74 @@ public struct ProviderConfigDocument: Equatable, Sendable {
         var verify = ProviderConfigScanner(data: result)
         guard try verify.cacheDailyRanges().dailyValue == value else { throw ProviderConfigError.validationFailed("Cache limit could not be verified") }
         return result
+    }
+
+    static func renderingCacheDirectory(expected: ProviderCacheStatus, selected: ProviderCacheVolumeIdentity?, in data: Data) throws -> Data {
+        guard data.count <= 1_048_576, String(data: data, encoding: .utf8) != nil else {
+            throw ProviderConfigError.validationFailed("Cache settings cannot be safely edited")
+        }
+        var scanner = ProviderConfigScanner(data: data)
+        let fields = try scanner.cacheDailyRanges()
+        guard fields.dailyValue.map({ Int64($0 * 1_000_000_000) }) == expected.dailyWriteBytes else { throw ProviderConfigError.changedExternally }
+        guard cacheSelectionMatches(fields.directory, uuid: fields.volumeUUID, expected: expected) else { throw ProviderConfigError.changedExternally }
+        if let selected {
+            guard UUID(uuidString: selected.uuid) != nil,
+                  let path = ProviderCacheParser.normalizedSelectedDirectory(selected.directory), path == selected.directory,
+                  path.rangeOfCharacter(from: .controlCharacters) == nil, path.utf8.count <= 4096 else {
+                throw ProviderConfigError.validationFailed("Cache volume could not be verified")
+            }
+        }
+        let newline = Self.detectLineEnding(in: data)
+        var edits: [(Range<Int>, Data)] = []
+        var insertions: [String] = []
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        for (key, field, desired) in [("directory", fields.directoryField, selected?.directory), ("volume_uuid", fields.volumeField, selected?.uuid)] {
+            if let desired {
+                let encoded = try encoder.encode(desired)
+                if let field { edits.append((field.valueRange, encoded)) }
+                else { insertions.append("\(key) = \(String(decoding: encoded, as: UTF8.self))") }
+            } else if let field {
+                guard !field.hasComment else { throw ProviderConfigError.validationFailed("A cache folder comment cannot be preserved") }
+                edits.append((field.statementRange, Data()))
+            }
+        }
+        if let header = fields.headerEnd, !insertions.isEmpty {
+            let prefix = header == data.count && data.last != 10 && data.last != 13 ? newline : ""
+            edits.append((header..<header, Data((prefix + insertions.joined(separator: newline) + newline).utf8)))
+        }
+        var result = data
+        for (range, replacement) in edits.sorted(by: {
+            $0.0.lowerBound == $1.0.lowerBound ? $0.0.upperBound > $1.0.upperBound : $0.0.lowerBound > $1.0.lowerBound
+        }) { result.replaceSubrange(range, with: replacement) }
+        if fields.headerEnd == nil, !insertions.isEmpty {
+            let prefix = !result.isEmpty && result.last != 10 && result.last != 13 ? newline : ""
+            result.append(contentsOf: (prefix + "[cache]" + newline + insertions.joined(separator: newline) + newline).utf8)
+        }
+        var verify = ProviderConfigScanner(data: result)
+        let updated = try verify.cacheDailyRanges()
+        guard updated.directory == selected?.directory, updated.volumeUUID == selected?.uuid,
+              updated.dailyValue == fields.dailyValue else { throw ProviderConfigError.validationFailed("Cache folder could not be verified") }
+        return result
+    }
+
+    private static func cacheSelectionMatches(_ directory: String?, uuid: String?, expected: ProviderCacheStatus) -> Bool {
+        guard let directory else { return !expected.hasVolume && expected.selectedDirectory == nil && !expected.hasProblem }
+        guard let selected = ProviderCacheParser.normalizedSelectedDirectory(directory) else { return false }
+        if expected.hasVolume, let observed = expected.selectedDirectory {
+            guard !expected.hasProblem, let uuid, let actual = expected.volumeUUID,
+                  let savedUUID = UUID(uuidString: uuid), let observedUUID = UUID(uuidString: actual),
+                  savedUUID == observedUUID else { return false }
+            return selected == ProviderCacheParser.normalizedSelectedDirectory(observed)
+        }
+        // When a selected volume is unavailable, the CLI still reports the
+        // configured cache root (<selected>/<environment>/kv3). This permits a
+        // reset while refusing a changed selected folder.
+        guard expected.hasProblem, !expected.hasVolume, expected.selectedDirectory == nil,
+              let root = ProviderCacheParser.normalizedSelectedDirectory(expected.directory),
+              root.hasPrefix(selected == "/" ? "/" : selected + "/") else { return false }
+        let remainder = root.dropFirst(selected == "/" ? 1 : selected.count + 1).split(separator: "/")
+        return remainder.count == 2 && remainder.last == "kv3"
     }
 
     /// Replace only recognized schedule statements; leave every other byte in
@@ -498,6 +560,14 @@ private struct ProviderConfigScanner {
         var dailyValue: Double?
         var directory: String?
         var volumeUUID: String?
+        var directoryField: CacheStringField?
+        var volumeField: CacheStringField?
+    }
+
+    fileprivate struct CacheStringField {
+        let valueRange: Range<Int>
+        let statementRange: Range<Int>
+        let hasComment: Bool
     }
 
     fileprivate mutating func cacheDailyRanges() throws -> CacheDailyRanges {
@@ -546,9 +616,14 @@ private struct ProviderConfigScanner {
             } else if key == "directory" || key == "volume_uuid" {
                 guard (key != "directory" || result.directory == nil), (key != "volume_uuid" || result.volumeUUID == nil),
                       index < bytes.count, bytes[index] == Self.doubleQuote || bytes[index] == Self.singleQuote else { throw failure }
+                let begin = index
                 let value = try parseString(key: key)
+                let valueEnd = index
                 try consumeTargetStatementRemainder(arrayKey: key)
-                if key == "directory" { result.directory = value } else { result.volumeUUID = value }
+                let field = CacheStringField(valueRange: begin..<valueEnd, statementRange: start..<index,
+                                             hasComment: bytes[valueEnd..<index].contains(Self.comment))
+                if key == "directory" { result.directory = value; result.directoryField = field }
+                else { result.volumeUUID = value; result.volumeField = field }
             } else { index = skipStatement(from: index) }
         }
         guard (result.directory == nil) == (result.volumeUUID == nil) else { throw failure }

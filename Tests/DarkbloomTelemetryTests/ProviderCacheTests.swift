@@ -35,6 +35,19 @@ struct ProviderCacheTests {
         #expect(ProviderCacheParser.normalizedSelectedDirectory("/safe/../other") == nil)
     }
 
+    @Test("volume identity requires a clean canonical selection and UUID")
+    func validatesVolumeIdentity() throws {
+        let valid = Data(#"{"scope":"saved_settings","volume":{"directory":"/private/var/example","uuid":"12345678-1234-1234-1234-123456789abc"}}"#.utf8)
+        let identity = try ProviderCacheParser.parseVolumeIdentity(valid)
+        #expect(identity.directory == "/private/var/example")
+        for json in [#"{"scope":"saved_settings","volume":{"directory":"/var/example","uuid":"12345678-1234-1234-1234-123456789abc"}}"#,
+                     #"{"scope":"saved_settings","volume":{"directory":"/safe","uuid":"bad"}}"#,
+                     #"{"scope":"saved_settings","volume":{"directory":"/safe","uuid":"00000000-0000-0000-0000-000000000000"}}"#,
+                     #"{"scope":"saved_settings","problem":"bad","volume":{"directory":"/safe","uuid":"12345678-1234-1234-1234-123456789abc"}}"#] {
+            #expect(throws: (any Error).self) { try ProviderCacheParser.parseVolumeIdentity(Data(json.utf8)) }
+        }
+    }
+
     @Test("commands touch only the chosen cache setting")
     func commandMapping() {
         let executable = URL(fileURLWithPath: "/fixture/darkbloom")
@@ -82,9 +95,6 @@ struct ProviderCacheTests {
 
 private actor CacheRunner: ProcessExecuting {
     var bytes: Int64?
-    var directory = "/cache"
-    var selectedDirectory: String?
-    var custom = false
     var writes = 0
     var ignored = false
     var staleReadback = false
@@ -100,30 +110,33 @@ private actor CacheRunner: ProcessExecuting {
             return CommandResult(exitCode: 0, standardOutput: Data(), standardError: Data())
         }
         if command.arguments.prefix(2) == ["cache", "status"] {
-            if staleReadback { staleReadback = false }
-            else {
-                let text = try String(contentsOf: config, encoding: .utf8)
-                let value = text.components(separatedBy: .newlines).compactMap { line -> Double? in
+            let argument = try #require(command.arguments.firstIndex(of: "--config"))
+            let path = URL(fileURLWithPath: command.arguments[argument + 1])
+            let text = try String(contentsOf: path, encoding: .utf8)
+            func value(_ key: String) -> String? {
+                text.components(separatedBy: .newlines).compactMap { line in
                     let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-                    return parts.count == 2 && parts[0] == "daily_write_gb" ? Double(parts[1]) : nil
+                    return parts.count == 2 && parts[0] == key ? parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) : nil
                 }.last
-                bytes = value.map { Int64($0 * 1_000_000_000) }
             }
-            var payload: [String: Any] = ["directory": directory, "scope": "saved_settings",
-                "dailyWriteSource": bytes == nil ? "startup_environment_or_default" : "saved_settings"]
-            if let bytes { payload["dailyWriteBytes"] = bytes; payload["unlimited"] = bytes == 0 }
-            if custom { payload["volume"] = ["directory": selectedDirectory ?? ""] }
+            let readBytes = value("daily_write_gb").flatMap(Double.init).map { Int64($0 * 1_000_000_000) }
+            let actual = path.standardizedFileURL == config.standardizedFileURL
+            let shownBytes: Int64?
+            if actual && staleReadback { staleReadback = false; shownBytes = bytes }
+            else { shownBytes = readBytes; if actual { bytes = readBytes } }
+            let selected = value("directory")
+            var payload: [String: Any] = ["directory": selected.map { $0 + "/namespace/kv3" } ?? "/cache", "scope": "saved_settings",
+                "dailyWriteSource": shownBytes == nil ? "startup_environment_or_default" : "saved_settings"]
+            if let shownBytes { payload["dailyWriteBytes"] = shownBytes; payload["unlimited"] = shownBytes == 0 }
+            if let selected { payload["volume"] = ["directory": selected, "uuid": value("volume_uuid") ?? ""] }
             return CommandResult(exitCode: 0, standardOutput: try JSONSerialization.data(withJSONObject: payload), standardError: Data())
         }
         guard command.arguments.prefix(2) == ["cache", "set"] else { throw ProviderExtrasMutationError.commandFailed }
-        writes += 1
-        if ignored { ignored = false }
-        else if let index = command.arguments.firstIndex(of: "--daily-write-gb"), index + 1 < command.arguments.count,
-                let gb = Double(command.arguments[index + 1]) { bytes = Int64(gb * 1_000_000_000) }
-        else if let index = command.arguments.firstIndex(of: "--directory"), index + 1 < command.arguments.count {
-            selectedDirectory = command.arguments[index + 1]; directory = command.arguments[index + 1] + "/namespace/kv3"; custom = true
-        } else if command.arguments.contains("--reset-directory") { directory = "/cache"; selectedDirectory = nil; custom = false }
-        else { throw ProviderExtrasMutationError.commandFailed }
+        guard let index = command.arguments.firstIndex(of: "--directory"), index + 1 < command.arguments.count,
+              let configIndex = command.arguments.firstIndex(of: "--config"), configIndex + 1 < command.arguments.count else { throw ProviderExtrasMutationError.commandFailed }
+        let path = command.arguments[index + 1]
+        try Data("[cache]\ndirectory=\"\(path)\"\nvolume_uuid=\"12345678-1234-1234-1234-123456789abc\"\n".utf8)
+            .write(to: URL(fileURLWithPath: command.arguments[configIndex + 1]))
         return CommandResult(exitCode: 0, standardOutput: Data(), standardError: Data())
     }
 }

@@ -401,10 +401,10 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
         guard let executable = resolveExecutable(), case .available(let before, _) = await refreshCache(), before == expected else {
             throw ProviderExtrasMutationError.commandFailed
         }
+        try await requireQualifiedConfigCLI(executable, error: .unsupportedCacheSettingsVersion)
         switch change {
         case .dailyWriteGB(let value):
             guard ProviderCacheParser.validDailyWriteGB(value) else { throw ProviderExtrasMutationError.commandFailed }
-            try await requireQualifiedConfigCLI(executable, error: .unsupportedCacheSettingsVersion)
         case .directory(let path):
             guard path.hasPrefix("/"), path.utf8.count <= 4096,
                   path.rangeOfCharacter(from: .controlCharacters) == nil else { throw ProviderExtrasMutationError.commandFailed }
@@ -416,7 +416,21 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
                 let config = LocalProviderConfigStore(configURL: policy.providerConfig, executable: executable, runner: runner)
                 try await config.saveCacheDailyWrite(expected: before, value: value)
             } else {
-                try await runMutation(ProviderExtrasCommand.cacheSet(executable: executable, config: policy.providerConfig, change: change))
+                let identity: ProviderCacheVolumeIdentity?
+                if case .directory(let path) = change {
+                    identity = try await inspectCacheVolume(executable: executable, path: path)
+                } else { identity = nil }
+                let config = LocalProviderConfigStore(configURL: policy.providerConfig, executable: executable, runner: runner)
+                try await config.saveCacheDirectory(expected: before, selected: identity) { candidate in
+                    let output = try await self.run(ProviderExtrasCommand.cacheStatus(executable: executable, config: candidate))
+                    guard output.exitCode == 0 else { throw ProviderExtrasMutationError.commandFailed }
+                    if let identity {
+                        guard try ProviderCacheParser.parseVolumeIdentity(output.standardOutput) == identity else { throw ProviderExtrasMutationError.commandFailed }
+                    } else {
+                        let status = try ProviderCacheParser.parse(output.standardOutput)
+                        guard !status.hasVolume, !status.hasProblem else { throw ProviderExtrasMutationError.commandFailed }
+                    }
+                }
             }
             succeeded = true
         } catch { }
@@ -433,6 +447,21 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
         case .resetDirectory:
             guard !after.hasProblem, !after.hasVolume, after.dailyWriteBytes == before.dailyWriteBytes else { throw ProviderExtrasMutationError.commandFailed }
         }
+    }
+
+    private func inspectCacheVolume(executable: URL, path: String) async throws -> ProviderCacheVolumeIdentity {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("BloomyCacheProbe-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let config = directory.appendingPathComponent("provider.toml")
+        try Data("[provider]\nname = 'Bloomy cache validation'\nauto_update = false\n".utf8).write(to: config, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: config.path)
+        try await runMutation(ProviderExtrasCommand.cacheSet(executable: executable, config: config, change: .directory(path)))
+        let output = try await run(ProviderExtrasCommand.cacheStatus(executable: executable, config: config))
+        guard output.exitCode == 0 else { throw ProviderExtrasMutationError.commandFailed }
+        let identity = try ProviderCacheParser.parseVolumeIdentity(output.standardOutput)
+        guard ProviderCacheParser.normalizedSelectedDirectory(path) == identity.directory else { throw ProviderExtrasMutationError.commandFailed }
+        return identity
     }
 
     public func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus> {

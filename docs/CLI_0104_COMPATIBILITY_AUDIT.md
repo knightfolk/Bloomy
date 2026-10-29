@@ -54,8 +54,12 @@ and the installed CLI's read-only help and status output.
   limits and encrypted cache edits. Download controls now use a preserving
   transaction qualified for 0.10.4, with real-CLI disposable-file and conflict
   tests. Cache daily-write limits now also use a preserving transaction for
-  0.10.4; selecting or resetting a cache folder still uses the CLI serializer
-  and retains the preservation concern even though its own settings are read back.
+  0.10.4. Folder selection and reset now use a preserving transaction as well:
+  selection is checked by Darkbloom against a private disposable config, then
+  the candidate is checked again before publication. Real-CLI disposable-file
+  tests cover selection, write limits, reset with a missing folder, and unknown
+  field preservation. A reported UUID mismatch with a still-mounted volume is
+  conservatively refused; its repair flow needs further work.
   Pause, resume and disable now use a targeted policy writer qualified for CLI
   0.10.4; other versions are refused with a clear message until qualified. The
   complete client path passed disposable-config tests against the real CLI for
