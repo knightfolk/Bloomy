@@ -47,7 +47,9 @@ and the installed CLI's read-only help and status output.
   backend key and an unknown table when saving. Do not use that save path on
   the operator's config without a preservation solution. Bloomy's existing
   targeted, validated configuration writer is a possible alternative, subject
-  to schedule parsing and concurrency tests. Saved changes require a provider
+  to schedule parsing and concurrency tests. Its validated atomic publication
+  path has been extracted for reuse; the existing 26 configuration-store tests
+  passed after this refactor. Saved changes require a provider
   restart. Bloomy now has a tested schedule value model for local wall time,
   overnight and full-day windows, and the desktop's 14-window limit; it is not
   yet connected to configuration or a user interface. No live schedule changes

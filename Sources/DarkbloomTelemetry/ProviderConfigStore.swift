@@ -238,7 +238,23 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
                 ? draft.engineV2MaxConcurrent
                 : nil
         )
-        let mode = expectedState.permissions
+        let publishedState = try await publishValidated(candidateData, expectedState: expectedState)
+
+        return ProviderConfigSaveResult(
+            draft: ProviderConfigDraft(
+                publishedSelection: draft.selection,
+                publishedMaxModelSlots: draft.maxModelSlots,
+                publishedStartupPreload: draft.startupPreload,
+                publishedEngineV2MaxConcurrent: draft.engineV2MaxConcurrent,
+                sourceFileState: publishedState
+            ),
+            restartRequired: true
+        )
+    }
+
+    /// All configuration editors must use the same validation, security metadata,
+    /// conflict detection and atomic publication path.
+    private func publishValidated(_ candidateData: Data, expectedState: ProviderConfigFileState) async throws -> ProviderConfigFileState {
         let candidateURL = uniqueSibling(named: "candidate")
         var candidateNeedsCleanup = false
         let publishedState: ProviderConfigFileState
@@ -246,7 +262,7 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
             try createFile(
                 at: candidateURL,
                 data: candidateData,
-                mode: mode,
+                mode: expectedState.permissions,
                 candidateNeedsCleanup: &candidateNeedsCleanup
             )
             try preserveSecurityMetadata(
@@ -267,16 +283,7 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
             throw error
         }
 
-        return ProviderConfigSaveResult(
-            draft: ProviderConfigDraft(
-                publishedSelection: draft.selection,
-                publishedMaxModelSlots: draft.maxModelSlots,
-                publishedStartupPreload: draft.startupPreload,
-                publishedEngineV2MaxConcurrent: draft.engineV2MaxConcurrent,
-                sourceFileState: publishedState
-            ),
-            restartRequired: true
-        )
+        return publishedState
     }
 
     private func readLockedSnapshot(lockFlag: Int32) async throws -> ProviderConfigFileSnapshot {
