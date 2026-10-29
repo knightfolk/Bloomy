@@ -105,8 +105,9 @@ struct ProviderCacheSettingsView: View {
             let success = await performMutation("inference cache") { try await store.setCache(expected: expected, change: change) }
             submitting = false
             if success { draft.cacheExpected = nil } else { draft.setCacheDirty(dailyHasEdits || directoryHasEdits) }
+            let unsupported = ProviderExtrasMutationError.unsupportedCacheSettingsVersion.userMessage
             feedback = success ? "Cache settings saved. Restart the provider to apply them."
-                : "Cache settings could not be confirmed. Refresh before trying again."
+                : (store.errorMessage == unsupported ? unsupported : "Cache settings could not be confirmed. Refresh before trying again.")
         }
     }
 }

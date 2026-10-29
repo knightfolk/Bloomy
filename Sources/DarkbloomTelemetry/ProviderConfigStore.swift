@@ -254,6 +254,13 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
         _ = try await publishValidated(data, expectedState: snapshot.state)
     }
 
+    func saveCacheDailyWrite(expected: ProviderCacheStatus, value: Double) async throws {
+        let snapshot = try await readLockedSnapshot(lockFlag: O_SHLOCK)
+        let data = try ProviderConfigDocument.renderingCacheDailyWrite(expected: expected, value: value, in: snapshot.data)
+        guard data != snapshot.data else { return }
+        _ = try await publishValidated(data, expectedState: snapshot.state)
+    }
+
     public func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult {
         guard draft.hasChanges else {
             return ProviderConfigSaveResult(draft: try await load(), restartRequired: false)

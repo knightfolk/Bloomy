@@ -282,10 +282,18 @@ final class ProviderExtrasStore: ObservableObject {
         try requireFreshEvidence(cacheStatus)
         guard cacheStatus?.value == expected, !mutationInFlight, !cacheRefreshing else { throw ProviderExtrasMutationError.commandFailed }
         mutationInFlight = true
+        errorMessage = nil
         defer { mutationInFlight = false }
         var confirmed = false
-        do { try await client.setCache(expected: expected, change: change); confirmed = true } catch { }
+        var unsupportedVersion = false
+        do { try await client.setCache(expected: expected, change: change); confirmed = true }
+        catch ProviderExtrasMutationError.unsupportedCacheSettingsVersion { unsupportedVersion = true }
+        catch { }
         await Task.detached { await self.refreshCache() }.value
+        if unsupportedVersion {
+            errorMessage = ProviderExtrasMutationError.unsupportedCacheSettingsVersion.userMessage
+            throw ProviderExtrasMutationError.unsupportedCacheSettingsVersion
+        }
         guard confirmed, ProviderSettingsFreshnessPolicy.isFresh(cacheStatus, at: now()) else { throw ProviderExtrasMutationError.commandFailed }
     }
 

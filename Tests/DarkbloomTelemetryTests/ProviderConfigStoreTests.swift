@@ -5,6 +5,19 @@ import Testing
 
 @Suite("Provider config store")
 struct ProviderConfigStoreTests {
+    @Test("cache limit save rejects a competing edit during validation")
+    func cacheDailyConflictDuringValidation() async throws {
+        let source = Data("[backend]\nenabled_models=[]\npreload_models=[]\n[cache]\ndaily_write_gb=25.5\n".utf8)
+        let external = Data((String(decoding: source, as: UTF8.self) + "# external edit\n").utf8)
+        let harness = try ConfigStoreHarness.make(mode: 0o600, sourceData: source, externalWriteDuringValidation: external)
+        defer { harness.cleanup() }
+        let expected = ProviderCacheStatus(directory: "/builtin", dailyWriteBytes: 25_500_000_000, hasVolume: false, hasProblem: false)
+        await #expect(throws: ProviderConfigError.changedExternally) {
+            try await harness.store.saveCacheDailyWrite(expected: expected, value: 12)
+        }
+        #expect(try Data(contentsOf: harness.configURL) == external)
+        #expect(!FileManager.default.fileExists(atPath: harness.backupURL.path))
+    }
     @Test("download limits reject a competing edit during validation")
     func autopilotDownloadConflictDuringValidation() async throws {
         let source = Data("""

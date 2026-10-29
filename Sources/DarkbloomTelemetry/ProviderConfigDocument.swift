@@ -125,6 +125,40 @@ public struct ProviderConfigDocument: Equatable, Sendable {
         return result
     }
 
+    static func renderingCacheDailyWrite(expected: ProviderCacheStatus, value: Double, in data: Data) throws -> Data {
+        guard data.count <= 1_048_576, String(data: data, encoding: .utf8) != nil,
+              ProviderCacheParser.validDailyWriteGB(value) else { throw ProviderConfigError.validationFailed("Cache limit is invalid") }
+        var scanner = ProviderConfigScanner(data: data)
+        let fields = try scanner.cacheDailyRanges()
+        let bytes = fields.dailyValue.map { Int64($0 * 1_000_000_000) }
+        guard bytes == expected.dailyWriteBytes else { throw ProviderConfigError.changedExternally }
+        if let directory = fields.directory {
+            guard expected.hasVolume, let observed = expected.selectedDirectory,
+                  let selected = ProviderCacheParser.normalizedSelectedDirectory(directory),
+                  selected == ProviderCacheParser.normalizedSelectedDirectory(observed) else { throw ProviderConfigError.changedExternally }
+        } else {
+            guard !expected.hasVolume, expected.selectedDirectory == nil else { throw ProviderConfigError.changedExternally }
+        }
+        let newValue = String(value)
+        if fields.dailyValue == value { return data }
+        var result = data
+        if let range = fields.dailyRange {
+            result.replaceSubrange(range, with: Data(newValue.utf8))
+        } else {
+            let newline = Self.detectLineEnding(in: data)
+            if let header = fields.headerEnd {
+                let prefix = header == data.count && data.last != 10 && data.last != 13 ? newline : ""
+                result.replaceSubrange(header..<header, with: Data("\(prefix)daily_write_gb = \(newValue)\(newline)".utf8))
+            } else {
+                let prefix = !data.isEmpty && data.last != 10 && data.last != 13 ? newline : ""
+                result.append(contentsOf: "\(prefix)[cache]\(newline)daily_write_gb = \(newValue)\(newline)".utf8)
+            }
+        }
+        var verify = ProviderConfigScanner(data: result)
+        guard try verify.cacheDailyRanges().dailyValue == value else { throw ProviderConfigError.validationFailed("Cache limit could not be verified") }
+        return result
+    }
+
     /// Replace only recognized schedule statements; leave every other byte in
     /// place. Unsupported window fields or inline comments prevent a rewrite.
     public static func renderingSchedule(_ schedule: ProviderSchedule, in data: Data) throws -> Data {
@@ -456,6 +490,69 @@ private struct ProviderConfigScanner {
         let valueRange: Range<Int>
         let statementRange: Range<Int>
         let hasComment: Bool
+    }
+
+    fileprivate struct CacheDailyRanges {
+        var headerEnd: Int?
+        var dailyRange: Range<Int>?
+        var dailyValue: Double?
+        var directory: String?
+        var volumeUUID: String?
+    }
+
+    fileprivate mutating func cacheDailyRanges() throws -> CacheDailyRanges {
+        let failure = ProviderConfigError.validationFailed("Cache settings cannot be safely edited")
+        var result = CacheDailyRanges()
+        var inCache = false
+        var root = true
+        while true {
+            skipStatementTrivia()
+            guard index < bytes.count else { break }
+            let start = index
+            if bytes[index] == Self.openBracket {
+                let end = skipStatement(from: start)
+                let raw = String(decoding: bytes[start..<end], as: UTF8.self)
+                let header = (raw.split(separator: "#", maxSplits: 1).first.map(String.init) ?? "").filter { !$0.isWhitespace }
+                if header == "[cache]" {
+                    guard result.headerEnd == nil else { throw failure }
+                    result.headerEnd = end; inCache = true
+                } else {
+                    if header.contains("cache") && (header.hasPrefix("[cache") || header.hasPrefix("[\"cache") || header.hasPrefix("['cache")) { throw failure }
+                    inCache = false
+                }
+                root = false; index = end; continue
+            }
+            guard let key = parseBareKey() else {
+                if inCache || root { throw failure }
+                index = skipStatement(from: start); continue
+            }
+            skipHorizontalWhitespace()
+            guard index < bytes.count, bytes[index] == Self.equals else {
+                if inCache || (root && key == "cache") { throw failure }
+                index = skipStatement(from: start); continue
+            }
+            index += 1
+            if root && key == "cache" { throw failure }
+            guard inCache else { index = skipStatement(from: index); continue }
+            skipHorizontalWhitespace()
+            if key == "daily_write_gb" {
+                guard result.dailyRange == nil else { throw failure }
+                let begin = index
+                while index < bytes.count, !isHorizontalWhitespace(bytes[index]), !isNewline(at: index), bytes[index] != Self.comment { index += 1 }
+                let raw = String(decoding: bytes[begin..<index], as: UTF8.self)
+                guard let value = Double(raw.replacingOccurrences(of: "_", with: "")), ProviderCacheParser.validDailyWriteGB(value) else { throw failure }
+                result.dailyRange = begin..<index; result.dailyValue = value
+                try consumeTargetStatementRemainder(integerKey: key)
+            } else if key == "directory" || key == "volume_uuid" {
+                guard (key != "directory" || result.directory == nil), (key != "volume_uuid" || result.volumeUUID == nil),
+                      index < bytes.count, bytes[index] == Self.doubleQuote || bytes[index] == Self.singleQuote else { throw failure }
+                let value = try parseString(key: key)
+                try consumeTargetStatementRemainder(arrayKey: key)
+                if key == "directory" { result.directory = value } else { result.volumeUUID = value }
+            } else { index = skipStatement(from: index) }
+        }
+        guard (result.directory == nil) == (result.volumeUUID == nil) else { throw failure }
+        return result
     }
 
     fileprivate struct AutopilotDownloadRanges {

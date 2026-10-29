@@ -49,8 +49,13 @@ struct ProviderCacheTests {
 
     @Test("write rechecks evidence and verifies actual readback")
     func mutation() async throws {
-        let runner = CacheRunner()
-        let root = URL(fileURLWithPath: "/fixture")
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let directory = root.appendingPathComponent(".config/darkbloom")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = directory.appendingPathComponent("provider.toml")
+        try Data("[backend]\nenabled_models=[]\npreload_models=[]\n".utf8).write(to: config)
+        let runner = CacheRunner(config: config)
         let client = ProviderExtrasClient(policy: DarkbloomSourcePolicy(homeDirectory: root, environmentPath: ""),
             runner: runner, now: Date.init, testOnlyExecutable: root.appendingPathComponent("darkbloom"))
         guard case .available(let initial, _) = await client.refreshCache() else { Issue.record("Expected cache status"); return }
@@ -61,11 +66,13 @@ struct ProviderCacheTests {
         guard case .available(let changed, _) = await client.refreshCache() else { Issue.record("Expected cache status"); return }
         await runner.ignoreNextWrite()
         await #expect(throws: ProviderExtrasMutationError.self) { try await client.setCache(expected: changed, change: .dailyWriteGB(9)) }
-        try await client.setCache(expected: changed, change: .directory("/fixture/new-cache"))
+        let reconciled = try #require(await client.refreshCache().value)
+        #expect(reconciled.dailyWriteBytes == 9_000_000_000)
+        try await client.setCache(expected: reconciled, change: .directory("/fixture/new-cache"))
         guard case .available(let moved, _) = await client.refreshCache() else { Issue.record("Expected changed directory"); return }
         #expect(moved.selectedDirectory == "/fixture/new-cache")
         #expect(moved.directory == "/fixture/new-cache/namespace/kv3")
-        #expect(moved.dailyWriteBytes == 25_500_000_000)
+        #expect(moved.dailyWriteBytes == 9_000_000_000)
         try await client.setCache(expected: moved, change: .resetDirectory)
         guard case .available(let reset, _) = await client.refreshCache() else { Issue.record("Expected reset"); return }
         #expect(!reset.hasVolume && reset.directory == "/cache")
@@ -80,10 +87,28 @@ private actor CacheRunner: ProcessExecuting {
     var custom = false
     var writes = 0
     var ignored = false
+    var staleReadback = false
+    let config: URL
+    init(config: URL) { self.config = config }
     func ignoreNextWrite() { ignored = true }
     func run(_ command: ProcessCommand, timeout: Duration, outputLimit: Int,
              onOutput: (@Sendable (ProcessOutputChunk) -> Void)?) async throws -> CommandResult {
+        if command.arguments == ["--version"] { return CommandResult(exitCode: 0, standardOutput: Data("0.10.4\n".utf8), standardError: Data()) }
+        if command.arguments.first == "status" {
+            writes += 1
+            if ignored { ignored = false; staleReadback = true }
+            return CommandResult(exitCode: 0, standardOutput: Data(), standardError: Data())
+        }
         if command.arguments.prefix(2) == ["cache", "status"] {
+            if staleReadback { staleReadback = false }
+            else {
+                let text = try String(contentsOf: config, encoding: .utf8)
+                let value = text.components(separatedBy: .newlines).compactMap { line -> Double? in
+                    let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                    return parts.count == 2 && parts[0] == "daily_write_gb" ? Double(parts[1]) : nil
+                }.last
+                bytes = value.map { Int64($0 * 1_000_000_000) }
+            }
             var payload: [String: Any] = ["directory": directory, "scope": "saved_settings",
                 "dailyWriteSource": bytes == nil ? "startup_environment_or_default" : "saved_settings"]
             if let bytes { payload["dailyWriteBytes"] = bytes; payload["unlimited"] = bytes == 0 }

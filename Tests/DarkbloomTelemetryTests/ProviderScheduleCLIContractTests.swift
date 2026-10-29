@@ -6,6 +6,28 @@ import Testing
 /// configuration files are touched; no provider lifecycle action is issued.
 @Suite("Provider schedule CLI contract")
 struct ProviderScheduleCLIContractTests {
+    @Test("preserving cache limits are accepted by Darkbloom", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
+    func cacheDailyWriteContract() async throws {
+        let executable = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"]))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("BloomyCacheLimitContract-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("provider.toml")
+        try Data("[provider]\nname='Synthetic cache limit'\nauto_update=false\n[backend]\nfuture_setting=73\n[future_section]\nkeep='untouched'\n".utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let runner = CappedProcessRunner()
+        let command = ProviderExtrasCommand.cacheStatus(executable: executable, config: url)
+        let initial = try await runner.run(command, timeout: .seconds(15), outputLimit: 262_144, onOutput: nil)
+        let expected = try ProviderCacheParser.parse(initial.standardOutput)
+        let store = LocalProviderConfigStore(configURL: url, executable: executable, runner: runner)
+        try await store.saveCacheDailyWrite(expected: expected, value: 25.5)
+        let output = try await runner.run(command, timeout: .seconds(15), outputLimit: 262_144, onOutput: nil)
+        let observed = try ProviderCacheParser.parse(output.standardOutput)
+        #expect(observed.dailyWriteBytes == 25_500_000_000)
+        #expect(observed.directory == expected.directory)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        #expect(text.contains("future_setting=73") && text.contains("[future_section]\nkeep='untouched'"))
+    }
     @Test("cache directory client confirms Darkbloom's selected folder", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
     func cacheDirectoryClientContract() async throws {
         let cli = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"]))
@@ -15,7 +37,8 @@ struct ProviderScheduleCLIContractTests {
         defer { try? FileManager.default.removeItem(at: home) }
         let selected = home.appendingPathComponent("selected")
         try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        try Data("[provider]\nname='Synthetic cache client'\nauto_update=false\n".utf8).write(to: configDir.appendingPathComponent("provider.toml"))
+        let configURL = configDir.appendingPathComponent("provider.toml")
+        try Data("[provider]\nname='Synthetic cache client'\nauto_update=false\n".utf8).write(to: configURL)
         let policy = DarkbloomSourcePolicy(homeDirectory: home, environmentPath: cli.deletingLastPathComponent().path)
         let client = ProviderExtrasClient(policy: policy, runner: CappedProcessRunner())
         let initial = try #require(await client.refreshCache().value)
@@ -23,6 +46,16 @@ struct ProviderScheduleCLIContractTests {
         let observed = try #require(await client.refreshCache().value)
         #expect(observed.selectedDirectory == ProviderCacheParser.normalizedSelectedDirectory(selected.path))
         #expect(observed.hasVolume && !observed.hasProblem)
+        let handle = try FileHandle(forWritingTo: configURL)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("\n[future_section]\nkeep='untouched'\n".utf8))
+        try handle.close()
+        let current = try #require(await client.refreshCache().value)
+        try await client.setCache(expected: current, change: .dailyWriteGB(12.5))
+        let limited = try #require(await client.refreshCache().value)
+        #expect(limited.dailyWriteBytes == 12_500_000_000)
+        #expect(limited.selectedDirectory == observed.selectedDirectory)
+        #expect(try String(contentsOf: configURL, encoding: .utf8).contains("[future_section]\nkeep='untouched'"))
     }
     @Test("cache status distinguishes selected folder from the effective root", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
     func cacheDirectoryContract() async throws {

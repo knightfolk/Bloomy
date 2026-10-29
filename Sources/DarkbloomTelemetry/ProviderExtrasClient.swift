@@ -404,13 +404,22 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
         switch change {
         case .dailyWriteGB(let value):
             guard ProviderCacheParser.validDailyWriteGB(value) else { throw ProviderExtrasMutationError.commandFailed }
+            try await requireQualifiedConfigCLI(executable, error: .unsupportedCacheSettingsVersion)
         case .directory(let path):
             guard path.hasPrefix("/"), path.utf8.count <= 4096,
                   path.rangeOfCharacter(from: .controlCharacters) == nil else { throw ProviderExtrasMutationError.commandFailed }
         case .resetDirectory: break
         }
         var succeeded = false
-        do { try await runMutation(ProviderExtrasCommand.cacheSet(executable: executable, config: policy.providerConfig, change: change)); succeeded = true } catch { }
+        do {
+            if case .dailyWriteGB(let value) = change {
+                let config = LocalProviderConfigStore(configURL: policy.providerConfig, executable: executable, runner: runner)
+                try await config.saveCacheDailyWrite(expected: before, value: value)
+            } else {
+                try await runMutation(ProviderExtrasCommand.cacheSet(executable: executable, config: policy.providerConfig, change: change))
+            }
+            succeeded = true
+        } catch { }
         let readback = await Task.detached { await self.refreshCache() }.value
         guard succeeded, case .available(let after, _) = readback else { throw ProviderExtrasMutationError.commandFailed }
         switch change {
@@ -456,7 +465,7 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
 
     public func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws {
         guard let executable = resolveExecutable() else { throw ProviderExtrasMutationError.executableUnavailable }
-        try await requireQualifiedAutopilotCLI(executable)
+        try await requireQualifiedConfigCLI(executable, error: .unsupportedAutopilotPolicyVersion)
         // Read immediately before dispatch. Cached UI evidence is never the write authority.
         guard case .available(let before, _) = await refreshAutopilot(), before.allows(action) else {
             throw ProviderExtrasMutationError.commandFailed
@@ -485,19 +494,19 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
         }
     }
 
-    private func requireQualifiedAutopilotCLI(_ executable: URL) async throws {
+    private func requireQualifiedConfigCLI(_ executable: URL, error: ProviderExtrasMutationError) async throws {
         // This preserving implementation is qualified against 0.10.4. Do not
         // silently assume another provider version has identical semantics.
         let version = try await run(ProcessCommand(executable: executable, arguments: ["--version"]))
         guard version.exitCode == 0,
               String(data: version.standardOutput, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) == "0.10.4" else {
-            throw ProviderExtrasMutationError.unsupportedAutopilotPolicyVersion
+            throw error
         }
     }
 
     public func setAutopilotDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) async throws {
         guard let executable = resolveExecutable() else { throw ProviderExtrasMutationError.executableUnavailable }
-        try await requireQualifiedAutopilotCLI(executable)
+        try await requireQualifiedConfigCLI(executable, error: .unsupportedAutopilotPolicyVersion)
         guard desired.reserveGB == expected.reserveGB,
               (!desired.enabled || (desired.maxStorageGB != 0 && desired.maxModels != 0)),
               desired.enabled || (desired.maxStorageGB == expected.maxStorageGB && desired.maxModels == expected.maxModels),
