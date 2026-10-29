@@ -101,7 +101,10 @@ and the installed CLI's read-only help and status output.
   and estimated memory before pinning; these safeguards need to be carried into
   any implementation. The desktop service supports a private discovery directory
   via `DARKBLOOM_DESKTOP_DIR`, a possible route to its own checks; operation
-  coordination and lifecycle still need investigation. A disposable-config
+  coordination and lifecycle still need investigation. Its memory allowance
+  derives from the unified-memory cap and activation reserve, both of which
+  can be changed by environment variables. A hard-coded RAM percentage would
+  therefore not reliably reproduce the provider's decision. A disposable-config
   0.10.4 pin command removed an unfamiliar backend key and an unfamiliar table,
   so directly invoking it would not preserve arbitrary future configuration.
   The CLI says pins remain protected during an explicit pause; the presentation
