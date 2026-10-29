@@ -9,10 +9,14 @@ public struct ChatModelListSnapshot: Equatable, Sendable {
 
     public let modelIDs: [String]
     public let capturedAt: Date
+    /// Bound only by the local client to the normalized endpoint it queried.
+    /// Network and legacy snapshots have no authority to send images.
+    public let localEndpointOrigin: URL?
 
-    public init(modelIDs: [String], capturedAt: Date) {
+    public init(modelIDs: [String], capturedAt: Date, localEndpointOrigin: URL? = nil) {
         self.modelIDs = modelIDs
         self.capturedAt = capturedAt
+        self.localEndpointOrigin = localEndpointOrigin
     }
 }
 
@@ -60,8 +64,8 @@ public enum ChatModelListParser {
     }
 }
 
-/// One turn in a chat completion request. Roles are restricted to the plain
-/// text conversation roles; multimodal content parts are not supported.
+/// One turn in a chat completion request. Text-only content preserves the
+/// original string wire shape. Images use bounded inline content parts.
 public struct ChatMessagePayload: Equatable, Sendable, Codable {
     public enum Role: String, Sendable, Codable {
         case system, user, assistant
@@ -69,10 +73,70 @@ public struct ChatMessagePayload: Equatable, Sendable, Codable {
 
     public let role: Role
     public let content: String
+    public let images: [ChatImageAttachment]
 
-    public init(role: Role, content: String) {
+    public init(role: Role, content: String, images: [ChatImageAttachment] = []) {
         self.role = role
         self.content = content
+        self.images = images
+    }
+
+    private enum CodingKeys: String, CodingKey { case role, content }
+    private enum PartKeys: String, CodingKey { case type, text, image_url, url }
+
+    public func encode(to encoder: any Encoder) throws {
+        try ChatImageAttachment.validate(images)
+        guard images.isEmpty || role == .user else { throw ChatImageError.imagesRequireUserRole }
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(role, forKey: .role)
+        if images.isEmpty {
+            try container.encode(content, forKey: .content)
+        } else {
+            var parts = container.nestedUnkeyedContainer(forKey: .content)
+            if !content.isEmpty {
+                var part = parts.nestedContainer(keyedBy: PartKeys.self)
+                try part.encode("text", forKey: .type)
+                try part.encode(content, forKey: .text)
+            }
+            for image in images {
+                var part = parts.nestedContainer(keyedBy: PartKeys.self)
+                try part.encode("image_url", forKey: .type)
+                var value = part.nestedContainer(keyedBy: PartKeys.self, forKey: .image_url)
+                try value.encode(image.dataURI, forKey: .url)
+            }
+        }
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let role = try container.decode(Role.self, forKey: .role)
+        if let text = try? container.decode(String.self, forKey: .content) {
+            self.init(role: role, content: text)
+            return
+        }
+        var parts = try container.nestedUnkeyedContainer(forKey: .content)
+        guard let count = parts.count, count <= ChatImageAttachment.maximumImagesPerRequest + 1 else {
+            throw ChatImageError.tooManyImages
+        }
+        var text = ""
+        var images: [ChatImageAttachment] = []
+        var hasText = false
+        while !parts.isAtEnd {
+            let part = try parts.nestedContainer(keyedBy: PartKeys.self)
+            switch try part.decode(String.self, forKey: .type) {
+            case "text":
+                guard !hasText else { throw ChatClientError.invalidResponse }
+                text = try part.decode(String.self, forKey: .text)
+                hasText = true
+            case "image_url":
+                let image = try part.nestedContainer(keyedBy: PartKeys.self, forKey: .image_url)
+                images.append(try ChatImageAttachment.decodeDataURI(image.decode(String.self, forKey: .url)))
+            default: throw ChatClientError.invalidResponse
+            }
+        }
+        guard images.isEmpty || role == .user else { throw ChatImageError.imagesRequireUserRole }
+        try ChatImageAttachment.validate(images)
+        self.init(role: role, content: text, images: images)
     }
 }
 
@@ -80,6 +144,7 @@ public struct ChatMessagePayload: Equatable, Sendable, Codable {
 /// route; the body is bounded before transmission.
 public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
     public static let maximumBodyBytes = 256 * 1_024
+    public static let maximumLocalImageBodyBytes = 8 * 1_024 * 1_024
     public static let maximumMessages = 64
     public static let maximumMessageCharacters = 16_384
     public static let networkTimeoutInterval: TimeInterval = 300
@@ -99,7 +164,8 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
         messages: [ChatMessagePayload],
         stream: Bool = false
     ) throws -> Self {
-        try make(
+        guard messages.allSatisfy({ $0.images.isEmpty }) else { throw ChatImageError.networkImagesUnsupported }
+        return try make(
             url: URL(string: "https://api.darkbloom.dev/v1/chat/completions")!,
             token: consumerKey,
             model: model,
@@ -189,8 +255,12 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
         guard (1...maximumMessages).contains(messages.count) else {
             throw ChatClientError.requestTooLarge
         }
-        for message in messages where message.content.utf8.count > maximumMessageCharacters {
-            throw ChatClientError.requestTooLarge
+        var images: [ChatImageAttachment] = []
+        for message in messages {
+            guard message.content.utf8.count <= maximumMessageCharacters else { throw ChatClientError.requestTooLarge }
+            guard message.images.isEmpty || message.role == .user else { throw ChatImageError.imagesRequireUserRole }
+            images.append(contentsOf: message.images)
+            try ChatImageAttachment.validate(images)
         }
     }
 
@@ -206,7 +276,8 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
             let include_usage = true
         }
         let data = try JSONEncoder().encode(Body(model: model, messages: messages, stream: stream, max_tokens: maxTokens, stream_options: stream ? StreamOptions() : nil))
-        guard data.count <= maximumBodyBytes else { throw ChatClientError.requestTooLarge }
+        let limit = messages.contains(where: { !$0.images.isEmpty }) ? maximumLocalImageBodyBytes : maximumBodyBytes
+        guard data.count <= limit else { throw ChatClientError.requestTooLarge }
         return data
     }
 }

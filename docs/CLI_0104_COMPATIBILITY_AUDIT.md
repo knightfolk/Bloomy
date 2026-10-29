@@ -137,8 +137,14 @@ and the installed CLI's read-only help and status output.
   Installed-app review remains outstanding.
 - Chat now accepts incrementally streamed text for local and network requests,
   preserving partial output on cancellation or failure. Parser and store tests
-  cover framing, cancellation and errors. Media and tool-call conversations are
-  not yet supported. The local provider accepts inline media only, with
+  cover framing, cancellation and errors. Local chat now supports in-memory PNG
+  and JPEG attachments with size and pixel limits; a verified endpoint origin
+  is bound to image history, and a changed endpoint rejects the send. An isolated
+  native fixture selected and displayed a synthetic image and completed an
+  image-only simulated chat; no real image or inference was sent. The local
+  model list does not attest vision support, so the UI explains that the model
+  may reject an image. Network image attachments, video, audio and tool-call
+  conversations are not yet supported. The local provider accepts inline media only, with
   architecture-specific support and size limits; audio has a separate native
   model path, and catalog labels alone do not establish route support. Tool
   calls need structured proposals and explicit execution authorization rather

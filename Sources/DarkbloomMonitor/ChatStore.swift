@@ -51,6 +51,8 @@ struct ChatEntry: Identifiable, Equatable, Sendable {
     var provenance: ChatResponseProvenance?
     var promptTokens: Int?
     var completionTokens: Int?
+    /// In-memory only; never sent to diagnostics or persisted.
+    var images: [ChatImageAttachment] = []
 }
 
 struct ChatConversation: Identifiable, Equatable, Sendable {
@@ -61,6 +63,8 @@ struct ChatConversation: Identifiable, Equatable, Sendable {
     /// Network conversations require an explicit, per-conversation
     /// acknowledgment of the paid semantics before the first send.
     var paidRouteAcknowledged = false
+    /// First verified local origin that received this conversation's images.
+    var imageEndpointOrigin: URL?
     var entries: [ChatEntry] = []
 }
 
@@ -514,9 +518,10 @@ final class ChatStore: ObservableObject {
     /// time without a published change) silently rejected it, and the caller
     /// must keep the user's draft.
     @discardableResult
-    func send(_ draft: String) -> Bool {
+    func send(_ draft: String, images: [ChatImageAttachment] = []) -> Bool {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canSend, var updated = conversation, let modelID = effectiveModelID(for: updated), !text.isEmpty else { return false }
+        guard canSend, var updated = conversation, let modelID = effectiveModelID(for: updated),
+              !text.isEmpty || !images.isEmpty, images.isEmpty || updated.route == .local else { return false }
         if updated.modelID == nil {
             updated.modelID = modelID
         }
@@ -534,25 +539,40 @@ final class ChatStore: ObservableObject {
         while index >= 1 {
             let assistant = updated.entries[index]
             let user = updated.entries[index - 1]
-            if user.author == .user, user.phase == .complete, !user.text.isEmpty,
+            if user.author == .user, user.phase == .complete, (!user.text.isEmpty || !user.images.isEmpty),
                assistant.author == .assistant, assistant.phase == .complete, !assistant.text.isEmpty {
-                history.insert(ChatMessagePayload(role: .user, content: user.text), at: 0)
+                history.insert(ChatMessagePayload(role: .user, content: user.text, images: user.images), at: 0)
                 history.insert(ChatMessagePayload(role: .assistant, content: assistant.text), at: 1)
             }
             index -= 2
         }
-        history.append(ChatMessagePayload(role: .user, content: text))
+        history.append(ChatMessagePayload(role: .user, content: text, images: images))
         // Trim whole pairs from the front so the window never begins with
         // an orphan assistant message; the new user turn stays last.
         while history.count > Self.maximumHistoryMessages, history.count >= 3 {
             history.removeFirst(2)
         }
+        while history.count >= 3 && (try? ChatImageAttachment.validate(history.flatMap(\.images))) == nil {
+            history.removeFirst(2)
+        }
+        guard (try? ChatImageAttachment.validate(history.flatMap(\.images))) != nil else { return false }
+        let imageOrigin: URL?
+        if history.contains(where: { !$0.images.isEmpty }) {
+            guard route == .local, let verified = localModels?.localEndpointOrigin,
+                  updated.imageEndpointOrigin == nil || updated.imageEndpointOrigin == verified else {
+                notice = "The local endpoint changed or could not be verified. Start a new chat before sending images."
+                return false
+            }
+            updated.imageEndpointOrigin = verified
+            imageOrigin = verified
+        } else { imageOrigin = nil }
 
         updated.entries.append(ChatEntry(
             id: UUID(),
             author: .user,
             text: text,
-            phase: .complete
+            phase: .complete,
+            images: images
         ))
         let placeholderID = UUID()
         updated.entries.append(ChatEntry(
@@ -572,6 +592,7 @@ final class ChatStore: ObservableObject {
                 route: route,
                 modelID: modelID,
                 history: history,
+                imageEndpointOrigin: imageOrigin,
                 placeholderID: placeholderID
             )
         }
@@ -608,6 +629,7 @@ final class ChatStore: ObservableObject {
         route: ChatRoute,
         modelID: String,
         history: [ChatMessagePayload],
+        imageEndpointOrigin: URL?,
         placeholderID: UUID
     ) async {
         defer {
@@ -627,7 +649,7 @@ final class ChatStore: ObservableObject {
                 // Local: no fallback. If the endpoint is gone, this throws
                 // and the failure is recorded; only the user can start a new
                 // conversation on the network route.
-                let outcome = try await localClient.completeStreaming(model: modelID, messages: history) { [weak self] delta in
+                let outcome = try await localClient.completeStreaming(model: modelID, messages: history, imageEndpointOrigin: imageEndpointOrigin) { [weak self] delta in
                     await self?.appendStreamText(delta, conversationID: conversationID, placeholderID: placeholderID)
                 }
                 finish(conversationID: conversationID, placeholderID: placeholderID, route: route, modelID: modelID, outcome: outcome)
@@ -779,6 +801,8 @@ final class ChatStore: ObservableObject {
             message = ""
         } else if let blocked = error as? ChatSendBlocked {
             message = blocked.message
+        } else if let imageError = error as? ChatImageError {
+            message = imageError.errorDescription ?? "The image could not be sent."
         } else if let chatError = error as? ChatClientError {
             message = chatError.errorDescription ?? "The request failed."
         } else if (error as? URLError) != nil {

@@ -126,15 +126,38 @@ public protocol ChatModelListing: Sendable {
 
 public protocol ChatCompleting: Sendable {
     func complete(model: String, messages: [ChatMessagePayload]) async throws -> ChatCompletionOutcome
+    /// Image callers must bind the endpoint to a successful local model-list
+    /// snapshot; resolving a newly configured endpoint is not consent to send
+    /// existing images there. Text-only callers can use the original API.
+    func complete(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?) async throws -> ChatCompletionOutcome
     /// Delivers visible text deltas while a response is arriving. The return
     /// value is authoritative only after the server finishes successfully.
     func completeStreaming(
         model: String, messages: [ChatMessagePayload],
         onText: @escaping @Sendable (String) async -> Void
     ) async throws -> ChatCompletionOutcome
+    func completeStreaming(
+        model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?,
+        onText: @escaping @Sendable (String) async -> Void
+    ) async throws -> ChatCompletionOutcome
 }
 
 extension ChatCompleting {
+    /// Conforming clients have to opt into media explicitly. Legacy clients
+    /// and fixtures cannot silently ignore endpoint binding.
+    public func complete(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?) async throws -> ChatCompletionOutcome {
+        guard messages.allSatisfy({ $0.images.isEmpty }) else { throw ChatImageError.localImageEndpointChanged }
+        return try await complete(model: model, messages: messages)
+    }
+
+    public func completeStreaming(
+        model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?,
+        onText: @escaping @Sendable (String) async -> Void
+    ) async throws -> ChatCompletionOutcome {
+        guard messages.allSatisfy({ $0.images.isEmpty }) else { throw ChatImageError.localImageEndpointChanged }
+        return try await completeStreaming(model: model, messages: messages, onText: onText)
+    }
+
     /// Existing non-streaming clients keep their behavior without a second
     /// request or any automatic retry if streaming fails.
     public func completeStreaming(
@@ -170,12 +193,17 @@ public struct LocalChatClient: ChatModelListing, ChatCompleting, Sendable {
             session: session,
             successCapacity: ChatModelListSnapshot.maximumResponseBytes
         ) { data in
-            try ChatModelListParser.parse(data, capturedAt: now)
+            let snapshot = try ChatModelListParser.parse(data, capturedAt: now)
+            return ChatModelListSnapshot(modelIDs: snapshot.modelIDs, capturedAt: snapshot.capturedAt, localEndpointOrigin: endpoint.origin)
         }
     }
 
     public func complete(model: String, messages: [ChatMessagePayload]) async throws -> ChatCompletionOutcome {
-        let endpoint = try await resolvedEndpoint()
+        try await complete(model: model, messages: messages, imageEndpointOrigin: nil)
+    }
+
+    public func complete(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?) async throws -> ChatCompletionOutcome {
+        let endpoint = try await resolvedEndpoint(messages: messages, imageEndpointOrigin: imageEndpointOrigin)
         let request = try ChatCompletionRequest.makeLocal(
             origin: endpoint.origin,
             token: endpoint.withToken { $0 },
@@ -195,7 +223,14 @@ public struct LocalChatClient: ChatModelListing, ChatCompleting, Sendable {
         model: String, messages: [ChatMessagePayload],
         onText: @escaping @Sendable (String) async -> Void
     ) async throws -> ChatCompletionOutcome {
-        let endpoint = try await resolvedEndpoint()
+        try await completeStreaming(model: model, messages: messages, imageEndpointOrigin: nil, onText: onText)
+    }
+
+    public func completeStreaming(
+        model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?,
+        onText: @escaping @Sendable (String) async -> Void
+    ) async throws -> ChatCompletionOutcome {
+        let endpoint = try await resolvedEndpoint(messages: messages, imageEndpointOrigin: imageEndpointOrigin)
         let request = try ChatCompletionRequest.makeLocal(
             origin: endpoint.origin, token: endpoint.withToken { $0 },
             model: model, messages: messages, stream: true
@@ -206,6 +241,16 @@ public struct LocalChatClient: ChatModelListing, ChatCompleting, Sendable {
     private func resolvedEndpoint() async throws -> ChatLocalEndpoint {
         guard let endpoint = await endpointProvider.endpoint() else {
             throw ChatClientError.localEndpointUnavailable
+        }
+        return endpoint
+    }
+
+    private func resolvedEndpoint(messages: [ChatMessagePayload], imageEndpointOrigin: URL?) async throws -> ChatLocalEndpoint {
+        let endpoint = try await resolvedEndpoint()
+        if messages.contains(where: { !$0.images.isEmpty }) {
+            guard let imageEndpointOrigin, imageEndpointOrigin == endpoint.origin else {
+                throw ChatImageError.localImageEndpointChanged
+            }
         }
         return endpoint
     }
@@ -266,6 +311,8 @@ public struct NetworkChatClient: ChatModelListing, ChatCompleting, Sendable {
     }
 
     public func complete(model: String, messages: [ChatMessagePayload]) async throws -> ChatCompletionOutcome {
+        // Local image admission is not evidence of network-route support.
+        guard messages.allSatisfy({ $0.images.isEmpty }) else { throw ChatImageError.networkImagesUnsupported }
         let token = try await consumerKey()
         let request = try ChatCompletionRequest.makeNetwork(
             consumerKey: token,
@@ -285,10 +332,15 @@ public struct NetworkChatClient: ChatModelListing, ChatCompleting, Sendable {
         }
     }
 
+    public func complete(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?) async throws -> ChatCompletionOutcome {
+        try await complete(model: model, messages: messages)
+    }
+
     public func completeStreaming(
         model: String, messages: [ChatMessagePayload],
         onText: @escaping @Sendable (String) async -> Void
     ) async throws -> ChatCompletionOutcome {
+        guard messages.allSatisfy({ $0.images.isEmpty }) else { throw ChatImageError.networkImagesUnsupported }
         let token = try await consumerKey()
         let request = try ChatCompletionRequest.makeNetwork(
             consumerKey: token, model: model, messages: messages, stream: true
@@ -298,6 +350,13 @@ public struct NetworkChatClient: ChatModelListing, ChatCompleting, Sendable {
         } catch ChatClientError.unauthorized {
             throw ChatClientError.consumerKeyRejected
         }
+    }
+
+    public func completeStreaming(
+        model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?,
+        onText: @escaping @Sendable (String) async -> Void
+    ) async throws -> ChatCompletionOutcome {
+        try await completeStreaming(model: model, messages: messages, onText: onText)
     }
 
     private func consumerKey() async throws -> String {

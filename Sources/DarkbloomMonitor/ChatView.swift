@@ -1,5 +1,6 @@
 import DarkbloomTelemetry
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum ChatNewConversationPolicy {
     static let inFlightExplanation = "Cancel the current send before starting a new chat."
@@ -62,6 +63,7 @@ struct ChatView: View {
     @State private var showsKeyEditor = false
     @State private var keyDraft = ""
     @State private var keyError: String?
+    @State private var imageError: String?
     @FocusState private var composerFocused: Bool
 
     init(store: ChatStore, openPopOut: (() -> Void)? = nil, draft: ChatDraftState? = nil, isVisible: Bool = true,
@@ -115,6 +117,7 @@ struct ChatView: View {
         }
         .onChange(of: store.conversation?.id) { _, _ in
             draft.clear()
+            imageError = nil
         }
     }
 
@@ -394,8 +397,34 @@ struct ChatView: View {
                 if conversation.route == .network {
                     consumerKeyLink
                 }
+                if conversation.route == .local {
+                    Button { chooseImage(conversationID: conversation.id) } label: {
+                        Label("Attach image…", systemImage: "photo.badge.plus")
+                    }
+                    .disabled(store.isSending || draft.images.count >= ChatImageAttachment.maximumImagesPerRequest)
+                    .accessibilityIdentifier("chat.attachImage")
+                    .help("Send a local image to the selected model. Model support varies.")
+                }
                 Spacer()
             }
+            if !draft.images.isEmpty, draft.conversationID == conversation.id {
+                ScrollView(.horizontal) { HStack {
+                    ForEach(Array(draft.images.enumerated()), id: \.offset) { index, image in
+                        VStack(spacing: 3) {
+                            if let preview = NSImage(data: image.data) {
+                                Image(nsImage: preview).resizable().scaledToFit().frame(width: 56, height: 56)
+                                    .accessibilityLabel("Attached image \(index + 1)")
+                            }
+                            Button("Remove image \(index + 1)") { draft.removeImage(at: index) }
+                                .font(.caption)
+                        }
+                    }
+                    Spacer()
+                } }
+                Text("The original images, including metadata, are sent to the selected local endpoint. Model support varies; older exchanges may be omitted when the image limit is reached.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if let imageError { Text(imageError).font(.caption).foregroundStyle(.orange) }
             HStack(alignment: .bottom, spacing: 8) {
                 TextEditor(text: Binding(
                     get: { draft.visibleText(in: store.conversation?.id) },
@@ -439,7 +468,7 @@ struct ChatView: View {
                     .disabled(
                         !store.canSend
                             || !draftBelongsToActiveConversation
-                            || draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || (draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && draft.images.isEmpty)
                     )
                 }
             }
@@ -451,6 +480,28 @@ struct ChatView: View {
         }
         .padding()
         .overlay(alignment: .top) { Divider() }
+    }
+
+    private func chooseImage(conversationID: UUID) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.prompt = "Attach"
+        guard panel.runModal() == .OK, let url = panel.url,
+              store.conversation?.id == conversationID, store.conversation?.route == .local,
+              !store.isSending else { return }
+        do {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let bytes = try handle.read(upToCount: ChatImageAttachment.maximumBytes + 1) ?? Data()
+            let mime: String = url.pathExtension.lowercased() == "png" ? "image/png" : "image/jpeg"
+            let image = try ChatImageAttachment(data: bytes, mimeType: mime)
+            guard draft.addImage(image, in: conversationID) else { throw ChatImageError.totalAttachmentsTooLarge }
+            imageError = nil
+        } catch {
+            imageError = "Choose a valid PNG or JPEG up to 2 MiB and 16 megapixels. Up to four images may total 5 MiB and 24 megapixels."
+        }
     }
 
     @ViewBuilder
@@ -533,7 +584,7 @@ private struct ChatEntryRow: View {
     var body: some View {
         let presentation = ChatEntryPresentation(entry: entry)
         VStack(alignment: entry.author == .user ? .trailing : .leading, spacing: 4) {
-            if !entry.text.isEmpty || presentation.phaseAccessibilityLabel != nil {
+            if !entry.text.isEmpty || !entry.images.isEmpty || presentation.phaseAccessibilityLabel != nil {
                 Text(presentation.speaker)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -541,7 +592,19 @@ private struct ChatEntryRow: View {
                     // status; the visible caption need not repeat that name.
                     .accessibilityHidden(entry.text.isEmpty)
             }
-            HStack {
+            if !entry.images.isEmpty {
+                HStack {
+                    if entry.author == .user { Spacer(minLength: 40) }
+                    ForEach(Array(entry.images.enumerated()), id: \.offset) { index, image in
+                        if let preview = NSImage(data: image.data) {
+                            Image(nsImage: preview).resizable().scaledToFit().frame(maxWidth: 88, maxHeight: 88)
+                                .accessibilityLabel("Image \(index + 1) attached by you")
+                        }
+                    }
+                }
+            }
+            if !entry.text.isEmpty || entry.phase == .sending {
+              HStack {
                 if entry.author == .user { Spacer(minLength: 40) }
                 Text(entry.text)
                     .accessibilityLabel(presentation.messageAccessibilityLabel)
@@ -564,6 +627,7 @@ private struct ChatEntryRow: View {
                         }
                     }
                 if entry.author == .assistant { Spacer(minLength: 40) }
+              }
             }
             switch entry.phase {
             case .complete:
@@ -800,6 +864,7 @@ struct ConsumerKeyEditor: View {
 @MainActor
 final class ChatDraftState: ObservableObject {
     @Published private(set) var text = ""
+    @Published private(set) var images: [ChatImageAttachment] = []
     @Published private(set) var conversationID: UUID?
 
     func canSend(to activeConversationID: UUID?) -> Bool {
@@ -807,7 +872,7 @@ final class ChatDraftState: ObservableObject {
             draft: text,
             draftConversationID: conversationID,
             activeConversationID: activeConversationID
-        )
+        ) || (!images.isEmpty && conversationID != nil && conversationID == activeConversationID)
     }
 
     /// Only meaningful text owned by the active conversation needs preserving.
@@ -843,7 +908,21 @@ final class ChatDraftState: ObservableObject {
 
     func clear() {
         text = ""
+        images = []
         conversationID = nil
+    }
+
+    @discardableResult func addImage(_ image: ChatImageAttachment, in activeConversationID: UUID) -> Bool {
+        if let owner = conversationID, owner != activeConversationID { return false }
+        guard (try? ChatImageAttachment.validate(images + [image])) != nil else { return false }
+        conversationID = activeConversationID
+        images.append(image)
+        return true
+    }
+
+    func removeImage(at index: Int) {
+        guard images.indices.contains(index) else { return }
+        images.remove(at: index)
     }
 
     func send(using store: ChatStore) {
@@ -853,7 +932,7 @@ final class ChatDraftState: ObservableObject {
         }
         // Rejected sends retain the draft, including its owner. Accepted
         // sends have already copied the prompt into the transcript.
-        if store.send(text) { clear() }
+        if store.send(text, images: images) { clear() }
     }
 }
 

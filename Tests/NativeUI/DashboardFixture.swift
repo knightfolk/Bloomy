@@ -1386,7 +1386,8 @@ private struct FixtureChat: LocalChatRouteClient, NetworkChatRouteClient {
     let scenario: FixtureScenario
     func models(now: Date) async throws -> ChatModelListSnapshot {
         if !scenario.hasCurrentRuntime { throw FixtureError.offline }
-        return ChatModelListSnapshot(modelIDs: FixtureData.modelIDs, capturedAt: now)
+        return ChatModelListSnapshot(modelIDs: FixtureData.modelIDs, capturedAt: now,
+            localEndpointOrigin: URL(string: "http://127.0.0.1:18888"))
     }
     func complete(model: String, messages: [ChatMessagePayload]) async throws -> ChatCompletionOutcome {
         if !scenario.hasCurrentRuntime { throw FixtureError.offline }
@@ -1402,6 +1403,11 @@ private struct FixtureChat: LocalChatRouteClient, NetworkChatRouteClient {
             try await Task.sleep(for: .seconds(1))
         }
         return outcome
+    }
+    func completeStreaming(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?,
+                           onText: @escaping @Sendable (String) async -> Void) async throws -> ChatCompletionOutcome {
+        if messages.contains(where: { !$0.images.isEmpty }) && imageEndpointOrigin == nil { throw ChatImageError.localImageEndpointChanged }
+        return try await completeStreaming(model: model, messages: messages, onText: onText)
     }
 }
 

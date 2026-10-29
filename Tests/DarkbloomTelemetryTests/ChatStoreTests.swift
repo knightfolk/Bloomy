@@ -891,6 +891,39 @@ struct ChatStoreTests {
         #expect(store.consumerKeyPresent == false)
         #expect(keys.storedKey == nil)
     }
+
+    @Test("local image-only turns remain in follow-up history and drafts stay conversation-bound")
+    func imageConversation() async throws {
+        let bytes = try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="))
+        let image = try ChatImageAttachment(data: bytes, mimeType: "image/png")
+        let local = FakeChatRouteClient()
+        let origin = try #require(URL(string: "http://127.0.0.1:18888"))
+        local.modelsResult = .success(ChatModelListSnapshot(modelIDs: ["gpt-oss-20b"],
+            capturedAt: Date(timeIntervalSince1970: 1_800_000_000), localEndpointOrigin: origin))
+        let store = await makeStore(local: local)
+        store.startConversation(route: .local)
+        await waitUntil { store.canSend }
+        let owner = try #require(store.conversation?.id)
+        let draft = ChatDraftState()
+        #expect(draft.addImage(image, in: owner))
+        #expect(draft.canSend(to: owner))
+        #expect(!draft.canSend(to: UUID()))
+        draft.send(using: store)
+        await waitUntil { !store.isSending }
+        #expect(local.completeCalls.first?.last?.images == [image])
+        #expect(store.conversation?.entries.first?.images == [image])
+        #expect(store.send("What is in the image?"))
+        await waitUntil { !store.isSending }
+        #expect(local.completeCalls.last?.first?.images == [image])
+        #expect(draft.images.isEmpty)
+        local.modelsResult = .success(ChatModelListSnapshot(modelIDs: ["gpt-oss-20b"],
+            capturedAt: Date(timeIntervalSince1970: 1_800_000_000),
+            localEndpointOrigin: URL(string: "http://127.0.0.1:19999")))
+        await store.refreshModels()
+        #expect(!store.send("Continue"))
+        #expect(store.notice?.contains("endpoint changed") == true)
+        #expect(local.completeCalls.count == 2)
+    }
 }
 
 // MARK: - Fakes
@@ -998,6 +1031,14 @@ final class FakeChatRouteClient: LocalChatRouteClient, NetworkChatRouteClient, @
             }
         }
         return try completeResult.get()
+    }
+    func completeStreaming(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?,
+                           onText: @escaping @Sendable (String) async -> Void) async throws -> ChatCompletionOutcome {
+        if messages.contains(where: { !$0.images.isEmpty }) && imageEndpointOrigin == nil { throw ChatImageError.localImageEndpointChanged }
+        let result = try await complete(model: model, messages: messages)
+        try Task.checkCancellation()
+        await onText(result.content)
+        return result
     }
 }
 
