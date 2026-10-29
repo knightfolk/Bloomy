@@ -54,6 +54,19 @@ struct TelemetryTests {
         #expect(throws: (any Error).self) { try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: json)) }
     }
 
+    @Test("socket observations preserve old snapshots and reject malformed evidence")
+    func coordinatorConnection() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: fixture("daemon-state-online", extension: "json")) as? [String: Any])
+        let old = try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: json))
+        #expect(old.coordinatorConnected == nil && !old.coordinatorConnectionIsUnrecognized)
+        json["coordinator_connection"] = ["connected": false, "connections": 1, "since": 1.0]
+        let offline = try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: json))
+        #expect(offline.coordinatorConnected == false && !offline.coordinatorConnectionIsUnrecognized)
+        json["coordinator_connection"] = ["connected": "not-a-boolean"]
+        let malformed = try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: json))
+        #expect(malformed.coordinatorConnected == nil && malformed.coordinatorConnectionIsUnrecognized)
+    }
+
     @Test("loaded models remain distinct from warm models")
     func parsesLoadedModels() throws {
         let data = try fixture("loaded-models", extension: "json")

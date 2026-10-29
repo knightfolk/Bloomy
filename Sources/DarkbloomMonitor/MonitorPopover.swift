@@ -942,7 +942,10 @@ struct MonitorPopover: View {
 
     private var currentActivityLabel: String {
         guard let state = store.snapshot.state.value else { return "Unavailable" }
-        return state.inferenceActive ? "Working" : "Idle"
+        if state.inferenceActive { return "Working" }
+        if state.requestWorkPending == true { return "Work pending" }
+        if state.loadTransitionActive == true { return "Loading" }
+        return "Idle"
     }
 
     private func earningsSection(

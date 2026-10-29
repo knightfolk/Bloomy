@@ -39,7 +39,7 @@ public struct ProviderRequestActivityPresentation: Equatable, Sendable {
             case .forced:
                 return Self(
                     mode: .stopped,
-                    value: "0",
+                    value: daemonState.inferenceActive || daemonState.requestWorkPending == true ? "—" : "0",
                     status: "Forced stop",
                     detail: "The provider reported a forced stop; accepted work may have been interrupted."
                 )
@@ -60,21 +60,27 @@ public struct ProviderRequestActivityPresentation: Equatable, Sendable {
             return Self(
                 mode: .draining,
                 value: modelSwitch.remainingRequests.map(String.init) ?? "—",
-                status: "Switching",
-                detail: "The provider is applying a live model selection; new work is paused during the switch."
+                status: modelSwitch.outcome == .validating ? "Validating" : "Switching",
+                detail: modelSwitch.outcome == .validating
+                    ? "The provider is validating a model selection; this does not establish that new work is paused."
+                    : "The provider is applying a live model selection; new work is paused during the switch."
             )
         }
 
         if daemonState.startupPreloadPendingModels?.isEmpty == false {
             return Self(
-                mode: .idle,
-                value: "0",
+                mode: daemonState.requestWorkPending == true || daemonState.inferenceActive ? .active : .idle,
+                value: daemonState.requestWorkPending == true || daemonState.inferenceActive ? "1+" : "—",
                 status: "Preloading",
-                detail: "Configured startup models are still loading before normal serving begins."
+                detail: "Configured startup models are still loading; other warm models may continue serving."
             )
         }
 
         if daemonState.availability?.phase == .waitingForSchedule {
+            if daemonState.inferenceActive || daemonState.requestWorkPending == true {
+                return Self(mode: .active, value: "1+", status: "Work pending",
+                            detail: "Work is reported while the provider is waiting for its scheduled window.")
+            }
             return Self(
                 mode: .stopped,
                 value: "0",
@@ -110,6 +116,10 @@ public struct ProviderRequestActivityPresentation: Equatable, Sendable {
 
         if let lifecycle = daemonState.lifecycle,
            lifecycle.outcome == .drained || lifecycle.outcome == .stopped {
+            if daemonState.inferenceActive || daemonState.requestWorkPending == true {
+                return Self(mode: .unavailable, value: "—", status: "Unconfirmed",
+                            detail: "Provider stop and work observations conflict; refresh to check the current state.")
+            }
             return Self(
                 mode: .stopped,
                 value: "0",
@@ -127,11 +137,21 @@ public struct ProviderRequestActivityPresentation: Equatable, Sendable {
             )
         }
 
+        if daemonState.requestWorkPending == true {
+            return Self(mode: .active, value: "1+", status: "Work pending",
+                        detail: "Accepted or queued work is reported; the exact count is unavailable.")
+        }
+        if daemonState.loadTransitionActive == true {
+            return Self(mode: .idle, value: "—", status: "Loading",
+                        detail: "A model load is in progress; the exact request count is unavailable.")
+        }
         return Self(
             mode: .idle,
             value: "0",
             status: "Idle",
-            detail: "No inference is currently active; queued requests are not reported."
+            detail: daemonState.requestWorkPending == false
+                ? "No active inference or accepted or queued work is reported."
+                : "No inference is currently active; queued requests are not reported."
         )
     }
 }

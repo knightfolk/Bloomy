@@ -43,6 +43,7 @@ enum FixtureScenario: String, CaseIterable, Identifiable, Sendable {
 private enum FixtureReadinessMode: String, CaseIterable, Sendable {
     case scenario = "Scenario observation"
     case idle = "Ready and idle", working = "Active inference"
+    case pending = "Accepted or queued work", disconnected = "Coordinator disconnected"
     case scheduled = "Scheduled waiting", draining = "Finishing accepted work"
     case stopped = "Provider stopped", expired = "Expired authorization"
     case cold = "Models on demand", unknown = "Unknown lifecycle phase"
@@ -209,7 +210,8 @@ private enum FixtureData {
             lifecycle: .init(outcome: outcome, remainingRequests: mode == .draining ? 2 : 0, coordinatorAcknowledged: true),
             startupPreloadPendingModels: mode == .preloading ? [modelIDs[1]] : nil,
             modelSwitch: mode == .validating ? .init(outcome: .validating, models: [modelIDs[1]]) : nil,
-            availability: mode == .scheduled ? .init(phase: .waitingForSchedule) : nil)
+            availability: mode == .scheduled ? .init(phase: .waitingForSchedule) : nil,
+            requestWorkPending: mode == .pending, coordinatorConnected: mode != .disconnected)
         var status = StatusSnapshot()
         status.version = "0.9.17"
         status.coordinator = "https://coordinator.example:8443"

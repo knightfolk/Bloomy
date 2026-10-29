@@ -77,7 +77,7 @@ public struct ProviderVerification: Equatable, Sendable {
         let receivedAfterStarted = trust?.receivedAt.isFinite == true
             && state.startedAt.isFinite
             && (trust?.receivedAt ?? -.infinity) >= state.startedAt
-        let online = trust?.status.lowercased() == "online"
+        let online = trust?.status.lowercased() == "online" && state.coordinatorConnected != false
 
         let liveIdentity = liveProcessIdentity
         let processMatches = liveIdentity == state.processIdentity
@@ -129,10 +129,16 @@ public struct ProviderVerification: Equatable, Sendable {
             resultState = .incomplete
             title = "Verification unavailable"
             detail = "Coordinator trust predates this provider start."
+        } else if state.coordinatorConnectionIsUnrecognized {
+            resultState = .unconfirmed
+            title = "Connection unconfirmed"
+            detail = "The provider reported a connection state this monitor cannot interpret."
         } else if !online {
             resultState = .offline
             title = "Provider offline"
-            detail = "The latest coordinator trust status is not online."
+            detail = state.coordinatorConnected == false
+                ? "The provider reports that its coordinator connection is down."
+                : "The latest coordinator trust status is not online."
         } else if authorization == nil {
             // Pre-App-Attest snapshots can still carry the legacy hardware
             // trust path. Do not call an arbitrary online snapshot verified.

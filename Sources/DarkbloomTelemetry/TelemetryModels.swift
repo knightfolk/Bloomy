@@ -27,6 +27,9 @@ public struct DaemonState: Equatable, Sendable {
     /// Accepted or queued requests and in-progress model loading, when reported.
     public let requestWorkPending: Bool?
     public let loadTransitionActive: Bool?
+    /// The current socket observation; nil is absent on older providers.
+    public let coordinatorConnected: Bool?
+    public let coordinatorConnectionIsUnrecognized: Bool
     public var hasPendingWorkOrTransition: Bool {
         inferenceActive || requestWorkPending == true || loadTransitionActive == true
     }
@@ -91,7 +94,9 @@ public struct DaemonState: Equatable, Sendable {
         autopilotPhase: String? = nil,
         autopilotPhaseIsUnrecognized: Bool = false,
         requestWorkPending: Bool? = nil,
-        loadTransitionActive: Bool? = nil
+        loadTransitionActive: Bool? = nil,
+        coordinatorConnected: Bool? = nil,
+        coordinatorConnectionIsUnrecognized: Bool = false
     ) {
         self.schema = schema
         self.version = version
@@ -104,6 +109,8 @@ public struct DaemonState: Equatable, Sendable {
         self.inferenceActive = inferenceActive
         self.requestWorkPending = requestWorkPending
         self.loadTransitionActive = loadTransitionActive
+        self.coordinatorConnected = coordinatorConnected
+        self.coordinatorConnectionIsUnrecognized = coordinatorConnectionIsUnrecognized
         self.startedAt = startedAt
         self.writtenAt = writtenAt
         self.pid = pid

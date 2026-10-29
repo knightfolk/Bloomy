@@ -115,6 +115,28 @@ struct ProviderReadinessTests {
         }
     }
 
+    @Test("socket disconnect and malformed connection never present verified readiness")
+    func coordinatorSocket() {
+        let offline = present(state(connected: false))
+        #expect(offline.state == .offline)
+        #expect(offline.evidence.first { $0.id == .connection }?.value == "Offline")
+        #expect(offline.evidence.first { $0.id == .authorization }?.value != "Verified")
+        #expect(present(state(connected: true)).state == .ready)
+        #expect(present(state(connectionInvalid: true)).state == .unconfirmed)
+        #expect(present(state(connected: false), capturedAt: Date(timeIntervalSince1970: 989)).state == .stale)
+    }
+
+    @Test("accepted work and loading do not appear as idle")
+    func pendingWork() {
+        let pending = present(state(pending: true))
+        #expect(pending.title == "Work pending")
+        #expect(pending.evidence.first { $0.id == .work }?.value == "Work pending")
+        let loading = present(state(loading: true))
+        #expect(loading.state == .transitioning)
+        #expect(loading.evidence.first { $0.id == .work }?.value == "Model loading")
+        #expect(present(state(active: true, pending: true)).title == "Serving now")
+    }
+
     @Test("long-running inference and accepted drain work need no monetary evidence")
     func observedWorkIsNotMoney() {
         #expect(present(state(active: true, startedAt: 1)).state == .serving)
@@ -216,14 +238,16 @@ struct ProviderReadinessTests {
         TrustState(level: level, status: status, reason: "PRIVATE_CANARY_NEVER_RENDER", receivedAt: receivedAt, authorization: authorization)
     }
 
-    private func state(active: Bool = false, trust suppliedTrust: TrustState?? = nil, startedAt: TimeInterval = 900, writtenAt: TimeInterval = 997, warm: [String] = ["model"], advertised: [String]? = ["model"], coordinator: String = "wss://coordinator.example/ws/provider", lifecycle: ProviderLifecycleState? = nil, preload: [String]? = nil, modelSwitch: ProviderModelSwitchState? = nil, availability: ProviderAvailabilityState? = nil, loadFailures: [ModelLoadFailure] = []) -> DaemonState {
+    private func state(active: Bool = false, trust suppliedTrust: TrustState?? = nil, startedAt: TimeInterval = 900, writtenAt: TimeInterval = 997, warm: [String] = ["model"], advertised: [String]? = ["model"], coordinator: String = "wss://coordinator.example/ws/provider", lifecycle: ProviderLifecycleState? = nil, preload: [String]? = nil, modelSwitch: ProviderModelSwitchState? = nil, availability: ProviderAvailabilityState? = nil, loadFailures: [ModelLoadFailure] = [], pending: Bool? = nil, loading: Bool? = nil, connected: Bool? = nil, connectionInvalid: Bool = false) -> DaemonState {
         DaemonState(schema: 1, version: "fixture", currentModel: "model", warmModels: warm,
                     stats: ProviderStats(tokensGenerated: 999_999, requestsServed: 999_999, usageGaps: 0),
                     trust: suppliedTrust ?? trust(authorization: lease), capacity: nil, slots: [],
                     inferenceActive: active, startedAt: startedAt, writtenAt: writtenAt,
                     pid: identity.pid, processIdentity: identity, advertisedModels: advertised,
                     coordinatorURL: coordinator, modelLoadFailures: loadFailures, lifecycle: lifecycle,
-                    startupPreloadPendingModels: preload, modelSwitch: modelSwitch, availability: availability)
+                    startupPreloadPendingModels: preload, modelSwitch: modelSwitch, availability: availability,
+                    requestWorkPending: pending, loadTransitionActive: loading, coordinatorConnected: connected,
+                    coordinatorConnectionIsUnrecognized: connectionInvalid)
     }
 
     private func present(_ daemon: DaemonState, now suppliedNow: Date? = nil, capturedAt: Date? = nil, daemonCapturedAt: Date? = nil, statusCapturedAt: Date? = nil, statusStale: Bool = false, statusUnavailable: Bool = false, expectedCoordinator: String? = "https://coordinator.example") -> ProviderReadinessPresentation {

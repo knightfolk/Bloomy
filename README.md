@@ -292,8 +292,9 @@ work, not the provider.
 Provider resources show a best-effort whole-Mac GPU utilization reading when
 macOS exposes it; it includes other apps and is not attributed to Darkbloom.
 During normal serving, the request indicator shows `1+` when inference is active
-because the daemon reports activity but not an exact live count. During native
-drain, it shows the exact accepted requests remaining.
+or the provider reports accepted or queued work; the exact live count is not
+reported. Model loading is shown separately. During native drain, it shows the
+reported accepted requests remaining.
 
 Encrypted inference-cache settings are available in Settings → Provider. Bloomy
 shows the saved directory and daily write limit, and can save a different limit,

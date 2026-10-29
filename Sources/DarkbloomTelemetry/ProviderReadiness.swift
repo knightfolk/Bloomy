@@ -145,11 +145,23 @@ public struct ProviderReadinessPresentation: Equatable, Sendable {
         guard statusFresh && verification.coordinatorMatches else {
             return result(.unconfirmed, "Connection unconfirmed", "A current CLI configuration and matching coordinator observation are required.", "questionmark.circle", .caution, .health)
         }
+        if connectionCurrent && daemon.coordinatorConnected == false {
+            return result(.offline, "Provider connection offline", "The provider reports that its coordinator connection is down.", "network.slash", .caution, .hosting)
+        }
         if connectionCurrent && !verification.online {
             return result(.offline, "Provider connection offline", "The current coordinator observation does not report an online connection.", "network.slash", .caution, .hosting)
         }
+        if daemon.coordinatorConnectionIsUnrecognized {
+            return result(.unconfirmed, "Connection unconfirmed", "The provider reported a connection state this monitor cannot interpret.", "questionmark.circle", .caution, .health)
+        }
         guard authorized else {
             return result(.authorizationRequired, "Authorization unconfirmed", "Current coordinator authorization has not been verified for this process.", "lock.circle", .caution, .health)
+        }
+        if !daemon.inferenceActive && daemon.requestWorkPending == true {
+            return result(.serving, "Work pending", "The provider reports accepted or queued work; inference has not been reported active.", "hourglass", .positive)
+        }
+        if !daemon.inferenceActive && daemon.loadTransitionActive == true {
+            return result(.transitioning, "Preparing models", "The provider reports that model loading is in progress.", "hourglass", .neutral)
         }
         guard modelWarm else {
             if advertised {
@@ -177,6 +189,10 @@ public struct ProviderReadinessPresentation: Equatable, Sendable {
         let connection: EvidenceRow
         if !processFresh {
             connection = row(.connection, "Connection", "Unconfirmed", "A current observation matched to a live provider process is required.", .caution)
+        } else if daemon.coordinatorConnected == false {
+            connection = row(.connection, "Connection", "Offline", "The provider reports that its coordinator connection is down.", .caution)
+        } else if daemon.coordinatorConnectionIsUnrecognized {
+            connection = row(.connection, "Connection", "Unconfirmed", "The reported connection state could not be interpreted.", .caution)
         } else if !connectionCurrent {
             connection = row(.connection, "Connection", "Unconfirmed", "A matching coordinator and current trust observation are required.", .caution)
         } else {
@@ -217,10 +233,14 @@ public struct ProviderReadinessPresentation: Equatable, Sendable {
             work = row(.work, "Observed work", value, "New requests are paused during the model change; completion time is not reported.")
         } else if daemon.inferenceActive {
             work = row(.work, "Observed work", "Inference active", "At least one request is active; exact live count and progress are not reported.")
+        } else if daemon.requestWorkPending == true {
+            work = row(.work, "Observed work", "Work pending", "The provider reports accepted or queued work; an exact count is not reported.")
+        } else if daemon.loadTransitionActive == true {
+            work = row(.work, "Observed work", "Model loading", "A model load is in progress; an exact request count is not reported.")
         } else if daemon.availability?.phase == .waitingForSchedule {
             work = row(.work, "Observed work", "Scheduled idle", "The provider is intentionally waiting outside its configured serving window; no active inference is reported.")
         } else {
-            work = row(.work, "Observed work", "No active inference", "Queued requests and future demand are not reported.")
+            work = row(.work, "Observed work", "No active inference", daemon.requestWorkPending == false ? "No accepted or queued work is reported at this observation." : "Queued requests and future demand are not reported.")
         }
         return [source, connection, authorization, models, work]
     }

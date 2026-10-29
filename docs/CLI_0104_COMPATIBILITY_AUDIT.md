@@ -27,7 +27,10 @@ and the installed CLI's read-only help and status output.
   work before decoding; `load_transition_active` signals model loading. Bloomy's
   idle-driven actions must use both. Compatibility with older snapshots and
   malformed new fields must remain explicit. Broader presentation and all
-  control paths still require audit.
+  control paths still require audit. Readiness and request activity now surface
+  pending work and model loading; an explicit coordinator disconnect blocks
+  verified readiness, and malformed connection evidence is unconfirmed.
+  Native review and live installed-app verification remain outstanding.
 - Encrypted SSD cache: CLI 0.9.20 added `cache status` and `cache set`, including
   directory and daily write limits. Bloomy now reads and edits these settings
   through the CLI, preserving unset versus unlimited and requiring readback.
