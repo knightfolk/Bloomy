@@ -28,6 +28,22 @@ public struct ProviderAutopilotLiveStatus: Equatable, Sendable {
     fileprivate func matches(revision: String) -> Bool { self.revision == revision }
 }
 
+public struct AutopilotDownloadPolicy: Equatable, Sendable {
+    public let enabled: Bool
+    public let maxStorageGB: UInt64?
+    public let maxModels: UInt64?
+    public let reserveGB: UInt64?
+    public init(enabled: Bool, maxStorageGB: UInt64? = nil, maxModels: UInt64? = nil, reserveGB: UInt64? = nil) {
+        self.enabled = enabled; self.maxStorageGB = maxStorageGB
+        self.maxModels = maxModels; self.reserveGB = reserveGB
+    }
+}
+
+public struct AutopilotDownloadUsage: Equatable, Sendable {
+    public let usedBytes: UInt64
+    public let usedModels: UInt64
+}
+
 public struct ProviderAutopilotStatus: Equatable, Sendable {
     public let configuredEnabled: Bool
     public let consentRecorded: Bool
@@ -37,23 +53,35 @@ public struct ProviderAutopilotStatus: Equatable, Sendable {
     public let live: ProviderAutopilotLiveStatus?
     public let phase: ProviderAutopilotPhase?
     /// Nil means this provider did not report a usable download policy.
-    public let downloadsEnabled: Bool?
+    public let downloads: AutopilotDownloadPolicy?
+    public let downloadUsage: AutopilotDownloadUsage?
+    public var downloadsEnabled: Bool? { downloads?.enabled }
     private let configuredRevision: String
 
     public init(configuredEnabled: Bool, consentRecorded: Bool, configuredPaused: Bool,
                 selectedModels: [String], pinnedModels: [String], configuredRevision: String,
                 live: ProviderAutopilotLiveStatus? = nil, phase: ProviderAutopilotPhase? = nil,
-                downloadsEnabled: Bool? = nil) {
+                downloadsEnabled: Bool? = nil, downloads: AutopilotDownloadPolicy? = nil,
+                downloadUsage: AutopilotDownloadUsage? = nil) {
         self.configuredEnabled = configuredEnabled; self.consentRecorded = consentRecorded
         self.configuredPaused = configuredPaused; self.selectedModels = selectedModels
         self.pinnedModels = pinnedModels; self.configuredRevision = configuredRevision
-        self.live = live; self.phase = phase; self.downloadsEnabled = downloadsEnabled
+        self.live = live; self.phase = phase
+        self.downloads = downloads ?? downloadsEnabled.map { AutopilotDownloadPolicy(enabled: $0) }
+        self.downloadUsage = downloadUsage
     }
 
     public func withoutLiveEvidence() -> Self {
         Self(configuredEnabled: configuredEnabled, consentRecorded: consentRecorded,
              configuredPaused: configuredPaused, selectedModels: selectedModels, pinnedModels: pinnedModels,
-             configuredRevision: configuredRevision, downloadsEnabled: downloadsEnabled)
+             configuredRevision: configuredRevision, downloads: downloads, downloadUsage: downloadUsage)
+    }
+
+    /// Download settings are independent of consent and its revision.
+    public func hasSameEnrollment(as other: Self) -> Bool {
+        configuredEnabled == other.configuredEnabled && consentRecorded == other.consentRecorded
+            && configuredPaused == other.configuredPaused && configuredRevision == other.configuredRevision
+            && selectedModels == other.selectedModels && pinnedModels == other.pinnedModels
     }
 
     public var isEnrolled: Bool {
@@ -106,7 +134,8 @@ public extension ProviderExtrasParser {
                 selectedModels: configured.selected_models, pinnedModels: configured.pinned_models,
                 configuredRevision: configured.revision, live: live,
                 phase: payload.phase.flatMap(ProviderAutopilotPhase.init(rawValue:)),
-                downloadsEnabled: payload.downloads?.enabled)
+                downloads: payload.downloads.map { AutopilotDownloadPolicy(enabled: $0.enabled, maxStorageGB: $0.max_storage_gb, maxModels: $0.max_models, reserveGB: $0.reserve_gb) },
+                downloadUsage: payload.download_usage.map { AutopilotDownloadUsage(usedBytes: $0.used_bytes, usedModels: $0.used_models) })
         } catch let error as ProviderExtrasParseError { throw error }
         catch { throw ProviderExtrasParseError.invalidPayload }
     }
@@ -129,9 +158,17 @@ private struct AutopilotPayload: Decodable {
     let live: AutopilotLivePayload?
     let phase: String?
     let downloads: AutopilotDownloadsPayload?
+    let download_usage: AutopilotDownloadUsagePayload?
 }
 private struct AutopilotDownloadsPayload: Decodable {
     let enabled: Bool
+    let max_storage_gb: UInt64?
+    let max_models: UInt64?
+    let reserve_gb: UInt64?
+}
+private struct AutopilotDownloadUsagePayload: Decodable {
+    let used_bytes: UInt64
+    let used_models: UInt64
 }
 private struct AutopilotConfiguredPayload: Decodable {
     let enabled: Bool

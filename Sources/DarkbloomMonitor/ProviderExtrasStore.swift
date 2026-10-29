@@ -265,6 +265,23 @@ final class ProviderExtrasStore: ObservableObject {
         }
     }
 
+    func setAutopilotDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) async throws {
+        try requireFreshEvidence(snapshot?.autopilotStatus)
+        guard snapshot?.autopilotStatus?.value?.downloads == expected, !mutationInFlight else {
+            throw ProviderExtrasMutationError.commandFailed
+        }
+        mutationInFlight = true
+        errorMessage = nil
+        defer { mutationInFlight = false }
+        var confirmed = false
+        do { try await client.setAutopilotDownloads(expected: expected, desired: desired); confirmed = true } catch { }
+        await Task.detached { await self.refresh(force: true) }.value
+        guard confirmed, autopilotEvidenceIsFresh, snapshot?.autopilotStatus?.value?.downloads == desired else {
+            errorMessage = "Download settings could not be confirmed. Refresh before trying again."
+            throw ProviderExtrasMutationError.commandFailed
+        }
+    }
+
     private func refresh(force: Bool) async {
         if let previous = refreshTask {
             let previousIncludedStatic = refreshIncludesStatic

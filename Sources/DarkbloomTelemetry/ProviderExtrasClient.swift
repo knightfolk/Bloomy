@@ -4,6 +4,7 @@ public protocol ProviderExtrasProviding: Sendable {
     func refresh() async -> ProviderExtrasSnapshot
     func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus>
     func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws
+    func setAutopilotDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) async throws
     func refreshFan() async -> SourceAvailability<ProviderFanStatus>
     func saveIdle(minutes: Int) async throws
     func setBeta(id: String, enabled: Bool) async throws
@@ -20,6 +21,10 @@ public extension ProviderExtrasProviding {
     }
 
     func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws {
+        throw ProviderExtrasMutationError.commandFailed
+    }
+
+    func setAutopilotDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) async throws {
         throw ProviderExtrasMutationError.commandFailed
     }
 
@@ -58,6 +63,15 @@ public enum ProviderExtrasCommand {
 
     public static func setAutopilotPolicy(executable: URL, config: URL, action: ProviderAutopilotPolicyAction) -> ProcessCommand {
         ProcessCommand(executable: executable, arguments: ["autopilot", action.rawValue, "--config", config.path])
+    }
+
+    public static func autopilotDownloads(executable: URL, config: URL, desired: AutopilotDownloadPolicy) -> ProcessCommand {
+        var args = ["autopilot", "downloads", desired.enabled ? "enable" : "disable", "--config", config.path]
+        if desired.enabled {
+            if let storage = desired.maxStorageGB { args += ["--max-storage-gb", String(storage)] }
+            if let models = desired.maxModels { args += ["--max-models", String(models)] }
+        }
+        return ProcessCommand(executable: executable, arguments: args)
     }
 
     public static func idleStatus(executable: URL, config: URL) -> ProcessCommand {
@@ -386,6 +400,25 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
               afterPolicy == beforePolicy, commandSucceeded, case .available(let status, _) = after,
               status.confirms(action), status.selectedModels == before.selectedModels,
               status.pinnedModels == before.pinnedModels else {
+            throw ProviderExtrasMutationError.commandFailed
+        }
+    }
+
+    public func setAutopilotDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) async throws {
+        guard let executable = resolveExecutable(), desired.reserveGB == expected.reserveGB,
+              (!desired.enabled || (desired.maxStorageGB != 0 && desired.maxModels != 0)),
+              desired.enabled || (desired.maxStorageGB == expected.maxStorageGB && desired.maxModels == expected.maxModels),
+              case .available(let before, _) = await refreshAutopilot(), before.downloads == expected else {
+            throw ProviderExtrasMutationError.commandFailed
+        }
+        var succeeded = false
+        do {
+            try await runMutation(ProviderExtrasCommand.autopilotDownloads(executable: executable, config: policy.providerConfig, desired: desired))
+            succeeded = true
+        } catch { }
+        let result = await Task.detached { await self.refreshAutopilot() }.value
+        guard succeeded, case .available(let after, _) = result, after.downloads == desired,
+              after.hasSameEnrollment(as: before) else {
             throw ProviderExtrasMutationError.commandFailed
         }
     }

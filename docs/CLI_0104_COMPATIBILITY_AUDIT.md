@@ -17,9 +17,12 @@ and the installed CLI's read-only help and status output.
   current CLI reports download settings and usage. Enrollment does not itself
   download, but automatic downloads default on with consent. Bloomy now reports
   the observed enabled flag and discloses this behavior before enrollment.
-  Download limits, usage, and safe configuration controls remain to implement.
-  In particular, `downloads enable` replaces both limits, so omission cannot
-  be treated as preservation.
+  Bloomy reads download limits and usage and offers explicit configuration.
+  `downloads enable` replaces both limits, so blank is presented explicitly
+  as no limit; disabling preserves existing limits. Tests exercise the official
+  command mapping, recheck, readback and uncertain outcomes. The isolated native
+  fixture verified the form, invalid input, disabling, and updated limits.
+  Actual-provider writes and installed-app/release proof remain outstanding.
 - Pending work: the daemon's `request_work_pending` includes accepted or queued
   work before decoding; `load_transition_active` signals model loading. Bloomy's
   idle-driven actions must use both. Compatibility with older snapshots and

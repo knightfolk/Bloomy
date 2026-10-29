@@ -947,6 +947,11 @@ private actor FixtureAutopilot {
     private var mode: FixtureAutopilotMode = .off
     private var enrollmentCount = 0
     private var policyCount = 0
+    private var downloadPolicy = AutopilotDownloadPolicy(enabled: true, maxStorageGB: 120, maxModels: 3, reserveGB: 50)
+    func setDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) throws {
+        guard downloadPolicy == expected else { throw ProviderExtrasMutationError.commandFailed }
+        downloadPolicy = desired
+    }
     func setMode(_ value: FixtureAutopilotMode) { mode = value }
     func read() -> SourceAvailability<ProviderAutopilotStatus> {
         guard mode != .unavailable else { return .unavailable(reason: "Synthetic Autopilot read failed") }
@@ -957,7 +962,8 @@ private actor FixtureAutopilot {
             live: enabled ? .init(protocolVersion: 3, enabled: true, active: mode == .active,
                 observeOnly: mode == .shadow, paused: mode == .paused, cachedOnly: true,
                 revision: mode == .mismatch ? "old" : "fixture") : nil,
-            phase: mode == .active ? .active : mode == .paused ? .paused : mode == .waiting ? .waiting : .shadow),
+            phase: mode == .active ? .active : mode == .paused ? .paused : mode == .waiting ? .waiting : .shadow,
+            downloads: downloadPolicy),
             capturedAt: Date())
     }
     func enroll() { enrollmentCount += 1; mode = .shadow }
@@ -1170,6 +1176,9 @@ private actor FixtureExtras: ProviderExtrasProviding {
     init(scenario: FixtureScenario, autopilot: FixtureAutopilot) { self.scenario = scenario; self.autopilot = autopilot }
     func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus> { await autopilot.read() }
     func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws { await autopilot.apply(action) }
+    func setAutopilotDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) async throws {
+        try await autopilot.setDownloads(expected: expected, desired: desired)
+    }
     func setAutopilotMode(_ value: FixtureAutopilotMode) async { await autopilot.setMode(value) }
     func autopilotProof() async -> [String: Int] { await autopilot.proof() }
     func refresh() async -> ProviderExtrasSnapshot {
