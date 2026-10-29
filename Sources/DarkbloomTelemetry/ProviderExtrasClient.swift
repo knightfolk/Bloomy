@@ -454,6 +454,13 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
 
     public func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws {
         guard let executable = resolveExecutable() else { throw ProviderExtrasMutationError.executableUnavailable }
+        // This preserving implementation is qualified against 0.10.4. Do not
+        // silently assume another provider version has identical semantics.
+        let version = try await run(ProcessCommand(executable: executable, arguments: ["--version"]))
+        guard version.exitCode == 0,
+              String(data: version.standardOutput, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) == "0.10.4" else {
+            throw ProviderExtrasMutationError.unsupportedAutopilotPolicyVersion
+        }
         // Read immediately before dispatch. Cached UI evidence is never the write authority.
         guard case .available(let before, _) = await refreshAutopilot(), before.allows(action) else {
             throw ProviderExtrasMutationError.commandFailed
@@ -462,10 +469,11 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
         let beforePolicy = try ProviderAutopilotPreservationBaseline.read(policy.providerConfig)
         var commandSucceeded = false
         do {
-            try await runMutation(ProviderExtrasCommand.setAutopilotPolicy(executable: executable, config: policy.providerConfig, action: action))
+            let config = LocalProviderConfigStore(configURL: policy.providerConfig, executable: executable, runner: runner)
+            try await config.saveAutopilotPolicy(action, expected: before)
             commandSucceeded = true
         } catch {
-            // A command can persist policy before a failed live notification.
+            // Publication can succeed before cancellation or later reconciliation fails.
         }
         let after = await Task.detached { await self.refreshAutopilot() }.value
         let afterConfig = try? ProviderConfigDocument(data: Data(contentsOf: policy.providerConfig))

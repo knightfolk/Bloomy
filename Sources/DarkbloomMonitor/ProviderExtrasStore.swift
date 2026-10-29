@@ -297,9 +297,12 @@ final class ProviderExtrasStore: ObservableObject {
         errorMessage = nil
         defer { mutationInFlight = false }
         var commandConfirmed = false
+        var unsupportedVersion = false
         do {
             try await client.setAutopilotPolicy(action)
             commandConfirmed = true
+        } catch ProviderExtrasMutationError.unsupportedAutopilotPolicyVersion {
+            unsupportedVersion = true
         } catch {
             // A cancellation or command failure can follow a persisted write.
         }
@@ -307,6 +310,10 @@ final class ProviderExtrasStore: ObservableObject {
         // well as the client's command readback. Await an uncancelled task so
         // refresh's cancellation handler cannot discard its fresh merge.
         await Task.detached { await self.refresh(force: true) }.value
+        if unsupportedVersion {
+            errorMessage = ProviderExtrasMutationError.unsupportedAutopilotPolicyVersion.userMessage
+            throw ProviderExtrasMutationError.unsupportedAutopilotPolicyVersion
+        }
         guard commandConfirmed, autopilotEvidenceIsFresh,
               snapshot?.autopilotStatus?.value?.confirms(action) == true else {
             errorMessage = "Autopilot change could not be confirmed. Refresh before trying again."

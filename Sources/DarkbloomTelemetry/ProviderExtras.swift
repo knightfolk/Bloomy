@@ -308,6 +308,7 @@ public enum ProviderExtrasMutationError: Error, Equatable, Sendable {
     case invalidFanPolicy
     case unsupportedBetaFeature
     case unsupportedFanControl
+    case unsupportedAutopilotPolicyVersion
     case executableUnavailable
     case commandFailed
     case mutationInProgress
@@ -324,6 +325,8 @@ public extension ProviderExtrasMutationError {
             "That beta feature is not available for changes in this app."
         case .unsupportedFanControl:
             "This Darkbloom installation does not expose the official fan-control helper."
+        case .unsupportedAutopilotPolicyVersion:
+            "This Darkbloom version has not been verified for safe Autopilot policy changes in Bloomy."
         case .executableUnavailable:
             "The Darkbloom command is unavailable."
         case .commandFailed:

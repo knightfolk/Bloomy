@@ -43,16 +43,17 @@ and the installed CLI's read-only help and status output.
 - Configuration preservation caveat: the 0.10.4 CLI's `autopilot pin`,
   `unpin`, `pause`, and `resume` share `changeAutopilotPolicy`, which saves via
   `ConfigManager.save`. A disposable pin probe showed that this serializer drops
-  unknown configuration fields and tables. Bloomy's already-implemented pause
-  and resume controls use this CLI path; their existing readback checks cover
-  selected policies but do not prove preservation of arbitrary unknown fields.
+  unknown configuration fields and tables. Bloomy's previous pause and resume
+  implementation used this CLI path; its readback checks covered selected
+  policies but did not prove preservation of arbitrary unknown fields.
   The current CLI source also uses `ConfigManager.save` for Autopilot download
   limits and encrypted cache edits, so those newer Bloomy controls share this
   preservation concern even though their own settings are read back.
-  A targeted policy writer has now passed disposable-config tests for pause,
-  resume and disable against CLI 0.10.4 while retaining unknown fields, plus an
-  external-edit conflict test. It is not yet connected to the user controls;
-  compatibility gating and live readback still need integration.
+  Pause, resume and disable now use a targeted policy writer qualified for CLI
+  0.10.4; other versions are refused with a clear message until qualified. The
+  complete client path passed disposable-config tests against the real CLI for
+  all three actions while retaining unknown fields, plus an external-edit
+  conflict test. Live-provider behavior and installed-app review remain open.
   This requires a preserving mutation path or a reliable preflight before those
   controls can be considered fully compatible with future configurations.
 - Weekly availability schedules: introduced in 0.9.15. Bloomy reports scheduled

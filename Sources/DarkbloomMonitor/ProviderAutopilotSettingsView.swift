@@ -393,7 +393,9 @@ struct ProviderAutopilotSettingsView: View {
                 case .disable: "Leaving is saved. Check the status above for any remaining transition."
                 }
             } else {
-                feedback = "The change could not be confirmed. Refresh Autopilot before trying again."
+                let unsupported = ProviderExtrasMutationError.unsupportedAutopilotPolicyVersion.userMessage
+                feedback = store.errorMessage == unsupported ? unsupported
+                    : "The change could not be confirmed. Refresh Autopilot before trying again."
             }
         }
     }

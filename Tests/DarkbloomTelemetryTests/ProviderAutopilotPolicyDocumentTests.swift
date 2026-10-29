@@ -59,4 +59,22 @@ struct ProviderAutopilotPolicyDocumentTests {
         let result = try ProviderConfigDocument.renderingAutopilotPolicy(.pause, expected: status, in: Data(input.utf8))
         #expect(String(decoding: result, as: UTF8.self).contains("[backend.model_autopilot]\npaused = true\n"))
     }
+
+    @Test("an unqualified CLI version cannot change the saved policy")
+    func refusesUnknownCLIVersion() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("BloomyPolicyVersion-\(UUID().uuidString)")
+        let configDir = home.appendingPathComponent(".config/darkbloom")
+        let binDir = home.appendingPathComponent(".darkbloom/bin")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let config = configDir.appendingPathComponent("provider.toml")
+        try Data(source.utf8).write(to: config)
+        let executable = binDir.appendingPathComponent("darkbloom")
+        try Data("#!/bin/sh\nprintf '0.99.0\\n'\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let client = ProviderExtrasClient(policy: DarkbloomSourcePolicy(homeDirectory: home, environmentPath: ""))
+        await #expect(throws: ProviderExtrasMutationError.unsupportedAutopilotPolicyVersion) { try await client.setAutopilotPolicy(.pause) }
+        #expect(try Data(contentsOf: config) == Data(source.utf8))
+    }
 }

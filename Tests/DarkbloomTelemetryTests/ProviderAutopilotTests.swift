@@ -272,6 +272,17 @@ struct ProviderAutopilotTests {
         #expect(await privateHarness.runner.startCount == 0)
     }
 
+    @Test("an unqualified CLI reports why the policy was not changed")
+    @MainActor
+    func unsupportedPolicyVersionIsReported() async throws {
+        let store = ProviderExtrasStore(client: UnsupportedAutopilotPolicyClient())
+        await store.refresh()
+        await #expect(throws: ProviderExtrasMutationError.unsupportedAutopilotPolicyVersion) {
+            try await store.setAutopilotPolicy(.pause)
+        }
+        #expect(store.errorMessage == ProviderExtrasMutationError.unsupportedAutopilotPolicyVersion.userMessage)
+    }
+
     @Test("cancelled policy writes still merge authoritative saved pause into the store")
     @MainActor
     func cancelledPolicyStoreReconciliation() async throws {
@@ -506,6 +517,20 @@ private struct NoAutopilotDaemon: TelemetrySource {
     func readLoadedModels() async throws -> LoadedModelsState { throw ProviderExtrasParseError.invalidPayload }
     func readStatus() async throws -> StatusSnapshot { throw ProviderExtrasParseError.invalidPayload }
     func readLegacyEvents(limit: Int) async throws -> [LogEvent] { [] }
+}
+
+private actor UnsupportedAutopilotPolicyClient: ProviderExtrasProviding {
+    func refresh() async -> ProviderExtrasSnapshot {
+        ProviderExtrasSnapshot(capturedAt: Date(), idlePolicy: .unavailable(reason: "fixture"),
+            betaFeatures: .unavailable(reason: "fixture"), fanStatus: .unavailable(reason: "fixture"),
+            autopilotStatus: .available(value: try! ProviderExtrasParser.parseAutopilot(
+                autopilotJSON(enabled: true, paused: false)), capturedAt: Date()))
+    }
+    func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws {
+        throw ProviderExtrasMutationError.unsupportedAutopilotPolicyVersion
+    }
+    func saveIdle(minutes: Int) async throws {}
+    func setBeta(id: String, enabled: Bool) async throws {}
 }
 
 private actor CancelledAutopilotPolicyClient: ProviderExtrasProviding {

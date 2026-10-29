@@ -6,6 +6,44 @@ import Testing
 /// configuration files are touched; no provider lifecycle action is issued.
 @Suite("Provider schedule CLI contract")
 struct ProviderScheduleCLIContractTests {
+    @Test("Autopilot controls use preserving writes with the qualified CLI", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
+    func autopilotClientContract() async throws {
+        let cli = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"]))
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("BloomyAutopilotClient-\(UUID().uuidString)")
+        let configDirectory = home.appendingPathComponent(".config/darkbloom")
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: home) }
+        let url = configDirectory.appendingPathComponent("provider.toml")
+        try Data("""
+        [provider]
+        name = "Synthetic client contract"
+        auto_update = false
+        [backend]
+        enabled_models = ["test/model"]
+        preload_models = []
+        future_setting = 73
+        [backend.model_autopilot]
+        enabled = true
+        consent_recorded = true
+        paused = false
+        selected_models = ["test/model"]
+        pinned_models = []
+        revision = "synthetic-revision"
+        [future_section]
+        keep = "untouched"
+        """.utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let policy = DarkbloomSourcePolicy(homeDirectory: home, environmentPath: cli.deletingLastPathComponent().path)
+        let client = ProviderExtrasClient(policy: policy, runner: CappedProcessRunner())
+        for action in [ProviderAutopilotPolicyAction.pause, .resume, .disable] {
+            try await client.setAutopilotPolicy(action)
+            let observation = await client.refreshAutopilot()
+            #expect(observation.value?.confirms(action) == true)
+        }
+        let saved = try String(contentsOf: url, encoding: .utf8)
+        #expect(saved.contains("future_setting = 73"))
+        #expect(saved.contains("[future_section]\nkeep = \"untouched\""))
+    }
     @Test("preserving Autopilot pause, resume and disable are accepted by Darkbloom", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
     func autopilotPauseContract() async throws {
         let path = try #require(ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"])
