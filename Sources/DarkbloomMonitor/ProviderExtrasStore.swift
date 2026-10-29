@@ -42,6 +42,9 @@ final class ProviderExtrasStore: ObservableObject {
     @Published private(set) var snapshot: ProviderExtrasSnapshot?
     @Published private(set) var cacheStatus: SourceAvailability<ProviderCacheStatus>?
     @Published private(set) var cacheRefreshing = false
+    @Published private(set) var scheduleStatus: SourceAvailability<ProviderSchedule>?
+    @Published private(set) var scheduleRefreshing = false
+    private var scheduleGeneration: UInt64 = 0
     private var cacheGeneration: UInt64 = 0
     @Published private(set) var isRefreshing = false
     @Published private(set) var mutationInFlight = false
@@ -109,6 +112,16 @@ final class ProviderExtrasStore: ObservableObject {
 
     func refresh() async {
         await refresh(force: false)
+    }
+
+    func refreshSchedule() async {
+        scheduleGeneration &+= 1
+        let generation = scheduleGeneration
+        scheduleRefreshing = true
+        let result = await client.refreshSchedule()
+        guard generation == scheduleGeneration else { return }
+        scheduleStatus = Self.retainLastGood(result, previous: scheduleStatus, reason: "Schedule refresh failed")
+        scheduleRefreshing = false
     }
 
     /// Fan sensors stay fresh for the menu bar while static configuration is

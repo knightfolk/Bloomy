@@ -5,6 +5,27 @@ import Testing
 
 @Suite("Provider config store")
 struct ProviderConfigStoreTests {
+    @Test("schedule is read from the locked configuration without writing")
+    func readsScheduleWithoutMutation() async throws {
+        let source = Data("""
+        [backend]
+        enabled_models = []
+        preload_models = []
+        [schedule]
+        enabled = true
+        [[schedule.windows]]
+        days = ["mon", "fri"]
+        start = "22:00"
+        end = "02:00"
+        """.utf8)
+        let harness = try ConfigStoreHarness.make(mode: 0o600, sourceData: source)
+        defer { harness.cleanup() }
+        let schedule = try await harness.store.loadSchedule()
+        #expect(schedule == .init(enabled: true, windows: [.init(days: [.monday, .friday], start: "22:00", end: "02:00")]))
+        #expect(try Data(contentsOf: harness.configURL) == source)
+        #expect(!FileManager.default.fileExists(atPath: harness.backupURL.path))
+    }
+
     @Test("Auto settings save one slot and startup preload in one guarded transaction")
     func savesAutomaticStartupSettings() async throws {
         let source = Data("""

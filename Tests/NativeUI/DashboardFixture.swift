@@ -1170,6 +1170,9 @@ private actor FixtureExtras: ProviderExtrasProviding {
     var mtp = false
     var autoUpdate = true
     private var cache = ProviderCacheStatus(directory: "/Synthetic/Cache", dailyWriteBytes: 25_500_000_000, hasVolume: true, hasProblem: false)
+    func refreshSchedule() async -> SourceAvailability<ProviderSchedule> {
+        .available(value: .init(enabled: true, windows: [.init(days: [.monday, .wednesday, .friday], start: "22:00", end: "02:00")]), capturedAt: Date())
+    }
     func refreshCache() async -> SourceAvailability<ProviderCacheStatus> { .available(value: cache, capturedAt: Date()) }
     func setCache(expected: ProviderCacheStatus, change: ProviderCacheChange) async throws {
         guard cache == expected else { throw ProviderExtrasMutationError.commandFailed }

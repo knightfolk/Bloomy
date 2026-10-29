@@ -3,6 +3,7 @@ import Foundation
 public protocol ProviderExtrasProviding: Sendable {
     func refresh() async -> ProviderExtrasSnapshot
     func refreshCache() async -> SourceAvailability<ProviderCacheStatus>
+    func refreshSchedule() async -> SourceAvailability<ProviderSchedule>
     func setCache(expected: ProviderCacheStatus, change: ProviderCacheChange) async throws
     func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus>
     func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws
@@ -18,6 +19,7 @@ public protocol ProviderExtrasProviding: Sendable {
 }
 
 public extension ProviderExtrasProviding {
+    func refreshSchedule() async -> SourceAvailability<ProviderSchedule> { .unavailable(reason: "Schedule unavailable") }
     func refreshCache() async -> SourceAvailability<ProviderCacheStatus> { .unavailable(reason: "Cache settings unavailable") }
     func setCache(expected: ProviderCacheStatus, change: ProviderCacheChange) async throws { throw ProviderExtrasMutationError.commandFailed }
 
@@ -216,6 +218,19 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
     private let runner: any ProcessExecuting
     private let now: @Sendable () -> Date
     private let testOnlyExecutable: URL?
+
+    public func refreshSchedule() async -> SourceAvailability<ProviderSchedule> {
+        guard let executable = resolveExecutable() else { return .unavailable(reason: "Schedule unavailable") }
+        do {
+            let config = LocalProviderConfigStore(configURL: policy.providerConfig, executable: executable, runner: runner)
+            let schedule = try await config.loadSchedule()
+            let date = now()
+            guard date.timeIntervalSince1970.isFinite else { throw ProviderExtrasMutationError.commandFailed }
+            return .available(value: schedule, capturedAt: date)
+        } catch {
+            return .unavailable(reason: "Schedule unavailable")
+        }
+    }
 
     public init(
         policy: DarkbloomSourcePolicy,

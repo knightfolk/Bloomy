@@ -54,8 +54,9 @@ and the installed CLI's read-only help and status output.
   overnight and full-day windows, and the desktop's 14-window limit. A bounded
   configuration reader handles the CLI's schedule tables and reports malformed
   or unsupported forms as unreadable instead of guessing that scheduling is off.
-  It is not yet connected to a writer or user interface. No live schedule changes
-  were made during the audit.
+  Provider settings now display the saved windows, local time zone and stale
+  status from a locked read. The schedule editor and save path are not yet
+  connected. No live schedule changes were made during the audit.
 - Autopilot model pins: Bloomy displays saved pins and labels stale readings;
   pin and unpin controls are not yet exposed. The upstream desktop app checks selected models, available slots,
   and estimated memory before pinning; these safeguards need to be carried into

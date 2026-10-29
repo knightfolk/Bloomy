@@ -212,6 +212,11 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
         return ProviderConfigDraft(document: document, sourceFileState: source.state)
     }
 
+    public func loadSchedule() async throws -> ProviderSchedule {
+        let source = try await readLockedSnapshot(lockFlag: O_SHLOCK)
+        return try ProviderConfigDocument.readSchedule(data: source.data)
+    }
+
     public func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult {
         guard draft.hasChanges else {
             return ProviderConfigSaveResult(draft: try await load(), restartRequired: false)
