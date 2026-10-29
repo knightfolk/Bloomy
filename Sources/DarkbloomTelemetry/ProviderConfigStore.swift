@@ -2,6 +2,11 @@ import CryptoKit
 import Darwin
 import Foundation
 
+public struct ProviderScheduleDraft: Sendable {
+    public let schedule: ProviderSchedule
+    fileprivate let sourceFileState: ProviderConfigFileState
+}
+
 public struct ProviderConfigDraft: Equatable, Sendable {
     public let sourceRevision: String
     public let original: ProviderModelSelection
@@ -213,8 +218,21 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
     }
 
     public func loadSchedule() async throws -> ProviderSchedule {
+        try await loadScheduleDraft().schedule
+    }
+
+    public func loadScheduleDraft() async throws -> ProviderScheduleDraft {
         let source = try await readLockedSnapshot(lockFlag: O_SHLOCK)
-        return try ProviderConfigDocument.readSchedule(data: source.data)
+        return ProviderScheduleDraft(schedule: try ProviderConfigDocument.readSchedule(data: source.data), sourceFileState: source.state)
+    }
+
+    public func saveSchedule(_ schedule: ProviderSchedule, expected: ProviderScheduleDraft) async throws -> ProviderScheduleDraft {
+        let current = try await readLockedSnapshot(lockFlag: O_SHLOCK)
+        guard current.state == expected.sourceFileState else { throw ProviderConfigError.changedExternally }
+        let data = try ProviderConfigDocument.renderingSchedule(schedule, in: current.data)
+        if data == current.data { return expected }
+        let published = try await publishValidated(data, expectedState: current.state)
+        return ProviderScheduleDraft(schedule: schedule, sourceFileState: published)
     }
 
     public func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult {

@@ -48,6 +48,43 @@ public struct ProviderConfigDocument: Equatable, Sendable {
         return try scanner.scanSchedule()
     }
 
+    /// Replace only recognized schedule statements; leave every other byte in
+    /// place. Unsupported window fields or inline comments prevent a rewrite.
+    public static func renderingSchedule(_ schedule: ProviderSchedule, in data: Data) throws -> Data {
+        guard schedule.isValidForEditing else { throw ProviderConfigError.validationFailed("Schedule is invalid") }
+        let original = try readSchedule(data: data)
+        guard original != schedule else { return data }
+        var scanner = ProviderConfigScanner(data: data)
+        let edit = try scanner.scheduleEditRanges()
+        let newline = Self.detectLineEnding(in: data)
+        var replacements = edit.removals.map { ($0, Data()) }
+        if let enabled = edit.enabled {
+            replacements.append((enabled, Data((schedule.enabled ? "true" : "false").utf8)))
+        } else if let afterHeader = edit.scheduleHeaderEnd {
+            let prefix = afterHeader == data.count && data.last != 10 && data.last != 13 ? newline : ""
+            replacements.append((afterHeader..<afterHeader, Data("\(prefix)enabled = \(schedule.enabled)\(newline)".utf8)))
+        }
+        var result = data
+        for (range, replacement) in replacements.sorted(by: {
+            $0.0.lowerBound == $1.0.lowerBound ? $0.0.upperBound > $1.0.upperBound : $0.0.lowerBound > $1.0.lowerBound
+        }) {
+            result.replaceSubrange(range, with: replacement)
+        }
+        var suffix = ""
+        if !result.isEmpty && result.last != 10 && result.last != 13 { suffix += newline }
+        if edit.scheduleHeaderEnd == nil { suffix += "[schedule]\(newline)enabled = \(schedule.enabled)\(newline)" }
+        for window in schedule.windows {
+            let days = ProviderScheduleDay.allCases.filter { window.days.contains($0) }
+                .map { "\"\($0.rawValue)\"" }.joined(separator: ", ")
+            suffix += "\(newline)[[schedule.windows]]\(newline)days = [\(days)]\(newline)start = \"\(window.start)\"\(newline)end = \"\(window.end)\"\(newline)"
+        }
+        result.append(contentsOf: suffix.utf8)
+        guard try readSchedule(data: result) == schedule else {
+            throw ProviderConfigError.validationFailed("Schedule could not be verified")
+        }
+        return result
+    }
+
     public init(data: Data) throws {
         guard String(data: data, encoding: .utf8) != nil else {
             throw ProviderConfigError.invalidUTF8
@@ -321,6 +358,53 @@ private struct ProviderConfigScanner {
 
     init(data: Data) {
         self.bytes = [UInt8](data)
+    }
+
+    fileprivate struct ScheduleEditRanges {
+        var enabled: Range<Int>?
+        var scheduleHeaderEnd: Int?
+        var removals: [Range<Int>] = []
+    }
+
+    fileprivate mutating func scheduleEditRanges() throws -> ScheduleEditRanges {
+        enum Scope { case other, schedule, window }
+        var result = ScheduleEditRanges()
+        var scope = Scope.other
+        let failure = ProviderConfigError.validationFailed("Saved schedule contains settings or comments that cannot be preserved")
+        while true {
+            skipStatementTrivia()
+            guard index < bytes.count else { break }
+            let start = index
+            if bytes[index] == Self.openBracket {
+                let end = skipStatement(from: start)
+                let raw = String(decoding: bytes[start..<end], as: UTF8.self)
+                let header = (raw.split(separator: "#", maxSplits: 1).first.map(String.init) ?? "").filter { !$0.isWhitespace }
+                if header == "[schedule]" {
+                    result.scheduleHeaderEnd = end; scope = .schedule
+                } else if header == "[[schedule.windows]]" {
+                    guard !raw.contains("#") else { throw failure }
+                    result.removals.append(start..<end); scope = .window
+                } else { scope = .other }
+                index = end
+                continue
+            }
+            guard let key = parseBareKey() else { index = skipStatement(from: start); continue }
+            skipHorizontalWhitespace()
+            guard index < bytes.count, bytes[index] == Self.equals else { index = skipStatement(from: start); continue }
+            index += 1
+            if scope == .schedule && key == "enabled" {
+                skipHorizontalWhitespace()
+                result.enabled = try parseBoolean(key: key).range
+                try consumeTargetStatementRemainder(booleanKey: key)
+            } else if scope == .window {
+                guard ["days", "start", "end"].contains(key) else { throw failure }
+                let end = skipStatement(from: start)
+                guard !bytes[start..<end].contains(Self.comment) else { throw failure }
+                result.removals.append(start..<end)
+                index = end
+            } else { index = skipStatement(from: index) }
+        }
+        return result
     }
 
     mutating func scanSchedule() throws -> ProviderSchedule {

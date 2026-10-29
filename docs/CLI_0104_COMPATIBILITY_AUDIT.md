@@ -55,8 +55,11 @@ and the installed CLI's read-only help and status output.
   configuration reader handles the CLI's schedule tables and reports malformed
   or unsupported forms as unreadable instead of guessing that scheduling is off.
   Provider settings now display the saved windows, local time zone and stale
-  status from a locked read. The schedule editor and save path are not yet
-  connected. No live schedule changes were made during the audit.
+  status from a locked read. A schedule writer now stages only recognized
+  schedule statements through the guarded configuration transaction, preserving
+  unrelated fields and refusing windows with unknown fields or inline comments.
+  The editor and real-provider write verification are not yet connected. No
+  live schedule changes were made during the audit.
 - Autopilot model pins: Bloomy displays saved pins and labels stale readings;
   pin and unpin controls are not yet exposed. The upstream desktop app checks selected models, available slots,
   and estimated memory before pinning; these safeguards need to be carried into

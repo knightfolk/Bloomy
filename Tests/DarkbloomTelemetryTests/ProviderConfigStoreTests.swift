@@ -5,6 +5,36 @@ import Testing
 
 @Suite("Provider config store")
 struct ProviderConfigStoreTests {
+    @Test("schedule saves use validated atomic publication and preserve other settings")
+    func savesSchedule() async throws {
+        let source = Data("[backend]\nenabled_models = []\npreload_models = []\nfuture_key = 73\n[schedule]\nenabled = false\n".utf8)
+        let harness = try ConfigStoreHarness.make(mode: 0o600, sourceData: source)
+        defer { harness.cleanup() }
+        let draft = try await harness.store.loadScheduleDraft()
+        let desired = ProviderSchedule(enabled: true, windows: [.init(days: [.monday], start: "22:00", end: "02:00")])
+        let saved = try await harness.store.saveSchedule(desired, expected: draft)
+        #expect(saved.schedule == desired)
+        let data = try Data(contentsOf: harness.configURL)
+        #expect(try ProviderConfigDocument.readSchedule(data: data) == desired)
+        #expect(String(decoding: data, as: UTF8.self).contains("future_key = 73"))
+        #expect(try Data(contentsOf: harness.backupURL) == source)
+    }
+
+    @Test("schedule save rejects an external configuration edit")
+    func scheduleConflicts() async throws {
+        let harness = try ConfigStoreHarness.make(mode: 0o600)
+        defer { harness.cleanup() }
+        let draft = try await harness.store.loadScheduleDraft()
+        let changed = Data("[schedule]\nenabled = false\n# external change\n".utf8)
+        try changed.write(to: harness.configURL)
+        let desired = ProviderSchedule(enabled: true, windows: [.init(days: [.monday], start: "08:00", end: "09:00")])
+        await #expect(throws: ProviderConfigError.changedExternally) {
+            try await harness.store.saveSchedule(desired, expected: draft)
+        }
+        #expect(try Data(contentsOf: harness.configURL) == changed)
+        #expect(!FileManager.default.fileExists(atPath: harness.backupURL.path))
+    }
+
     @Test("schedule is read from the locked configuration without writing")
     func readsScheduleWithoutMutation() async throws {
         let source = Data("""

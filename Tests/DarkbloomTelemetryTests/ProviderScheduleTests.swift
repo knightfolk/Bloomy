@@ -74,4 +74,37 @@ struct ProviderScheduleTests {
             try ProviderConfigDocument.readSchedule(data: Data(source.utf8))
         }
     }
+
+    @Test("schedule replacement preserves unrelated fields and standalone comments")
+    func rendersSchedule() throws {
+        let source = "[provider]\r\nfuture_key = 73\r\n[schedule]\r\nenabled = false # retained\r\nfuture_option = 'keep'\r\n# retained window note\r\n[[schedule.windows]]\r\ndays = ['mon']\r\nstart = '08:00'\r\nend = '09:00'\r\n[other]\r\nvalue = 'unchanged'\r\n"
+        let schedule = ProviderSchedule(enabled: true, windows: [.init(days: [.friday], start: "22:00", end: "02:00")])
+        let result = try ProviderConfigDocument.renderingSchedule(schedule, in: Data(source.utf8))
+        let text = String(decoding: result, as: UTF8.self)
+        #expect(text.contains("future_key = 73\r\n"))
+        #expect(text.contains("enabled = true # retained\r\n"))
+        #expect(text.contains("future_option = 'keep'\r\n# retained window note\r\n"))
+        #expect(text.contains("[other]\r\nvalue = 'unchanged'\r\n"))
+        #expect(try ProviderConfigDocument.readSchedule(data: result) == schedule)
+    }
+
+    @Test("creating a schedule and editing an empty final table produce valid output")
+    func createsSchedule() throws {
+        let desired = ProviderSchedule(enabled: true, windows: [.init(days: [.monday], start: "08:00", end: "09:00")])
+        for source in ["[provider]\nname = 'example'\n", "[schedule]",
+                       "[schedule]\n[[schedule.windows]]\ndays=['fri']\nstart='01:00'\nend='02:00'\n"] {
+            let data = try ProviderConfigDocument.renderingSchedule(desired, in: Data(source.utf8))
+            #expect(try ProviderConfigDocument.readSchedule(data: data) == desired)
+        }
+    }
+
+    @Test("unknown window fields and inline comments prevent a destructive rewrite")
+    func refusesUnpreservableWindows() {
+        let desired = ProviderSchedule(enabled: true, windows: [.init(days: [.friday], start: "22:00", end: "02:00")])
+        for extra in ["future = 'keep'\n", "# standalone is safe\nfuture = true\n", "days = ['mon'] # operator note\n"] {
+            let days = extra.hasPrefix("days") ? "" : "days = ['mon']\n"
+            let source = "[schedule]\nenabled = true\n[[schedule.windows]]\n\(days)start = '08:00'\nend = '09:00'\n\(extra)"
+            #expect(throws: (any Error).self) { try ProviderConfigDocument.renderingSchedule(desired, in: Data(source.utf8)) }
+        }
+    }
 }
