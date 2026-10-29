@@ -39,7 +39,11 @@ and the installed CLI's read-only help and status output.
   through the CLI, preserving unset versus unlimited and requiring readback.
   Changes are labeled restart-required and leave old files in place. Tests and
   an isolated native fixture cover the main paths; actual-provider writes and
-  installed-app review remain outstanding.
+  installed-app review remain outstanding. Darkbloom reports the selected
+  parent folder separately from the effective namespaced cache root; Bloomy now
+  reads and displays both and confirms directory changes against the selected
+  parent, including the CLI's `/var` and `/tmp` alias normalization. A real-CLI
+  disposable-config test exercises the client path.
 - Configuration preservation caveat: the 0.10.4 CLI's `autopilot pin`,
   `unpin`, `pause`, and `resume` share `changeAutopilotPolicy`, which saves via
   `ConfigManager.save`. A disposable pin probe showed that this serializer drops

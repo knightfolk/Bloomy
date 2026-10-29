@@ -417,8 +417,10 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
         case .dailyWriteGB(let value):
             guard after.dailyWriteBytes == Int64(value * 1_000_000_000), after.directory == before.directory else { throw ProviderExtrasMutationError.commandFailed }
         case .directory(let path):
-            let target = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
-            guard !after.hasProblem, after.hasVolume, after.directory == target, after.dailyWriteBytes == before.dailyWriteBytes else { throw ProviderExtrasMutationError.commandFailed }
+            guard let target = ProviderCacheParser.normalizedSelectedDirectory(path),
+                  let selected = after.selectedDirectory.flatMap(ProviderCacheParser.normalizedSelectedDirectory),
+                  !after.hasProblem, after.hasVolume, selected == target,
+                  after.dailyWriteBytes == before.dailyWriteBytes else { throw ProviderExtrasMutationError.commandFailed }
         case .resetDirectory:
             guard !after.hasProblem, !after.hasVolume, after.dailyWriteBytes == before.dailyWriteBytes else { throw ProviderExtrasMutationError.commandFailed }
         }

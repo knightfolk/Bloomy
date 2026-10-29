@@ -15,7 +15,10 @@ struct ProviderCacheSettingsView: View {
                 let fresh = ProviderSettingsFreshnessPolicy.isFresh(source, at: store.currentDate)
                 Text(fresh ? "Saved settings" : "Last known settings · refresh before changing")
                     .font(.caption).foregroundStyle(.secondary)
-                Text(value.directory).font(.callout).textSelection(.enabled)
+                if let selected = value.selectedDirectory {
+                    Text("Selected folder: \(selected)").font(.callout).textSelection(.enabled)
+                }
+                Text("Cache files: \(value.directory)").font(.callout).textSelection(.enabled)
                 Text(limitDescription(value.dailyWriteBytes)).font(.callout)
                 if value.hasProblem {
                     Label("The selected storage could not be verified. Check the directory and volume.", systemImage: "exclamationmark.triangle")
@@ -26,7 +29,7 @@ struct ProviderCacheSettingsView: View {
                 HStack {
                     Button("Manage cache…") {
                         draft.cacheExpected = value
-                        draft.cacheDirectory = value.directory
+                        draft.cacheDirectory = value.selectedDirectory ?? ""
                         draft.cacheDaily = value.dailyWriteBytes.map { String(Double($0) / 1_000_000_000) } ?? ""
                         feedback = nil
                     }
@@ -62,7 +65,7 @@ struct ProviderCacheSettingsView: View {
         guard let expected = draft.cacheExpected else { return false }
         return draft.cacheDaily != (expected.dailyWriteBytes.map { String(Double($0) / 1_000_000_000) } ?? "")
     }
-    private var directoryHasEdits: Bool { draft.cacheExpected.map { draft.cacheDirectory != $0.directory } ?? false }
+    private var directoryHasEdits: Bool { draft.cacheExpected.map { draft.cacheDirectory != ($0.selectedDirectory ?? "") } ?? false }
     private var cacheSheet: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Encrypted inference cache").font(.title2.bold())

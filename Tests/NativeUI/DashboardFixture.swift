@@ -1169,7 +1169,7 @@ private actor FixtureExtras: ProviderExtrasProviding {
     var minutes = 30
     var mtp = false
     var autoUpdate = true
-    private var cache = ProviderCacheStatus(directory: "/Synthetic/Cache", dailyWriteBytes: 25_500_000_000, hasVolume: true, hasProblem: false)
+    private var cache = ProviderCacheStatus(directory: "/Synthetic/Cache/namespace/kv3", dailyWriteBytes: 25_500_000_000, hasVolume: true, hasProblem: false, selectedDirectory: "/Synthetic/Cache")
     private var schedule = ProviderSchedule(enabled: true, windows: [.init(days: [.monday, .wednesday, .friday], start: "22:00", end: "02:00")])
     func refreshSchedule() async -> SourceAvailability<ProviderScheduleDraft> { .available(value: .init(schedule: schedule), capturedAt: Date()) }
     func saveSchedule(expected: ProviderScheduleDraft, desired: ProviderSchedule) async throws {
@@ -1180,8 +1180,8 @@ private actor FixtureExtras: ProviderExtrasProviding {
     func setCache(expected: ProviderCacheStatus, change: ProviderCacheChange) async throws {
         guard cache == expected else { throw ProviderExtrasMutationError.commandFailed }
         switch change {
-        case .dailyWriteGB(let value): cache = .init(directory: cache.directory, dailyWriteBytes: Int64(value * 1_000_000_000), hasVolume: cache.hasVolume, hasProblem: false)
-        case .directory(let path): cache = .init(directory: path, dailyWriteBytes: cache.dailyWriteBytes, hasVolume: true, hasProblem: false)
+        case .dailyWriteGB(let value): cache = .init(directory: cache.directory, dailyWriteBytes: Int64(value * 1_000_000_000), hasVolume: cache.hasVolume, hasProblem: false, selectedDirectory: cache.selectedDirectory)
+        case .directory(let path): cache = .init(directory: path + "/namespace/kv3", dailyWriteBytes: cache.dailyWriteBytes, hasVolume: true, hasProblem: false, selectedDirectory: path)
         case .resetDirectory: cache = .init(directory: "/Synthetic/BuiltIn", dailyWriteBytes: cache.dailyWriteBytes, hasVolume: false, hasProblem: false)
         }
     }

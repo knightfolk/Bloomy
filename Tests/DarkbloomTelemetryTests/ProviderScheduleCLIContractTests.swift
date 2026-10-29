@@ -6,6 +6,45 @@ import Testing
 /// configuration files are touched; no provider lifecycle action is issued.
 @Suite("Provider schedule CLI contract")
 struct ProviderScheduleCLIContractTests {
+    @Test("cache directory client confirms Darkbloom's selected folder", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
+    func cacheDirectoryClientContract() async throws {
+        let cli = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"]))
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("BloomyCacheClient-\(UUID().uuidString)")
+        let configDir = home.appendingPathComponent(".config/darkbloom")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: home) }
+        let selected = home.appendingPathComponent("selected")
+        try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        try Data("[provider]\nname='Synthetic cache client'\nauto_update=false\n".utf8).write(to: configDir.appendingPathComponent("provider.toml"))
+        let policy = DarkbloomSourcePolicy(homeDirectory: home, environmentPath: cli.deletingLastPathComponent().path)
+        let client = ProviderExtrasClient(policy: policy, runner: CappedProcessRunner())
+        let initial = try #require(await client.refreshCache().value)
+        try await client.setCache(expected: initial, change: .directory(selected.path))
+        let observed = try #require(await client.refreshCache().value)
+        #expect(observed.selectedDirectory == ProviderCacheParser.normalizedSelectedDirectory(selected.path))
+        #expect(observed.hasVolume && !observed.hasProblem)
+    }
+    @Test("cache status distinguishes selected folder from the effective root", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
+    func cacheDirectoryContract() async throws {
+        let executable = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"]))
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("BloomyCacheContract-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let selected = root.appendingPathComponent("selected")
+        try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let config = root.appendingPathComponent("provider.toml")
+        try Data("[provider]\nname='Synthetic cache contract'\nauto_update=false\n".utf8).write(to: config)
+        let runner = CappedProcessRunner()
+        let set = ProviderExtrasCommand.cacheSet(executable: executable, config: config, change: .directory(selected.path))
+        let written = try await runner.run(set, timeout: .seconds(15), outputLimit: 262_144, onOutput: nil)
+        #expect(written.exitCode == 0)
+        let read = try await runner.run(ProviderExtrasCommand.cacheStatus(executable: executable, config: config), timeout: .seconds(15), outputLimit: 262_144, onOutput: nil)
+        let status = try ProviderCacheParser.parse(read.standardOutput)
+        let canonical = try #require(ProviderCacheParser.normalizedSelectedDirectory(selected.path))
+        #expect(status.selectedDirectory == canonical)
+        #expect(status.directory.hasPrefix(canonical + "/"))
+        #expect(status.directory != status.selectedDirectory)
+    }
     @Test("download controls preserve unfamiliar settings with the qualified CLI", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
     func downloadsClientContract() async throws {
         let cli = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"]))
