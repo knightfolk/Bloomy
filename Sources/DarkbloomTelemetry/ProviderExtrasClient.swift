@@ -2,6 +2,8 @@ import Foundation
 
 public protocol ProviderExtrasProviding: Sendable {
     func refresh() async -> ProviderExtrasSnapshot
+    func refreshCache() async -> SourceAvailability<ProviderCacheStatus>
+    func setCache(expected: ProviderCacheStatus, change: ProviderCacheChange) async throws
     func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus>
     func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws
     func setAutopilotDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) async throws
@@ -16,6 +18,9 @@ public protocol ProviderExtrasProviding: Sendable {
 }
 
 public extension ProviderExtrasProviding {
+    func refreshCache() async -> SourceAvailability<ProviderCacheStatus> { .unavailable(reason: "Cache settings unavailable") }
+    func setCache(expected: ProviderCacheStatus, change: ProviderCacheChange) async throws { throw ProviderExtrasMutationError.commandFailed }
+
     func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus> {
         .unavailable(reason: "Darkbloom Autopilot is unavailable")
     }
@@ -57,6 +62,19 @@ public enum ProviderFanMutationAction: String, Equatable, Sendable {
 }
 
 public enum ProviderExtrasCommand {
+    public static func cacheStatus(executable: URL, config: URL) -> ProcessCommand {
+        ProcessCommand(executable: executable, arguments: ["cache", "status", "--config", config.path, "--json"])
+    }
+    public static func cacheSet(executable: URL, config: URL, change: ProviderCacheChange) -> ProcessCommand {
+        var args = ["cache", "set", "--config", config.path]
+        switch change {
+        case .dailyWriteGB(let value): args += ["--daily-write-gb", String(value)]
+        case .directory(let value): args += ["--directory", value]
+        case .resetDirectory: args.append("--reset-directory")
+        }
+        return ProcessCommand(executable: executable, arguments: args)
+    }
+
     public static func autopilotStatus(executable: URL, config: URL) -> ProcessCommand {
         ProcessCommand(executable: executable, arguments: ["autopilot", "status", "--json", "--config", config.path])
     }
@@ -345,6 +363,42 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
 
     public func uninstallFan() async throws {
         try await runFanMutation(action: .uninstall)
+    }
+
+    public func refreshCache() async -> SourceAvailability<ProviderCacheStatus> {
+        guard let executable = resolveExecutable() else { return .unavailable(reason: "Cache settings unavailable") }
+        do {
+            let output = try await run(ProviderExtrasCommand.cacheStatus(executable: executable, config: policy.providerConfig))
+            guard output.exitCode == 0 else { throw ProviderExtrasParseError.invalidPayload }
+            return .available(value: try ProviderCacheParser.parse(output.standardOutput), capturedAt: now())
+        } catch { return .unavailable(reason: "Cache settings unavailable") }
+    }
+
+    public func setCache(expected: ProviderCacheStatus, change: ProviderCacheChange) async throws {
+        guard let executable = resolveExecutable(), case .available(let before, _) = await refreshCache(), before == expected else {
+            throw ProviderExtrasMutationError.commandFailed
+        }
+        switch change {
+        case .dailyWriteGB(let value):
+            guard ProviderCacheParser.validDailyWriteGB(value) else { throw ProviderExtrasMutationError.commandFailed }
+        case .directory(let path):
+            guard path.hasPrefix("/"), path.utf8.count <= 4096,
+                  path.rangeOfCharacter(from: .controlCharacters) == nil else { throw ProviderExtrasMutationError.commandFailed }
+        case .resetDirectory: break
+        }
+        var succeeded = false
+        do { try await runMutation(ProviderExtrasCommand.cacheSet(executable: executable, config: policy.providerConfig, change: change)); succeeded = true } catch { }
+        let readback = await Task.detached { await self.refreshCache() }.value
+        guard succeeded, case .available(let after, _) = readback else { throw ProviderExtrasMutationError.commandFailed }
+        switch change {
+        case .dailyWriteGB(let value):
+            guard after.dailyWriteBytes == Int64(value * 1_000_000_000), after.directory == before.directory else { throw ProviderExtrasMutationError.commandFailed }
+        case .directory(let path):
+            let target = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+            guard !after.hasProblem, after.hasVolume, after.directory == target, after.dailyWriteBytes == before.dailyWriteBytes else { throw ProviderExtrasMutationError.commandFailed }
+        case .resetDirectory:
+            guard !after.hasProblem, !after.hasVolume, after.dailyWriteBytes == before.dailyWriteBytes else { throw ProviderExtrasMutationError.commandFailed }
+        }
     }
 
     public func refreshAutopilot() async -> SourceAvailability<ProviderAutopilotStatus> {

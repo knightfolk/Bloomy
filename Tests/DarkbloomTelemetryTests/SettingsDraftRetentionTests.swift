@@ -253,6 +253,19 @@ struct SettingsDraftRetentionTests {
         await store.stop()
     }
 
+    @Test("cache edits join the shared unsaved-settings guard")
+    @MainActor func cacheDraftGuard() {
+        let draft = ProviderSettingsDraftState()
+        #expect(!draft.hasChanges)
+        draft.setCacheDirty(true)
+        #expect(draft.hasChanges)
+        #expect(!draft.hasOtherChangesForCache)
+        draft.editIdle("20")
+        #expect(draft.hasOtherChangesForCache)
+        draft.setCacheDirty(false)
+        #expect(draft.hasChanges)
+    }
+
     private func idleView(store: ProviderExtrasStore, draft: ProviderSettingsDraftState? = nil) -> AnyView {
         AnyView(Form {
             ProviderAdvancedSettingsView(store: store, performMutation: { _, _ in false },

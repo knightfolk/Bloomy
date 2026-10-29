@@ -1164,6 +1164,16 @@ private actor FixtureExtras: ProviderExtrasProviding {
     var minutes = 30
     var mtp = false
     var autoUpdate = true
+    private var cache = ProviderCacheStatus(directory: "/Synthetic/Cache", dailyWriteBytes: 25_500_000_000, hasVolume: true, hasProblem: false)
+    func refreshCache() async -> SourceAvailability<ProviderCacheStatus> { .available(value: cache, capturedAt: Date()) }
+    func setCache(expected: ProviderCacheStatus, change: ProviderCacheChange) async throws {
+        guard cache == expected else { throw ProviderExtrasMutationError.commandFailed }
+        switch change {
+        case .dailyWriteGB(let value): cache = .init(directory: cache.directory, dailyWriteBytes: Int64(value * 1_000_000_000), hasVolume: cache.hasVolume, hasProblem: false)
+        case .directory(let path): cache = .init(directory: path, dailyWriteBytes: cache.dailyWriteBytes, hasVolume: true, hasProblem: false)
+        case .resetDirectory: cache = .init(directory: "/Synthetic/BuiltIn", dailyWriteBytes: cache.dailyWriteBytes, hasVolume: false, hasProblem: false)
+        }
+    }
     private var submittedFanPolicy: ProviderFanPolicy?
     private var fanCommandCount = 0
     private var fanReadback: FixtureFanReadback = .held

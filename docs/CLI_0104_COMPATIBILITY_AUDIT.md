@@ -29,8 +29,11 @@ and the installed CLI's read-only help and status output.
   malformed new fields must remain explicit. Broader presentation and all
   control paths still require audit.
 - Encrypted SSD cache: CLI 0.9.20 added `cache status` and `cache set`, including
-  directory and daily write limits. Bloomy lacks these controls. Readback,
-  validation, storage semantics, restart behavior, and native review remain.
+  directory and daily write limits. Bloomy now reads and edits these settings
+  through the CLI, preserving unset versus unlimited and requiring readback.
+  Changes are labeled restart-required and leave old files in place. Tests and
+  an isolated native fixture cover the main paths; actual-provider writes and
+  installed-app review remain outstanding.
 - New coordinator connectivity, add-on hold, model load and Autopilot busy
   diagnostics are present in 0.10.4 state. Compare upstream contracts with
   existing readiness and status presentation before exposing them.

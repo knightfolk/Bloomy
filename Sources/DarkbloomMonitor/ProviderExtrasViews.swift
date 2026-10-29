@@ -252,13 +252,19 @@ final class ProviderSettingsDraftState: ObservableObject {
     @Published private(set) var fanSpeedPercent = ProviderFanPolicy.default.speedPercent
     @Published private(set) var fanTriggerTemperature = ProviderFanPolicy.default.triggerTemperatureCelsius
     @Published private(set) var fanDirty = false
+    @Published private(set) var cacheDirty = false
+    @Published var cacheExpected: ProviderCacheStatus?
+    @Published var cacheDirectory = ""
+    @Published var cacheDaily = ""
     @Published private(set) var fanPreset: FanPreset?
     @Published private(set) var fanSaveAwaitingConfirmation = false
     private var pendingFanSave: (revision: UInt64, policy: ProviderFanPolicy, requiresEnabled: Bool)?
     private(set) var idleRevision: UInt64 = 0
     private(set) var fanRevision: UInt64 = 0
 
-    var hasChanges: Bool { idleDirty || fanDirty }
+    var hasChanges: Bool { idleDirty || fanDirty || cacheDirty }
+    var hasOtherChangesForCache: Bool { idleDirty || fanDirty }
+    func setCacheDirty(_ value: Bool) { cacheDirty = value }
 
     func editIdle(_ text: String) {
         // Native text fields can write their existing value when focus moves.

@@ -295,6 +295,12 @@ During normal serving, the request indicator shows `1+` when inference is active
 because the daemon reports activity but not an exact live count. During native
 drain, it shows the exact accepted requests remaining.
 
+Encrypted inference-cache settings are available in Settings → Provider. Bloomy
+shows the saved directory and daily write limit, and can save a different limit,
+select an existing compatible directory, or return to built-in storage. The CLI
+validates the selected volume; changing directories does not move old cache files.
+These settings apply after a provider restart.
+
 Idle-memory and beta controls use official CLI commands and require a restart to
 apply. They share the model/lifecycle action gate and cannot overwrite a staged
 model draft. Automatic CLI updates use `darkbloom autoupdate` and apply when the

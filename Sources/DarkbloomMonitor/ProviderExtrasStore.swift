@@ -40,6 +40,9 @@ enum ProviderSettingsEvidenceError: Error, Equatable, Sendable {
 @MainActor
 final class ProviderExtrasStore: ObservableObject {
     @Published private(set) var snapshot: ProviderExtrasSnapshot?
+    @Published private(set) var cacheStatus: SourceAvailability<ProviderCacheStatus>?
+    @Published private(set) var cacheRefreshing = false
+    private var cacheGeneration: UInt64 = 0
     @Published private(set) var isRefreshing = false
     @Published private(set) var mutationInFlight = false
     @Published private(set) var errorMessage: String?
@@ -238,6 +241,27 @@ final class ProviderExtrasStore: ObservableObject {
         refreshTask = task
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
         if refreshGeneration == generation { refreshTask = nil; isRefreshing = false }
+    }
+
+    func refreshCache() async {
+        cacheGeneration &+= 1
+        let generation = cacheGeneration
+        cacheRefreshing = true
+        let result = await client.refreshCache()
+        guard generation == cacheGeneration else { return }
+        cacheStatus = Self.retainLastGood(result, previous: cacheStatus, reason: "Cache settings refresh failed")
+        cacheRefreshing = false
+    }
+
+    func setCache(expected: ProviderCacheStatus, change: ProviderCacheChange) async throws {
+        try requireFreshEvidence(cacheStatus)
+        guard cacheStatus?.value == expected, !mutationInFlight, !cacheRefreshing else { throw ProviderExtrasMutationError.commandFailed }
+        mutationInFlight = true
+        defer { mutationInFlight = false }
+        var confirmed = false
+        do { try await client.setCache(expected: expected, change: change); confirmed = true } catch { }
+        await Task.detached { await self.refreshCache() }.value
+        guard confirmed, ProviderSettingsFreshnessPolicy.isFresh(cacheStatus, at: now()) else { throw ProviderExtrasMutationError.commandFailed }
     }
 
     func setAutopilotPolicy(_ action: ProviderAutopilotPolicyAction) async throws {
