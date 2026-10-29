@@ -84,6 +84,8 @@ public struct ProviderAutopilotStatus: Equatable, Sendable {
     public var downloadsEnabled: Bool? { downloads?.enabled }
     private let configuredRevision: String
 
+    func matchesConfiguredRevision(_ revision: String) -> Bool { configuredRevision == revision }
+
     public init(configuredEnabled: Bool, consentRecorded: Bool, configuredPaused: Bool,
                 selectedModels: [String], pinnedModels: [String], configuredRevision: String,
                 live: ProviderAutopilotLiveStatus? = nil, phase: ProviderAutopilotPhase? = nil,

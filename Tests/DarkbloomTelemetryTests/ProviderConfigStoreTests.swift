@@ -5,6 +5,31 @@ import Testing
 
 @Suite("Provider config store")
 struct ProviderConfigStoreTests {
+    @Test("Autopilot policy save refuses a competing edit during validation")
+    func autopilotPolicyConflictDuringValidation() async throws {
+        let source = Data("""
+        [backend]
+        enabled_models = ["org/model"]
+        preload_models = []
+        [backend.model_autopilot]
+        enabled = true
+        consent_recorded = true
+        paused = false
+        selected_models = ["org/model"]
+        pinned_models = []
+        revision = "r1"
+        """.utf8)
+        let external = Data((String(decoding: source, as: UTF8.self) + "\n# external edit\n").utf8)
+        let harness = try ConfigStoreHarness.make(mode: 0o600, sourceData: source, externalWriteDuringValidation: external)
+        defer { harness.cleanup() }
+        let status = ProviderAutopilotStatus(configuredEnabled: true, consentRecorded: true, configuredPaused: false,
+            selectedModels: ["org/model"], pinnedModels: [], configuredRevision: "r1")
+        await #expect(throws: ProviderConfigError.changedExternally) {
+            try await harness.store.saveAutopilotPolicy(.pause, expected: status)
+        }
+        #expect(try Data(contentsOf: harness.configURL) == external)
+        #expect(!FileManager.default.fileExists(atPath: harness.backupURL.path))
+    }
     @Test("schedule saves use validated atomic publication and preserve other settings")
     func savesSchedule() async throws {
         let source = Data("[backend]\nenabled_models = []\npreload_models = []\nfuture_key = 73\n[schedule]\nenabled = false\n".utf8)

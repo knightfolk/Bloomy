@@ -48,6 +48,38 @@ public struct ProviderConfigDocument: Equatable, Sendable {
         return try scanner.scanSchedule()
     }
 
+    /// Apply the 0.10.4 policy fields without serializing unrelated settings.
+    static func renderingAutopilotPolicy(_ action: ProviderAutopilotPolicyAction,
+                                         expected: ProviderAutopilotStatus, in data: Data,
+                                         revision: UUID = UUID()) throws -> Data {
+        guard expected.allows(action), data.count <= 1_048_576,
+              String(data: data, encoding: .utf8) != nil else { throw ProviderConfigError.changedExternally }
+        var scanner = ProviderConfigScanner(data: data)
+        let fields = try scanner.autopilotPolicyRanges()
+        guard expected.matchesConfiguredRevision(fields.revisionValue), fields.enabledValue == expected.configuredEnabled,
+              fields.consentValue == expected.consentRecorded, (fields.pausedValue ?? false) == expected.configuredPaused,
+              fields.selectedModels == expected.selectedModels, fields.pinnedModels == expected.pinnedModels else {
+            throw ProviderConfigError.changedExternally
+        }
+        let newline = Self.detectLineEnding(in: data)
+        var edits: [(Range<Int>, Data)] = [(fields.revision, Data("\"\(revision.uuidString)\"".utf8))]
+        let paused = action == .pause
+        if let range = fields.paused { edits.append((range, Data(String(paused).utf8))) }
+        else {
+            let prefix = fields.headerEnd == data.count && data.last != 10 && data.last != 13 ? newline : ""
+            edits.append((fields.headerEnd..<fields.headerEnd, Data("\(prefix)paused = \(paused)\(newline)".utf8)))
+        }
+        if action == .disable {
+            edits.append((fields.enabled, Data("false".utf8)))
+            edits.append((fields.consent, Data("true".utf8)))
+        }
+        var result = data
+        for (range, replacement) in edits.sorted(by: { $0.0.lowerBound > $1.0.lowerBound }) {
+            result.replaceSubrange(range, with: replacement)
+        }
+        return result
+    }
+
     /// Replace only recognized schedule statements; leave every other byte in
     /// place. Unsupported window fields or inline comments prevent a rewrite.
     public static func renderingSchedule(_ schedule: ProviderSchedule, in data: Data) throws -> Data {
@@ -358,6 +390,80 @@ private struct ProviderConfigScanner {
 
     init(data: Data) {
         self.bytes = [UInt8](data)
+    }
+
+    fileprivate struct AutopilotPolicyRanges {
+        let headerEnd: Int
+        let enabled: Range<Int>
+        let enabledValue: Bool
+        let consent: Range<Int>
+        let consentValue: Bool
+        let paused: Range<Int>?
+        let pausedValue: Bool?
+        let revision: Range<Int>
+        let revisionValue: String
+        let selectedModels: [String]
+        let pinnedModels: [String]
+    }
+
+    fileprivate mutating func autopilotPolicyRanges() throws -> AutopilotPolicyRanges {
+        let failure = ProviderConfigError.validationFailed("Autopilot settings cannot be safely edited")
+        var inPolicy = false
+        var headerEnd: Int?
+        var booleans: [String: ProviderConfigBoolean] = [:]
+        var revision: (Range<Int>, String)?
+        var arrays: [String: [String]] = [:]
+        while true {
+            skipStatementTrivia()
+            guard index < bytes.count else { break }
+            let start = index
+            if bytes[index] == Self.openBracket {
+                let end = skipStatement(from: start)
+                let raw = String(decoding: bytes[start..<end], as: UTF8.self)
+                let header = (raw.split(separator: "#", maxSplits: 1).first.map(String.init) ?? "").filter { !$0.isWhitespace }
+                if header == "[backend.model_autopilot]" {
+                    guard headerEnd == nil else { throw failure }
+                    headerEnd = end; inPolicy = true
+                } else {
+                    if header.contains("model_autopilot") { throw failure }
+                    inPolicy = false
+                }
+                index = end; continue
+            }
+            guard let key = parseBareKey() else {
+                if inPolicy { throw failure }
+                index = skipStatement(from: start); continue
+            }
+            skipHorizontalWhitespace()
+            guard index < bytes.count, bytes[index] == Self.equals else {
+                if inPolicy || key == "backend" { throw failure }
+                index = skipStatement(from: start); continue
+            }
+            index += 1
+            guard inPolicy else { index = skipStatement(from: index); continue }
+            skipHorizontalWhitespace()
+            if ["enabled", "consent_recorded", "paused"].contains(key) {
+                guard booleans[key] == nil else { throw failure }
+                booleans[key] = try parseBoolean(key: key)
+                try consumeTargetStatementRemainder(booleanKey: key)
+            } else if key == "revision" {
+                guard revision == nil, index < bytes.count,
+                      bytes[index] == Self.doubleQuote || bytes[index] == Self.singleQuote else { throw failure }
+                let begin = index
+                let value = try parseString(key: key)
+                revision = (begin..<index, value)
+                try consumeTargetStatementRemainder(arrayKey: key)
+            } else if key == "selected_models" || key == "pinned_models" {
+                guard arrays[key] == nil, index < bytes.count, bytes[index] == Self.openBracket else { throw failure }
+                arrays[key] = try parseStringArray(key: key).values
+                try consumeTargetStatementRemainder(arrayKey: key)
+            } else { index = skipStatement(from: index) }
+        }
+        guard let headerEnd, let enabled = booleans["enabled"], let consent = booleans["consent_recorded"], let revision else { throw failure }
+        return AutopilotPolicyRanges(headerEnd: headerEnd, enabled: enabled.range, enabledValue: enabled.value,
+            consent: consent.range, consentValue: consent.value, paused: booleans["paused"]?.range,
+            pausedValue: booleans["paused"]?.value, revision: revision.0, revisionValue: revision.1,
+            selectedModels: arrays["selected_models"] ?? [], pinnedModels: arrays["pinned_models"] ?? [])
     }
 
     fileprivate struct ScheduleEditRanges {

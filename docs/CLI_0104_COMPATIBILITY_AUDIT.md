@@ -49,6 +49,10 @@ and the installed CLI's read-only help and status output.
   The current CLI source also uses `ConfigManager.save` for Autopilot download
   limits and encrypted cache edits, so those newer Bloomy controls share this
   preservation concern even though their own settings are read back.
+  A targeted policy writer has now passed disposable-config tests for pause,
+  resume and disable against CLI 0.10.4 while retaining unknown fields, plus an
+  external-edit conflict test. It is not yet connected to the user controls;
+  compatibility gating and live readback still need integration.
   This requires a preserving mutation path or a reliable preflight before those
   controls can be considered fully compatible with future configurations.
 - Weekly availability schedules: introduced in 0.9.15. Bloomy reports scheduled
