@@ -162,6 +162,17 @@ and the installed CLI's read-only help and status output.
   than automatically running model output. No live
   inference was run for this work; an isolated native fixture displayed partial
   text followed by a completed response. Installed-app review remains outstanding.
+- Media follow-up: the 0.10.4 local video contract uses inline `video_url`
+  parts with MP4 or QuickTime data URIs; it does not pass a local path to the
+  provider. Default media and transport limits differ, and model-specific
+  restrictions differ as well: for example, Nemotron's local path accepts a
+  single video or images rather than both. Video frame sampling does not prove
+  that a soundtrack is processed. See the tagged [media ingest](https://github.com/Layr-Labs/d-inference/blob/v0.10.4/provider-swift/Sources/ProviderCore/Inference/Vision/MediaIngest.swift)
+  and [Nemotron binding](https://github.com/Layr-Labs/d-inference/blob/v0.10.4/provider-swift/Sources/ProviderCore/Inference/Engine/Bridge/NemotronSuperLocalImageBinding.swift).
+  The separate native audio path requires a compatible loaded model and audio
+  binding. Neither local support nor an unauthenticated catalog request proves
+  that a paid network model currently accepts either medium. Implementation and
+  verification of both media types remain open.
 - Provider-internal inference features and performance changes do not
   automatically imply Bloomy UI controls. Review model capabilities and chat
   transport against actual supported API contracts; do not infer entitlement
