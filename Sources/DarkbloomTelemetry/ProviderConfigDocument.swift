@@ -206,15 +206,15 @@ public struct ProviderConfigDocument: Equatable, Sendable {
         guard let directory else { return !expected.hasVolume && expected.selectedDirectory == nil && !expected.hasProblem }
         guard let selected = ProviderCacheParser.normalizedSelectedDirectory(directory) else { return false }
         if expected.hasVolume, let observed = expected.selectedDirectory {
-            guard !expected.hasProblem, let uuid, let actual = expected.volumeUUID,
-                  let savedUUID = UUID(uuidString: uuid), let observedUUID = UUID(uuidString: actual),
-                  savedUUID == observedUUID else { return false }
-            return selected == ProviderCacheParser.normalizedSelectedDirectory(observed)
+            guard selected == ProviderCacheParser.normalizedSelectedDirectory(observed),
+                  let uuid, let actual = expected.volumeUUID,
+                  let savedUUID = UUID(uuidString: uuid), let observedUUID = UUID(uuidString: actual) else { return false }
+            return savedUUID == observedUUID || (expected.hasProblem && expected.sourceRevision != nil)
         }
         // When a selected volume is unavailable, the CLI still reports the
         // configured cache root (<selected>/<environment>/kv3). This permits a
         // reset while refusing a changed selected folder.
-        guard expected.hasProblem, !expected.hasVolume, expected.selectedDirectory == nil,
+        guard expected.hasProblem, expected.sourceRevision != nil, !expected.hasVolume, expected.selectedDirectory == nil,
               let root = ProviderCacheParser.normalizedSelectedDirectory(expected.directory),
               root.hasPrefix(selected == "/" ? "/" : selected + "/") else { return false }
         let remainder = root.dropFirst(selected == "/" ? 1 : selected.count + 1).split(separator: "/")

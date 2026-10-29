@@ -5,6 +5,18 @@ import Testing
 
 @Suite("Provider config store")
 struct ProviderConfigStoreTests {
+    @Test("cache repair rejects an outdated source revision even when visible fields match")
+    func staleCacheRepairRevision() async throws {
+        let source = Data("[cache]\ndirectory='/folder'\nvolume_uuid='12345678-1234-1234-1234-123456789abc'\n".utf8)
+        let harness = try ConfigStoreHarness.make(mode: 0o600, sourceData: source)
+        defer { harness.cleanup() }
+        let expected = ProviderCacheStatus(directory: "/folder/darkbloom/kv3", dailyWriteBytes: nil, hasVolume: true,
+            hasProblem: true, selectedDirectory: "/folder", volumeUUID: "87654321-4321-4321-4321-cba987654321").withSourceRevision("outdated")
+        await #expect(throws: ProviderConfigError.changedExternally) {
+            try await harness.store.saveCacheDirectory(expected: expected, selected: nil) { _ in }
+        }
+        #expect(try Data(contentsOf: harness.configURL) == source)
+    }
     @Test("failed cache volume recheck never publishes the candidate")
     func cacheVolumeRecheckFailure() async throws {
         let source = Data("[backend]\nenabled_models=[]\npreload_models=[]\n".utf8)

@@ -4,6 +4,20 @@ import Testing
 
 @Suite("Encrypted inference cache settings")
 struct ProviderCacheTests {
+    @Test("a configuration change during a cache read is not published as fresh")
+    func changedDuringRead() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let directory = root.appendingPathComponent(".config/darkbloom")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = directory.appendingPathComponent("provider.toml")
+        try Data("[cache]\ndaily_write_gb=1\n".utf8).write(to: config)
+        let runner = CacheRunner(config: config)
+        await runner.replaceOnNextRead(Data("[cache]\ndaily_write_gb=2\n".utf8))
+        let client = ProviderExtrasClient(policy: DarkbloomSourcePolicy(homeDirectory: root, environmentPath: ""),
+            runner: runner, now: Date.init, testOnlyExecutable: root.appendingPathComponent("darkbloom"))
+        if case .available = await client.refreshCache() { Issue.record("Changed configuration was presented as fresh") }
+    }
     @Test("unset, unlimited and explicit limits remain distinct")
     func parsesLimits() throws {
         let unset = try ProviderCacheParser.parse(Data(#"{"directory":"/cache","dailyWriteSource":"startup_environment_or_default","scope":"saved_settings"}"#.utf8))
@@ -98,9 +112,11 @@ private actor CacheRunner: ProcessExecuting {
     var writes = 0
     var ignored = false
     var staleReadback = false
+    var nextReadReplacement: Data?
     let config: URL
     init(config: URL) { self.config = config }
     func ignoreNextWrite() { ignored = true }
+    func replaceOnNextRead(_ data: Data) { nextReadReplacement = data }
     func run(_ command: ProcessCommand, timeout: Duration, outputLimit: Int,
              onOutput: (@Sendable (ProcessOutputChunk) -> Void)?) async throws -> CommandResult {
         if command.arguments == ["--version"] { return CommandResult(exitCode: 0, standardOutput: Data("0.10.4\n".utf8), standardError: Data()) }
@@ -112,6 +128,10 @@ private actor CacheRunner: ProcessExecuting {
         if command.arguments.prefix(2) == ["cache", "status"] {
             let argument = try #require(command.arguments.firstIndex(of: "--config"))
             let path = URL(fileURLWithPath: command.arguments[argument + 1])
+            if let replacement = nextReadReplacement, path.standardizedFileURL == config.standardizedFileURL {
+                nextReadReplacement = nil
+                try replacement.write(to: path)
+            }
             let text = try String(contentsOf: path, encoding: .utf8)
             func value(_ key: String) -> String? {
                 text.components(separatedBy: .newlines).compactMap { line in

@@ -391,9 +391,13 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
     public func refreshCache() async -> SourceAvailability<ProviderCacheStatus> {
         guard let executable = resolveExecutable() else { return .unavailable(reason: "Cache settings unavailable") }
         do {
+            let config = LocalProviderConfigStore(configURL: policy.providerConfig, executable: executable, runner: runner)
+            let revision = try? await config.cacheSourceRevision()
             let output = try await run(ProviderExtrasCommand.cacheStatus(executable: executable, config: policy.providerConfig))
             guard output.exitCode == 0 else { throw ProviderExtrasParseError.invalidPayload }
-            return .available(value: try ProviderCacheParser.parse(output.standardOutput), capturedAt: now())
+            let after = try? await config.cacheSourceRevision()
+            guard revision == after else { throw ProviderExtrasParseError.invalidPayload }
+            return .available(value: try ProviderCacheParser.parse(output.standardOutput).withSourceRevision(revision), capturedAt: now())
         } catch { return .unavailable(reason: "Cache settings unavailable") }
     }
 
@@ -402,6 +406,7 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
             throw ProviderExtrasMutationError.commandFailed
         }
         try await requireQualifiedConfigCLI(executable, error: .unsupportedCacheSettingsVersion)
+        guard before.sourceRevision != nil else { throw ProviderExtrasMutationError.commandFailed }
         switch change {
         case .dailyWriteGB(let value):
             guard ProviderCacheParser.validDailyWriteGB(value) else { throw ProviderExtrasMutationError.commandFailed }

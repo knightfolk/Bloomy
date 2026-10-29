@@ -34,13 +34,25 @@ struct ProviderCacheDocumentTests {
     @Test("an unavailable selected volume can be reset without guessing another folder")
     func resetsUnavailableVolume() throws {
         let source = Data("[cache]\ndirectory='/missing'\nvolume_uuid='12345678-1234-1234-1234-123456789abc'\n".utf8)
-        let expected = ProviderCacheStatus(directory: "/missing/darkbloom/kv3", dailyWriteBytes: nil, hasVolume: false, hasProblem: true)
+        let expected = ProviderCacheStatus(directory: "/missing/darkbloom/kv3", dailyWriteBytes: nil, hasVolume: false, hasProblem: true).withSourceRevision("synthetic")
         let output = try ProviderConfigDocument.renderingCacheDirectory(expected: expected, selected: nil, in: source)
         #expect(!String(decoding: output, as: UTF8.self).contains("directory="))
-        let changed = ProviderCacheStatus(directory: "/other/darkbloom/kv3", dailyWriteBytes: nil, hasVolume: false, hasProblem: true)
+        let changed = ProviderCacheStatus(directory: "/other/darkbloom/kv3", dailyWriteBytes: nil, hasVolume: false, hasProblem: true).withSourceRevision("synthetic")
         #expect(throws: ProviderConfigError.changedExternally) {
             try ProviderConfigDocument.renderingCacheDirectory(expected: changed, selected: nil, in: source)
         }
+    }
+
+    @Test("a reported volume mismatch can be repaired only with a bound source revision")
+    func repairsMismatchedVolume() throws {
+        let source = Data("[cache]\ndirectory='/folder'\nvolume_uuid='12345678-1234-1234-1234-123456789abc'\n".utf8)
+        let status = ProviderCacheStatus(directory: "/folder/darkbloom/kv3", dailyWriteBytes: nil, hasVolume: true,
+            hasProblem: true, selectedDirectory: "/folder", volumeUUID: "87654321-4321-4321-4321-cba987654321")
+        #expect(throws: ProviderConfigError.changedExternally) {
+            try ProviderConfigDocument.renderingCacheDirectory(expected: status, selected: nil, in: source)
+        }
+        let output = try ProviderConfigDocument.renderingCacheDirectory(expected: status.withSourceRevision("synthetic"), selected: nil, in: source)
+        #expect(!String(decoding: output, as: UTF8.self).contains("directory="))
     }
 
     @Test("new cache folder settings are inserted without touching existing sections")

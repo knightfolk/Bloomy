@@ -227,6 +227,10 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
         try await loadScheduleDraft().schedule
     }
 
+    func cacheSourceRevision() async throws -> String {
+        try await readLockedSnapshot(lockFlag: O_SHLOCK).state.revision
+    }
+
     public func loadScheduleDraft() async throws -> ProviderScheduleDraft {
         let source = try await readLockedSnapshot(lockFlag: O_SHLOCK)
         return ProviderScheduleDraft(schedule: try ProviderConfigDocument.readSchedule(data: source.data), sourceFileState: source.state)
@@ -256,6 +260,7 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
 
     func saveCacheDailyWrite(expected: ProviderCacheStatus, value: Double) async throws {
         let snapshot = try await readLockedSnapshot(lockFlag: O_SHLOCK)
+        if let revision = expected.sourceRevision, revision != snapshot.state.revision { throw ProviderConfigError.changedExternally }
         let data = try ProviderConfigDocument.renderingCacheDailyWrite(expected: expected, value: value, in: snapshot.data)
         guard data != snapshot.data else { return }
         _ = try await publishValidated(data, expectedState: snapshot.state)
@@ -264,6 +269,7 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
     func saveCacheDirectory(expected: ProviderCacheStatus, selected: ProviderCacheVolumeIdentity?,
                             verify: @escaping @Sendable (URL) async throws -> Void) async throws {
         let snapshot = try await readLockedSnapshot(lockFlag: O_SHLOCK)
+        if let revision = expected.sourceRevision, revision != snapshot.state.revision { throw ProviderConfigError.changedExternally }
         let data = try ProviderConfigDocument.renderingCacheDirectory(expected: expected, selected: selected, in: snapshot.data)
         guard data != snapshot.data else { return }
         _ = try await publishValidated(data, expectedState: snapshot.state, validateCandidate: verify)

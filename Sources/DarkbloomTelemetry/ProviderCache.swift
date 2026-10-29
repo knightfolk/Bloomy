@@ -11,12 +11,26 @@ public struct ProviderCacheStatus: Equatable, Sendable {
     public let hasProblem: Bool
     /// Private volume evidence; never displayed in the settings UI.
     let volumeUUID: String?
+    let sourceRevision: String?
 
     public init(directory: String, dailyWriteBytes: Int64?, hasVolume: Bool, hasProblem: Bool, selectedDirectory: String? = nil, volumeUUID: String? = nil) {
         self.directory = directory; self.dailyWriteBytes = dailyWriteBytes
         self.hasVolume = hasVolume; self.hasProblem = hasProblem
         self.selectedDirectory = selectedDirectory
         self.volumeUUID = volumeUUID
+        self.sourceRevision = nil
+    }
+
+    private init(directory: String, dailyWriteBytes: Int64?, hasVolume: Bool, hasProblem: Bool,
+                 selectedDirectory: String?, volumeUUID: String?, sourceRevision: String?) {
+        self.directory = directory; self.dailyWriteBytes = dailyWriteBytes
+        self.hasVolume = hasVolume; self.hasProblem = hasProblem
+        self.selectedDirectory = selectedDirectory; self.volumeUUID = volumeUUID; self.sourceRevision = sourceRevision
+    }
+
+    func withSourceRevision(_ revision: String?) -> Self {
+        .init(directory: directory, dailyWriteBytes: dailyWriteBytes, hasVolume: hasVolume, hasProblem: hasProblem,
+              selectedDirectory: selectedDirectory, volumeUUID: volumeUUID, sourceRevision: revision)
     }
 }
 

@@ -51,6 +51,17 @@ struct ProviderScheduleCLIContractTests {
         #expect(limited.dailyWriteBytes == 12_500_000_000)
         #expect(limited.selectedDirectory == observed.selectedDirectory)
         #expect(try String(contentsOf: configURL, encoding: .utf8).contains("[future_section]\nkeep='untouched'"))
+        let damaged = try String(contentsOf: configURL, encoding: .utf8).components(separatedBy: .newlines).map { line in
+            line.trimmingCharacters(in: .whitespaces).hasPrefix("volume_uuid")
+                ? "volume_uuid = '12345678-1234-1234-1234-123456789abc'" : line
+        }.joined(separator: "\n")
+        try Data(damaged.utf8).write(to: configURL)
+        let mismatched = try #require(await client.refreshCache().value)
+        #expect(mismatched.hasProblem && mismatched.hasVolume)
+        try await client.setCache(expected: mismatched, change: .resetDirectory)
+        let repaired = try #require(await client.refreshCache().value)
+        #expect(!repaired.hasProblem && !repaired.hasVolume)
+        try await client.setCache(expected: repaired, change: .directory(selected.path))
         try FileManager.default.removeItem(at: selected)
         let missing = try #require(await client.refreshCache().value)
         #expect(missing.hasProblem && !missing.hasVolume)

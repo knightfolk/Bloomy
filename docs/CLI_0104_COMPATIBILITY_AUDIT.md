@@ -58,8 +58,10 @@ and the installed CLI's read-only help and status output.
   selection is checked by Darkbloom against a private disposable config, then
   the candidate is checked again before publication. Real-CLI disposable-file
   tests cover selection, write limits, reset with a missing folder, and unknown
-  field preservation. A reported UUID mismatch with a still-mounted volume is
-  conservatively refused; its repair flow needs further work.
+  field preservation. Cache readings are now bound to a configuration revision;
+  a mounted-volume UUID mismatch can be repaired or reset only if that revision
+  still matches. A disposable real-CLI test covered both UUID mismatch and a
+  missing folder, and a conflict test rejects an outdated revision.
   Pause, resume and disable now use a targeted policy writer qualified for CLI
   0.10.4; other versions are refused with a clear message until qualified. The
   complete client path passed disposable-config tests against the real CLI for
