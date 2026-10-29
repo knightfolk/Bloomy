@@ -417,6 +417,8 @@ private struct ProviderAdvancedSettingsHost: View {
                 )
                 ProviderCacheSettingsView(store: extras, draft: draft, performMutation: performMutation)
                 ProviderScheduleSettingsView(store: extras, draft: draft, performMutation: performMutation, isVisible: isVisible)
+                ProviderAddonSettingsView(store: extras, control: control, draft: draft,
+                    performMutation: performMutation, isVisible: isVisible)
                 ProviderAdvancedSettingsView(
                     store: extras,
                     performMutation: performMutation,

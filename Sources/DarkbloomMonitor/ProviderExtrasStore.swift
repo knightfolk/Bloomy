@@ -44,6 +44,9 @@ final class ProviderExtrasStore: ObservableObject {
     @Published private(set) var cacheRefreshing = false
     @Published private(set) var scheduleStatus: SourceAvailability<ProviderScheduleDraft>?
     @Published private(set) var scheduleRefreshing = false
+    @Published private(set) var addonStatus: ProviderAddonControlStatus = .unavailable(.unknownStatus)
+    @Published private(set) var addonCheckedAt: Date?
+    @Published private(set) var addonRefreshing = false
     private var scheduleGeneration: UInt64 = 0
     private var cacheGeneration: UInt64 = 0
     @Published private(set) var isRefreshing = false
@@ -276,6 +279,40 @@ final class ProviderExtrasStore: ObservableObject {
         guard generation == cacheGeneration else { return }
         cacheStatus = Self.retainLastGood(result, previous: cacheStatus, reason: "Cache settings refresh failed")
         cacheRefreshing = false
+    }
+
+    func refreshAddon() async {
+        guard !addonRefreshing, !mutationInFlight else { return }
+        addonRefreshing = true
+        let result = await client.addonStatus()
+        addonStatus = result
+        addonCheckedAt = now()
+        addonRefreshing = false
+    }
+
+    func changeAddonHold(leaseSeconds: Int? = nil, force: Bool = false) async throws {
+        guard !mutationInFlight, !addonRefreshing, let checked = addonCheckedAt,
+              now().timeIntervalSince(checked).isFinite,
+              (0...ProviderExtrasSnapshot.maximumSourceAge).contains(now().timeIntervalSince(checked)),
+              case .available = addonStatus else { throw ProviderExtrasMutationError.commandFailed }
+        mutationInFlight = true
+        errorMessage = nil
+        defer { mutationInFlight = false }
+        let result: ProviderAddonMutationResult
+        if let leaseSeconds { result = await client.holdAddon(leaseSeconds: leaseSeconds) }
+        else { result = await client.releaseAddon(force: force) }
+        switch result {
+        case .confirmed(let snapshot):
+            addonStatus = .available(snapshot); addonCheckedAt = now()
+        case .outcomeUncertain(let status):
+            addonStatus = status; addonCheckedAt = nil
+            errorMessage = "The hold change could not be confirmed. Refresh before trying again."
+            throw ProviderExtrasMutationError.commandFailed
+        case .rejected:
+            addonStatus = await client.addonStatus(); addonCheckedAt = nil
+            errorMessage = "Darkbloom could not complete that hold change. Check the status before trying again."
+            throw ProviderExtrasMutationError.commandFailed
+        }
     }
 
     func setCache(expected: ProviderCacheStatus, change: ProviderCacheChange) async throws {

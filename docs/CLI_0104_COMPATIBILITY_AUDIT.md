@@ -113,10 +113,17 @@ and the installed CLI's read-only help and status output.
   retaining add-on identifiers, blocks idle-driven work and live model apply,
   and explains the observed hold. Autopilot reports bounded busy reasons using
   fixed labels. An isolated native fixture showed the held state and busy
-  explanations; installed-app review remains outstanding. The CLI's operator
-  hold/release commands are not yet exposed in Bloomy; releasing all holds can
-  affect other apps and needs a separate design and safe testing. No add-on
-  hold/release command was issued during testing.
+  explanations; installed-app review remains outstanding. Operator controls now
+  expose a 30–600 second shared hold and explicitly labeled global release;
+  force release has a separate confirmation warning about other apps' VMs.
+  Lease expiry can be delayed by the machine lock. Status is parsed into bounded
+  aggregate values, and a command is confirmed only with matching response and
+  independent readback; timeout or cancellation remains uncertain. Mock-only
+  tests cover release races and malformed output. Isolated native fixtures
+  exercised a hold and release and displayed the force warning with a simulated
+  machine lock. No live add-on hold/release
+  command was issued during testing. Bloomy cannot own a scoped hold: 0.10.4
+  only permits Darkbloom's signed sandbox to use the scoped add-on socket.
 - Further model-load, Autopilot and coordinator diagnostics remain to audit.
 - Model load memory: Bloomy now derives a current no-eviction shortfall and,
   when available, the remaining shortfall after idle eviction from the daemon's
@@ -131,7 +138,11 @@ and the installed CLI's read-only help and status output.
 - Chat now accepts incrementally streamed text for local and network requests,
   preserving partial output on cancellation or failure. Parser and store tests
   cover framing, cancellation and errors. Media and tool-call conversations are
-  not yet supported and require capability and contract review. No live
+  not yet supported. The local provider accepts inline media only, with
+  architecture-specific support and size limits; audio has a separate native
+  model path, and catalog labels alone do not establish route support. Tool
+  calls need structured proposals and explicit execution authorization rather
+  than automatically running model output. No live
   inference was run for this work; an isolated native fixture displayed partial
   text followed by a completed response. Installed-app review remains outstanding.
 - Provider-internal inference features and performance changes do not

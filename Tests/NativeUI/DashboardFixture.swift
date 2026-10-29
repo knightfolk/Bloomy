@@ -1185,6 +1185,18 @@ private struct FixtureFanProof: Codable, Sendable {
 private actor FixtureExtras: ProviderExtrasProviding {
     let scenario: FixtureScenario
     let autopilot: FixtureAutopilot
+    private var addon = ProviderAddonControlSnapshot(hold: .none, machineLockHeld: false, operatorHoldPresent: false)
+    func simulateAddonMachineLock() { addon = .init(hold: .held, machineLockHeld: true, operatorHoldPresent: false) }
+    func addonStatus() async -> ProviderAddonControlStatus { .available(addon) }
+    func holdAddon(leaseSeconds: Int) async -> ProviderAddonMutationResult {
+        guard (30...600).contains(leaseSeconds) else { return .rejected(.invalidLease) }
+        addon = .init(hold: .draining, machineLockHeld: false, operatorHoldPresent: true)
+        return .confirmed(addon)
+    }
+    func releaseAddon(force: Bool) async -> ProviderAddonMutationResult {
+        addon = .init(hold: .none, machineLockHeld: false, operatorHoldPresent: false)
+        return .confirmed(addon)
+    }
     private let frozenAt = Date()
     var minutes = 30
     var mtp = false
@@ -1724,6 +1736,11 @@ private final class FixtureModel: ObservableObject {
         guard ready, !isTerminating else { return }
         await extrasClient.setAutopilotMode(value)
         await monitor.providerExtras?.refreshAutopilot()
+    }
+    func showAddonMachineLock() async {
+        guard ready, !isTerminating else { return }
+        await extrasClient.simulateAddonMachineLock()
+        await monitor.providerExtras?.refreshAddon()
     }
     func saveAutopilotProof() async {
         if let data = try? JSONEncoder().encode(await extrasClient.autopilotProof()) {
@@ -3217,6 +3234,7 @@ private struct FixtureReviewView: View {
                             Divider()
                             Button("Save action counts") { Task { await model.saveAutopilotProof() } }
                         }
+                        Button("Synthetic add-on machine lock") { Task { await model.showAddonMachineLock() } }
                         Menu("Synthetic host GPU protection") {
                             Button("High GPU while provider idle") { Task { await model.showHighIdleGPU() } }
                             Button("GPU recovered") { Task { await model.showRecoveredGPU() } }

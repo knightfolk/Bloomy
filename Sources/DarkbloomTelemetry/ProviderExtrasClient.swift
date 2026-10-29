@@ -1,6 +1,9 @@
 import Foundation
 
 public protocol ProviderExtrasProviding: Sendable {
+    func addonStatus() async -> ProviderAddonControlStatus
+    func holdAddon(leaseSeconds: Int) async -> ProviderAddonMutationResult
+    func releaseAddon(force: Bool) async -> ProviderAddonMutationResult
     func refresh() async -> ProviderExtrasSnapshot
     func refreshCache() async -> SourceAvailability<ProviderCacheStatus>
     func refreshSchedule() async -> SourceAvailability<ProviderScheduleDraft>
@@ -21,6 +24,9 @@ public protocol ProviderExtrasProviding: Sendable {
 }
 
 public extension ProviderExtrasProviding {
+    func addonStatus() async -> ProviderAddonControlStatus { .unavailable(.unknownStatus) }
+    func holdAddon(leaseSeconds: Int) async -> ProviderAddonMutationResult { .rejected(.unknownStatus) }
+    func releaseAddon(force: Bool) async -> ProviderAddonMutationResult { .rejected(.unknownStatus) }
     func refreshSchedule() async -> SourceAvailability<ProviderScheduleDraft> { .unavailable(reason: "Schedule unavailable") }
     func saveSchedule(expected: ProviderScheduleDraft, desired: ProviderSchedule) async throws { throw ProviderExtrasMutationError.commandFailed }
     func refreshCache() async -> SourceAvailability<ProviderCacheStatus> { .unavailable(reason: "Cache settings unavailable") }
@@ -225,6 +231,16 @@ public struct ProviderExtrasClient: ProviderExtrasProviding, Sendable {
     private let runner: any ProcessExecuting
     private let now: @Sendable () -> Date
     private let testOnlyExecutable: URL?
+
+    public func addonStatus() async -> ProviderAddonControlStatus {
+        await ProviderAddonControlClient(policy: policy, runner: runner).status()
+    }
+    public func holdAddon(leaseSeconds: Int) async -> ProviderAddonMutationResult {
+        await ProviderAddonControlClient(policy: policy, runner: runner).hold(leaseSeconds: leaseSeconds)
+    }
+    public func releaseAddon(force: Bool) async -> ProviderAddonMutationResult {
+        await ProviderAddonControlClient(policy: policy, runner: runner).release(force: force)
+    }
 
     public func refreshSchedule() async -> SourceAvailability<ProviderScheduleDraft> {
         guard let executable = resolveExecutable() else { return .unavailable(reason: "Schedule unavailable") }

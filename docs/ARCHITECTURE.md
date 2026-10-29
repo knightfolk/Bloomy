@@ -315,9 +315,9 @@ non-guarantee, showing balance and selected-model price as status lines —
 including explicit "unavailable" states while those reads are pending or
 have failed, never a manufactured value.
 
-The first version is non-streaming with full cancellation (an honest
-cancelled state notes the request may already have been delivered); a
-duplicate send while one is in flight is ignored. Conversation state is
+Chat streams bounded text responses and retains partial text if a request
+fails or is cancelled. Cancellation notes that the request may already have
+been delivered; a duplicate send while one is in flight is ignored. Conversation state is
 transient: quitting the app discards it, and nothing about chat reaches
 SQLite or diagnostics.
 
