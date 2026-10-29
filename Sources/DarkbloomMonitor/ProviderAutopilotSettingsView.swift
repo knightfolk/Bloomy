@@ -314,8 +314,9 @@ struct ProviderAutopilotSettingsView: View {
             }
             isSubmitting = false
             if confirmed { draft.downloadExpected = nil }
+            let unsupported = ProviderExtrasMutationError.unsupportedAutopilotPolicyVersion.userMessage
             feedback = confirmed ? "Download settings saved. The provider applies them at its next policy refresh."
-                : "Download settings could not be confirmed. Refresh before trying again."
+                : (store.errorMessage == unsupported ? unsupported : "Download settings could not be confirmed. Refresh before trying again.")
         }
     }
 

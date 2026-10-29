@@ -247,6 +247,13 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
         _ = try await publishValidated(data, expectedState: snapshot.state)
     }
 
+    func saveAutopilotDownloads(expected: AutopilotDownloadPolicy, desired: AutopilotDownloadPolicy) async throws {
+        let snapshot = try await readLockedSnapshot(lockFlag: O_SHLOCK)
+        let data = try ProviderConfigDocument.renderingAutopilotDownloads(expected: expected, desired: desired, in: snapshot.data)
+        guard data != snapshot.data else { return }
+        _ = try await publishValidated(data, expectedState: snapshot.state)
+    }
+
     public func save(_ draft: ProviderConfigDraft) async throws -> ProviderConfigSaveResult {
         guard draft.hasChanges else {
             return ProviderConfigSaveResult(draft: try await load(), restartRequired: false)

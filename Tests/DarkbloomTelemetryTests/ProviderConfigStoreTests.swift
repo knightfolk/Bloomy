@@ -5,6 +5,28 @@ import Testing
 
 @Suite("Provider config store")
 struct ProviderConfigStoreTests {
+    @Test("download limits reject a competing edit during validation")
+    func autopilotDownloadConflictDuringValidation() async throws {
+        let source = Data("""
+        [backend]
+        enabled_models = []
+        preload_models = []
+        [backend.autopilot_downloads]
+        enabled = true
+        max_storage_gb = 120
+        reserve_gb = 50
+        """.utf8)
+        let external = Data((String(decoding: source, as: UTF8.self) + "\n# external edit\n").utf8)
+        let harness = try ConfigStoreHarness.make(mode: 0o600, sourceData: source, externalWriteDuringValidation: external)
+        defer { harness.cleanup() }
+        let expected = AutopilotDownloadPolicy(enabled: true, maxStorageGB: 120, reserveGB: 50)
+        let desired = AutopilotDownloadPolicy(enabled: false, maxStorageGB: 120, reserveGB: 50)
+        await #expect(throws: ProviderConfigError.changedExternally) {
+            try await harness.store.saveAutopilotDownloads(expected: expected, desired: desired)
+        }
+        #expect(try Data(contentsOf: harness.configURL) == external)
+        #expect(!FileManager.default.fileExists(atPath: harness.backupURL.path))
+    }
     @Test("Autopilot policy save refuses a competing edit during validation")
     func autopilotPolicyConflictDuringValidation() async throws {
         let source = Data("""

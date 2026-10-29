@@ -47,8 +47,10 @@ and the installed CLI's read-only help and status output.
   implementation used this CLI path; its readback checks covered selected
   policies but did not prove preservation of arbitrary unknown fields.
   The current CLI source also uses `ConfigManager.save` for Autopilot download
-  limits and encrypted cache edits, so those newer Bloomy controls share this
-  preservation concern even though their own settings are read back.
+  limits and encrypted cache edits. Download controls now use a preserving
+  transaction qualified for 0.10.4, with real-CLI disposable-file and conflict
+  tests. Cache edits still share the preservation concern even though their own
+  settings are read back.
   Pause, resume and disable now use a targeted policy writer qualified for CLI
   0.10.4; other versions are refused with a clear message until qualified. The
   complete client path passed disposable-config tests against the real CLI for

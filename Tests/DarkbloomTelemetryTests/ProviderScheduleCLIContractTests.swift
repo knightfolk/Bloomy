@@ -6,6 +6,81 @@ import Testing
 /// configuration files are touched; no provider lifecycle action is issued.
 @Suite("Provider schedule CLI contract")
 struct ProviderScheduleCLIContractTests {
+    @Test("download controls preserve unfamiliar settings with the qualified CLI", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
+    func downloadsClientContract() async throws {
+        let cli = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"]))
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("BloomyDownloadsClient-\(UUID().uuidString)")
+        let directory = home.appendingPathComponent(".config/darkbloom")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: home) }
+        let url = directory.appendingPathComponent("provider.toml")
+        try Data("""
+        [provider]
+        name = "Synthetic downloads client"
+        auto_update = false
+        [backend]
+        enabled_models = []
+        preload_models = []
+        future_setting = 73
+        [backend.autopilot_downloads]
+        enabled = true
+        max_storage_gb = 120
+        max_models = 3
+        reserve_gb = 50
+        [future_section]
+        keep = "untouched"
+        """.utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let policy = DarkbloomSourcePolicy(homeDirectory: home, environmentPath: cli.deletingLastPathComponent().path)
+        let client = ProviderExtrasClient(policy: policy, runner: CappedProcessRunner())
+        let initial = AutopilotDownloadPolicy(enabled: true, maxStorageGB: 120, maxModels: 3, reserveGB: 50)
+        let disabled = AutopilotDownloadPolicy(enabled: false, maxStorageGB: 120, maxModels: 3, reserveGB: 50)
+        let limited = AutopilotDownloadPolicy(enabled: true, maxStorageGB: 80, reserveGB: 50)
+        try await client.setAutopilotDownloads(expected: initial, desired: disabled)
+        try await client.setAutopilotDownloads(expected: disabled, desired: limited)
+        #expect(await client.refreshAutopilot().value?.downloads == limited)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        #expect(text.contains("future_setting = 73") && text.contains("[future_section]\nkeep = \"untouched\""))
+    }
+    @Test("preserving download limits are accepted by Darkbloom", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
+    func downloadsContract() async throws {
+        let executable = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"]))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("BloomyDownloadsContract-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("provider.toml")
+        try Data("""
+        [provider]
+        name = "Synthetic downloads contract"
+        auto_update = false
+        [backend]
+        enabled_models = []
+        preload_models = []
+        future_setting = 73
+        [backend.autopilot_downloads]
+        enabled = true
+        max_storage_gb = 120
+        max_models = 3
+        reserve_gb = 50
+        [future_section]
+        keep = "untouched"
+        """.utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let runner = CappedProcessRunner()
+        let store = LocalProviderConfigStore(configURL: url, executable: executable, runner: runner)
+        let command = ProviderExtrasCommand.autopilotStatus(executable: executable, config: url)
+        let initial = AutopilotDownloadPolicy(enabled: true, maxStorageGB: 120, maxModels: 3, reserveGB: 50)
+        let disabled = AutopilotDownloadPolicy(enabled: false, maxStorageGB: 120, maxModels: 3, reserveGB: 50)
+        let limited = AutopilotDownloadPolicy(enabled: true, maxStorageGB: 80, reserveGB: 50)
+        try await store.saveAutopilotDownloads(expected: initial, desired: disabled)
+        var result = try await runner.run(command, timeout: .seconds(15), outputLimit: 262_144, onOutput: nil)
+        #expect(try ProviderExtrasParser.parseAutopilot(result.standardOutput).downloads == disabled)
+        try await store.saveAutopilotDownloads(expected: disabled, desired: limited)
+        result = try await runner.run(command, timeout: .seconds(15), outputLimit: 262_144, onOutput: nil)
+        #expect(try ProviderExtrasParser.parseAutopilot(result.standardOutput).downloads == limited)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        #expect(text.contains("future_setting = 73") && text.contains("[future_section]\nkeep = \"untouched\""))
+    }
     @Test("Autopilot controls use preserving writes with the qualified CLI", .enabled(if: ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"] != nil))
     func autopilotClientContract() async throws {
         let cli = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["BLOOMY_SCHEDULE_TEST_CLI"]))

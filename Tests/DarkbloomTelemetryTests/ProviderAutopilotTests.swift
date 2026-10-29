@@ -65,8 +65,13 @@ struct ProviderAutopilotTests {
     func downloadMutation() async throws {
         let current = AutopilotDownloadPolicy(enabled: true, maxStorageGB: 120, maxModels: 3, reserveGB: 50)
         let desired = AutopilotDownloadPolicy(enabled: false, maxStorageGB: 120, maxModels: 3, reserveGB: 50)
-        let runner = DownloadPolicyRunner(policy: current)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let configDir = root.appendingPathComponent(".config/darkbloom")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = configDir.appendingPathComponent("provider.toml")
+        try Data("[backend]\nenabled_models=[]\npreload_models=[]\n[backend.autopilot_downloads]\nenabled=true\nmax_storage_gb=120\nmax_models=3\nreserve_gb=50\n".utf8).write(to: config)
+        let runner = DownloadPolicyRunner(policy: current, config: config)
         let client = ProviderExtrasClient(policy: DarkbloomSourcePolicy(homeDirectory: root, environmentPath: ""),
             runner: runner, now: Date.init, testOnlyExecutable: URL(fileURLWithPath: "/fixture/darkbloom"))
         try await client.setAutopilotDownloads(expected: current, desired: desired)
@@ -409,11 +414,33 @@ private actor DownloadPolicyRunner: ProcessExecuting {
     var policy: AutopilotDownloadPolicy
     var writes = 0
     private var ignoreWrite = false
+    private var staleReadback = false
+    private let config: URL
     func ignoreNextWrite() { ignoreWrite = true }
-    init(policy: AutopilotDownloadPolicy) { self.policy = policy }
+    init(policy: AutopilotDownloadPolicy, config: URL) { self.policy = policy; self.config = config }
     func run(_ command: ProcessCommand, timeout: Duration, outputLimit: Int,
              onOutput: (@Sendable (ProcessOutputChunk) -> Void)?) async throws -> CommandResult {
+        if command.arguments == ["--version"] {
+            return CommandResult(exitCode: 0, standardOutput: Data("0.10.4\n".utf8), standardError: Data())
+        }
+        if command.arguments.first == "status" {
+            writes += 1
+            if ignoreWrite { ignoreWrite = false; staleReadback = true }
+            return CommandResult(exitCode: 0, standardOutput: Data(), standardError: Data())
+        }
         if command.arguments.prefix(2) == ["autopilot", "status"] {
+            if staleReadback { staleReadback = false }
+            else {
+                let text = try String(contentsOf: config, encoding: .utf8)
+                func value(_ key: String) -> String? {
+                    text.components(separatedBy: .newlines).compactMap { line in
+                        let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                        return parts.count == 2 && parts[0] == key ? parts[1] : nil
+                    }.last
+                }
+                policy = .init(enabled: value("enabled") != "false", maxStorageGB: value("max_storage_gb").flatMap(UInt64.init),
+                               maxModels: value("max_models").flatMap(UInt64.init), reserveGB: value("reserve_gb").flatMap(UInt64.init))
+            }
             var payload = try #require(JSONSerialization.jsonObject(with: autopilotJSON(enabled: true)) as? [String: Any])
             var downloads: [String: Any] = ["enabled": policy.enabled]
             if let value = policy.maxStorageGB { downloads["max_storage_gb"] = value }
@@ -422,21 +449,7 @@ private actor DownloadPolicyRunner: ProcessExecuting {
             payload["downloads"] = downloads
             return CommandResult(exitCode: 0, standardOutput: try JSONSerialization.data(withJSONObject: payload), standardError: Data())
         }
-        guard command.arguments.prefix(2) == ["autopilot", "downloads"], command.arguments.count >= 3 else { throw ProviderExtrasMutationError.commandFailed }
-        writes += 1
-        if ignoreWrite { ignoreWrite = false; return CommandResult(exitCode: 0, standardOutput: Data(), standardError: Data()) }
-        if command.arguments[2] == "disable" {
-            policy = AutopilotDownloadPolicy(enabled: false, maxStorageGB: policy.maxStorageGB,
-                                             maxModels: policy.maxModels, reserveGB: policy.reserveGB)
-        } else {
-            func value(_ flag: String) -> UInt64? {
-                guard let index = command.arguments.firstIndex(of: flag), index + 1 < command.arguments.count else { return nil }
-                return UInt64(command.arguments[index + 1])
-            }
-            policy = AutopilotDownloadPolicy(enabled: true, maxStorageGB: value("--max-storage-gb"),
-                                             maxModels: value("--max-models"), reserveGB: policy.reserveGB)
-        }
-        return CommandResult(exitCode: 0, standardOutput: Data(), standardError: Data())
+        throw ProviderExtrasMutationError.commandFailed
     }
 }
 

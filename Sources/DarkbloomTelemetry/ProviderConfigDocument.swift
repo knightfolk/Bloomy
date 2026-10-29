@@ -80,6 +80,51 @@ public struct ProviderConfigDocument: Equatable, Sendable {
         return result
     }
 
+    static func renderingAutopilotDownloads(expected: AutopilotDownloadPolicy,
+                                            desired: AutopilotDownloadPolicy, in data: Data) throws -> Data {
+        guard data.count <= 1_048_576, String(data: data, encoding: .utf8) != nil,
+              desired.reserveGB == expected.reserveGB,
+              (!desired.enabled || (desired.maxStorageGB != 0 && desired.maxModels != 0)),
+              desired.enabled || (desired.maxStorageGB == expected.maxStorageGB && desired.maxModels == expected.maxModels) else {
+            throw ProviderConfigError.validationFailed("Download settings are invalid")
+        }
+        var scanner = ProviderConfigScanner(data: data)
+        let fields = try scanner.autopilotDownloadRanges()
+        guard fields.policy == expected else { throw ProviderConfigError.changedExternally }
+        guard expected != desired else { return data }
+        let newline = Self.detectLineEnding(in: data)
+        var edits: [(Range<Int>, Data)] = []
+        var inserted: [String] = []
+        if let value = fields.enabled { edits.append((value.range, Data(String(desired.enabled).utf8))) }
+        else { inserted.append("enabled = \(desired.enabled)") }
+        for (key, old, value) in [("max_storage_gb", fields.storage, desired.maxStorageGB), ("max_models", fields.models, desired.maxModels)] {
+            if old?.value == value { continue }
+            if let value {
+                if let old { edits.append((old.valueRange, Data(String(value).utf8))) }
+                else { inserted.append("\(key) = \(value)") }
+            } else if let old {
+                guard !old.hasComment else { throw ProviderConfigError.validationFailed("A download limit comment cannot be preserved") }
+                edits.append((old.statementRange, Data()))
+            }
+        }
+        var result = data
+        if let header = fields.headerEnd, !inserted.isEmpty {
+            let prefix = header == data.count && data.last != 10 && data.last != 13 ? newline : ""
+            edits.append((header..<header, Data((prefix + inserted.joined(separator: newline) + newline).utf8)))
+        }
+        for (range, replacement) in edits.sorted(by: {
+            $0.0.lowerBound == $1.0.lowerBound ? $0.0.upperBound > $1.0.upperBound : $0.0.lowerBound > $1.0.lowerBound
+        }) { result.replaceSubrange(range, with: replacement) }
+        if fields.headerEnd == nil {
+            var suffix = (!result.isEmpty && result.last != 10 && result.last != 13) ? newline : ""
+            suffix += "[backend.autopilot_downloads]\(newline)" + inserted.joined(separator: newline) + newline
+            result.append(contentsOf: suffix.utf8)
+        }
+        var verify = ProviderConfigScanner(data: result)
+        guard try verify.autopilotDownloadRanges().policy == desired else { throw ProviderConfigError.validationFailed("Download settings could not be verified") }
+        return result
+    }
+
     /// Replace only recognized schedule statements; leave every other byte in
     /// place. Unsupported window fields or inline comments prevent a rewrite.
     public static func renderingSchedule(_ schedule: ProviderSchedule, in data: Data) throws -> Data {
@@ -404,6 +449,83 @@ private struct ProviderConfigScanner {
         let revisionValue: String
         let selectedModels: [String]
         let pinnedModels: [String]
+    }
+
+    fileprivate struct DownloadInteger {
+        let value: UInt64
+        let valueRange: Range<Int>
+        let statementRange: Range<Int>
+        let hasComment: Bool
+    }
+
+    fileprivate struct AutopilotDownloadRanges {
+        var headerEnd: Int?
+        var enabled: ProviderConfigBoolean?
+        var storage: DownloadInteger?
+        var models: DownloadInteger?
+        var reserve: DownloadInteger?
+        var policy: AutopilotDownloadPolicy {
+            .init(enabled: enabled?.value ?? true, maxStorageGB: storage?.value,
+                  maxModels: models?.value, reserveGB: reserve?.value)
+        }
+    }
+
+    fileprivate mutating func autopilotDownloadRanges() throws -> AutopilotDownloadRanges {
+        enum Scope { case other, backend, downloads }
+        let failure = ProviderConfigError.validationFailed("Download settings cannot be safely edited")
+        var result = AutopilotDownloadRanges()
+        var scope = Scope.other
+        while true {
+            skipStatementTrivia()
+            guard index < bytes.count else { break }
+            let start = index
+            if bytes[index] == Self.openBracket {
+                let end = skipStatement(from: start)
+                let raw = String(decoding: bytes[start..<end], as: UTF8.self)
+                let header = (raw.split(separator: "#", maxSplits: 1).first.map(String.init) ?? "").filter { !$0.isWhitespace }
+                if header == "[backend.autopilot_downloads]" {
+                    guard result.headerEnd == nil else { throw failure }
+                    result.headerEnd = end; scope = .downloads
+                } else {
+                    if header.contains("autopilot_downloads") { throw failure }
+                    scope = header == "[backend]" ? .backend : .other
+                }
+                index = end; continue
+            }
+            guard let key = parseBareKey() else {
+                if scope == .downloads || scope == .backend { throw failure }
+                index = skipStatement(from: start); continue
+            }
+            skipHorizontalWhitespace()
+            guard index < bytes.count, bytes[index] == Self.equals else {
+                if scope == .downloads || (scope == .backend && key == "autopilot_downloads") || key == "backend" { throw failure }
+                index = skipStatement(from: start); continue
+            }
+            index += 1
+            if scope == .backend && key == "autopilot_downloads" { throw failure }
+            guard scope == .downloads else { index = skipStatement(from: index); continue }
+            skipHorizontalWhitespace()
+            if key == "enabled" {
+                guard result.enabled == nil else { throw failure }
+                result.enabled = try parseBoolean(key: key)
+                try consumeTargetStatementRemainder(booleanKey: key)
+            } else if ["max_storage_gb", "max_models", "reserve_gb"].contains(key) {
+                guard (key != "max_storage_gb" || result.storage == nil), (key != "max_models" || result.models == nil), (key != "reserve_gb" || result.reserve == nil) else { throw failure }
+                let valueStart = index
+                while index < bytes.count && ((48...57).contains(bytes[index]) || bytes[index] == 95) { index += 1 }
+                let raw = String(decoding: bytes[valueStart..<index], as: UTF8.self)
+                guard !raw.isEmpty, !raw.hasPrefix("_"), !raw.hasSuffix("_"), !raw.contains("__"),
+                      let value = UInt64(raw.replacingOccurrences(of: "_", with: "")) else { throw failure }
+                let valueEnd = index
+                try consumeTargetStatementRemainder(integerKey: key)
+                let field = DownloadInteger(value: value, valueRange: valueStart..<valueEnd,
+                    statementRange: start..<index, hasComment: bytes[start..<index].contains(Self.comment))
+                if key == "max_storage_gb" { result.storage = field }
+                else if key == "max_models" { result.models = field }
+                else { result.reserve = field }
+            } else { index = skipStatement(from: index) }
+        }
+        return result
     }
 
     fileprivate mutating func autopilotPolicyRanges() throws -> AutopilotPolicyRanges {
