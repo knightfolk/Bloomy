@@ -41,9 +41,14 @@ and the installed CLI's read-only help and status output.
   waiting but has no schedule editor. The supported CLI editor is interactive;
   the 0.10.4 desktop API supports editing with a configuration revision, but
   saves name, automatic updates, and idle timeout alongside the schedule. Its
-  authenticated service writes a shared discovery file. Integrating it requires
-  preserving those fields and the existing service lifecycle. Saved changes
-  require a provider restart. No schedule changes were made during the audit.
+  authenticated service supports an isolated discovery directory. A 0.10.4
+  disposable-config probe confirmed that the API saves an overnight schedule
+  and rejects an outdated configuration revision, but also drops an unknown
+  backend key and an unknown table when saving. Do not use that save path on
+  the operator's config without a preservation solution. Bloomy's existing
+  targeted, validated configuration writer is a possible alternative, subject
+  to schedule parsing and concurrency tests. Saved changes require a provider
+  restart. No live schedule changes were made during the audit.
 - Autopilot model pins: Bloomy displays saved pins and labels stale readings;
   pin and unpin controls are not yet exposed. The upstream desktop app checks selected models, available slots,
   and estimated memory before pinning; these safeguards need to be carried into
