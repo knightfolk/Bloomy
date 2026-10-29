@@ -256,14 +256,23 @@ final class ProviderSettingsDraftState: ObservableObject {
     @Published var cacheExpected: ProviderCacheStatus?
     @Published var cacheDirectory = ""
     @Published var cacheDaily = ""
+    @Published var downloadExpected: AutopilotDownloadPolicy?
+    @Published var downloadStorage = ""
+    @Published var downloadCount = ""
     @Published private(set) var fanPreset: FanPreset?
     @Published private(set) var fanSaveAwaitingConfirmation = false
     private var pendingFanSave: (revision: UInt64, policy: ProviderFanPolicy, requiresEnabled: Bool)?
     private(set) var idleRevision: UInt64 = 0
     private(set) var fanRevision: UInt64 = 0
 
-    var hasChanges: Bool { idleDirty || fanDirty || cacheDirty }
-    var hasOtherChangesForCache: Bool { idleDirty || fanDirty }
+    var downloadDirty: Bool {
+        guard let expected = downloadExpected else { return false }
+        return downloadStorage != (expected.maxStorageGB.map(String.init) ?? "")
+            || downloadCount != (expected.maxModels.map(String.init) ?? "")
+    }
+    var hasChanges: Bool { idleDirty || fanDirty || cacheDirty || downloadDirty }
+    var hasOtherChangesForCache: Bool { idleDirty || fanDirty || downloadDirty }
+    var hasOtherChangesForDownloads: Bool { idleDirty || fanDirty || cacheDirty }
     func setCacheDirty(_ value: Bool) { cacheDirty = value }
 
     func editIdle(_ text: String) {

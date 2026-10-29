@@ -105,9 +105,6 @@ struct ProviderAutopilotSettingsView: View {
     @ObservedObject var draft: ProviderSettingsDraftState
     var compactActions = false
     @State private var showsConsent = false
-    @State private var downloadDraft: AutopilotDownloadPolicy?
-    @State private var downloadStorage = ""
-    @State private var downloadCount = ""
     @State private var showsLeaveConfirmation = false
     @State private var isSubmitting = false
     @State private var feedback: String?
@@ -139,7 +136,7 @@ struct ProviderAutopilotSettingsView: View {
             }
         }
         .sheet(isPresented: $showsConsent) { consentSheet }
-        .sheet(isPresented: Binding(get: { downloadDraft != nil }, set: { if !$0 { downloadDraft = nil } })) { downloadSheet }
+        .sheet(isPresented: Binding(get: { draft.downloadExpected != nil }, set: { if !$0 && !draft.downloadDirty && !isSubmitting { draft.downloadExpected = nil } })) { downloadSheet }
         .alert("Leave Autopilot?", isPresented: $showsLeaveConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Leave Autopilot") { submit(.disable) }
@@ -176,9 +173,10 @@ struct ProviderAutopilotSettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Button("Manage automatic downloads…") {
-                        downloadStorage = downloads.maxStorageGB.map(String.init) ?? ""
-                        downloadCount = downloads.maxModels.map(String.init) ?? ""
-                        downloadDraft = downloads
+                        feedback = nil
+                        draft.downloadStorage = downloads.maxStorageGB.map(String.init) ?? ""
+                        draft.downloadCount = downloads.maxModels.map(String.init) ?? ""
+                        draft.downloadExpected = downloads
                     }
                     .disabled(!presentation.isFresh || isBusy || hasUnsavedSettings)
                     .accessibilityIdentifier("settings.autopilot.downloads.manage")
@@ -237,7 +235,7 @@ struct ProviderAutopilotSettingsView: View {
             guard let number = UInt64(value), number > 0 else { return nil }
             return .some(number)
         }
-        guard let storage = parse(downloadStorage), let models = parse(downloadCount) else { return nil }
+        guard let storage = parse(draft.downloadStorage), let models = parse(draft.downloadCount) else { return nil }
         return (storage, models)
     }
 
@@ -247,41 +245,46 @@ struct ProviderAutopilotSettingsView: View {
             Text("While enrolled, Darkbloom may download catalog models. Existing downloads stay on disk when this is turned off; an accepted download may finish.")
                 .fixedSize(horizontal: false, vertical: true)
             Text("Storage limit (GiB)").font(.callout)
-            TextField("No limit", text: $downloadStorage)
+            TextField("No limit", text: $draft.downloadStorage).disabled(isSubmitting)
                 .accessibilityLabel("Storage limit in GiB")
                 .accessibilityIdentifier("settings.autopilot.downloads.storage")
             Text("Model count limit").font(.callout)
-            TextField("No limit", text: $downloadCount)
+            TextField("No limit", text: $draft.downloadCount).disabled(isSubmitting)
                 .accessibilityLabel("Model count limit")
                 .accessibilityIdentifier("settings.autopilot.downloads.count")
             Text("Use whole numbers of at least 1. Leave a field blank for no limit. Enabling replaces both limits.")
                 .font(.caption).foregroundStyle(.secondary)
             if validDownloadLimits == nil { Text("Enter a positive whole number or leave the field blank.").foregroundStyle(.orange) }
+            if let feedback { Text(feedback).font(.caption).foregroundStyle(.secondary) }
+            if !evidence.isFresh {
+                Button("Refresh Autopilot") { Task { await store.refreshAutopilot() } }
+                    .disabled(isBusy || store.isRefreshing)
+            }
             Spacer()
             HStack {
-                Button("Cancel") { downloadDraft = nil }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { draft.downloadExpected = nil }.keyboardShortcut(.cancelAction).disabled(isSubmitting)
                 Spacer()
-                if downloadDraft?.enabled == true {
+                if draft.downloadExpected?.enabled == true {
                     Button("Turn off") { submitDownloads(enabled: false) }
-                        .disabled(isBusy || !evidence.isFresh || hasUnsavedSettings)
+                        .disabled(isBusy || !evidence.isFresh || draft.hasOtherChangesForDownloads)
                 }
                 Button("Save and turn on") { submitDownloads(enabled: true) }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isBusy || !evidence.isFresh || hasUnsavedSettings || validDownloadLimits == nil)
+                    .disabled(isBusy || !evidence.isFresh || draft.hasOtherChangesForDownloads || validDownloadLimits == nil)
             }
         }
         .padding(24).frame(width: 480, height: 390)
+        .interactiveDismissDisabled(draft.downloadDirty || isSubmitting)
         .accessibilityIdentifier("settings.autopilot.downloads.sheet")
     }
 
     private func submitDownloads(enabled: Bool) {
-        guard let expected = downloadDraft, evidence.isFresh, !isBusy, !hasUnsavedSettings else { return }
+        guard let expected = draft.downloadExpected, evidence.isFresh, !isBusy, !draft.hasOtherChangesForDownloads else { return }
         guard !enabled || validDownloadLimits != nil else { return }
         let limits = enabled ? validDownloadLimits : (expected.maxStorageGB, expected.maxModels)
         guard let limits else { return }
         let desired = AutopilotDownloadPolicy(enabled: enabled, maxStorageGB: limits.0,
                                                maxModels: limits.1, reserveGB: expected.reserveGB)
-        downloadDraft = nil
         isSubmitting = true
         feedback = nil
         Task { @MainActor in
@@ -289,6 +292,7 @@ struct ProviderAutopilotSettingsView: View {
                 try await store.setAutopilotDownloads(expected: expected, desired: desired)
             }
             isSubmitting = false
+            if confirmed { draft.downloadExpected = nil }
             feedback = confirmed ? "Download settings saved. The provider applies them at its next policy refresh."
                 : "Download settings could not be confirmed. Refresh before trying again."
         }

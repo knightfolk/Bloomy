@@ -31,6 +31,22 @@ struct ProviderAutopilotPresentationTests {
         #expect(view.enrollmentReason != nil)
     }
 
+    @Test("download edits remain in the shared draft and block other settings")
+    func downloadDraftProtection() {
+        let draft = ProviderSettingsDraftState()
+        draft.downloadExpected = .init(enabled: true, maxStorageGB: 10, maxModels: 2, reserveGB: nil)
+        draft.downloadStorage = "10"
+        draft.downloadCount = "2"
+        #expect(!draft.hasChanges)
+        draft.downloadStorage = "20"
+        #expect(draft.downloadDirty)
+        #expect(draft.hasChanges)
+        #expect(draft.hasOtherChangesForCache)
+        #expect(!draft.hasOtherChangesForDownloads)
+        draft.downloadExpected = nil
+        #expect(!draft.hasChanges)
+    }
+
     private func status(enabled: Bool = true, consent: Bool = true, paused: Bool = false,
                         livePaused: Bool = false, active: Bool = false, observeOnly: Bool = true,
                         matches: Bool = true, phase: ProviderAutopilotPhase? = .shadow,

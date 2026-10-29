@@ -37,6 +37,17 @@ and the installed CLI's read-only help and status output.
   Changes are labeled restart-required and leave old files in place. Tests and
   an isolated native fixture cover the main paths; actual-provider writes and
   installed-app review remain outstanding.
+- Weekly availability schedules: introduced in 0.9.15. Bloomy reports scheduled
+  waiting but has no schedule editor. The supported CLI editor is interactive;
+  the 0.10.4 desktop API supports editing with a configuration revision, but
+  saves name, automatic updates, and idle timeout alongside the schedule. Its
+  authenticated service writes a shared discovery file. Integrating it requires
+  preserving those fields and the existing service lifecycle. Saved changes
+  require a provider restart. No schedule changes were made during the audit.
+- Autopilot model pins: the CLI exposes pin and unpin, but Bloomy does not yet
+  expose them. The upstream desktop app checks selected models, available slots,
+  and estimated memory before pinning; these safeguards need to be carried into
+  any implementation. No pins were changed during the audit.
 - Add-on holds can leave the provider connected while inference is paused.
   Bloomy now recognizes held, draining and unrecognized hold states without
   retaining add-on identifiers, blocks idle-driven work and live model apply,
