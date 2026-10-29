@@ -7,6 +7,25 @@ import Testing
 @Suite("Settings draft retention", .serialized)
 @MainActor
 struct SettingsDraftRetentionTests {
+    @Test("schedule edits remain protected when the settings window closes")
+    func scheduleDraftBlocksUpdate() async throws {
+        let fixture = try SettingsUpdateGuardFixture()
+        defer { fixture.close() }
+        fixture.status.showSettings(page: .provider, activate: false)
+        let dashboard = try #require(fixture.status.dashboardWindowController)
+        let draft = dashboard.settingsDraft
+        let original = ProviderSchedule(enabled: false, windows: [])
+        draft.scheduleExpected = .init(schedule: original)
+        draft.scheduleEdit = .init(enabled: true, windows: [.init(days: [.monday], start: "09:00", end: "17:00")])
+        #expect(draft.scheduleDirty)
+        #expect(!fixture.delegate.canRelaunchForAppUpdate())
+        dashboard.close()
+        #expect(!fixture.delegate.canRelaunchForAppUpdate())
+        #expect(draft.scheduleEdit.windows.count == 1)
+        draft.scheduleExpected = nil
+        #expect(fixture.delegate.canRelaunchForAppUpdate())
+        await fixture.monitor.stop()
+    }
     @Test("retained idle and fan edits independently block the production update guard until saved", arguments: [false, true])
     func retainedSettingsBlockAppUpdate(fan: Bool) async throws {
         let fixture = try SettingsUpdateGuardFixture()

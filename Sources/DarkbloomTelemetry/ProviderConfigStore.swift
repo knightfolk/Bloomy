@@ -2,9 +2,15 @@ import CryptoKit
 import Darwin
 import Foundation
 
-public struct ProviderScheduleDraft: Sendable {
+public struct ProviderScheduleDraft: Equatable, Sendable {
     public let schedule: ProviderSchedule
-    fileprivate let sourceFileState: ProviderConfigFileState
+    fileprivate let sourceFileState: ProviderConfigFileState?
+
+    /// Synthetic drafts cannot authorize writes to an on-disk configuration.
+    public init(schedule: ProviderSchedule) { self.schedule = schedule; self.sourceFileState = nil }
+    fileprivate init(schedule: ProviderSchedule, sourceFileState: ProviderConfigFileState) {
+        self.schedule = schedule; self.sourceFileState = sourceFileState
+    }
 }
 
 public struct ProviderConfigDraft: Equatable, Sendable {
@@ -228,7 +234,7 @@ public actor LocalProviderConfigStore: ProviderConfigManaging {
 
     public func saveSchedule(_ schedule: ProviderSchedule, expected: ProviderScheduleDraft) async throws -> ProviderScheduleDraft {
         let current = try await readLockedSnapshot(lockFlag: O_SHLOCK)
-        guard current.state == expected.sourceFileState else { throw ProviderConfigError.changedExternally }
+        guard let state = expected.sourceFileState, current.state == state else { throw ProviderConfigError.changedExternally }
         let data = try ProviderConfigDocument.renderingSchedule(schedule, in: current.data)
         if data == current.data { return expected }
         let published = try await publishValidated(data, expectedState: current.state)

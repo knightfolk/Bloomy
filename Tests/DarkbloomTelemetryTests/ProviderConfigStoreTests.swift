@@ -35,6 +35,18 @@ struct ProviderConfigStoreTests {
         #expect(!FileManager.default.fileExists(atPath: harness.backupURL.path))
     }
 
+    @Test("a synthetic schedule draft cannot authorize a file write")
+    func syntheticScheduleCannotWrite() async throws {
+        let harness = try ConfigStoreHarness.make(mode: 0o600)
+        defer { harness.cleanup() }
+        let fake = ProviderScheduleDraft(schedule: .init(enabled: false, windows: []))
+        let desired = ProviderSchedule(enabled: true, windows: [.init(days: [.monday], start: "08:00", end: "09:00")])
+        await #expect(throws: ProviderConfigError.changedExternally) {
+            try await harness.store.saveSchedule(desired, expected: fake)
+        }
+        #expect(try Data(contentsOf: harness.configURL) == harness.originalData)
+    }
+
     @Test("schedule is read from the locked configuration without writing")
     func readsScheduleWithoutMutation() async throws {
         let source = Data("""

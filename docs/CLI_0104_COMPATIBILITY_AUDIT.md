@@ -58,8 +58,10 @@ and the installed CLI's read-only help and status output.
   status from a locked read. A schedule writer now stages only recognized
   schedule statements through the guarded configuration transaction, preserving
   unrelated fields and refusing windows with unknown fields or inline comments.
-  The editor and real-provider write verification are not yet connected. No
-  live schedule changes were made during the audit.
+  Provider settings now include an editor with retained drafts, stale-file
+  rejection and readback. An isolated native fixture exercised a save and an
+  invalid time. Real-provider write verification and installed-app review remain
+  outstanding. No live schedule changes were made during the audit.
 - Autopilot model pins: Bloomy displays saved pins and labels stale readings;
   pin and unpin controls are not yet exposed. The upstream desktop app checks selected models, available slots,
   and estimated memory before pinning; these safeguards need to be carried into

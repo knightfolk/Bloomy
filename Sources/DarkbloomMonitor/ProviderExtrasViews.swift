@@ -259,6 +259,8 @@ final class ProviderSettingsDraftState: ObservableObject {
     @Published var downloadExpected: AutopilotDownloadPolicy?
     @Published var downloadStorage = ""
     @Published var downloadCount = ""
+    @Published var scheduleExpected: ProviderScheduleDraft?
+    @Published var scheduleEdit = ProviderSchedule(enabled: false, windows: [])
     @Published private(set) var fanPreset: FanPreset?
     @Published private(set) var fanSaveAwaitingConfirmation = false
     private var pendingFanSave: (revision: UInt64, policy: ProviderFanPolicy, requiresEnabled: Bool)?
@@ -270,9 +272,11 @@ final class ProviderSettingsDraftState: ObservableObject {
         return downloadStorage != (expected.maxStorageGB.map(String.init) ?? "")
             || downloadCount != (expected.maxModels.map(String.init) ?? "")
     }
-    var hasChanges: Bool { idleDirty || fanDirty || cacheDirty || downloadDirty }
-    var hasOtherChangesForCache: Bool { idleDirty || fanDirty || downloadDirty }
-    var hasOtherChangesForDownloads: Bool { idleDirty || fanDirty || cacheDirty }
+    var scheduleDirty: Bool { scheduleExpected.map { $0.schedule != scheduleEdit } ?? false }
+    var hasChanges: Bool { idleDirty || fanDirty || cacheDirty || downloadDirty || scheduleDirty }
+    var hasOtherChangesForCache: Bool { idleDirty || fanDirty || downloadDirty || scheduleDirty }
+    var hasOtherChangesForDownloads: Bool { idleDirty || fanDirty || cacheDirty || scheduleDirty }
+    var hasOtherChangesForSchedule: Bool { idleDirty || fanDirty || cacheDirty || downloadDirty }
     func setCacheDirty(_ value: Bool) { cacheDirty = value }
 
     func editIdle(_ text: String) {
