@@ -67,6 +67,26 @@ struct TelemetryTests {
         #expect(malformed.coordinatorConnected == nil && malformed.coordinatorConnectionIsUnrecognized)
     }
 
+    @Test("add-on holds are bounded and do not retain private labels")
+    func addonHoldTelemetry() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: fixture("daemon-state-online", extension: "json")) as? [String: Any])
+        func parsed() throws -> DaemonState { try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: json)) }
+        #expect(try parsed().addonHold == nil)
+        json["addon_hold"] = ["holds": []]
+        #expect(try parsed().addonHold == ProviderAddonHold.none)
+        #expect(!(try parsed().hasPendingWorkOrTransition))
+        json["addon_hold"] = ["holds": [["state": "held", "addon": "PRIVATE_CANARY"]]]
+        let held = try parsed()
+        #expect(held.addonHold == .held && held.hasPendingWorkOrTransition)
+        #expect(!String(describing: held).contains("PRIVATE_CANARY"))
+        json["addon_hold"] = ["holds": [["state": "held"], ["state": "draining"]]]
+        #expect(try parsed().addonHold == .draining)
+        json["addon_hold"] = ["holds": [["state": "future_state"]]]
+        #expect(try parsed().addonHold == .unrecognized)
+        json["addon_hold"] = ["holds": "invalid"]
+        #expect(try parsed().addonHold == .unrecognized)
+    }
+
     @Test("loaded models remain distinct from warm models")
     func parsesLoadedModels() throws {
         let data = try fixture("loaded-models", extension: "json")

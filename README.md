@@ -294,7 +294,9 @@ macOS exposes it; it includes other apps and is not attributed to Darkbloom.
 During normal serving, the request indicator shows `1+` when inference is active
 or the provider reports accepted or queued work; the exact live count is not
 reported. Model loading is shown separately. During native drain, it shows the
-reported accepted requests remaining.
+reported accepted requests remaining. An add-on hold is shown as a pause even
+when the provider remains connected; Bloomy waits for the hold to end before
+idle-triggered actions or applying a model selection live.
 
 Encrypted inference-cache settings are available in Settings → Provider. Bloomy
 shows the saved directory and daily write limit, and can save a different limit,

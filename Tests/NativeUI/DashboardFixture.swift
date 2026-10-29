@@ -44,6 +44,7 @@ private enum FixtureReadinessMode: String, CaseIterable, Sendable {
     case scenario = "Scenario observation"
     case idle = "Ready and idle", working = "Active inference"
     case pending = "Accepted or queued work", disconnected = "Coordinator disconnected"
+    case addonHeld = "Add-on hold", addonDraining = "Add-on draining"
     case scheduled = "Scheduled waiting", draining = "Finishing accepted work"
     case stopped = "Provider stopped", expired = "Expired authorization"
     case cold = "Models on demand", unknown = "Unknown lifecycle phase"
@@ -211,7 +212,8 @@ private enum FixtureData {
             startupPreloadPendingModels: mode == .preloading ? [modelIDs[1]] : nil,
             modelSwitch: mode == .validating ? .init(outcome: .validating, models: [modelIDs[1]]) : nil,
             availability: mode == .scheduled ? .init(phase: .waitingForSchedule) : nil,
-            requestWorkPending: mode == .pending, coordinatorConnected: mode != .disconnected)
+            requestWorkPending: mode == .pending || mode == .addonDraining, coordinatorConnected: mode != .disconnected,
+            addonHold: mode == .addonHeld ? .held : mode == .addonDraining ? .draining : ProviderAddonHold.none)
         var status = StatusSnapshot()
         status.version = "0.9.17"
         status.coordinator = "https://coordinator.example:8443"
@@ -963,7 +965,8 @@ private actor FixtureAutopilot {
             pinnedModels: [], configuredRevision: "fixture",
             live: enabled ? .init(protocolVersion: 3, enabled: true, active: mode == .active,
                 observeOnly: mode == .shadow, paused: mode == .paused, cachedOnly: true,
-                revision: mode == .mismatch ? "old" : "fixture") : nil,
+                revision: mode == .mismatch ? "old" : "fixture",
+                busyReasons: mode == .active ? [.acceptedWork, .modelChange] : []) : nil,
             phase: mode == .active ? .active : mode == .paused ? .paused : mode == .waiting ? .waiting : .shadow,
             downloads: downloadPolicy),
             capturedAt: Date())

@@ -137,6 +137,17 @@ struct ProviderReadinessTests {
         #expect(present(state(active: true, pending: true)).title == "Serving now")
     }
 
+    @Test("add-on holds do not claim serving readiness")
+    func addonHold() {
+        let held = present(state(hold: .held))
+        #expect(held.state == .busy && held.title == "Paused by an add-on")
+        #expect(held.evidence.first { $0.id == .work }?.value == "Paused by add-on")
+        #expect(present(state(hold: .draining)).title == "Pausing for an add-on")
+        #expect(present(state(hold: .unrecognized)).state == .unconfirmed)
+        #expect(present(state(hold: ProviderAddonHold.none)).state == .ready)
+        #expect(present(state(hold: .held), capturedAt: Date(timeIntervalSince1970: 989)).state == .stale)
+    }
+
     @Test("long-running inference and accepted drain work need no monetary evidence")
     func observedWorkIsNotMoney() {
         #expect(present(state(active: true, startedAt: 1)).state == .serving)
@@ -238,7 +249,7 @@ struct ProviderReadinessTests {
         TrustState(level: level, status: status, reason: "PRIVATE_CANARY_NEVER_RENDER", receivedAt: receivedAt, authorization: authorization)
     }
 
-    private func state(active: Bool = false, trust suppliedTrust: TrustState?? = nil, startedAt: TimeInterval = 900, writtenAt: TimeInterval = 997, warm: [String] = ["model"], advertised: [String]? = ["model"], coordinator: String = "wss://coordinator.example/ws/provider", lifecycle: ProviderLifecycleState? = nil, preload: [String]? = nil, modelSwitch: ProviderModelSwitchState? = nil, availability: ProviderAvailabilityState? = nil, loadFailures: [ModelLoadFailure] = [], pending: Bool? = nil, loading: Bool? = nil, connected: Bool? = nil, connectionInvalid: Bool = false) -> DaemonState {
+    private func state(active: Bool = false, trust suppliedTrust: TrustState?? = nil, startedAt: TimeInterval = 900, writtenAt: TimeInterval = 997, warm: [String] = ["model"], advertised: [String]? = ["model"], coordinator: String = "wss://coordinator.example/ws/provider", lifecycle: ProviderLifecycleState? = nil, preload: [String]? = nil, modelSwitch: ProviderModelSwitchState? = nil, availability: ProviderAvailabilityState? = nil, loadFailures: [ModelLoadFailure] = [], pending: Bool? = nil, loading: Bool? = nil, connected: Bool? = nil, connectionInvalid: Bool = false, hold: ProviderAddonHold? = nil) -> DaemonState {
         DaemonState(schema: 1, version: "fixture", currentModel: "model", warmModels: warm,
                     stats: ProviderStats(tokensGenerated: 999_999, requestsServed: 999_999, usageGaps: 0),
                     trust: suppliedTrust ?? trust(authorization: lease), capacity: nil, slots: [],
@@ -247,7 +258,7 @@ struct ProviderReadinessTests {
                     coordinatorURL: coordinator, modelLoadFailures: loadFailures, lifecycle: lifecycle,
                     startupPreloadPendingModels: preload, modelSwitch: modelSwitch, availability: availability,
                     requestWorkPending: pending, loadTransitionActive: loading, coordinatorConnected: connected,
-                    coordinatorConnectionIsUnrecognized: connectionInvalid)
+                    coordinatorConnectionIsUnrecognized: connectionInvalid, addonHold: hold)
     }
 
     private func present(_ daemon: DaemonState, now suppliedNow: Date? = nil, capturedAt: Date? = nil, daemonCapturedAt: Date? = nil, statusCapturedAt: Date? = nil, statusStale: Bool = false, statusUnavailable: Bool = false, expectedCoordinator: String? = "https://coordinator.example") -> ProviderReadinessPresentation {

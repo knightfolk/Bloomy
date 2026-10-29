@@ -1774,6 +1774,8 @@ final class ProviderControlStore: ObservableObject {
         "Upgrade the running provider to use Apply Live",
         "The running provider uses a different configuration",
         "Finish the current provider lifecycle action before applying live",
+        "Wait for the add-on hold to end before applying live",
+        "Add-on hold state is unrecognized; refresh before applying live",
         "A live model switch is already in progress",
     ]
 

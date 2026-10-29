@@ -21,6 +21,11 @@ public enum ProviderLiveSwitchAvailability: Equatable, Sendable {
         ).isMarkedFresh, let daemon else {
             return .unavailable("Refresh current provider state before applying live")
         }
+        if let hold = daemon.addonHold, hold != ProviderAddonHold.none {
+            return .unavailable(hold == .unrecognized
+                ? "Add-on hold state is unrecognized; refresh before applying live"
+                : "Wait for the add-on hold to end before applying live")
+        }
         guard let modelSwitch = daemon.modelSwitch,
               daemon.runtimeCapabilities != nil,
               let configPath = daemon.configPath, !configPath.isEmpty,

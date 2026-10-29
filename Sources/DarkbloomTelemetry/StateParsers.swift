@@ -107,7 +107,8 @@ public enum DaemonStateParser {
             requestWorkPending: raw.requestWorkPending,
             loadTransitionActive: raw.loadTransitionActive,
             coordinatorConnected: raw.coordinatorConnection?.connected,
-            coordinatorConnectionIsUnrecognized: raw.coordinatorConnectionIsUnrecognized
+            coordinatorConnectionIsUnrecognized: raw.coordinatorConnectionIsUnrecognized,
+            addonHold: raw.addonHold
         )
     }
 
@@ -166,6 +167,7 @@ private struct RawDaemonState: Decodable {
     let loadTransitionActive: Bool?
     let coordinatorConnection: RawCoordinatorConnection?
     let coordinatorConnectionIsUnrecognized: Bool
+    let addonHold: ProviderAddonHold?
     let startedAt: TimeInterval
     let writtenAt: TimeInterval
     let processIdentity: RawProcessIdentity
@@ -196,6 +198,7 @@ private struct RawDaemonState: Decodable {
         case requestWorkPending = "request_work_pending"
         case loadTransitionActive = "load_transition_active"
         case coordinatorConnection = "coordinator_connection"
+        case addonHold = "addon_hold"
         case inferenceActive = "inference_active"
         case startedAt = "started_at"
         case writtenAt = "written_at"
@@ -221,6 +224,15 @@ private struct RawDaemonState: Decodable {
         coordinatorConnection = try? values.decode(RawCoordinatorConnection.self, forKey: .coordinatorConnection)
         coordinatorConnectionIsUnrecognized = values.contains(.coordinatorConnection)
             && (try? values.decodeNil(forKey: .coordinatorConnection)) != true && coordinatorConnection == nil
+        if !values.contains(.addonHold) || (try? values.decodeNil(forKey: .addonHold)) == true {
+            addonHold = nil
+        } else if let snapshot = try? values.decode(RawAddonHold.self, forKey: .addonHold), snapshot.holds.count <= 64 {
+            let states = snapshot.holds.map(\.state)
+            if states.isEmpty { addonHold = ProviderAddonHold.none }
+            else if states.contains(where: { $0 != "draining" && $0 != "held" }) { addonHold = .unrecognized }
+            else if states.contains("draining") { addonHold = .draining }
+            else { addonHold = .held }
+        } else { addonHold = .unrecognized }
         startedAt = try values.decode(TimeInterval.self, forKey: .startedAt)
         writtenAt = try values.decode(TimeInterval.self, forKey: .writtenAt)
         processIdentity = try values.decode(RawProcessIdentity.self, forKey: .processIdentity)
@@ -235,6 +247,11 @@ private struct RawDaemonState: Decodable {
         autopilotPhaseIsUnrecognized = values.contains(.autopilotPhase)
             && (try? values.decodeNil(forKey: .autopilotPhase)) != true && autopilotPhase == nil
     }
+}
+
+private struct RawAddonHold: Decodable {
+    struct Hold: Decodable { let state: String }
+    let holds: [Hold]
 }
 
 private struct RawCoordinatorConnection: Decodable { let connected: Bool }

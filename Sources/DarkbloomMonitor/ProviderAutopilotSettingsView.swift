@@ -157,6 +157,12 @@ struct ProviderAutopilotSettingsView: View {
             Text(presentation.explanation).font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let status = presentation.status {
+                if presentation.isFresh, status.isLiveConfirmed, let reasons = status.live?.busyReasons, !reasons.isEmpty {
+                    Text("Autopilot is waiting: " + reasons.map(\.explanation).joined(separator: " "))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("settings.autopilot.busyReasons")
+                }
                 Text((presentation.isFresh ? "" : "Last known: ")
                      + (status.downloadsEnabled.map { $0 ? (status.isEnrolled ? "Automatic model downloads on" : "Automatic model downloads on when enrolled") : "Automatic model downloads off" }
                         ?? "automatic model download setting unavailable"))

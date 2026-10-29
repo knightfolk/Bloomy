@@ -8,6 +8,30 @@ public enum ProviderAutopilotPhase: String, Equatable, Sendable, CaseIterable {
     case off, waiting, waitingInventory = "waiting_inventory", shadow, active, paused, transitioning, recovering
 }
 
+/// Fixed, privacy-safe categories for the provider's live busy reasons.
+public enum ProviderAutopilotBusyReason: Equatable, Sendable {
+    case addOnHold, acceptedWork, modelChange, providerTransition, other
+
+    static func map(_ value: String) -> Self {
+        switch value {
+        case "addon_hold": .addOnHold
+        case "inflight_work": .acceptedWork
+        case "startup_preload", "preload", "model_loading", "model_unloading", "model_retiring", "model_switch", "mtp_upgrade", "mtp_staging", "reslice", "load_gate": .modelChange
+        case "autopilot_operation", "shutting_down", "draining", "reconnect_after_retirement", "revision_activation", "revision_update", "engine_recovery", "model_advertisement", "pending_advertisement", "native_memory_retained": .providerTransition
+        default: .other
+        }
+    }
+    public var explanation: String {
+        switch self {
+        case .addOnHold: "An add-on is holding the provider."
+        case .acceptedWork: "Accepted work is in progress."
+        case .modelChange: "The provider is loading or changing models."
+        case .providerTransition: "The provider is completing another operation."
+        case .other: "The provider reports another busy condition."
+        }
+    }
+}
+
 /// Deliberately excludes session IDs, command IDs, hashes and free-form reasons.
 public struct ProviderAutopilotLiveStatus: Equatable, Sendable {
     public let protocolVersion: Int
@@ -16,13 +40,15 @@ public struct ProviderAutopilotLiveStatus: Equatable, Sendable {
     public let observeOnly: Bool
     public let paused: Bool
     public let cachedOnly: Bool
+    public let busyReasons: [ProviderAutopilotBusyReason]
     private let revision: String
 
     public init(protocolVersion: Int, enabled: Bool, active: Bool, observeOnly: Bool,
-                paused: Bool, cachedOnly: Bool, revision: String) {
+                paused: Bool, cachedOnly: Bool, revision: String,
+                busyReasons: [ProviderAutopilotBusyReason] = []) {
         self.protocolVersion = protocolVersion; self.enabled = enabled; self.active = active
         self.observeOnly = observeOnly; self.paused = paused; self.cachedOnly = cachedOnly
-        self.revision = revision
+        self.revision = revision; self.busyReasons = busyReasons
     }
 
     fileprivate func matches(revision: String) -> Bool { self.revision == revision }
@@ -127,7 +153,8 @@ public extension ProviderExtrasParser {
                 }
                 return ProviderAutopilotLiveStatus(protocolVersion: live.protocolVersion,
                     enabled: live.enabled, active: live.active, observeOnly: live.observe_only,
-                    paused: live.paused, cachedOnly: live.cached_only, revision: live.revision)
+                    paused: live.paused, cachedOnly: live.cached_only, revision: live.revision,
+                    busyReasons: live.safeBusyReasons)
             }
             return ProviderAutopilotStatus(configuredEnabled: configured.enabled,
                 consentRecorded: configured.consent_recorded, configuredPaused: configured.paused,
@@ -186,9 +213,29 @@ private struct AutopilotLivePayload: Decodable {
     let paused: Bool
     let cached_only: Bool
     let revision: String
+    let safeBusyReasons: [ProviderAutopilotBusyReason]
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
-        case enabled, active, observe_only, paused, cached_only, revision
+        case enabled, active, observe_only, paused, cached_only, revision, busy_reasons, busy_reason
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        protocolVersion = try values.decode(Int.self, forKey: .protocolVersion)
+        enabled = try values.decode(Bool.self, forKey: .enabled)
+        active = try values.decode(Bool.self, forKey: .active)
+        observe_only = try values.decode(Bool.self, forKey: .observe_only)
+        paused = try values.decode(Bool.self, forKey: .paused)
+        cached_only = try values.decode(Bool.self, forKey: .cached_only)
+        revision = try values.decode(String.self, forKey: .revision)
+        if values.contains(.busy_reasons), (try? values.decodeNil(forKey: .busy_reasons)) != true {
+            if let raw = try? values.decode([String].self, forKey: .busy_reasons), raw.count <= 32 {
+                safeBusyReasons = raw.map(ProviderAutopilotBusyReason.map).reduce(into: []) { result, item in
+                    if !result.contains(item) { result.append(item) }
+                }
+            } else { safeBusyReasons = [.other] }
+        } else if values.contains(.busy_reason), (try? values.decodeNil(forKey: .busy_reason)) != true {
+            safeBusyReasons = [(try? values.decode(String.self, forKey: .busy_reason)).map(ProviderAutopilotBusyReason.map) ?? .other]
+        } else { safeBusyReasons = [] }
     }
 }
 

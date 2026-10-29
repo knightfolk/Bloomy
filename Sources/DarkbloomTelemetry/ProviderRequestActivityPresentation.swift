@@ -55,6 +55,23 @@ public struct ProviderRequestActivityPresentation: Equatable, Sendable {
             }
         }
 
+        switch daemonState.addonHold {
+        case .draining:
+            return Self(mode: .draining, value: daemonState.requestWorkPending == true || daemonState.inferenceActive ? "1+" : "—",
+                        status: "Pausing for add-on", detail: "New inference is paused while accepted work finishes and models unload.")
+        case .held:
+            if daemonState.requestWorkPending == true || daemonState.inferenceActive {
+                return Self(mode: .unavailable, value: "—", status: "Hold unconfirmed",
+                            detail: "The completed hold and pending work observations conflict; refresh to check the current state.")
+            }
+            return Self(mode: .stopped, value: "0", status: "Paused by add-on",
+                        detail: "The provider is not accepting inference during the add-on hold.")
+        case .unrecognized:
+            return Self(mode: .unavailable, value: "—", status: "Hold unconfirmed",
+                        detail: "The provider's add-on hold state could not be interpreted.")
+        case .some(.none), nil: break
+        }
+
         if let modelSwitch = daemonState.modelSwitch,
            [.validating, .draining, .switching].contains(modelSwitch.outcome) {
             return Self(

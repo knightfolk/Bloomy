@@ -20,6 +20,17 @@ struct LiveModelSwitchTests {
         #expect(availability.isAvailable)
     }
 
+    @Test("live apply waits for active or unrecognized add-on holds")
+    func addonHold() {
+        for hold in [ProviderAddonHold.draining, .held, .unrecognized] {
+            let result = ProviderLiveSwitchAvailability.evaluate(daemon: daemon(hold: hold),
+                daemonSource: .fresh(evidenceAt: now), providerConfig: config, at: now)
+            #expect(!result.isAvailable)
+        }
+        #expect(ProviderLiveSwitchAvailability.evaluate(daemon: daemon(hold: ProviderAddonHold.none),
+            daemonSource: .fresh(evidenceAt: now), providerConfig: config, at: now).isAvailable)
+    }
+
     @Test("older stale mismatched and in-progress providers fail closed")
     func unavailableStates() {
         let older = daemon(modelSwitch: nil, configPath: nil, runtimeCapabilities: nil)
@@ -55,7 +66,8 @@ struct LiveModelSwitchTests {
     private func daemon(
         modelSwitch: ProviderModelSwitchState? = .init(outcome: .serving, models: []),
         configPath: String? = "/Users/example/.config/darkbloom/provider.toml",
-        runtimeCapabilities: [String]? = []
+        runtimeCapabilities: [String]? = [],
+        hold: ProviderAddonHold? = nil
     ) -> DaemonState {
         DaemonState(
             schema: 1,
@@ -75,7 +87,7 @@ struct LiveModelSwitchTests {
             coordinatorURL: "https://api.darkbloom.dev",
             modelSwitch: modelSwitch,
             configPath: configPath,
-            runtimeCapabilities: runtimeCapabilities
+            runtimeCapabilities: runtimeCapabilities, addonHold: hold
         )
     }
 }

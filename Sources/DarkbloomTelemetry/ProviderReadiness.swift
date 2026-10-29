@@ -118,6 +118,15 @@ public struct ProviderReadinessPresentation: Equatable, Sendable {
             case .serving: break
             }
         }
+        switch daemon.addonHold {
+        case .draining:
+            return result(.transitioning, "Pausing for an add-on", "New inference is paused while accepted work finishes and models unload.", "hourglass", .neutral, .health)
+        case .held:
+            return result(.busy, "Paused by an add-on", "The provider is not accepting inference while an add-on holds this Mac.", "pause.circle", .caution, .health)
+        case .unrecognized:
+            return result(.unconfirmed, "Add-on hold unconfirmed", "The provider reported an add-on hold state this app cannot interpret.", "questionmark.circle", .caution, .health)
+        case .some(.none), nil: break
+        }
         if daemon.availability?.phase == .waitingForSchedule {
             return result(.scheduledWaiting, "Waiting for scheduled window", "The provider is intentionally waiting for its next configured serving window.", "calendar.badge.clock", .neutral, .hosting)
         }
@@ -228,6 +237,12 @@ public struct ProviderReadinessPresentation: Equatable, Sendable {
                   lifecycle.outcome == .stopped || lifecycle.outcome == .forced
                     || (lifecycle.outcome == .drained && daemon.availability?.phase != .waitingForSchedule) {
             work = row(.work, "Observed work", "Stopped", "The provider reports that serving has stopped.")
+        } else if daemon.addonHold == .draining {
+            work = row(.work, "Observed work", "Finishing for add-on", "New inference is paused while accepted work and model unloading finish.")
+        } else if daemon.addonHold == .held {
+            work = row(.work, "Observed work", "Paused by add-on", "The provider reports an active add-on hold.")
+        } else if daemon.addonHold == .unrecognized {
+            work = row(.work, "Observed work", "Unknown", "The add-on hold state could not be interpreted.", .caution)
         } else if let modelSwitch = daemon.modelSwitch, modelSwitch.outcome == .draining {
             let value = modelSwitch.remainingRequests.map { "\($0) accepted remaining" } ?? "Finishing accepted work"
             work = row(.work, "Observed work", value, "New requests are paused during the model change; completion time is not reported.")

@@ -90,6 +90,24 @@ struct ProviderAutopilotTests {
         }
     }
 
+    @Test("busy reasons use fixed labels and never retain provider text")
+    func busyReasons() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: autopilotJSON(enabled: true, live: true)) as? [String: Any])
+        var live = try #require(json["live"] as? [String: Any])
+        live["busy_reasons"] = ["inflight_work", "model_loading", "addon_hold", "PRIVATE_CANARY"]
+        json["live"] = live
+        let result = try ProviderExtrasParser.parseAutopilot(JSONSerialization.data(withJSONObject: json))
+        #expect(result.live?.busyReasons == [.acceptedWork, .modelChange, .addOnHold, .other])
+        #expect(!String(describing: result).contains("PRIVATE_CANARY"))
+        live["busy_reasons"] = "bad"
+        json["live"] = live
+        #expect(try ProviderExtrasParser.parseAutopilot(JSONSerialization.data(withJSONObject: json)).live?.busyReasons == [.other])
+        live.removeValue(forKey: "busy_reasons")
+        live["busy_reason"] = "addon_hold"
+        json["live"] = live
+        #expect(try ProviderExtrasParser.parseAutopilot(JSONSerialization.data(withJSONObject: json)).live?.busyReasons == [.addOnHold])
+    }
+
     @Test("malformed consent and unbounded model payloads cannot enable controls")
     func malformedStatus() {
         #expect(throws: ProviderExtrasParseError.invalidPayload) {

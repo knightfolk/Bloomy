@@ -942,6 +942,9 @@ struct MonitorPopover: View {
 
     private var currentActivityLabel: String {
         guard let state = store.snapshot.state.value else { return "Unavailable" }
+        if state.addonHold == .draining { return "Pausing" }
+        if state.addonHold == .held { return "Paused" }
+        if state.addonHold == .unrecognized { return "Unconfirmed" }
         if state.inferenceActive { return "Working" }
         if state.requestWorkPending == true { return "Work pending" }
         if state.loadTransitionActive == true { return "Loading" }

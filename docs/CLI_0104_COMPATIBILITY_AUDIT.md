@@ -37,9 +37,16 @@ and the installed CLI's read-only help and status output.
   Changes are labeled restart-required and leave old files in place. Tests and
   an isolated native fixture cover the main paths; actual-provider writes and
   installed-app review remain outstanding.
-- New coordinator connectivity, add-on hold, model load and Autopilot busy
-  diagnostics are present in 0.10.4 state. Compare upstream contracts with
-  existing readiness and status presentation before exposing them.
+- Add-on holds can leave the provider connected while inference is paused.
+  Bloomy now recognizes held, draining and unrecognized hold states without
+  retaining add-on identifiers, blocks idle-driven work and live model apply,
+  and explains the observed hold. Autopilot reports bounded busy reasons using
+  fixed labels. An isolated native fixture showed the held state and busy
+  explanations; installed-app review remains outstanding. The CLI's operator
+  hold/release commands are not yet exposed in Bloomy; releasing all holds can
+  affect other apps and needs a separate design and safe testing. No add-on
+  hold/release command was issued during testing.
+- Further model-load, Autopilot and coordinator diagnostics remain to audit.
 - Provider-internal inference features and performance changes do not
   automatically imply Bloomy UI controls. Review model capabilities and chat
   transport against actual supported API contracts; do not infer entitlement

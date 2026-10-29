@@ -42,6 +42,18 @@ struct ProviderRequestActivityPresentationTests {
         #expect(value.detail.contains("does not establish"))
     }
 
+    @Test("add-on hold reports a pause rather than idle")
+    func addonHold() throws {
+        let held = ProviderRequestActivityPresentation.make(daemonState: try daemon(inferenceActive: false, lifecycle: nil, addon: ["holds": [["state": "held"]]]))
+        #expect(held.status == "Paused by add-on" && held.mode == .stopped)
+        let conflicting = ProviderRequestActivityPresentation.make(daemonState: try daemon(inferenceActive: false, lifecycle: nil, pending: true, addon: ["holds": [["state": "held"]]]))
+        #expect(conflicting.status == "Hold unconfirmed" && conflicting.value == "—")
+        let draining = ProviderRequestActivityPresentation.make(daemonState: try daemon(inferenceActive: false, lifecycle: nil, pending: true, addon: ["holds": [["state": "draining"]]]))
+        #expect(draining.status == "Pausing for add-on" && draining.value == "1+")
+        let unknown = ProviderRequestActivityPresentation.make(daemonState: try daemon(inferenceActive: false, lifecycle: nil, addon: ["holds": "unknown"]))
+        #expect(unknown.mode == .unavailable)
+    }
+
     @Test("native drain presents the exact remaining accepted request count")
     func drainingShowsExactRemaining() throws {
         let state = try daemon(
@@ -93,7 +105,7 @@ struct ProviderRequestActivityPresentationTests {
         #expect(ProviderRequestActivityPresentation.make(daemonState: state).mode == .idle)
     }
 
-    private func daemon(inferenceActive: Bool, lifecycle: [String: Any]?, pending: Bool? = nil, loading: Bool? = nil, modelSwitch: [String: Any]? = nil) throws -> DaemonState {
+    private func daemon(inferenceActive: Bool, lifecycle: [String: Any]?, pending: Bool? = nil, loading: Bool? = nil, modelSwitch: [String: Any]? = nil, addon: [String: Any]? = nil) throws -> DaemonState {
         let url = try #require(Bundle.module.url(
             forResource: "daemon-state-online",
             withExtension: "json",
@@ -104,6 +116,7 @@ struct ProviderRequestActivityPresentationTests {
         json["request_work_pending"] = pending
         json["load_transition_active"] = loading
         json["model_switch"] = modelSwitch
+        json["addon_hold"] = addon
         if let lifecycle {
             json["lifecycle"] = lifecycle
         } else {

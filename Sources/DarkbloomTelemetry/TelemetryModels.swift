@@ -10,6 +10,11 @@ enum KnownAutopilotPhase {
     static func contains(_ value: String) -> Bool { values.contains(value) }
 }
 
+/// Aggregate only: do not retain add-on identifiers, paths or lease data.
+public enum ProviderAddonHold: Equatable, Sendable {
+    case none, draining, held, unrecognized
+}
+
 public struct DaemonState: Equatable, Sendable {
     public let schema: Int
     public let version: String
@@ -30,8 +35,11 @@ public struct DaemonState: Equatable, Sendable {
     /// The current socket observation; nil is absent on older providers.
     public let coordinatorConnected: Bool?
     public let coordinatorConnectionIsUnrecognized: Bool
+    /// Nil denotes an older or standalone provider without this report.
+    public let addonHold: ProviderAddonHold?
     public var hasPendingWorkOrTransition: Bool {
         inferenceActive || requestWorkPending == true || loadTransitionActive == true
+            || (addonHold != nil && addonHold != ProviderAddonHold.none)
     }
     public let startedAt: TimeInterval
     public let writtenAt: TimeInterval
@@ -96,7 +104,8 @@ public struct DaemonState: Equatable, Sendable {
         requestWorkPending: Bool? = nil,
         loadTransitionActive: Bool? = nil,
         coordinatorConnected: Bool? = nil,
-        coordinatorConnectionIsUnrecognized: Bool = false
+        coordinatorConnectionIsUnrecognized: Bool = false,
+        addonHold: ProviderAddonHold? = nil
     ) {
         self.schema = schema
         self.version = version
@@ -111,6 +120,7 @@ public struct DaemonState: Equatable, Sendable {
         self.loadTransitionActive = loadTransitionActive
         self.coordinatorConnected = coordinatorConnected
         self.coordinatorConnectionIsUnrecognized = coordinatorConnectionIsUnrecognized
+        self.addonHold = addonHold
         self.startedAt = startedAt
         self.writtenAt = writtenAt
         self.pid = pid

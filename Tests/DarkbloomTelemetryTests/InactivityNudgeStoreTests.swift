@@ -15,6 +15,10 @@ struct InactivityNudgeStoreTests {
         #expect(NudgeIdleStateEligibility.eligibleState(state(at: epoch, requestWorkPending: true), at: now) == nil)
         #expect(NudgeIdleStateEligibility.eligibleState(state(at: epoch, loadTransitionActive: true), at: now) == nil)
         #expect(NudgeIdleStateEligibility.eligibleState(state(at: epoch, requestWorkPending: false, loadTransitionActive: false), at: now) != nil)
+        for hold in [ProviderAddonHold.draining, .held, .unrecognized] {
+            #expect(NudgeIdleStateEligibility.eligibleState(state(at: epoch, addonHold: hold), at: now) == nil)
+        }
+        #expect(NudgeIdleStateEligibility.eligibleState(state(at: epoch, addonHold: ProviderAddonHold.none), at: now) != nil)
     }
 
     @Test("fresh installation stays off and does not request earnings")
@@ -275,7 +279,8 @@ struct InactivityNudgeStoreTests {
         requests: Int64 = 0,
         modelSwitch: ProviderModelSwitchState? = nil,
         requestWorkPending: Bool? = nil,
-        loadTransitionActive: Bool? = nil
+        loadTransitionActive: Bool? = nil,
+        addonHold: ProviderAddonHold? = nil
     ) -> DaemonState {
         DaemonState(
             schema: 1, version: "test", currentModel: "model-a", warmModels: ["model-a"],
@@ -286,7 +291,7 @@ struct InactivityNudgeStoreTests {
             processIdentity: .init(pid: 1, startTimeMicros: 1), advertisedModels: ["model-a"],
             modelLoadFailures: [], lifecycle: .init(outcome: .serving, remainingRequests: 0),
             startupPreloadPendingModels: [], modelSwitch: modelSwitch,
-            requestWorkPending: requestWorkPending, loadTransitionActive: loadTransitionActive
+            requestWorkPending: requestWorkPending, loadTransitionActive: loadTransitionActive, addonHold: addonHold
         )
     }
 
