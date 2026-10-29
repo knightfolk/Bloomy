@@ -124,6 +124,12 @@ and the installed CLI's read-only help and status output.
   machine lock. No live add-on hold/release
   command was issued during testing. Bloomy cannot own a scoped hold: 0.10.4
   only permits Darkbloom's signed sandbox to use the scoped add-on socket.
+- The CLI's served-counter line now identifies requests since this daemon
+  started and labels output tokens explicitly. Bloomy parses both this 0.10.4
+  format and the older format; malformed and negative values remain unavailable.
+  The current line was confirmed with a read-only status call and parser tests.
+  These counts include free self-route and potentially unpaid interrupted work;
+  they are not a paid-jobs or earnings total. Installed-app review remains open.
 - Further model-load, Autopilot and coordinator diagnostics remain to audit.
 - Model load memory: Bloomy now derives a current no-eviction shortfall and,
   when available, the remaining shortfall after idle eviction from the daemon's

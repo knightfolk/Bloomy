@@ -161,6 +161,22 @@ struct TelemetryTests {
         #expect(status.slotPosture == ["gemma-4-26b-qat-4bit: kv=contiguous (requested auto) | mtp=enabled, active"])
     }
 
+    @Test("current CLI status reports per-run requests and output tokens")
+    func parsesCurrentServedCounters() {
+        let status = StatusParser.parse("""
+            darkbloom 0.10.4
+            Requests served since the daemon started (2h 4m ago): 37  |  output tokens: 12345
+              2 of them ended early on a coordinator cancel or a dropped connection and may be unpaid.
+              Paid jobs are listed under Earnings in the console; requests to your own machine are free.
+            """)
+        #expect(status.requestCount == 37)
+        #expect(status.tokenCount == 12345)
+
+        let malformed = StatusParser.parse("Requests served since the daemon started (2h ago): -2  |  output tokens: nope")
+        #expect(malformed.requestCount == nil)
+        #expect(malformed.tokenCount == nil)
+    }
+
     @Test("legacy log parser retains only lifecycle, warning, and error events")
     func parsesBoundedEvents() throws {
         let text = String(decoding: try fixture("provider", extension: "log"), as: UTF8.self)

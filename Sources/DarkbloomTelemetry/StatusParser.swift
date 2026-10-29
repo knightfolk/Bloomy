@@ -59,14 +59,26 @@ public enum StatusParser {
             snapshot.slotPosture = slotPosture
         }
 
-        if let counters = lines.first(where: { $0.hasPrefix("Requests served:") }) {
+        if let counters = lines.map({ $0.trimmingCharacters(in: .whitespaces) }).first(where: {
+            $0.hasPrefix("Requests served:") || $0.hasPrefix("Requests served since the daemon started (")
+        }) {
             let halves = counters.split(separator: "|", maxSplits: 1).map(String.init)
-            snapshot.requestCount = halves.first
-                .flatMap { value(after: "Requests served:", in: [$0]) }
-                .flatMap(Int64.init)
-            snapshot.tokenCount = halves.dropFirst().first
-                .flatMap { value(after: "tokens:", in: [$0]) }
-                .flatMap(Int64.init)
+            let first = halves.first ?? ""
+            let requestValue: String?
+            if first.hasPrefix("Requests served:") {
+                requestValue = value(after: "Requests served:", in: [first])
+            } else if first.hasPrefix("Requests served since the daemon started ("),
+                      let end = first.range(of: " ago): ") {
+                requestValue = String(first[end.upperBound...]).trimmingCharacters(in: .whitespaces)
+            } else {
+                requestValue = nil
+            }
+            snapshot.requestCount = requestValue.flatMap(Int64.init).flatMap { $0 >= 0 ? $0 : nil }
+            if requestValue != nil {
+                snapshot.tokenCount = halves.dropFirst().first
+                    .flatMap { value(after: first.hasPrefix("Requests served:") ? "tokens:" : "output tokens:", in: [$0]) }
+                    .flatMap(Int64.init).flatMap { $0 >= 0 ? $0 : nil }
+            }
         }
 
         return snapshot
