@@ -12,7 +12,10 @@ and the installed CLI's read-only help and status output.
 - Model refresh: the current saved startup selector is outside the enabled set.
   Bloomy's old document reader rejected it, hiding all model controls. The
   revised reader preserves it for explicit repair; saves retain validation.
-  Live installed-app proof and release are pending.
+  An opt-in read-only contract test now runs the current model-control service
+  against this Mac's actual config, catalog and local inventory; it refreshed
+  successfully with fresh catalog and local sources on CLI 0.10.4. Installed-app
+  proof and release are pending.
 - Autopilot: 0.10.1 and later can download models on the operator's behalf;
   current CLI reports download settings and usage. Enrollment does not itself
   download, but automatic downloads default on with consent. Bloomy now reports
@@ -60,7 +63,9 @@ and the installed CLI's read-only help and status output.
   unrelated fields and refusing windows with unknown fields or inline comments.
   Provider settings now include an editor with retained drafts, stale-file
   rejection and readback. An isolated native fixture exercised a save and an
-  invalid time. Real-provider write verification and installed-app review remain
+  invalid time. An opt-in real CLI contract test saved an overnight schedule to
+  a disposable config, verified Darkbloom's output, and confirmed unrelated
+  unknown fields survived. Live-config writes and installed-app review remain
   outstanding. No live schedule changes were made during the audit.
 - Autopilot model pins: Bloomy displays saved pins and labels stale readings;
   pin and unpin controls are not yet exposed. The upstream desktop app checks selected models, available slots,
