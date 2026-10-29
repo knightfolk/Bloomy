@@ -20,6 +20,20 @@ struct ProviderAutopilotTests {
         #expect(try ProviderExtrasParser.parseAutopilot(autopilotJSON(enabled: false)).live == nil)
     }
 
+    @Test("automatic download policy is reported when present and unknown for older providers")
+    func downloadPolicy() throws {
+        let original = autopilotJSON(enabled: true, live: true)
+        var json = try #require(JSONSerialization.jsonObject(with: original) as? [String: Any])
+        #expect(try ProviderExtrasParser.parseAutopilot(original).downloadsEnabled == nil)
+        for enabled in [true, false] {
+            json["downloads"] = ["enabled": enabled]
+            let data = try JSONSerialization.data(withJSONObject: json)
+            let status = try ProviderExtrasParser.parseAutopilot(data)
+            #expect(status.downloadsEnabled == enabled)
+            #expect(status.withoutLiveEvidence().downloadsEnabled == enabled)
+        }
+    }
+
     @Test("malformed consent and unbounded model payloads cannot enable controls")
     func malformedStatus() {
         #expect(throws: ProviderExtrasParseError.invalidPayload) {

@@ -66,7 +66,7 @@ struct ProviderAutopilotPresentation {
         if !status.configuredEnabled {
             return acceptedWorkMayBeFinishing
                 ? "Leaving is saved. An accepted model change may still finish."
-                : "Let the network choose among cached models to improve utilization. Enrollment is optional."
+                : "Let the network manage models to improve utilization. Enrollment is optional."
         }
         if !status.isEnrolled { return "Saved setup is incomplete. Enable Autopilot again to record consent and verify cached models." }
         if !status.isLiveConfirmed { return "Enrollment is saved; the running provider has not confirmed these settings." }
@@ -152,6 +152,13 @@ struct ProviderAutopilotSettingsView: View {
                 .accessibilityIdentifier("settings.autopilot.status")
             Text(presentation.explanation).font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let status = presentation.status {
+                Text((presentation.isFresh ? "" : "Last known: ")
+                     + (status.downloadsEnabled.map { $0 ? "Automatic model downloads on" : "Automatic model downloads off" }
+                        ?? "automatic model download setting unavailable"))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("settings.autopilot.downloads")
+            }
             ViewThatFits(in: .horizontal) {
                 actions(presentation).fixedSize(horizontal: true, vertical: false)
                 actions(presentation, vertical: true)
@@ -204,9 +211,10 @@ struct ProviderAutopilotSettingsView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Label("Enable experimental Autopilot", systemImage: "sparkles")
                         .font(.title2.bold())
-                    Text("Opt in to let Darkbloom report downloaded network models and choose among those cached models when live control is available.")
+                    Text("Opt in to let Darkbloom report downloaded network models and manage model choices when live control is available.")
                     Label("Shadow mode records proposals. Enrollment does not activate live control.", systemImage: "eye")
-                    Label("Downloaded files stay on disk. Your startup selection, memory, schedule, hosting and slot settings are preserved.", systemImage: "internaldrive")
+                    Label("Darkbloom may automatically download catalog models while enrolled. On current versions downloads are enabled by default; they use disk space and do not delete existing files.", systemImage: "arrow.down.circle")
+                    Label("Your startup selection, memory, schedule, hosting and slot settings are preserved.", systemImage: "internaldrive")
                     Label("Bloomy checks cached models and restarts the provider once. Accepted requests can finish first.", systemImage: "arrow.triangle.2.circlepath")
                     Text("You can pause or leave Autopilot in these settings at any time.")
                         .foregroundStyle(.secondary)

@@ -36,21 +36,24 @@ public struct ProviderAutopilotStatus: Equatable, Sendable {
     public let pinnedModels: [String]
     public let live: ProviderAutopilotLiveStatus?
     public let phase: ProviderAutopilotPhase?
+    /// Nil means this provider did not report a usable download policy.
+    public let downloadsEnabled: Bool?
     private let configuredRevision: String
 
     public init(configuredEnabled: Bool, consentRecorded: Bool, configuredPaused: Bool,
                 selectedModels: [String], pinnedModels: [String], configuredRevision: String,
-                live: ProviderAutopilotLiveStatus? = nil, phase: ProviderAutopilotPhase? = nil) {
+                live: ProviderAutopilotLiveStatus? = nil, phase: ProviderAutopilotPhase? = nil,
+                downloadsEnabled: Bool? = nil) {
         self.configuredEnabled = configuredEnabled; self.consentRecorded = consentRecorded
         self.configuredPaused = configuredPaused; self.selectedModels = selectedModels
         self.pinnedModels = pinnedModels; self.configuredRevision = configuredRevision
-        self.live = live; self.phase = phase
+        self.live = live; self.phase = phase; self.downloadsEnabled = downloadsEnabled
     }
 
     public func withoutLiveEvidence() -> Self {
         Self(configuredEnabled: configuredEnabled, consentRecorded: consentRecorded,
              configuredPaused: configuredPaused, selectedModels: selectedModels, pinnedModels: pinnedModels,
-             configuredRevision: configuredRevision)
+             configuredRevision: configuredRevision, downloadsEnabled: downloadsEnabled)
     }
 
     public var isEnrolled: Bool {
@@ -102,7 +105,8 @@ public extension ProviderExtrasParser {
                 consentRecorded: configured.consent_recorded, configuredPaused: configured.paused,
                 selectedModels: configured.selected_models, pinnedModels: configured.pinned_models,
                 configuredRevision: configured.revision, live: live,
-                phase: payload.phase.flatMap(ProviderAutopilotPhase.init(rawValue:)))
+                phase: payload.phase.flatMap(ProviderAutopilotPhase.init(rawValue:)),
+                downloadsEnabled: payload.downloads?.enabled)
         } catch let error as ProviderExtrasParseError { throw error }
         catch { throw ProviderExtrasParseError.invalidPayload }
     }
@@ -124,6 +128,10 @@ private struct AutopilotPayload: Decodable {
     let configured: AutopilotConfiguredPayload
     let live: AutopilotLivePayload?
     let phase: String?
+    let downloads: AutopilotDownloadsPayload?
+}
+private struct AutopilotDownloadsPayload: Decodable {
+    let enabled: Bool
 }
 private struct AutopilotConfiguredPayload: Decodable {
     let enabled: Bool

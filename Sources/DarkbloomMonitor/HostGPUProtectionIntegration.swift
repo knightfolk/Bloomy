@@ -26,7 +26,7 @@ extension MonitorStore {
             || state.modelSwitch.map { ![.serving, .switched].contains($0.outcome) || $0.remainingRequests != 0 } == true
             || state.autopilotPhaseIsUnrecognized
             || ["transitioning", "recovering", "waiting_inventory"].contains(state.autopilotPhase ?? "")
-        return .init(running: state.trust?.status == "online", idle: !state.inferenceActive,
+        return .init(running: state.trust?.status == "online", idle: !state.hasPendingWorkOrTransition,
             capturedAt: Date(timeIntervalSince1970: state.writtenAt),
             identity: "\(state.processIdentity.pid):\(state.processIdentity.startTimeMicros)",
             isTransitioning: transitioning)

@@ -24,6 +24,12 @@ public struct DaemonState: Equatable, Sendable {
     public let capacity: MemoryCapacity?
     public let slots: [ModelSlot]
     public let inferenceActive: Bool
+    /// Accepted or queued requests and in-progress model loading, when reported.
+    public let requestWorkPending: Bool?
+    public let loadTransitionActive: Bool?
+    public var hasPendingWorkOrTransition: Bool {
+        inferenceActive || requestWorkPending == true || loadTransitionActive == true
+    }
     public let startedAt: TimeInterval
     public let writtenAt: TimeInterval
     public let pid: Int32
@@ -83,7 +89,9 @@ public struct DaemonState: Equatable, Sendable {
         configPath: String? = nil,
         runtimeCapabilities: [String]? = nil,
         autopilotPhase: String? = nil,
-        autopilotPhaseIsUnrecognized: Bool = false
+        autopilotPhaseIsUnrecognized: Bool = false,
+        requestWorkPending: Bool? = nil,
+        loadTransitionActive: Bool? = nil
     ) {
         self.schema = schema
         self.version = version
@@ -94,6 +102,8 @@ public struct DaemonState: Equatable, Sendable {
         self.capacity = capacity
         self.slots = slots
         self.inferenceActive = inferenceActive
+        self.requestWorkPending = requestWorkPending
+        self.loadTransitionActive = loadTransitionActive
         self.startedAt = startedAt
         self.writtenAt = writtenAt
         self.pid = pid

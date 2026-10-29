@@ -807,6 +807,16 @@ struct ProviderControlServiceTests {
         #expect(await idle.service.activityRisk() == .unknown("Provider activity is unavailable"))
     }
 
+    @Test("activity treats queued requests and loading as busy")
+    func pendingActivityRisk() async throws {
+        for state in [daemon(currentModel: "model", inferenceActive: false, requestWorkPending: true),
+                      daemon(currentModel: "model", inferenceActive: false, loadTransitionActive: true)] {
+            let harness = try ServiceHarness.make(daemonState: state)
+            defer { harness.cleanup() }
+            #expect(await harness.service.activityRisk() == .active)
+        }
+    }
+
     @Test("activity treats stale and future daemon telemetry as unknown")
     func activityRequiresCurrentTelemetry() async throws {
         let boundary = try ServiceHarness.make(daemonState: daemon(
@@ -1965,6 +1975,8 @@ private func daemon(
     lifecycle: ProviderLifecycleState? = nil,
     startupPreloadPendingModels: [String]? = nil,
     modelSwitch: ProviderModelSwitchState? = nil,
+    requestWorkPending: Bool? = nil,
+    loadTransitionActive: Bool? = nil,
     capacity: MemoryCapacity = MemoryCapacity(
         totalMemoryGB: 32,
         gpuMemoryActiveGB: 0,
@@ -1988,7 +2000,8 @@ private func daemon(
         advertisedModels: advertisedModels,
         lifecycle: lifecycle,
         startupPreloadPendingModels: startupPreloadPendingModels,
-        modelSwitch: modelSwitch
+        modelSwitch: modelSwitch, requestWorkPending: requestWorkPending,
+        loadTransitionActive: loadTransitionActive
     )
 }
 

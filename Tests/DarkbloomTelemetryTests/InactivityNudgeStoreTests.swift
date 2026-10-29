@@ -8,6 +8,15 @@ import Testing
 struct InactivityNudgeStoreTests {
     private let epoch = 2_000_000.0
 
+    @Test("queued work and loading prevent an otherwise eligible nudge")
+    func pendingWorkBlocksNudge() {
+        let now = Date(timeIntervalSince1970: epoch)
+        #expect(NudgeIdleStateEligibility.eligibleState(state(at: epoch), at: now) != nil)
+        #expect(NudgeIdleStateEligibility.eligibleState(state(at: epoch, requestWorkPending: true), at: now) == nil)
+        #expect(NudgeIdleStateEligibility.eligibleState(state(at: epoch, loadTransitionActive: true), at: now) == nil)
+        #expect(NudgeIdleStateEligibility.eligibleState(state(at: epoch, requestWorkPending: false, loadTransitionActive: false), at: now) != nil)
+    }
+
     @Test("fresh installation stays off and does not request earnings")
     func optIn() async {
         let defaults = makeDefaults()
@@ -264,7 +273,9 @@ struct InactivityNudgeStoreTests {
     private func state(
         at writtenAt: TimeInterval,
         requests: Int64 = 0,
-        modelSwitch: ProviderModelSwitchState? = nil
+        modelSwitch: ProviderModelSwitchState? = nil,
+        requestWorkPending: Bool? = nil,
+        loadTransitionActive: Bool? = nil
     ) -> DaemonState {
         DaemonState(
             schema: 1, version: "test", currentModel: "model-a", warmModels: ["model-a"],
@@ -274,7 +285,8 @@ struct InactivityNudgeStoreTests {
             startedAt: epoch - 1_000, writtenAt: writtenAt, pid: 1,
             processIdentity: .init(pid: 1, startTimeMicros: 1), advertisedModels: ["model-a"],
             modelLoadFailures: [], lifecycle: .init(outcome: .serving, remainingRequests: 0),
-            startupPreloadPendingModels: [], modelSwitch: modelSwitch
+            startupPreloadPendingModels: [], modelSwitch: modelSwitch,
+            requestWorkPending: requestWorkPending, loadTransitionActive: loadTransitionActive
         )
     }
 

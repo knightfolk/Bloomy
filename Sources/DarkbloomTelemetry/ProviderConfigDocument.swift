@@ -48,7 +48,10 @@ public struct ProviderConfigDocument: Equatable, Sendable {
         let enabled = try Self.require("enabled_models", in: scan.arrays)
         let preloaded = try Self.require("preload_models", in: scan.arrays)
         let selection = ProviderModelSelection(enabled: enabled.values, preloaded: preloaded.values)
-        try Self.validate(selection)
+        // Preserve externally edited selections on read so the user can repair them.
+        // Validation of the preload relationship remains mandatory before saving.
+        try Self.validateUnique(selection.enabled)
+        try Self.validateUnique(selection.preloaded)
 
         self.data = data
         self.selection = selection

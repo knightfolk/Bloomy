@@ -1854,7 +1854,7 @@ private func modelSwapStateReason(
         return "Swap requires one saved model slot and one loaded model"
     }
     guard !snapshot.residentModelIDs.contains(modelID) else { return "This model is already loaded" }
-    guard !daemon.inferenceActive,
+    guard !daemon.hasPendingWorkOrTransition,
           (daemon.lifecycle?.remainingRequests ?? 0) == 0,
           (daemon.modelSwitch?.remainingRequests ?? 0) == 0 else {
         return "Wait for current work to finish before swapping"

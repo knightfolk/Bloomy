@@ -23,7 +23,10 @@ evidence is incomplete. Neither can promise public work or income.
 Bloomy. Enable opens a consent sheet, checks the downloaded model selection,
 and uses the supported provider startup internally; no terminal command or
 interactive startup selector is required. Enrollment reports eligible cached
-network models and does not itself activate live control. The status separates
+network models and does not itself activate live control. Current provider versions may
+automatically download additional catalog models while enrolled; downloads are enabled
+by default and can be managed with the official CLI. Bloomy reports the setting when
+the provider supplies it. The status separates
 shadow observation, active control, pause, and pending confirmation. Pause keeps
 enrollment; Leave removes it. Accepted transitions may finish after either action.
 Bloomy's optional profit switching defers while native Autopilot owns model selection.

@@ -103,7 +103,9 @@ public enum DaemonStateParser {
                 Array($0.compactMap(safeCapability).prefix(64))
             },
             autopilotPhase: raw.autopilotPhase,
-            autopilotPhaseIsUnrecognized: raw.autopilotPhaseIsUnrecognized
+            autopilotPhaseIsUnrecognized: raw.autopilotPhaseIsUnrecognized,
+            requestWorkPending: raw.requestWorkPending,
+            loadTransitionActive: raw.loadTransitionActive
         )
     }
 
@@ -158,6 +160,8 @@ private struct RawDaemonState: Decodable {
     let capacity: RawCapacity?
     let slots: [RawSlot]
     let inferenceActive: Bool
+    let requestWorkPending: Bool?
+    let loadTransitionActive: Bool?
     let startedAt: TimeInterval
     let writtenAt: TimeInterval
     let processIdentity: RawProcessIdentity
@@ -185,6 +189,8 @@ private struct RawDaemonState: Decodable {
         case configPath = "config_path"
         case runtimeCapabilities = "runtime_capabilities"
         case autopilotPhase = "autopilot_phase"
+        case requestWorkPending = "request_work_pending"
+        case loadTransitionActive = "load_transition_active"
         case inferenceActive = "inference_active"
         case startedAt = "started_at"
         case writtenAt = "written_at"
@@ -205,6 +211,8 @@ private struct RawDaemonState: Decodable {
         capacity = try values.decodeIfPresent(RawCapacity.self, forKey: .capacity)
         slots = try values.decodeIfPresent([RawSlot].self, forKey: .slots) ?? []
         inferenceActive = try values.decode(Bool.self, forKey: .inferenceActive)
+        requestWorkPending = try values.decodeIfPresent(Bool.self, forKey: .requestWorkPending)
+        loadTransitionActive = try values.decodeIfPresent(Bool.self, forKey: .loadTransitionActive)
         startedAt = try values.decode(TimeInterval.self, forKey: .startedAt)
         writtenAt = try values.decode(TimeInterval.self, forKey: .writtenAt)
         processIdentity = try values.decode(RawProcessIdentity.self, forKey: .processIdentity)

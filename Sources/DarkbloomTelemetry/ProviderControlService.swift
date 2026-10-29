@@ -138,7 +138,7 @@ public struct ProviderControlSnapshot: Equatable, Sendable {
         // Only explicit terminal lifecycle evidence permits an unknown serving
         // set. A missing field or empty resident list does not prove a stop.
         if daemon.lifecycle?.outcome == .stopped {
-            guard !daemon.inferenceActive, daemon.currentModel.isEmpty,
+            guard !daemon.hasPendingWorkOrTransition, daemon.currentModel.isEmpty,
                   daemon.warmModels.isEmpty, daemon.slots.isEmpty,
                   residentModelIDs.isEmpty,
                   (daemon.lifecycle?.remainingRequests ?? 0) == 0,
@@ -559,7 +559,7 @@ public actor ProviderControlService: ProviderControlling, ProviderSavedCapacityR
                 future: "Provider activity timestamp is in the future"
             ) {
             case .fresh:
-                return daemon.inferenceActive ? .active : .idle
+                return daemon.hasPendingWorkOrTransition ? .active : .idle
             case .stale(let reason), .unavailable(let reason):
                 return .unknown(reason)
             }

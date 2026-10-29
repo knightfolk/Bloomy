@@ -10,7 +10,7 @@ public enum NudgeIdleStateEligibility {
               let state,
               state.writtenAt.isFinite,
               (0...10).contains(nowSeconds - state.writtenAt),
-              !state.inferenceActive,
+              !state.hasPendingWorkOrTransition,
               state.trust?.status == "online",
               state.lifecycle?.outcome == .serving,
               state.lifecycle?.remainingRequests == 0,

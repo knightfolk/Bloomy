@@ -36,6 +36,24 @@ struct TelemetryTests {
         #expect(state.inferenceActive == false)
     }
 
+    @Test("queued work and model loading are distinct from inference and prevent idle decisions")
+    func pendingWorkAndLoading() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: fixture("daemon-state-online", extension: "json")) as? [String: Any])
+        let old = try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: json))
+        #expect(old.requestWorkPending == nil)
+        #expect(!old.hasPendingWorkOrTransition)
+        for key in ["request_work_pending", "load_transition_active"] {
+            json[key] = true
+            let busy = try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: json))
+            #expect(busy.hasPendingWorkOrTransition)
+            #expect(NudgeIdleStateEligibility.eligibleState(busy, at: Date(timeIntervalSince1970: busy.writtenAt)) == nil)
+            json[key] = false
+        }
+        #expect(!(try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: json))).hasPendingWorkOrTransition)
+        json["request_work_pending"] = "unexpected"
+        #expect(throws: (any Error).self) { try DaemonStateParser.parse(JSONSerialization.data(withJSONObject: json)) }
+    }
+
     @Test("loaded models remain distinct from warm models")
     func parsesLoadedModels() throws {
         let data = try fixture("loaded-models", extension: "json")

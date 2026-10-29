@@ -355,13 +355,12 @@ struct ProviderConfigDocumentTests {
         }
     }
 
-    @Test("requires every preload selector to remain enabled")
+    @Test("reads inconsistent saved preloads for repair but rejects invalid saves")
     func validatesPreloadSubset() throws {
-        #expect(throws: ProviderConfigError.preloadRequiresEnabled("gpt-oss")) {
-            try ProviderConfigDocument(data: Data("enabled_models = []\npreload_models = [\"gpt-oss\"]\n".utf8))
-        }
-
-        let document = try ProviderConfigDocument(data: Data("enabled_models = []\npreload_models = []\n".utf8))
+        let document = try ProviderConfigDocument(data: Data("enabled_models = []\npreload_models = [\"gpt-oss\"]\n".utf8))
+        #expect(document.selection.preloaded == ["gpt-oss"])
+        let repaired = try document.rendering(ProviderModelSelection(enabled: [], preloaded: []))
+        #expect(try ProviderConfigDocument(data: repaired).selection.preloaded.isEmpty)
         #expect(throws: ProviderConfigError.preloadRequiresEnabled("gpt-oss")) {
             try document.rendering(ProviderModelSelection(enabled: [], preloaded: ["gpt-oss"]))
         }
