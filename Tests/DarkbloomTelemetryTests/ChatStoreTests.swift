@@ -924,6 +924,33 @@ struct ChatStoreTests {
         #expect(store.notice?.contains("endpoint changed") == true)
         #expect(local.completeCalls.count == 2)
     }
+
+    @Test("network images require exact fresh advertised capability and paid consent")
+    func networkImageConversation() async throws {
+        let bytes = try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="))
+        let image = try ChatImageAttachment(data: bytes, mimeType: "image/png")
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let payload = Data(#"{"object":"list","data":[{"id":"gpt-oss-20b","input_modalities":["text","image"]},{"id":"gemma-4-26b-qat-4bit","input_modalities":["text"]}]}"#.utf8)
+        let network = FakeChatRouteClient()
+        network.modelsResult = .success(try ChatModelListParser.parse(payload, capturedAt: now).bindingNetworkRoute())
+        let keys = FakeConsumerKeyStore()
+        keys.inject("dk-synthetic-consumer")
+        let store = await makeStore(network: network, keys: keys)
+        store.startConversation(route: .network)
+        await waitUntil { store.selectedModelID != nil }
+        #expect(store.canAttachImages)
+        #expect(!store.send("Describe", images: [image]))
+        #expect(network.completeCalls.isEmpty)
+        store.acknowledgePaidRoute()
+        #expect(store.send("Describe", images: [image]))
+        await waitUntil { !store.isSending }
+        #expect(network.completeCalls.first?.last?.images == [image])
+        store.selectModel("gemma-4-26b-qat-4bit")
+        #expect(!store.canAttachImages)
+        #expect(!store.send("Continue"))
+        #expect(network.completeCalls.count == 1)
+        #expect(store.notice?.contains("has not reported image support") == true)
+    }
 }
 
 // MARK: - Fakes
@@ -1035,6 +1062,17 @@ final class FakeChatRouteClient: LocalChatRouteClient, NetworkChatRouteClient, @
     func completeStreaming(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?,
                            onText: @escaping @Sendable (String) async -> Void) async throws -> ChatCompletionOutcome {
         if messages.contains(where: { !$0.images.isEmpty }) && imageEndpointOrigin == nil { throw ChatImageError.localImageEndpointChanged }
+        let result = try await complete(model: model, messages: messages)
+        try Task.checkCancellation()
+        await onText(result.content)
+        return result
+    }
+    func completeStreaming(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?,
+                           networkImageCapability: ChatNetworkImageCapability?,
+                           onText: @escaping @Sendable (String) async -> Void) async throws -> ChatCompletionOutcome {
+        if messages.contains(where: { !$0.images.isEmpty }) {
+            guard networkImageCapability?.modelID == model else { throw ChatImageError.networkImagesUnsupported }
+        }
         let result = try await complete(model: model, messages: messages)
         try Task.checkCancellation()
         await onText(result.content)

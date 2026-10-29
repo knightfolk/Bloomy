@@ -1384,8 +1384,16 @@ private final class FixtureTokens: ConsumerKeyManaging, LocalEndpointTokenManagi
 }
 private struct FixtureChat: LocalChatRouteClient, NetworkChatRouteClient {
     let scenario: FixtureScenario
+    var network = false
     func models(now: Date) async throws -> ChatModelListSnapshot {
         if !scenario.hasCurrentRuntime { throw FixtureError.offline }
+        if network {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [FixtureNetworkModelsProtocol.self]
+            let session = URLSession(configuration: configuration)
+            defer { session.invalidateAndCancel() }
+            return try await NetworkChatClient(consumerKeyProvider: { "dk-synthetic-only" }, session: session).models(now: now)
+        }
         return ChatModelListSnapshot(modelIDs: FixtureData.modelIDs, capturedAt: now,
             localEndpointOrigin: URL(string: "http://127.0.0.1:18888"))
     }
@@ -1409,6 +1417,34 @@ private struct FixtureChat: LocalChatRouteClient, NetworkChatRouteClient {
         if messages.contains(where: { !$0.images.isEmpty }) && imageEndpointOrigin == nil { throw ChatImageError.localImageEndpointChanged }
         return try await completeStreaming(model: model, messages: messages, onText: onText)
     }
+    func completeStreaming(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?,
+                           networkImageCapability: ChatNetworkImageCapability?,
+                           onText: @escaping @Sendable (String) async -> Void) async throws -> ChatCompletionOutcome {
+        if messages.contains(where: { !$0.images.isEmpty }) && networkImageCapability?.modelID != model {
+            throw ChatImageError.networkImagesUnsupported
+        }
+        return try await completeStreaming(model: model, messages: messages, onText: onText)
+    }
+}
+
+/// Intercepts every URL in this session; no fixture model read reaches the network.
+private final class FixtureNetworkModelsProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard request.url == NetworkChatClient.modelsURL else {
+            client?.urlProtocol(self, didFailWithError: FixtureError.offline); return
+        }
+        let models = FixtureData.modelIDs.enumerated().map { index, id in
+            ["id": id, "input_modalities": index == 0 ? ["text", "image"] : ["text"]] as [String: Any]
+        }
+        let body = try! JSONSerialization.data(withJSONObject: ["object": "list", "data": models])
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 private enum FixturePopupHeightBudget: String, CaseIterable, Identifiable {
@@ -1639,7 +1675,7 @@ private final class FixtureModel: ObservableObject {
                 return scenario == .offline ? nil : "0.9.17"
             }, defaults: defaults,
             lanScanner: { scenario == .noLANAddresses ? [] : ["192.168.50.20"] }, copyToken: { _ in true }, copyCommand: { _ in true })
-        let chat = ChatStore(localClient: FixtureChat(scenario: scenario), networkClient: FixtureChat(scenario: scenario),
+        let chat = ChatStore(localClient: FixtureChat(scenario: scenario), networkClient: FixtureChat(scenario: scenario, network: true),
             balanceClient: FixtureBalance(), pricingClient: FixturePricing(scenario: scenario), keyStore: tokens)
         monitor.attachRecommendationInventory { control.snapshot }
         monitor.setDashboardVisible(true)

@@ -10,13 +10,65 @@ public struct ChatModelListSnapshot: Equatable, Sendable {
     public let modelIDs: [String]
     public let capturedAt: Date
     /// Bound only by the local client to the normalized endpoint it queried.
-    /// Network and legacy snapshots have no authority to send images.
+    /// Legacy snapshots have no authority to send network images.
     public let localEndpointOrigin: URL?
+    /// Only strictly decoded, explicit top-level `input_modalities` values.
+    /// Missing or malformed metadata leaves the model absent from this map.
+    public let inputModalitiesByModelID: [String: Set<ChatInputModality>]
+    private let isNetworkRoute: Bool
 
     public init(modelIDs: [String], capturedAt: Date, localEndpointOrigin: URL? = nil) {
         self.modelIDs = modelIDs
         self.capturedAt = capturedAt
         self.localEndpointOrigin = localEndpointOrigin
+        self.inputModalitiesByModelID = [:]
+        self.isNetworkRoute = false
+    }
+
+    init(modelIDs: [String], capturedAt: Date, inputModalitiesByModelID: [String: Set<ChatInputModality>], isNetworkRoute: Bool = false) {
+        self.modelIDs = modelIDs
+        self.capturedAt = capturedAt
+        self.localEndpointOrigin = nil
+        self.inputModalitiesByModelID = inputModalitiesByModelID
+        self.isNetworkRoute = isNetworkRoute
+    }
+
+    /// Only the network client's successful fixed-host model read binds this
+    /// metadata to the paid route. Local or manually constructed snapshots
+    /// cannot authorize a network image request.
+    func bindingNetworkRoute() -> Self {
+        Self(modelIDs: modelIDs, capturedAt: capturedAt, inputModalitiesByModelID: inputModalitiesByModelID, isNetworkRoute: true)
+    }
+
+    public func networkImageCapability(for modelID: String, at now: Date) -> ChatNetworkImageCapability? {
+        guard isNetworkRoute, modelIDs.contains(modelID),
+              inputModalitiesByModelID[modelID]?.contains(.image) == true
+        else { return nil }
+        let capability = ChatNetworkImageCapability(modelID: modelID, capturedAt: capturedAt)
+        return capability.isValid(for: modelID, at: now) ? capability : nil
+    }
+}
+
+public enum ChatInputModality: String, Hashable, Sendable, CaseIterable {
+    case text, image, audio, video
+}
+
+/// Short-lived evidence from the exact model's authenticated network listing.
+/// This carries neither credentials nor media. It cannot be constructed from
+/// provider status, local model metadata, model names, or price information.
+public struct ChatNetworkImageCapability: Equatable, Sendable {
+    public static let maximumAge: TimeInterval = 120
+    public let modelID: String
+    public let capturedAt: Date
+
+    fileprivate init(modelID: String, capturedAt: Date) {
+        self.modelID = modelID
+        self.capturedAt = capturedAt
+    }
+
+    public func isValid(for modelID: String, at now: Date) -> Bool {
+        let age = now.timeIntervalSince(capturedAt)
+        return self.modelID == modelID && age.isFinite && age >= 0 && age <= Self.maximumAge
     }
 }
 
@@ -24,7 +76,9 @@ public enum ChatModelListParser {
     /// Parses the OpenAI-compatible `{"object": "list", "data": [{"id": …}]}`
     /// shape served by both the local endpoint and the Darkbloom network.
     /// `object` is validated when present; per-model display fields beyond
-    /// `id` are ignored. Unknown, blank, duplicated or oversized IDs fail the
+    /// `id` do not affect text listing. Image capability requires strict explicit
+    /// `input_modalities`; unknown or malformed metadata grants no capability.
+    /// Unknown, blank, duplicated or oversized IDs fail the
     /// parse so a picker can never offer an unverified model.
     public static func parse(_ data: Data, capturedAt: Date) throws -> ChatModelListSnapshot {
         guard data.count <= ChatModelListSnapshot.maximumResponseBytes else {
@@ -34,6 +88,17 @@ public enum ChatModelListParser {
             struct Entry: Decodable {
                 let id: String?
                 let object: String?
+                let inputModalities: [String]?
+                enum CodingKeys: String, CodingKey { case id, object, inputModalities = "input_modalities" }
+
+                init(from decoder: any Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    id = try container.decodeIfPresent(String.self, forKey: .id)
+                    object = try container.decodeIfPresent(String.self, forKey: .object)
+                    // Bad optional capability metadata must not remove an
+                    // otherwise valid text model from the existing picker.
+                    inputModalities = try? container.decode([String].self, forKey: .inputModalities)
+                }
             }
             let object: String?
             let data: [Entry]?
@@ -52,6 +117,7 @@ public enum ChatModelListParser {
             throw ChatClientError.invalidResponse
         }
         var ids: [String] = []
+        var modalities: [String: Set<ChatInputModality>] = [:]
         for entry in entries {
             guard let id = entry.id,
                   !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -59,8 +125,14 @@ public enum ChatModelListParser {
                   !ids.contains(id)
             else { throw ChatClientError.invalidResponse }
             ids.append(id)
+            if let values = entry.inputModalities, !values.isEmpty, values.count <= ChatInputModality.allCases.count {
+                let known = values.compactMap(ChatInputModality.init(rawValue:))
+                if known.count == values.count, Set(known).count == values.count {
+                    modalities[id] = Set(known)
+                }
+            }
         }
-        return ChatModelListSnapshot(modelIDs: ids, capturedAt: capturedAt)
+        return ChatModelListSnapshot(modelIDs: ids, capturedAt: capturedAt, inputModalitiesByModelID: modalities)
     }
 }
 
@@ -145,6 +217,7 @@ public struct ChatMessagePayload: Equatable, Sendable, Codable {
 public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
     public static let maximumBodyBytes = 256 * 1_024
     public static let maximumLocalImageBodyBytes = 8 * 1_024 * 1_024
+    public static let maximumNetworkImageBodyBytes = 8 * 1_024 * 1_024
     public static let maximumMessages = 64
     public static let maximumMessageCharacters = 16_384
     public static let networkTimeoutInterval: TimeInterval = 300
@@ -162,10 +235,12 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
         consumerKey: String,
         model: String,
         messages: [ChatMessagePayload],
-        stream: Bool = false
+        stream: Bool = false,
+        networkImageCapability: ChatNetworkImageCapability? = nil,
+        now: Date = Date()
     ) throws -> Self {
-        guard messages.allSatisfy({ $0.images.isEmpty }) else { throw ChatImageError.networkImagesUnsupported }
-        return try make(
+        try validateNetworkImageCapability(model: model, messages: messages, capability: networkImageCapability, now: now)
+        let request = try make(
             url: URL(string: "https://api.darkbloom.dev/v1/chat/completions")!,
             token: consumerKey,
             model: model,
@@ -173,6 +248,17 @@ public struct ChatCompletionRequest: CustomStringConvertible, Sendable {
             timeout: networkTimeoutInterval,
             stream: stream
         )
+        guard (request.urlRequest.httpBody?.count ?? 0) <= maximumNetworkImageBodyBytes else {
+            throw ChatClientError.requestTooLarge
+        }
+        return request
+    }
+
+    static func validateNetworkImageCapability(model: String, messages: [ChatMessagePayload], capability: ChatNetworkImageCapability?, now: Date) throws {
+        guard messages.contains(where: { !$0.images.isEmpty }) else { return }
+        guard let capability, capability.isValid(for: model, at: now) else {
+            throw ChatImageError.networkImagesUnsupported
+        }
     }
 
     /// One tiny owner-only inference after a model switch. The mandatory self

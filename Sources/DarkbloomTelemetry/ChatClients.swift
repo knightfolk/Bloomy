@@ -130,6 +130,13 @@ public protocol ChatCompleting: Sendable {
     /// snapshot; resolving a newly configured endpoint is not consent to send
     /// existing images there. Text-only callers can use the original API.
     func complete(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?) async throws -> ChatCompletionOutcome
+    /// Route-specific media admission. A network capability is minted by a
+    /// successful network model read and must match the exact request model.
+    func complete(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?, networkImageCapability: ChatNetworkImageCapability?) async throws -> ChatCompletionOutcome
+    func completeStreaming(
+        model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?, networkImageCapability: ChatNetworkImageCapability?,
+        onText: @escaping @Sendable (String) async -> Void
+    ) async throws -> ChatCompletionOutcome
     /// Delivers visible text deltas while a response is arriving. The return
     /// value is authoritative only after the server finishes successfully.
     func completeStreaming(
@@ -156,6 +163,24 @@ extension ChatCompleting {
     ) async throws -> ChatCompletionOutcome {
         guard messages.allSatisfy({ $0.images.isEmpty }) else { throw ChatImageError.localImageEndpointChanged }
         return try await completeStreaming(model: model, messages: messages, onText: onText)
+    }
+
+    public func complete(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?, networkImageCapability: ChatNetworkImageCapability?) async throws -> ChatCompletionOutcome {
+        // Only an explicitly opted-in network client can consume this evidence.
+        guard networkImageCapability == nil || messages.allSatisfy({ $0.images.isEmpty }) else {
+            throw ChatImageError.networkImagesUnsupported
+        }
+        return try await complete(model: model, messages: messages, imageEndpointOrigin: imageEndpointOrigin)
+    }
+
+    public func completeStreaming(
+        model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?, networkImageCapability: ChatNetworkImageCapability?,
+        onText: @escaping @Sendable (String) async -> Void
+    ) async throws -> ChatCompletionOutcome {
+        guard networkImageCapability == nil || messages.allSatisfy({ $0.images.isEmpty }) else {
+            throw ChatImageError.networkImagesUnsupported
+        }
+        return try await completeStreaming(model: model, messages: messages, imageEndpointOrigin: imageEndpointOrigin, onText: onText)
     }
 
     /// Existing non-streaming clients keep their behavior without a second
@@ -281,13 +306,16 @@ public struct NetworkChatClient: ChatModelListing, ChatCompleting, Sendable {
 
     private let consumerKeyProvider: @Sendable () async -> String?
     private let session: URLSession
+    private let now: @Sendable () -> Date
 
     public init(
         consumerKeyProvider: @escaping @Sendable () async -> String?,
-        session: URLSession? = nil
+        session: URLSession? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.consumerKeyProvider = consumerKeyProvider
         self.session = session ?? ChatHTTPSession.shared
+        self.now = now
     }
 
     public func models(now: Date) async throws -> ChatModelListSnapshot {
@@ -303,7 +331,7 @@ public struct NetworkChatClient: ChatModelListing, ChatCompleting, Sendable {
                 session: session,
                 successCapacity: ChatModelListSnapshot.maximumResponseBytes
             ) { data in
-                try ChatModelListParser.parse(data, capturedAt: now)
+                try ChatModelListParser.parse(data, capturedAt: now).bindingNetworkRoute()
             }
         } catch ChatClientError.unauthorized {
             throw ChatClientError.consumerKeyRejected
@@ -311,13 +339,21 @@ public struct NetworkChatClient: ChatModelListing, ChatCompleting, Sendable {
     }
 
     public func complete(model: String, messages: [ChatMessagePayload]) async throws -> ChatCompletionOutcome {
-        // Local image admission is not evidence of network-route support.
-        guard messages.allSatisfy({ $0.images.isEmpty }) else { throw ChatImageError.networkImagesUnsupported }
+        try await complete(model: model, messages: messages, imageEndpointOrigin: nil, networkImageCapability: nil)
+    }
+
+    public func complete(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?) async throws -> ChatCompletionOutcome {
+        try await complete(model: model, messages: messages)
+    }
+
+    public func complete(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?, networkImageCapability: ChatNetworkImageCapability?) async throws -> ChatCompletionOutcome {
+        // Validate before credential access and again after the asynchronous
+        // key read, so a suspended read cannot outlive the evidence's window.
+        try ChatCompletionRequest.validateNetworkImageCapability(model: model, messages: messages, capability: networkImageCapability, now: now())
         let token = try await consumerKey()
         let request = try ChatCompletionRequest.makeNetwork(
-            consumerKey: token,
-            model: model,
-            messages: messages
+            consumerKey: token, model: model, messages: messages,
+            networkImageCapability: networkImageCapability, now: now()
         )
         do {
             return try await ChatRouteExecutor.execute(
@@ -332,24 +368,11 @@ public struct NetworkChatClient: ChatModelListing, ChatCompleting, Sendable {
         }
     }
 
-    public func complete(model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?) async throws -> ChatCompletionOutcome {
-        try await complete(model: model, messages: messages)
-    }
-
     public func completeStreaming(
         model: String, messages: [ChatMessagePayload],
         onText: @escaping @Sendable (String) async -> Void
     ) async throws -> ChatCompletionOutcome {
-        guard messages.allSatisfy({ $0.images.isEmpty }) else { throw ChatImageError.networkImagesUnsupported }
-        let token = try await consumerKey()
-        let request = try ChatCompletionRequest.makeNetwork(
-            consumerKey: token, model: model, messages: messages, stream: true
-        )
-        do {
-            return try await ChatStreamingExecutor.execute(request: request.urlRequest, session: session, onText: onText)
-        } catch ChatClientError.unauthorized {
-            throw ChatClientError.consumerKeyRejected
-        }
+        try await completeStreaming(model: model, messages: messages, imageEndpointOrigin: nil, networkImageCapability: nil, onText: onText)
     }
 
     public func completeStreaming(
@@ -357,6 +380,23 @@ public struct NetworkChatClient: ChatModelListing, ChatCompleting, Sendable {
         onText: @escaping @Sendable (String) async -> Void
     ) async throws -> ChatCompletionOutcome {
         try await completeStreaming(model: model, messages: messages, onText: onText)
+    }
+
+    public func completeStreaming(
+        model: String, messages: [ChatMessagePayload], imageEndpointOrigin: URL?, networkImageCapability: ChatNetworkImageCapability?,
+        onText: @escaping @Sendable (String) async -> Void
+    ) async throws -> ChatCompletionOutcome {
+        try ChatCompletionRequest.validateNetworkImageCapability(model: model, messages: messages, capability: networkImageCapability, now: now())
+        let token = try await consumerKey()
+        let request = try ChatCompletionRequest.makeNetwork(
+            consumerKey: token, model: model, messages: messages, stream: true,
+            networkImageCapability: networkImageCapability, now: now()
+        )
+        do {
+            return try await ChatStreamingExecutor.execute(request: request.urlRequest, session: session, onText: onText)
+        } catch ChatClientError.unauthorized {
+            throw ChatClientError.consumerKeyRejected
+        }
     }
 
     private func consumerKey() async throws -> String {

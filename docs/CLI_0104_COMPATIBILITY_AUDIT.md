@@ -143,7 +143,12 @@ and the installed CLI's read-only help and status output.
   native fixture selected and displayed a synthetic image and completed an
   image-only simulated chat; no real image or inference was sent. The local
   model list does not attest vision support, so the UI explains that the model
-  may reject an image. Network image attachments, video, audio and tool-call
+  may reject an image. Network image attachments require a fresh network model
+  listing explicitly reporting image input for the selected model; existing paid
+  route, balance and pricing checks still apply. The composer warns that image
+  charges may apply and that the image price is not shown. An isolated native
+  fixture displayed and sent a synthetic image through a simulated network route;
+  no live network inference or real image was sent. Video, audio and tool-call
   conversations are not yet supported. The local provider accepts inline media only, with
   architecture-specific support and size limits; audio has a separate native
   model path, and catalog labels alone do not establish route support. Tool

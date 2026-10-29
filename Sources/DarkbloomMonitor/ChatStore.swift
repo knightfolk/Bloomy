@@ -502,6 +502,15 @@ final class ChatStore: ObservableObject {
         }
     }
 
+    /// Network image support is confirmed only by this route's fresh model
+    /// listing for the exact selected ID; local support remains provider-decided.
+    var canAttachImages: Bool {
+        guard let conversation else { return false }
+        if conversation.route == .local { return true }
+        guard modelsAreFresh, let model = effectiveModelID(for: conversation) else { return false }
+        return networkModels?.networkImageCapability(for: model, at: now()) != nil
+    }
+
     /// The selected model, or the first verified one when auto-selection has
     /// not run yet. Never a guess: only IDs from this route's verified list.
     private func effectiveModelID(for conversation: ChatConversation) -> String? {
@@ -521,7 +530,7 @@ final class ChatStore: ObservableObject {
     func send(_ draft: String, images: [ChatImageAttachment] = []) -> Bool {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend, var updated = conversation, let modelID = effectiveModelID(for: updated),
-              !text.isEmpty || !images.isEmpty, images.isEmpty || updated.route == .local else { return false }
+              !text.isEmpty || !images.isEmpty else { return false }
         if updated.modelID == nil {
             updated.modelID = modelID
         }
@@ -557,15 +566,26 @@ final class ChatStore: ObservableObject {
         }
         guard (try? ChatImageAttachment.validate(history.flatMap(\.images))) != nil else { return false }
         let imageOrigin: URL?
+        let networkImageCapability: ChatNetworkImageCapability?
         if history.contains(where: { !$0.images.isEmpty }) {
-            guard route == .local, let verified = localModels?.localEndpointOrigin,
-                  updated.imageEndpointOrigin == nil || updated.imageEndpointOrigin == verified else {
-                notice = "The local endpoint changed or could not be verified. Start a new chat before sending images."
-                return false
+            if route == .local {
+                guard let verified = localModels?.localEndpointOrigin,
+                      updated.imageEndpointOrigin == nil || updated.imageEndpointOrigin == verified else {
+                    notice = "The local endpoint changed or could not be verified. Start a new chat before sending images."
+                    return false
+                }
+                updated.imageEndpointOrigin = verified
+                imageOrigin = verified
+                networkImageCapability = nil
+            } else {
+                guard let capability = networkModels?.networkImageCapability(for: modelID, at: now()) else {
+                    notice = "This network model has not reported image support. Select a supported model or refresh the model list."
+                    return false
+                }
+                imageOrigin = nil
+                networkImageCapability = capability
             }
-            updated.imageEndpointOrigin = verified
-            imageOrigin = verified
-        } else { imageOrigin = nil }
+        } else { imageOrigin = nil; networkImageCapability = nil }
 
         updated.entries.append(ChatEntry(
             id: UUID(),
@@ -593,6 +613,7 @@ final class ChatStore: ObservableObject {
                 modelID: modelID,
                 history: history,
                 imageEndpointOrigin: imageOrigin,
+                networkImageCapability: networkImageCapability,
                 placeholderID: placeholderID
             )
         }
@@ -630,6 +651,7 @@ final class ChatStore: ObservableObject {
         modelID: String,
         history: [ChatMessagePayload],
         imageEndpointOrigin: URL?,
+        networkImageCapability: ChatNetworkImageCapability?,
         placeholderID: UUID
     ) async {
         defer {
@@ -656,7 +678,8 @@ final class ChatStore: ObservableObject {
 
             case .network:
                 try await enforceNetworkGates(conversationID: conversationID, credentialGeneration: credentialGeneration, modelID: modelID)
-                let outcome = try await networkClient.completeStreaming(model: modelID, messages: history) { [weak self] delta in
+                let outcome = try await networkClient.completeStreaming(model: modelID, messages: history,
+                    imageEndpointOrigin: nil, networkImageCapability: networkImageCapability) { [weak self] delta in
                     await self?.appendStreamText(delta, conversationID: conversationID, placeholderID: placeholderID)
                 }
                 finish(conversationID: conversationID, placeholderID: placeholderID, route: route, modelID: modelID, outcome: outcome)

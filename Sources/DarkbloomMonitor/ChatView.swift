@@ -397,15 +397,18 @@ struct ChatView: View {
                 if conversation.route == .network {
                     consumerKeyLink
                 }
-                if conversation.route == .local {
-                    Button { chooseImage(conversationID: conversation.id) } label: {
-                        Label("Attach image…", systemImage: "photo.badge.plus")
-                    }
-                    .disabled(store.isSending || draft.images.count >= ChatImageAttachment.maximumImagesPerRequest)
-                    .accessibilityIdentifier("chat.attachImage")
-                    .help("Send a local image to the selected model. Model support varies.")
+                Button { chooseImage(conversationID: conversation.id) } label: {
+                    Label("Attach image…", systemImage: "photo.badge.plus")
                 }
+                .disabled(store.isSending || !store.canAttachImages || draft.images.count >= ChatImageAttachment.maximumImagesPerRequest)
+                .accessibilityIdentifier("chat.attachImage")
+                .help(conversation.route == .local ? "Send an image to the local endpoint. Model support varies."
+                    : "Requires a fresh network model listing that reports image input.")
                 Spacer()
+            }
+            if conversation.route == .network && !store.canAttachImages {
+                Text("Select a network model that reports image support, or refresh the model list.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if !draft.images.isEmpty, draft.conversationID == conversation.id {
                 ScrollView(.horizontal) { HStack {
@@ -421,7 +424,9 @@ struct ChatView: View {
                     }
                     Spacer()
                 } }
-                Text("The original images, including metadata, are sent to the selected local endpoint. Model support varies; older exchanges may be omitted when the image limit is reached.")
+                Text(conversation.route == .local
+                     ? "The original images, including metadata, are sent to the selected local endpoint. Model support varies; older exchanges may be omitted when the image limit is reached."
+                     : "The original images, including metadata, are sent to Darkbloom's paid network. Image charges may apply; the image price is not shown here. Older exchanges may be omitted when the image limit is reached.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if let imageError { Text(imageError).font(.caption).foregroundStyle(.orange) }
@@ -468,6 +473,7 @@ struct ChatView: View {
                     .disabled(
                         !store.canSend
                             || !draftBelongsToActiveConversation
+                            || (!draft.images.isEmpty && !store.canAttachImages)
                             || (draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && draft.images.isEmpty)
                     )
                 }
@@ -489,7 +495,7 @@ struct ChatView: View {
         panel.canChooseDirectories = false
         panel.prompt = "Attach"
         guard panel.runModal() == .OK, let url = panel.url,
-              store.conversation?.id == conversationID, store.conversation?.route == .local,
+              store.conversation?.id == conversationID, store.canAttachImages,
               !store.isSending else { return }
         do {
             let handle = try FileHandle(forReadingFrom: url)

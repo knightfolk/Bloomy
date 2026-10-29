@@ -68,7 +68,7 @@ public struct ChatImageAttachment: Equatable, Sendable, CustomStringConvertible,
     }
 }
 
-/// Fixed local messages avoid reflecting image bytes, paths, or server text.
+/// Fixed messages avoid reflecting image bytes, paths, or server text.
 public enum ChatImageError: Error, Equatable, Sendable, LocalizedError {
     case unsupportedMIMEType, invalidImage, attachmentTooLarge, tooManyImages
     case totalAttachmentsTooLarge, networkImagesUnsupported, imagesRequireUserRole
@@ -81,7 +81,7 @@ public enum ChatImageError: Error, Equatable, Sendable, LocalizedError {
         case .attachmentTooLarge: "Each image must be 2 MiB or smaller."
         case .tooManyImages: "A chat request can include at most four images, including history."
         case .totalAttachmentsTooLarge: "Images in this request exceed the 5 MiB or 24 megapixel total limit, including history."
-        case .networkImagesUnsupported: "Image attachments are available on the local chat route only."
+        case .networkImagesUnsupported: "The selected network model has no fresh verified image support. Refresh network models or choose a model with image input."
         case .imagesRequireUserRole: "Images can only be attached to user messages."
         case .localImageEndpointChanged: "The local image destination changed or was not verified. Refresh local models before sending images."
         }
